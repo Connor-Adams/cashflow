@@ -28,11 +28,9 @@
  * is added.
  */
 import { Router } from 'express';
-import { Op, type WhereOptions } from 'sequelize';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
 import { FinancialScenario } from '../models/FinancialScenario';
-import { Account, PlannedEvent, Transaction } from '../models';
 import {
   runScenario,
   addDaysIso,
@@ -41,15 +39,9 @@ import {
   type AssumptionType,
   type AssumptionRecurrence,
 } from '../scenarios/runScenario';
-import {
-  type ForecastOccurrence,
-} from '../forecast/buildForecast';
-import { expandRecurrence, type PlannedEventLike } from '../forecast/expandRecurrence';
+import { type BuildForecastInput } from '../forecast/buildForecast';
+import { assembleForecast } from '../forecast/assembleForecast';
 import { resolveForecastCurrency } from '../forecast/gatherOccurrences';
-import { balanceAtDate } from '../networth/balanceAtDate';
-import { detectRecurring, type RecurringInputTxn } from './recurring';
-import { num } from '../util/numbers';
-import { classifyPositiveFlow } from '../summary/classifyTransactionFlow';
 
 const router = Router();
 
@@ -66,9 +58,6 @@ const VALID_RECURRENCES: AssumptionRecurrence[] = ['weekly', 'biweekly', 'monthl
 
 // Match the forecast route's defaults.
 const DEFAULT_BASELINE_DAYS = 30;
-const FORECAST_EXCLUDED_TYPES = new Set(['investment']);
-const RECURRING_LOOKBACK_DAYS = 180;
-const RECURRING_MIN_OCCURRENCES = 3;
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -264,162 +253,31 @@ function validatePatchBody(raw: unknown): ValidationResult<{
 }
 
 // ---------------------------------------------------------------------------
-// Forecast engine helpers (adapted from routes/forecast.ts)
+// Forecast engine helpers
 // ---------------------------------------------------------------------------
-
-/** Infer direction from PlannedEvent type — mirrors forecast.ts logic. */
-function directionOfPlannedEvent(
-  type: PlannedEvent['type'],
-): ForecastOccurrence['direction'] {
-  switch (type) {
-    case 'income':
-      return 'in';
-    case 'expense':
-    case 'debt_payment':
-    case 'savings':
-      return 'out';
-    case 'transfer':
-    case 'settlement':
-      return 'neutral';
-  }
-}
 
 /**
  * Build the baseline forecast input for a given household + currency +
- * date window. This is a lightweight copy of the logic in forecast.ts
- * that we need here to run the scenario comparison.
+ * date window. Delegates to the canonical `assembleForecast` pipeline
+ * (issue #653) so the scenario baseline matches the real forecast exactly:
+ * planned-event occurrences + detected recurring charges AND recurring
+ * income. The previous inline copy was an older, narrower variant (planned
+ * `kind` only, no recurring income, 30-day stepping that drifted across
+ * month boundaries).
  */
 async function buildBaselineInput(
   householdId: number,
   currency: string,
   dateFrom: string,
   dateTo: string,
-) {
-  // Eligible accounts (non-investment, not closed before the window).
-  const allAccounts = await Account.findAll({ where: { householdId } });
-  const eligible = allAccounts.filter((a) => {
-    if (FORECAST_EXCLUDED_TYPES.has(a.accountType)) return false;
-    if (a.closedAt && a.closedAt <= dateFrom) return false;
-    return true;
-  });
-
-  // Opening balance in the requested currency.
-  let openingBalance = 0;
-  for (const acc of eligible) {
-    const bals = await balanceAtDate(acc, dateFrom);
-    for (const { currency: ccy, amount } of bals) {
-      if (ccy === currency) openingBalance += amount;
-    }
-  }
-
-  // PlannedEvent occurrences in the window.
-  const eventWhere: WhereOptions = {
+): Promise<BuildForecastInput> {
+  const { openingBalance, occurrences } = await assembleForecast({
     householdId,
-    kind: 'planned',
-    currency,
-    status: 'planned',
-    expectedDate: { [Op.lte]: dateTo },
-  };
-  const plannedRows = await PlannedEvent.findAll({
-    where: eventWhere,
-    order: [['expectedDate', 'ASC']],
-  });
-
-  const occurrences: ForecastOccurrence[] = [];
-  for (const row of plannedRows) {
-    const eventLike: PlannedEventLike = {
-      id: row.id,
-      expectedDate: row.expectedDate,
-      recurrenceRule: row.recurrenceRule,
-      status: row.status,
-    };
-    const rowOccs = expandRecurrence(eventLike, dateFrom, dateTo);
-    const amount = Number(row.amount);
-    if (!Number.isFinite(amount)) continue;
-    const direction = directionOfPlannedEvent(row.type);
-    for (const occ of rowOccs) {
-      occurrences.push({
-        date: occ.date,
-        amount,
-        direction,
-        sourceType: 'planned_event',
-        sourceId: row.id,
-        sourceName: row.name,
-        accountId: row.accountId,
-      });
-    }
-  }
-
-  // Recurring detection — same logic as forecast.ts.
-  const txnSince = addDaysIso(dateFrom, -RECURRING_LOOKBACK_DAYS);
-  const txnWhere: WhereOptions = {
-    householdId,
-    date: { [Op.gte]: txnSince, [Op.lt]: dateFrom },
-    currency,
-  };
-  const txnRows = await Transaction.findAll({
-    where: txnWhere,
-    attributes: ['date', 'currency', 'amount', 'merchantRaw', 'merchantClean', 'finalCategory'],
-    raw: true,
-  });
-
-  type RawRow = {
-    date: string;
-    currency: string;
-    amount: unknown;
-    merchantRaw: string | null;
-    merchantClean: string | null;
-    finalCategory: string | null;
-  };
-
-  const candidates: RecurringInputTxn[] = [];
-  for (const row of txnRows as unknown as RawRow[]) {
-    const amount = num(row.amount);
-    if (amount == null || amount >= 0) continue;
-    if (
-      classifyPositiveFlow({
-        merchantRaw: row.merchantRaw,
-        merchantClean: row.merchantClean,
-        category: row.finalCategory,
-      }) === 'payment'
-    )
-      continue;
-    const merchant = (row.merchantClean ?? '').trim() || (row.merchantRaw ?? '').trim();
-    if (!merchant) continue;
-    candidates.push({ merchant, amount, currency: row.currency, date: row.date, category: row.finalCategory });
-  }
-
-  const recurringItems = detectRecurring(candidates, { minOccurrences: RECURRING_MIN_OCCURRENCES });
-  const plannedNameKeys = new Set(plannedRows.map((r) => r.name.trim().toLowerCase()));
-
-  let recurringIdCounter = 1;
-  for (const item of recurringItems) {
-    if (plannedNameKeys.has(item.merchant.trim().toLowerCase())) continue;
-    const stepDays = item.cadence === 'weekly' ? 7 : 30;
-    let cursor = item.nextExpected;
-    while (cursor < dateFrom) cursor = addDaysIso(cursor, stepDays);
-    const id = recurringIdCounter++;
-    while (cursor <= dateTo) {
-      occurrences.push({
-        date: cursor,
-        amount: item.avgAmount,
-        direction: 'out',
-        sourceType: 'recurring_detection',
-        sourceId: id,
-        sourceName: item.merchant,
-        accountId: null,
-      });
-      cursor = addDaysIso(cursor, stepDays);
-    }
-  }
-
-  return {
-    openingBalance,
-    occurrences,
     dateFrom,
     dateTo,
     currency,
-  };
+  });
+  return { openingBalance, occurrences, dateFrom, dateTo, currency };
 }
 
 /**
