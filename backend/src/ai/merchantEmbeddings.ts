@@ -217,8 +217,3 @@ async function buildDefaultEmbedder(): Promise<Embedder | null> {
     return null;
   }
 }
-
-/** Test-only: reset the memoized default embedder. */
-export function __resetDefaultEmbedderForTests(): void {
-  defaultEmbedderPromise = null;
-}
