@@ -17,6 +17,7 @@ import { findExistingInvestmentByFuzzyMatch } from './fuzzyDedupInvestmentActivi
 import { stableIdentityFingerprint } from './fingerprint';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import { enrichTransaction } from './enrich';
+import { applyRuleSideEffects, findRuleActionsSignal } from '../rules/applyRuleSideEffects';
 import { convertIncomeActivityToAccountCurrency } from './convertActivityCurrency';
 import { ensureFxRate } from '../fx/bankOfCanada';
 import {
@@ -457,6 +458,17 @@ export async function commitStatementImport(
                 transaction: sp,
               },
             );
+          }
+
+          // Rule actions side-effects (issue #795): set_label / set_alert.
+          const ruleActions = findRuleActionsSignal(enriched.signals);
+          if (ruleActions) {
+            await applyRuleSideEffects({
+              ruleActions,
+              transactionId: txn.id,
+              householdId: account.householdId ?? null,
+              transaction: sp,
+            });
           }
         });
         insertedTransactions += 1;
