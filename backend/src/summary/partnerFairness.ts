@@ -339,6 +339,28 @@ function classifyInflow(
 }
 
 /**
+ * Project one settlement row's direction to the viewer's perspective. A
+ * settlement's `direction` is recorded relative to `recordedByUserId` ("i" =
+ * that user). When the viewer is a DIFFERENT user, "i_paid_partner" reads as
+ * "partner_paid_me" and vice-versa — so iPaid/partnerPaid swap. When viewer or
+ * recordedBy is unknown (legacy / no auth), no flip (owner POV).
+ */
+export function projectSettlementContribution(
+  direction: 'i_paid_partner' | 'partner_paid_me',
+  amount: number,
+  recordedByUserId: number | null,
+  viewerUserId: number | null | undefined,
+): { iPaid: number; partnerPaid: number } {
+  const flip =
+    viewerUserId != null && recordedByUserId != null && recordedByUserId !== viewerUserId;
+  const iPaidRaw = direction === 'i_paid_partner' ? amount : 0;
+  const partnerPaidRaw = direction === 'partner_paid_me' ? amount : 0;
+  return flip
+    ? { iPaid: partnerPaidRaw, partnerPaid: iPaidRaw }
+    : { iPaid: iPaidRaw, partnerPaid: partnerPaidRaw };
+}
+
+/**
  * Build the per-currency fairness summary used by `GET /api/partner/fairness`.
  *
  * @param rows           Raw shared transaction rows (already scoped to household + date filter)

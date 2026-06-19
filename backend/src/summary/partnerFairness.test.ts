@@ -5,10 +5,28 @@ import {
   buildFairnessByCurrency,
   buildFairnessMonthly,
   buildSettlementRecommendation,
+  projectSettlementContribution,
   topLargestShared,
   type SettlementTotals,
   type SharedTxnRow,
 } from './partnerFairness';
+
+// ---------------- projectSettlementContribution ----------------
+
+test('projectSettlementContribution: owner (recorder) sees direction unchanged', () => {
+  const r = projectSettlementContribution('i_paid_partner', 40, 1, 1);
+  assert.deepEqual(r, { iPaid: 40, partnerPaid: 0 });
+});
+
+test('projectSettlementContribution: other viewer sees direction flipped', () => {
+  const r = projectSettlementContribution('i_paid_partner', 40, 1, 2);
+  assert.deepEqual(r, { iPaid: 0, partnerPaid: 40 });
+});
+
+test('projectSettlementContribution: no viewer or no recorder => owner POV (no flip)', () => {
+  assert.deepEqual(projectSettlementContribution('partner_paid_me', 10, 1, null), { iPaid: 0, partnerPaid: 10 });
+  assert.deepEqual(projectSettlementContribution('partner_paid_me', 10, null, 2), { iPaid: 0, partnerPaid: 10 });
+});
 
 function makeRow(over: Partial<SharedTxnRow> = {}): SharedTxnRow {
   return {
