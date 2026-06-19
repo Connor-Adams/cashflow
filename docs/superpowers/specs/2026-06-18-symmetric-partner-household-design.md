@@ -179,3 +179,35 @@ All Sequelize must run on both SQLite and Postgres (dual-dialect).
 | Share compute (priority override>auto>default) | `backend/src/import/calculateShares.ts:78–156` |
 | Split override PATCH | `backend/src/routes/transactions.ts:542–558` |
 | Row-level visibility guards | `backend/src/auth/scope.ts` |
+
+## Planning addendum (discovered while reading the fairness code)
+
+Two refinements to Component 2, found by reading `partnerFairness.ts` /
+`partner.ts` during plan-writing:
+
+1. **Balance projection is not a field-swap.** `myShareAmount` +
+   `partnerShareAmount` = `amount` (they are portions, not negatives of each
+   other), so swapping the two per row and reusing `balance = -partnerShareTotal
+   + settlements` produces a *wrong* balance. The correct per-row balance
+   contribution for viewer `V` is:
+
+   ```
+   balanceContribution_V(row) = (row.payerUserId == V) ? -partnerShareAmount : +partnerShareAmount
+   ```
+
+   (Verified: a Connor-paid row with `partnerShareAmount = -50` → Connor `+50`
+   "partner owes me", Alex `-50` "I owe partner".) The *display* swap
+   (`myShare`/`partnerShare` in category breakdown & largest-shared) is a
+   separate, independent transform. `SharedTxnRow` gains `payerUserId`
+   (= `created_by_user_id`); `buildFairnessByCurrency` / `buildFairnessMonthly`
+   take a `viewerUserId` and compute balance from the contribution formula, not
+   from the swapped totals.
+
+2. **Settlements need payer attribution.** `PartnerSettlement` has `contactId` +
+   `direction` (`i_paid_partner` / `partner_paid_me`) but **no user FK** — the
+   direction is implicitly owner-relative. For a symmetric view (when the partner
+   records a settlement) the direction must project per viewer. Add
+   `PartnerSettlement.recordedByUserId` (the user whose "i" the direction refers
+   to; default = the household owner on backfill). Projection: when
+   `viewerUserId != recordedByUserId`, swap `iPaid ↔ partnerPaid` for that
+   settlement before rolling up. This becomes part of the spine (Component 1).
