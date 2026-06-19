@@ -16,6 +16,7 @@
 import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let testDb: PgTestDb;
@@ -26,7 +27,7 @@ let householdId: number;
 before(async () => {
   testDb = await setupPgTestDb('self-account-exclude');
   app = (await import('../../src/app.js')).default;
-  authed = request.agent(app);
+  authed = testAgent(app);
 
   // Register as "Connor Adams" — tokens ['connor', 'adams'] from displayName.
   const reg = await authed.post('/api/auth/register').send({

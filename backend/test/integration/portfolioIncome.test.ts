@@ -7,6 +7,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let testDb: PgTestDb;
@@ -28,7 +29,7 @@ before(async () => {
   const seeded = await seedHousehold(models, `income-${Date.now()}@example.com`);
   householdId = seeded.household.id;
   userId = seeded.user.id;
-  authed = request.agent(app);
+  authed = testAgent(app);
   authed.jar.setCookie(`cashflow_session=${seeded.token}; Path=/`);
 
   const tfsa = await seedAccount(models, householdId, userId, 'TFSA', 'TFSA01');

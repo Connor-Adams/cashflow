@@ -8,6 +8,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -67,7 +68,7 @@ before(async () => {
   await seedDailyPrice(models, { securityId: untraded.id, date: '2026-05-20', close: 5 });
   await seedDailyPrice(models, { securityId: untraded.id, date: '2026-05-21', close: 5.1 });
 
-  authed = request.agent(app);
+  authed = testAgent(app);
   authed.jar.setCookie(`cashflow_session=${seeded.token}; Path=/`);
 });
 
@@ -110,7 +111,7 @@ test('omits held securities that have no daily-price rows', async () => {
     accountId: acct2.id, householdId: second.household.id, securityId: sec.id,
     statementDate: '2026-05-01', quantity: 1, marketValue: 1, costBasis: 1,
   });
-  const agent2 = request.agent(app);
+  const agent2 = testAgent(app);
   agent2.jar.setCookie(`cashflow_session=${second.token}; Path=/`);
   const res = await agent2.get('/api/portfolio/sparklines?range=30d');
   assert.equal(res.status, 200);

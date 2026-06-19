@@ -1,6 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -12,7 +13,7 @@ before(async () => {
   testDb = await setupPgTestDb('capture-tokens');
   models = await import('../../src/models/index.js');
   app = (await import('../../src/app.js')).default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   const register = await authed.post('/api/auth/register').send({
     email: 'tokens@example.com',
     displayName: 'Tokens User',
@@ -50,6 +51,6 @@ test('mints a token, lists it (without plaintext), then revokes', async () => {
 });
 
 test('rejects unauthenticated calls', async () => {
-  const res = await request(app).post('/api/capture/tokens').send({ label: 'x' });
+  const res = await testRequest(app).post('/api/capture/tokens').send({ label: 'x' });
   assert.equal(res.status, 401);
 });

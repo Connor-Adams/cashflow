@@ -11,13 +11,15 @@ export type Account = {
   shortCode: string | null
   defaultCurrency: string | null
   closedAt: string | null
-  /** Credit limit (#437). Only set for credit_card accounts; null otherwise. */
+  /** Credit limit (#437). Set for revolving credit (credit cards and `loan`
+   *  lines of credit); null otherwise. */
   creditLimit?: number | null
-  /** Current owed balance, derived from the transaction stream. Credit cards
-   *  only. Positive number. Null for non-credit accounts. */
+  /** Current owed balance, derived from the transaction stream. Revolving
+   *  credit only (credit cards / lines of credit). Positive number. Null for
+   *  non-revolving accounts. */
   currentBalance?: number | null
   /** currentBalance / creditLimit × 100, or null when either is missing or
-   *  the card is closed. Frontend renders the badge tier from this. */
+   *  the account is closed. Frontend renders the badge tier from this. */
   utilizationPct?: number | null
   /** Free-form notes (max 4000 chars). Markdown rendered on the detail view. */
   notes?: string | null

@@ -78,6 +78,7 @@ export interface GmailMessageFull {
   id: string;
   threadId: string;
   internalDate: string; // ms since epoch
+  labelIds?: string[];
   payload: GmailPayload;
 }
 

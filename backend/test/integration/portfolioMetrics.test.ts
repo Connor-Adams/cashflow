@@ -5,6 +5,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let testDb: PgTestDb;
@@ -59,7 +60,7 @@ before(async () => {
     statementDate: '2026-05-01', quantity: 100, marketValue: 3400, costBasis: 3000,
   });
 
-  authed = request.agent(app);
+  authed = testAgent(app);
   authed.jar.setCookie(`cashflow_session=${seeded.token}; Path=/`);
 });
 

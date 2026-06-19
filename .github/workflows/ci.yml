@@ -69,9 +69,17 @@ jobs:
       - name: Run workflow tests
         run: yarn test:workflows
 
-  backend-test:
+  # Sharded matrix. The required branch-protection check is the `backend-test`
+  # GATE job below, not these per-shard jobs (whose names carry a `(n)` suffix).
+  backend-test-shard:
     needs: install
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # node:test --test-shard splits the 360+ unit files across runners.
+        # Keep this list and TEST_SHARD's denominator below in sync.
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v6
 
@@ -91,15 +99,42 @@ jobs:
       - name: Extract node_modules
         run: tar -xf node_modules.tar
 
+      # Shared contract tests are tiny and dialect-agnostic; run them once on
+      # shard 1 rather than redundantly on every shard.
       - name: Run shared contract tests
+        if: matrix.shard == 1
         run: yarn workspace @cashflow/shared run test
 
-      - name: Run backend unit tests
+      - name: Run backend unit tests (shard ${{ matrix.shard }}/3)
+        env:
+          TEST_SHARD: ${{ matrix.shard }}/3
         run: yarn workspace cashflow-backend run test
 
-  backend-test-integration:
+  # Gate job that carries the required `backend-test` status check. Always runs
+  # so the context reports even on shard failure; passes only if every shard did.
+  backend-test:
+    needs: backend-test-shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all unit-test shards passed
+        run: |
+          result='${{ needs.backend-test-shard.result }}'
+          if [ "$result" != "success" ]; then
+            echo "backend-test-shard matrix result: $result" >&2
+            exit 1
+          fi
+
+  # Sharded matrix. The required branch-protection check is the
+  # `backend-test-integration` GATE job below, not these per-shard jobs.
+  backend-test-integration-shard:
     needs: install
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 140+ Postgres-backed files; --test-shard splits them across runners.
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v6
 
@@ -125,10 +160,25 @@ jobs:
           pg_isready
           sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
 
-      - name: Run backend integration tests
+      - name: Run backend integration tests (shard ${{ matrix.shard }}/3)
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+          TEST_SHARD: ${{ matrix.shard }}/3
         run: yarn workspace cashflow-backend run test:integration
+
+  # Gate job carrying the required `backend-test-integration` status check.
+  backend-test-integration:
+    needs: backend-test-integration-shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all integration-test shards passed
+        run: |
+          result='${{ needs.backend-test-integration-shard.result }}'
+          if [ "$result" != "success" ]; then
+            echo "backend-test-integration-shard matrix result: $result" >&2
+            exit 1
+          fi
 
   backend-build:
     needs: install

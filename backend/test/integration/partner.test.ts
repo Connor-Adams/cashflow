@@ -13,6 +13,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { seedHousehold } from '../helpers/seedHousehold.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -108,7 +109,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'super-partner@example.com',
     displayName: 'Super Partner',
@@ -120,12 +121,12 @@ before(async () => {
   householdAId = a.householdId;
   userAId = a.userId;
   contactAId = a.contactId;
-  agentA = request.agent(app);
+  agentA = testAgent(app);
   agentA.jar.setCookie(`cashflow_session=${a.token}; Path=/`);
 
   const b = await seedHousehold('PartnerB', 'B Partner');
   householdBId = b.householdId;
-  agentB = request.agent(app);
+  agentB = testAgent(app);
   agentB.jar.setCookie(`cashflow_session=${b.token}; Path=/`);
 
   const models = await import('../../src/models');
@@ -724,6 +725,35 @@ test('/fairness: #375 toggle default falls back to CashflowSettings (defaults tr
     .query({ currency: 'CAD', dateFrom: '2031-02-01', dateTo: '2031-02-28' });
   assert.equal(res.status, 200);
   assert.equal(res.body.excludeNonPartnerInflows, true);
+});
+
+test('partner direct transfer nets into fairness balance (period-scoped)', async () => {
+  const models = await import('../../src/models');
+  const partner = await models.Contact.create({
+    householdId: householdAId,
+    name: 'Fairness Partner',
+    isPartner: true,
+  });
+  // Partner sent me 2000 in an isolated window; pure transfer (split 'me', partnerShare 0).
+  await createTxn({
+    householdId: householdAId, accountId: accountAId, date: '2027-03-10',
+    amount: 2000, currency: 'CAD', merchantRaw: 'Cash received', txnType: 'transfer',
+    finalSplitType: 'me', myShareAmount: 2000, partnerShareAmount: 0,
+    counterpartyContactId: partner.id,
+  });
+
+  const res = await agentA
+    .get('/api/partner/fairness')
+    .query({ dateFrom: '2027-03-01', dateTo: '2027-03-31', currency: 'CAD' });
+  assert.equal(res.status, 200);
+  const cad = (res.body.byCurrency as Array<{
+    currency: string;
+    balance: number;
+    partnerTransfers: { in: number; out: number };
+  }>).find((c) => c.currency === 'CAD');
+  assert.ok(cad, `expected CAD entry: ${JSON.stringify(res.body.byCurrency)}`);
+  assert.deepEqual(cad.partnerTransfers, { in: 2000, out: 0 });
+  assert.equal(cad.balance, -2000, 'partner-sent money reduces balance (I owe partner)');
 });
 
 test('/fairness: #375 override query param wins over CashflowSettings', async () => {

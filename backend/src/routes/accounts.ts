@@ -7,7 +7,15 @@ import { visibleAccountWhere } from '../auth/scope';
 import { pendingTotal } from '../transactions/status';
 import { currentOwed, utilizationPct } from '../cards/utilization';
 
-const CREDIT_CARD_TYPE = 'credit_card';
+// Revolving-credit kinds carry a creditLimit + utilization (#437). Credit cards
+// and lines of credit (stored as the `loan` type) both draw against a limit, and
+// currentOwed() keys off any negative balance, so the drawn/limit math is
+// identical. Term loans share the `loan` kind but have no revolving limit — the
+// limit stays optional, so this never forces a figure onto one.
+const REVOLVING_CREDIT_TYPES = new Set(['credit_card', 'loan']);
+function isRevolvingCredit(accountType: string): boolean {
+  return REVOLVING_CREDIT_TYPES.has(accountType);
+}
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -16,9 +24,9 @@ function todayIso(): string {
 /**
  * Serialize an account with #437 enrichment: creditLimit (from the
  * liability_accounts sidecar) and utilizationPct (derived from the
- * transaction stream). Both are null for non-credit-card accounts and for
- * credit cards without a limit set. Closed cards report null utilizationPct
- * so they fall out of badges + Dashboard summaries.
+ * transaction stream). Both are null for non-revolving accounts and for
+ * revolving accounts (credit cards / lines of credit) without a limit set.
+ * Closed accounts report null utilizationPct so they fall out of badges.
  */
 async function enrichAccount(
   account: InstanceType<typeof Account>,
@@ -26,7 +34,7 @@ async function enrichAccount(
   asOf: string,
 ): Promise<Record<string, unknown>> {
   const base = account.toJSON() as Record<string, unknown>;
-  if (account.accountType !== CREDIT_CARD_TYPE) {
+  if (!isRevolvingCredit(account.accountType)) {
     base.creditLimit = null;
     base.currentBalance = null;
     base.utilizationPct = null;
@@ -65,10 +73,10 @@ router.get('/', async (req, res, next) => {
       where: visibleAccountWhere(req),
       order: [['name', 'ASC']],
     });
-    const ccIds = rows.filter((a) => a.accountType === CREDIT_CARD_TYPE).map((a) => a.id);
+    const revolvingIds = rows.filter((a) => isRevolvingCredit(a.accountType)).map((a) => a.id);
     const profiles =
-      ccIds.length > 0
-        ? await LiabilityAccount.findAll({ where: { accountId: { [Op.in]: ccIds } } })
+      revolvingIds.length > 0
+        ? await LiabilityAccount.findAll({ where: { accountId: { [Op.in]: revolvingIds } } })
         : [];
     const profileByAccount = new Map<number, InstanceType<typeof LiabilityAccount>>();
     for (const p of profiles) profileByAccount.set(p.accountId, p);
@@ -207,8 +215,9 @@ router.patch('/:id', async (req, res, next) => {
     }
 
     // creditLimit lives on the liability_accounts sidecar (#437). Only valid
-    // for credit_card accounts; sending a non-null value for any other kind is
-    // a 400 to avoid stranded data on a row that nothing will ever read.
+    // for revolving credit (credit_card / loan lines of credit); sending a
+    // non-null value for any other kind is a 400 to avoid stranded data on a
+    // row that nothing will ever read.
     let nextCreditLimit: number | null | undefined = undefined;
     if (creditLimit !== undefined) {
       if (creditLimit === null || creditLimit === '') {
@@ -224,10 +233,10 @@ router.patch('/:id', async (req, res, next) => {
       // The effective accountType after this PATCH determines whether the
       // limit is allowed. Caller may be flipping kind in the same request.
       const effectiveType = account.accountType;
-      if (effectiveType !== CREDIT_CARD_TYPE && nextCreditLimit !== null) {
+      if (!isRevolvingCredit(effectiveType) && nextCreditLimit !== null) {
         res
           .status(400)
-          .json({ error: 'creditLimit can only be set on credit_card accounts' });
+          .json({ error: 'creditLimit can only be set on credit_card or loan accounts' });
         return;
       }
     }

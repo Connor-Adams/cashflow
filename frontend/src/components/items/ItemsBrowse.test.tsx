@@ -163,4 +163,21 @@ describe('ItemsBrowse', () => {
     fireEvent.click(screen.getByText(/^A$/))
     expect(onOpen).toHaveBeenCalledWith(1, expect.objectContaining({ id: 1 }))
   })
+
+  it('flags unmatched items and groups them separately', async () => {
+    const unmatched: ItemRow = {
+      ...sample[0],
+      id: 99,
+      title: 'Unreconciled gadget',
+      categoryEffective: 'Gadgets',
+      receipt: { id: 0, date: null, sourceTxnId: null },
+    }
+    vi.mocked(api.getJson).mockResolvedValue({ items: [sample[0], unmatched], nextCursor: null })
+    render(<ItemsBrowse filters={{}} onOpenItem={() => {}} />)
+    await waitFor(() => expect(screen.getByText('Unreconciled gadget')).toBeInTheDocument())
+    expect(screen.getByText('Unmatched')).toBeInTheDocument()
+    expect(
+      screen.getAllByRole('heading', { name: /Unmatched purchases/ }).length,
+    ).toBeGreaterThan(0)
+  })
 })

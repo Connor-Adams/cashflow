@@ -14,6 +14,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let models: typeof import('../../src/models/index.js');
@@ -38,7 +39,7 @@ before(async () => {
   models = await import('../../src/models/index.js');
   const mod = await import('../../src/app.js');
   app = mod.default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   const register = await authed.post('/api/auth/register').send({
     email: 'pdfbundle@example.com',
     displayName: 'PDF Bundle User',
@@ -241,7 +242,7 @@ test('GET /api/import/pdf-batch/:id: 404 for a batch belonging to another househ
   const { PdfImportBatch } = models;
 
   // Create a second user + household to own the foreign batch
-  const authed2 = request.agent(app);
+  const authed2 = testAgent(app);
   const reg2 = await authed2.post('/api/auth/register').send({
     email: 'pdfbundle2@example.com',
     displayName: 'PDF Bundle User 2',

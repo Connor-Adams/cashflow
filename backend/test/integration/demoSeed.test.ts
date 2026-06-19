@@ -1,6 +1,6 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import type { Express } from 'express';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -63,7 +63,7 @@ test('seedDemoData creates an idempotent production demo account with sample led
 });
 
 test('POST /api/auth/demo-login creates a session for the seeded demo user', async () => {
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   const login = await agent.post('/api/auth/demo-login').send({});
   assert.equal(login.status, 200);
   assert.equal(login.body.user.email, 'dev-test@cashflow.local');
@@ -76,7 +76,7 @@ test('POST /api/auth/demo-login creates a session for the seeded demo user', asy
 });
 
 test('demo user cannot use AI even when OpenAI is configured', async () => {
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   const login = await agent.post('/api/auth/demo-login').send({});
   assert.equal(login.status, 200);
   const cookie = login.headers['set-cookie'];

@@ -9,8 +9,7 @@ import path from 'path';
 import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import request from 'supertest';
-
+import { testAgent, testRequest } from './_setup/testServer.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.join(__dirname, '..', '..');
 const dbPath = path.join(backendRoot, 'data', 'test-portfolio-performance.sqlite');
@@ -45,7 +44,7 @@ after(() => {
 async function makeHousehold(tag: string) {
   const { seedHousehold } = await import('./portfolioFixtures.js');
   const seeded = await seedHousehold(models, `perf-${tag}-${Date.now()}@example.com`);
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${seeded.token}; Path=/`);
   return { ...seeded, agent };
 }
@@ -94,7 +93,7 @@ async function seedSnapshot(opts: {
 // ─── Test 1: 401 when unauthenticated ────────────────────────────────────────
 
 test('401 when unauthenticated', async () => {
-  const res = await request(app).get('/api/portfolio/performance');
+  const res = await testRequest(app).get('/api/portfolio/performance');
   assert.equal(res.status, 401);
 });
 

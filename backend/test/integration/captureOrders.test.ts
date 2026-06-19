@@ -1,6 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -13,7 +14,7 @@ before(async () => {
   testDb = await setupPgTestDb('capture-orders');
   models = await import('../../src/models/index.js');
   app = (await import('../../src/app.js')).default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   const register = await authed.post('/api/auth/register').send({
     email: 'capture@example.com',
     displayName: 'Capture User',
@@ -32,12 +33,12 @@ after(async () => {
 });
 
 test('rejects POST /capture/orders without bearer token', async () => {
-  const res = await request(app).post('/api/capture/orders').send({ vendor: 'amazon', orders: [] });
+  const res = await testRequest(app).post('/api/capture/orders').send({ vendor: 'amazon', orders: [] });
   assert.equal(res.status, 401);
 });
 
 test('rejects POST /capture/orders with wrong-format token', async () => {
-  const res = await request(app)
+  const res = await testRequest(app)
     .post('/api/capture/orders')
     .set('Authorization', 'Bearer not-a-cfc-token')
     .send({ vendor: 'amazon', orders: [] });
@@ -45,7 +46,7 @@ test('rejects POST /capture/orders with wrong-format token', async () => {
 });
 
 test('accepts a valid POST and creates ExternalOrder + items', async () => {
-  const res = await request(app)
+  const res = await testRequest(app)
     .post('/api/capture/orders')
     .set('Authorization', `Bearer ${token}`)
     .send({
@@ -84,16 +85,16 @@ test('second POST with identical payload is a no-op', async () => {
       },
     ],
   };
-  const first = await request(app).post('/api/capture/orders').set('Authorization', `Bearer ${token}`).send(body);
+  const first = await testRequest(app).post('/api/capture/orders').set('Authorization', `Bearer ${token}`).send(body);
   assert.equal(first.body.created, 1);
-  const second = await request(app).post('/api/capture/orders').set('Authorization', `Bearer ${token}`).send(body);
+  const second = await testRequest(app).post('/api/capture/orders').set('Authorization', `Bearer ${token}`).send(body);
   assert.equal(second.status, 200);
   assert.equal(second.body.created, 0);
   assert.equal(second.body.skipped, 1);
 });
 
 test('CORS preflight allows amazon.com origin', async () => {
-  const res = await request(app)
+  const res = await testRequest(app)
     .options('/api/capture/orders')
     .set('Origin', 'https://www.amazon.com')
     .set('Access-Control-Request-Method', 'POST')
@@ -103,7 +104,7 @@ test('CORS preflight allows amazon.com origin', async () => {
 });
 
 test('rejects POST with invalid calendar date in YYYY-MM-DD format', async () => {
-  const res = await request(app)
+  const res = await testRequest(app)
     .post('/api/capture/orders')
     .set('Authorization', `Bearer ${token}`)
     .send({
@@ -125,7 +126,7 @@ test('rejects POST with invalid calendar date in YYYY-MM-DD format', async () =>
 });
 
 test('rejects POST /capture/orders-from-paste without a session', async () => {
-  const res = await request(app)
+  const res = await testRequest(app)
     .post('/api/capture/orders-from-paste')
     .send({ vendor: 'amazon', orders: [] });
   assert.equal(res.status, 401);
@@ -190,7 +191,7 @@ test('post-capture backfill enriches a matching transaction', async () => {
     isRecurring: false,
   } as never);
 
-  const res = await request(app)
+  const res = await testRequest(app)
     .post('/api/capture/orders')
     .set('Authorization', `Bearer ${token}`)
     .send({

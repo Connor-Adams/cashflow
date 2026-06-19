@@ -14,6 +14,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -175,7 +176,7 @@ before(async () => {
   app = mod.default;
 
   // First registered user becomes superadmin — used only to bootstrap.
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -186,13 +187,13 @@ before(async () => {
   const primary = await seed('Primary');
   primaryHouseholdId = primary.householdId;
   primaryUserId = primary.userId;
-  primaryAgent = request.agent(app);
+  primaryAgent = testAgent(app);
   primaryAgent.jar.setCookie(`cashflow_session=${primary.token}; Path=/`);
 
   const other = await seed('Other');
   otherHouseholdId = other.householdId;
   otherUserId = other.userId;
-  otherAgent = request.agent(app);
+  otherAgent = testAgent(app);
   otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
 
   await seedAllSources(primaryHouseholdId, primaryUserId);
@@ -332,7 +333,7 @@ test('GET /api/review-items rejects limit over the max with a clamp (returns <=2
 });
 
 test('GET /api/review-items requires auth', async () => {
-  const r = await request(app).get('/api/review-items');
+  const r = await testRequest(app).get('/api/review-items');
   assert.equal(r.status, 401);
 });
 

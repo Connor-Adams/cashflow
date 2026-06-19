@@ -14,6 +14,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -50,7 +51,7 @@ async function seedOwner(prefix: string): Promise<Seeded> {
     tokenHash: hashToken(token),
     expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
   });
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${token}; Path=/`);
   return { agent, householdId: household.id, userId: user.id };
 }
@@ -75,7 +76,7 @@ async function seedMemberOf(prefix: string, householdId: number): Promise<Seeded
     tokenHash: hashToken(token),
     expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
   });
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${token}; Path=/`);
   return { agent, householdId, userId: user.id };
 }
@@ -93,7 +94,7 @@ before(async () => {
 
   // First registered user becomes the superadmin bootstrap; subsequent seeds
   // use direct model writes.
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',

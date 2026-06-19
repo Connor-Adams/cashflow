@@ -1,6 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -16,7 +17,7 @@ before(async () => {
   testDb = await setupPgTestDb('amazon-capture-automatch');
   models = await import('../../src/models/index.js');
   app = (await import('../../src/app.js')).default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   const register = await authed.post('/api/auth/register').send({
     email: 'automatch@example.com',
     displayName: 'Auto Match',
@@ -63,7 +64,7 @@ test('capturing an Amazon order auto-suggests a link to a matching transaction',
     sourceIdentityFingerprint: 'fp-automatch-1',
   } as never);
 
-  const res = await request(app)
+  const res = await testRequest(app)
     .post('/api/capture/orders')
     .set('Authorization', `Bearer ${token}`)
     .send({

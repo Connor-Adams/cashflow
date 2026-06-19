@@ -14,6 +14,7 @@ import {
   buildFairnessByCurrency,
   buildFairnessMonthly,
   buildSettlementRecommendation,
+  computePartnerTransferDelta,
   type SettlementTotals,
   type SharedTxnRow,
 } from '../summary/partnerFairness';
@@ -241,12 +242,13 @@ router.get('/fairness', async (req, res, next) => {
       await loadSharedTxns(req);
     const excludeNonPartnerInflows = await resolveExcludeNonPartnerInflows(req);
     const { start, nextStart } = currentMonthBoundaries(new Date());
+    const partnerTransfersByCurrency = computePartnerTransferDelta(sharedRows, partnerContactIds);
     const byCurrency = buildFairnessByCurrency(
       sharedRows,
       settlementTotals,
       start,
       nextStart,
-      { partnerContactIds, excludeNonPartnerInflows },
+      { partnerContactIds, excludeNonPartnerInflows, partnerTransfersByCurrency },
     );
     res.json({ byCurrency, excludeNonPartnerInflows });
   } catch (e) {
@@ -291,12 +293,13 @@ router.get('/settlement-recommendation', async (req, res, next) => {
       await loadSharedTxns(req);
     const excludeNonPartnerInflows = await resolveExcludeNonPartnerInflows(req);
     const { start, nextStart } = currentMonthBoundaries(new Date());
+    const partnerTransfersByCurrency = computePartnerTransferDelta(sharedRows, partnerContactIds);
     const fairness = buildFairnessByCurrency(
       sharedRows,
       settlementTotals,
       start,
       nextStart,
-      { partnerContactIds, excludeNonPartnerInflows },
+      { partnerContactIds, excludeNonPartnerInflows, partnerTransfersByCurrency },
     );
     const recommendations = buildSettlementRecommendation(fairness);
     res.json({ recommendations, excludeNonPartnerInflows });
