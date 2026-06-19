@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Diffs current fallow dead-code findings against the committed baseline
- * (.fallow/baseline.json) and creates one GitHub `chore` issue per new finding.
+ * (audit-baseline.json) and creates one GitHub `chore` issue per new finding.
  *
  * Modes:
  *   node scripts/audit-issues.cjs              — diff + create issues (CI use)
@@ -25,7 +25,9 @@ const https = require('https');
 
 const ROOT = path.resolve(__dirname, '..');
 const DEADCODE_JSON = path.join(ROOT, 'reports', 'fallow-deadcode.json');
-const BASELINE_JSON = path.join(ROOT, '.fallow', 'baseline.json');
+// Tracked at repo root (NOT under .fallow/, which is gitignored and carries
+// fallow's own auto-generated `.gitignore: *` that would un-track the file).
+const BASELINE_JSON = path.join(ROOT, 'audit-baseline.json');
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const WRITE_BASELINE = process.argv.includes('--baseline');
@@ -106,6 +108,18 @@ function loadBaseline() {
   const data = readJson(BASELINE_JSON);
   if (!data || !Array.isArray(data.findings)) return new Set();
   return new Set(data.findings);
+}
+
+/**
+ * Return the findings whose `key` is not present in the baseline set.
+ * Pure — the diff is what decides which findings become NEW chore issues.
+ *
+ * @param {Array<{key: string}>} findings
+ * @param {Set<string>} baseline
+ * @returns {Array<{key: string}>}
+ */
+function diffFindings(findings, baseline) {
+  return findings.filter((f) => !baseline.has(f.key));
 }
 
 // ---------------------------------------------------------------------------
@@ -204,7 +218,7 @@ function buildIssueBody(finding, sha, serverUrl, repo) {
 - [ ] ${remedy}
 
 ---
-_Auto-created by the [code-audit workflow](${serverUrl}/${repo}/actions/workflows/audit-issues.yml) on commit \`${(sha ?? 'unknown').slice(0, 8)}\`. Update [.fallow/baseline.json](${serverUrl}/${repo}/blob/main/.fallow/baseline.json) after this is resolved._`;
+_Auto-created by the [code-audit workflow](${serverUrl}/${repo}/actions/workflows/audit-issues.yml) on commit \`${(sha ?? 'unknown').slice(0, 8)}\`. Update [audit-baseline.json](${serverUrl}/${repo}/blob/main/audit-baseline.json) after this is resolved._`;
 }
 
 function buildIssueTitle(finding) {
@@ -237,7 +251,7 @@ async function main() {
   }
 
   const known = loadBaseline();
-  const newFindings = findings.filter((f) => !known.has(f.key));
+  const newFindings = diffFindings(findings, known);
   console.log(`${newFindings.length} new findings not in baseline.`);
 
   if (newFindings.length === 0) {
@@ -287,7 +301,18 @@ async function main() {
   console.log(`Done — created ${created} issue(s).`);
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+module.exports = {
+  extractFindings,
+  diffFindings,
+  buildIssueTitle,
+  buildIssueBody,
+  RULE_LABELS,
+  REMEDIATION,
+};
+
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

@@ -4,13 +4,14 @@ FROM node:22-slim AS builder
 WORKDIR /app
 
 RUN corepack enable
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
-COPY package.json yarn.lock ./
+COPY package.json yarn.lock .yarnrc.yml ./
 COPY backend/package.json ./backend/
 COPY shared/package.json ./shared/
 COPY frontend/package.json ./frontend/
 
-RUN yarn install --frozen-lockfile
+RUN yarn install --immutable
 
 COPY frontend/ ./frontend/
 COPY shared/ ./shared/

@@ -16,6 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Enable Corepack
+        run: corepack enable
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -23,7 +26,7 @@ jobs:
           cache: 'yarn'
 
       - name: Install
-        run: yarn install --frozen-lockfile
+        run: yarn install --immutable
 
       - name: Archive node_modules
         run: |
@@ -46,6 +49,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -76,6 +82,9 @@ jobs:
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -129,6 +138,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Enable Corepack
+        run: corepack enable
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -174,6 +186,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Enable Corepack
+        run: corepack enable
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -217,6 +232,9 @@ jobs:
           # fallow health derives churn/hotspots from git history.
           fetch-depth: 0
 
+      - name: Enable Corepack
+        run: corepack enable
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -235,9 +253,12 @@ jobs:
         run: |
           mkdir -p reports
           # fallow exits non-zero when it finds issues; don't let that (under
-          # bash -e) abort the step before the second command runs.
-          yarn --silent fallow dead-code --format json > reports/fallow-deadcode.json || true
-          yarn --silent fallow health --format json > reports/fallow-health.json || true
+          # bash -e) abort the step before the second command runs. Invoke the
+          # binary directly (not `yarn fallow`) so nothing from the package
+          # manager can leak into the JSON on stdout — Yarn 4 dropped the
+          # `yarn --silent` flag this script used to rely on.
+          ./node_modules/.bin/fallow dead-code --format json > reports/fallow-deadcode.json || true
+          ./node_modules/.bin/fallow health --format json > reports/fallow-health.json || true
 
       - name: Duplicate code (jscpd)
         continue-on-error: true
@@ -304,6 +325,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Enable Corepack
+        run: corepack enable
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -329,6 +353,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Enable Corepack
+        run: corepack enable
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -350,6 +377,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Setup Node
         uses: actions/setup-node@v6

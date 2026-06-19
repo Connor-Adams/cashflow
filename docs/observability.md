@@ -400,6 +400,28 @@ is the root cause, not necessarily the backend.
 3. `railway redeploy --service cashflow-backend --yes` if the process is stuck.
 4. Recovery: `cashflow_up` gauge reappears in Prometheus.
 
+**Why a heartbeat gauge (design rationale):** Prometheus scrapes only the
+otel-collector (`up{job="cashflow-otel-collector"}`); the backend *pushes*
+metrics through that collector, so there is no `up{job="cashflow-backend"}`
+series to alert on. The backend could be dead while the collector stays alive
+and nothing would fire. Two alternatives were considered and rejected:
+
+- **(A) `absent(cashflow_http_server_requests_total)`** — cheap (reuses an
+  existing counter) but false-positives during legitimate idle windows
+  (overnight, low traffic): no requests means the series goes stale even
+  though the backend is perfectly healthy. Rejected — a liveness signal must
+  be independent of inbound traffic.
+- **(C) blackbox_exporter probing `/api/health`** — the most faithful check
+  because it actually exercises the HTTP request path end-to-end, but it adds
+  a new service plus a dedicated Prometheus scrape job to operate. Noted as a
+  future upgrade if synthetic HTTP probing becomes worthwhile; out of scope
+  for the heartbeat.
+
+The `cashflow.up` observable gauge (registered in
+`backend/src/observability/metrics.ts`) reports `1` on every 15s export
+interval regardless of traffic, so `absent(cashflow_up)` is true only when the
+backend has actually stopped exporting — traffic-independent by construction.
+
 #### HighHttp5xxRate
 
 **Rule:** `cashflow-high-http-5xx-rate` — fires when the 5xx error rate
@@ -409,7 +431,9 @@ exceeds 2% of total requests over a 5-minute window, sustained for ≥5m.
 
 **Remediation:**
 1. Check backend logs for unhandled exceptions or database connectivity errors.
-2. Review the API health dashboard route breakdown for which endpoints are failing.
+2. Open the **5xx Error Budget** stat on the API Health dashboard to see how far
+   over the 2% budget you are, and the **Request Rate by Route and Status** panel
+   for which endpoints are failing.
 3. Check downstream dependencies (database, external APIs) for outages.
 4. Recovery: 5xx rate drops below 2%.
 
@@ -423,7 +447,8 @@ under normal load is ~150ms; the 1000ms threshold gives 6x headroom and
 catches sustained degradation without alerting on transient spikes.
 
 **Remediation:**
-1. Check the route breakdown panel in the API health dashboard for slow endpoints.
+1. Open the **Route Latency p99** panel on the API Health dashboard (the 1000ms
+   alert threshold is drawn on it) to see which routes are over budget.
 2. Look for slow database queries or missing indexes.
 3. Check for external API timeouts or memory pressure causing GC pauses.
 4. Recovery: p99 latency drops below 1000ms.
@@ -468,13 +493,45 @@ incident:
 
 Repeat for `loki` and `prometheus`.
 
-### Notification routing (future work)
+### Alert routing: every fire becomes a GitHub issue
 
-The alert rules will fire and show as "Firing" in Grafana → Alerting → Alert
-rules immediately. Routing them to email/Slack/Discord requires a contact
-point + notification policy, which lives outside this repo because it needs
-SMTP/webhook credentials. Add when ready via Grafana → Alerting → Contact
-points.
+A firing alert no longer just shows as "Firing" in the Grafana UI and ages out —
+it becomes a durable, owner-assignable GitHub issue (cashflow issue #386). This
+replaces the old comment-next-to-the-wiring pattern: the alert *is* the ticket.
+
+The path:
+
+1. Grafana provisions a webhook contact point and a notification policy from
+   [`infra/grafana/provisioning/alerting/contactpoints.yaml`](https://github.com/Connor-Adams/cashflow/blob/main/infra/grafana/provisioning/alerting/contactpoints.yaml).
+   The policy routes every alert in the `Cashflow` folder to the
+   `github-issues` contact point.
+2. That contact point POSTs a webhook to GitHub's `repository_dispatch` API
+   (`event_type: grafana-alert`), with the Alertmanager-shaped alert group as
+   the `client_payload`.
+3. [`.github/workflows/grafana-alert-to-issue.yml`](https://github.com/Connor-Adams/cashflow/blob/main/.github/workflows/grafana-alert-to-issue.yml)
+   listens for that dispatch and runs
+   [`scripts/grafana-alert-to-issue.cjs`](https://github.com/Connor-Adams/cashflow/blob/main/scripts/grafana-alert-to-issue.cjs).
+
+Issue lifecycle (keyed by an `alert:<rule-uid>` label, one open issue per rule):
+
+| Alert state | Open issue exists? | Action |
+| :--- | :--- | :--- |
+| firing | no | **create** a `bug` + `incident` issue (`severity:*`, `component:*`, `alert:<uid>` labels; body carries summary, description, `runbook_url`, and the Grafana rule link) |
+| firing | yes | **comment** on it (no duplicate) |
+| resolved | yes | **close** it with a "resolved" comment |
+| resolved | no | noop |
+
+**Required secret:** the contact point authenticates the dispatch POST with a
+fine-scoped PAT exposed to the Grafana service as the `GITHUB_DISPATCH_TOKEN`
+env var (Grafana expands `$GITHUB_DISPATCH_TOKEN` in provisioning). The PAT
+needs only `contents: read` + `repository_dispatch` write on this repo. It is
+**not** committed — set it in the Grafana service environment. The workflow
+itself uses the built-in `GITHUB_TOKEN` with `issues: write`.
+
+To test the path end to end, fire a real alert (stop tempo per the
+[Verification](#verification) steps above) and confirm a `[alert] … on tempo`
+issue appears in the tracker, then bring tempo back and confirm the issue is
+closed.
 
 ## Kill switch
 

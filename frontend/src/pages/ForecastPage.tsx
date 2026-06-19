@@ -10,7 +10,14 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, Calendar } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowDownRight,
+  ArrowUpRight,
+  Calendar,
+  ChevronDown,
+  ChevronRight,
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -32,6 +39,11 @@ import {
   useForecast,
   type ForecastRange,
 } from '../hooks/useForecast'
+import {
+  MAX_VISIBLE_DRIVERS,
+  deriveDipDrivers,
+  driverLinkTarget,
+} from './forecastDrivers'
 import type {
   ForecastEvent,
   ForecastEventDirection,
@@ -245,7 +257,7 @@ export function ForecastPage() {
               className="mt-0.5 size-5 shrink-0 text-warning"
               aria-hidden="true"
             />
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="font-semibold text-warning-foreground">
                 Balance dips below {formatMoney(0, currency)}
               </p>
@@ -253,6 +265,11 @@ export function ForecastPage() {
                 Projected to reach {formatMoney(data.lowestProjectedBalance, currency)} on{' '}
                 {data.lowestProjectedBalanceDate}. Consider shifting expenses or planning a transfer.
               </p>
+              <DipDrivers
+                events={data.events}
+                lowestProjectedBalanceDate={data.lowestProjectedBalanceDate}
+                currency={currency}
+              />
             </div>
           </div>
         </Card>
@@ -348,7 +365,12 @@ export function ForecastPage() {
                           aria-hidden="true"
                         />
                       ) : null}
-                      <span>{e.sourceName}</span>
+                      <Link
+                        to={driverLinkTarget(e.sourceType, e.sourceId)}
+                        className="hover:underline"
+                      >
+                        {e.sourceName}
+                      </Link>
                     </div>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
@@ -425,6 +447,118 @@ type SummaryTileProps = {
   description?: string
   tone?: 'default' | 'warn'
   loading?: boolean
+}
+
+type DipDriversProps = {
+  events: ForecastEvent[]
+  lowestProjectedBalanceDate: string | null
+  currency: string
+}
+
+/**
+ * Expandable "What's driving this dip?" disclosure inside the lowest-balance
+ * warning Card. Derives the dip drivers client-side from the already-fetched
+ * forecast occurrences (no extra request) — every `out` occurrence dated on
+ * or before the lowest-balance date, sorted by amount desc. Caps the visible
+ * list at MAX_VISIBLE_DRIVERS with a "+N more" reveal.
+ */
+function DipDrivers({
+  events,
+  lowestProjectedBalanceDate,
+  currency,
+}: DipDriversProps) {
+  const [open, setOpen] = useState(false)
+  const [showAll, setShowAll] = useState(false)
+
+  const drivers = useMemo(
+    () => deriveDipDrivers(events, lowestProjectedBalanceDate),
+    [events, lowestProjectedBalanceDate],
+  )
+
+  const overflow = Math.max(0, drivers.length - MAX_VISIBLE_DRIVERS)
+  const visible = showAll ? drivers : drivers.slice(0, MAX_VISIBLE_DRIVERS)
+
+  return (
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 text-sm font-medium text-warning-foreground hover:underline"
+      >
+        {open ? (
+          <ChevronDown className="size-4" aria-hidden="true" />
+        ) : (
+          <ChevronRight className="size-4" aria-hidden="true" />
+        )}
+        {open ? 'Hide drivers' : "What's driving this dip?"}
+      </button>
+
+      {open ? (
+        <div
+          role="region"
+          aria-label="Dip drivers"
+          className="mt-2 flex flex-col gap-1"
+        >
+          {drivers.length === 0 ? (
+            <p className="mb-0 text-sm text-warning">
+              No individual charges to attribute — the dip comes from low
+              projected income.
+            </p>
+          ) : (
+            <>
+              {visible.map((e) => (
+                <DipDriverRow key={eventKey(e)} event={e} currency={currency} />
+              ))}
+              {overflow > 0 && !showAll ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAll(true)}
+                  className="self-start text-sm font-medium text-warning-foreground hover:underline"
+                >
+                  +{overflow} more
+                </button>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function DipDriverRow({
+  event,
+  currency,
+}: {
+  event: ForecastEvent
+  currency: string
+}) {
+  const detected = event.sourceType === 'recurring_detection'
+  return (
+    <div className="flex items-center justify-between gap-3 text-sm">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="shrink-0 text-xs text-warning tabular-nums">
+          {event.date}
+        </span>
+        <Link
+          to={driverLinkTarget(event.sourceType, event.sourceId)}
+          className="truncate text-warning-foreground hover:underline"
+        >
+          {event.sourceName}
+        </Link>
+        {detected ? (
+          <Badge variant="secondary" className="shrink-0 text-[0.65rem]">
+            Detected charge
+          </Badge>
+        ) : null}
+      </div>
+      <span className={`shrink-0 tabular-nums ${DIRECTION_TONE[event.direction]}`}>
+        {DIRECTION_PREFIX[event.direction]}
+        {formatMoney(event.amount, currency)}
+      </span>
+    </div>
+  )
 }
 
 function SummaryTile({ label, value, description, tone, loading }: SummaryTileProps) {
