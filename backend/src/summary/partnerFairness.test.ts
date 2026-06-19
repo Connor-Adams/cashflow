@@ -24,6 +24,7 @@ function makeRow(over: Partial<SharedTxnRow> = {}): SharedTxnRow {
     ownershipContactId: null,
     counterpartyContactId: null,
     contactName: null,
+    payerUserId: null,
     ...over,
   };
 }

@@ -46,6 +46,8 @@ export type SharedTxnRow = {
    * any row where the import pipeline did not surface a counterparty.
    */
   counterpartyContactId: number | null;
+  /** transactions.created_by_user_id — the payer in the single-payer model. Drives viewer-relative projection. NULL on legacy rows. */
+  payerUserId: number | null;
 };
 
 /** Settlement summary keyed by (contactId, currency). Mirrors `partnerMath.SettlementSummary`. */

@@ -76,6 +76,7 @@ type RawTxnRow = {
   ownershipType: string;
   ownershipContactId: number | null;
   counterpartyContactId: number | null;
+  createdByUserId: number | null;
 };
 
 type RawSettlementRow = {
@@ -108,6 +109,7 @@ async function loadSharedTxns(req: Request): Promise<{
         'ownershipType',
         'ownershipContactId',
         'counterpartyContactId',
+        'createdByUserId',
       ],
       raw: true,
     }),
@@ -146,6 +148,7 @@ async function loadSharedTxns(req: Request): Promise<{
     ownershipType: r.ownershipType,
     ownershipContactId: r.ownershipContactId,
     counterpartyContactId: r.counterpartyContactId,
+    payerUserId: r.createdByUserId,
     contactName:
       r.ownershipContactId != null ? contactsById.get(r.ownershipContactId) ?? null : null,
   }));
