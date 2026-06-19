@@ -70,6 +70,73 @@ type GmailScanResult = {
 }
 
 // ---------------------------------------------------------------------------
+// SenderSuggestions
+// ---------------------------------------------------------------------------
+
+type SenderSuggestion = {
+  id: number
+  emailAddress: string
+  label: string | null
+  sampleSubject: string | null
+  candidateCount: number
+  lastSeenAt: string | null
+}
+
+export function SenderSuggestions() {
+  const [items, setItems] = useState<SenderSuggestion[]>([])
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const result = await getJson<SenderSuggestion[]>('/api/email/suggestions')
+      setItems(Array.isArray(result) ? result : [])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load suggestions')
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  async function act(id: number, action: 'approve' | 'dismiss') {
+    setError(null)
+    try {
+      await postJson(`/api/email/suggestions/${id}/${action}`)
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : `Could not ${action}`)
+    }
+  }
+
+  if (items.length === 0) {
+    return error ? <span className="error" role="alert">{error}</span> : null
+  }
+
+  return (
+    <div style={{ marginTop: '0.5rem', display: 'grid', gap: '0.4rem' }}>
+      <strong style={{ fontSize: '0.85rem' }}>Suggested receipt senders</strong>
+      <p className="muted" style={{ fontSize: '0.8rem', margin: 0 }}>
+        Discovery found these senders. Approve to scan them on every run, or dismiss to ignore.
+      </p>
+      <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'grid', gap: '0.3rem' }}>
+        {items.map((s) => (
+          <li key={s.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <code>{s.emailAddress}</code>{' '}
+              <span className="muted">· {s.candidateCount} emails{s.sampleSubject ? ` · "${s.sampleSubject}"` : ''}</span>
+            </span>
+            <Button type="button" size="sm" variant="outline" onClick={() => void act(s.id, 'approve')}>Approve</Button>
+            <Button type="button" size="sm" variant="destructive" onClick={() => void act(s.id, 'dismiss')}>Dismiss</Button>
+          </li>
+        ))}
+      </ul>
+      {error && <span className="error" role="alert" style={{ fontSize: '0.85rem' }}>{error}</span>}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -195,7 +262,7 @@ export function GmailSection() {
     }
   }
 
-  async function runGmailScan(maxMessages: number, sinceDays?: number) {
+  async function runGmailScanAt(path: string, maxMessages: number, sinceDays?: number) {
     if (gmailScanning) return
     setGmailScanning(true)
     setGmailError(null)
@@ -206,7 +273,7 @@ export function GmailSection() {
     if (sinceDays != null) body.sinceDays = sinceDays
     try {
       const base = import.meta.env.VITE_API_BASE ?? ''
-      const res = await fetch(`${base}/api/email/scan/google?stream=1`, {
+      const res = await fetch(`${base}${path}`, {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -290,6 +357,15 @@ export function GmailSection() {
     }
   }
 
+  async function runGmailScan(maxMessages: number, sinceDays?: number) {
+    await runGmailScanAt('/api/email/scan/google?stream=1', maxMessages, sinceDays)
+  }
+
+  async function runDiscovery() {
+    if (gmailScanning) return
+    await runGmailScanAt('/api/email/discover/google?stream=1', 300, 30)
+  }
+
   return (
     <Card className="accountsFormCard">
       <div className="accountsCardHeader">
@@ -359,6 +435,16 @@ export function GmailSection() {
               title="Scan the last year (up to 5000 messages — can take a while)"
             >
               1-year backfill (5000 msgs)
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={gmailScanning}
+              onClick={() => void runDiscovery()}
+              title="Find receipts from senders not yet on your allowlist"
+            >
+              <Sparkles aria-hidden="true" />
+              Discover new receipt sources
             </Button>
             <Button
               type="button"
@@ -546,6 +632,7 @@ export function GmailSection() {
               )}
             </div>
           </details>
+          <SenderSuggestions />
         </div>
       )}
     </Card>
