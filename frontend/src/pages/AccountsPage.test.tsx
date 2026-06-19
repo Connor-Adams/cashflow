@@ -1,8 +1,9 @@
 import React from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { ToastProvider } from '@/components/ui/toast'
 import { AccountsPage } from './AccountsPage'
+import { getJson } from '../lib/api'
 
 vi.mock('../lib/api', () => ({
   getJson: vi.fn(() =>
@@ -81,5 +82,44 @@ describe('AccountsPage', () => {
     expect(screen.getByText(/\$800/)).toBeInTheDocument()
     expect(screen.getByText(/\$4,000/)).toBeInTheDocument()
     expect(screen.getByText('20% used')).toBeInTheDocument()
+  })
+
+  it('exposes a "Merge into…" action when a same-currency target exists (AC #11)', async () => {
+    renderPage()
+    await screen.findByText('Everyday Chequing')
+    // Two CAD accounts → merge action present and enabled for both.
+    const mergeButtons = screen.getAllByRole('button', { name: /merge into/i })
+    expect(mergeButtons.length).toBeGreaterThan(0)
+    expect(mergeButtons[0]).toBeEnabled()
+    // Clicking opens the modal.
+    fireEvent.click(mergeButtons[0])
+    expect(await screen.findByText('Merge accounts')).toBeInTheDocument()
+  })
+
+  it('renders merged sources in the "Hidden / merged accounts" section (AC #13)', async () => {
+    vi.mocked(getJson).mockResolvedValueOnce([
+      {
+        id: 1, name: 'New BoA', owner: 'me', householdId: null, ownerUserId: null,
+        accountType: 'checking', shortCode: null, defaultCurrency: 'CAD', visibility: 'shared',
+        closedAt: null, creditLimit: null, currentBalance: null, utilizationPct: null, notes: null,
+        mergedIntoId: null, mergedAt: null,
+      },
+      {
+        id: 2, name: 'Old BoA', owner: 'me', householdId: null, ownerUserId: null,
+        accountType: 'checking', shortCode: null, defaultCurrency: 'CAD', visibility: 'shared',
+        closedAt: null, creditLimit: null, currentBalance: null, utilizationPct: null, notes: null,
+        mergedIntoId: 1, mergedAt: '2026-06-19T12:00:00.000Z',
+      },
+    ])
+    renderPage()
+    // Section heading is present (collapsible, collapsed by default).
+    const heading = await screen.findByText('Hidden / merged accounts')
+    expect(heading).toBeInTheDocument()
+    // Expand the section to reveal its rows.
+    fireEvent.click(screen.getByRole('button', { name: /expand hidden \/ merged accounts/i }))
+    // The merged source name appears in the hidden section, with its target.
+    expect(await screen.findByText('Old BoA')).toBeInTheDocument()
+    // "New BoA" is both the active row and the "Merged into" cell value.
+    expect(screen.getAllByText('New BoA').length).toBeGreaterThan(0)
   })
 })
