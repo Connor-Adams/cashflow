@@ -550,6 +550,8 @@ export type PartnerFairnessByCurrency = {
    * non-partner Contact (friend repaying lunch, side gig, family gift).
    */
   nonPartnerInflows: number
+  /** Direct partner transfers folded into balance (in = partner sent you, out = you sent partner). */
+  partnerTransfers: { in: number; out: number }
   balance: number
   direction: 'partner_owes_me' | 'i_owe_partner' | 'even'
   paidMore: { youCovered: number; partnerCovered: number }
