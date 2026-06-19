@@ -33,8 +33,7 @@
     "@cashflow/shared",
     "@radix-ui/react-slot",
     "pino-pretty",
-    "react-is",
-    "web-push"
+    "react-is"
   ],
   "ignoreExportsUsedInFile": true,
   "usedClassMembers": [
