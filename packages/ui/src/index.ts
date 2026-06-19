@@ -15,3 +15,14 @@ export { NativeSelect, NativeSelectOption } from './components/native-select'
 export {
   Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
 } from './components/table'
+export { Tabs, TabPanel } from './components/tabs'
+export type { TabItem } from './components/tabs'
+export {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogBody,
+  DialogFooter,
+  useConfirm,
+} from './components/dialog'
