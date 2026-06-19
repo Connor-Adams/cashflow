@@ -22,7 +22,9 @@ import {
   TableCell,
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton, SkeletonRow } from '@/components/ui/skeleton'
+import { Link } from 'react-router-dom'
 import { formatMoney } from '@/lib/formatMoney'
 import {
   fromDateInputValue,
@@ -162,7 +164,21 @@ export function NetWorthPage() {
   if (!cur) {
     return (
       <div className="p-6">
-        <p>No data{current.error ? `: ${current.error.message}` : ''}.</p>
+        {current.error ? (
+          <p className="error text-sm" role="alert">
+            Could not load net worth: {current.error.message}
+          </p>
+        ) : (
+          <EmptyState
+            title="No accounts yet"
+            description="Connect or add an account so we can track your assets and liabilities over time."
+            actions={
+              <Button asChild size="sm">
+                <Link to="/settings/accounts">Add an account</Link>
+              </Button>
+            }
+          />
+        )}
       </div>
     )
   }
