@@ -166,17 +166,6 @@ export async function mergeAccounts(input: MergeAccountsInput): Promise<MergeAcc
   return { source, target, movedTransactions, movedPlannedEvents, movedTotal };
 }
 
-/**
- * Source accounts that have been merged INTO the given target (for the
- * "Hidden / merged accounts" UI). Scoped to the household.
- */
-export async function mergedSourcesFor(targetId: number, householdId: number): Promise<Account[]> {
-  return Account.findAll({
-    where: { mergedIntoId: targetId, householdId } as never,
-    order: [['name', 'ASC']],
-  });
-}
-
 /** True if any account has been merged into the given account id (delete guard). */
 export async function hasMergedSources(accountId: number, householdId: number): Promise<boolean> {
   const count = await Account.count({
