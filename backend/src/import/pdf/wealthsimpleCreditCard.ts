@@ -43,6 +43,30 @@ function parseLast4(lines: PdfLine[]): string {
   throw new Error('WS credit card: could not parse card last-4');
 }
 
+// "$1,234.56" → 1234.56; null when no money token present.
+function parseSummaryMoney(lines: PdfLine[], label: RegExp): number | null {
+  for (const l of lines) {
+    const m = label.exec(l.text);
+    if (m) {
+      const n = Number(m[1].replace(/[,\s]/g, ''));
+      return Number.isFinite(n) ? n : null;
+    }
+  }
+  return null;
+}
+
+// "Jun 11, 2026" → "2026-06-11"; null when missing/unparseable.
+function parseSummaryDate(lines: PdfLine[], label: RegExp): string | null {
+  for (const l of lines) {
+    const m = label.exec(l.text);
+    if (!m) continue;
+    const month = MONTHS[m[1]];
+    if (month === undefined) return null;
+    return toIso(Number(m[3]), month, Number(m[2]));
+  }
+  return null;
+}
+
 export function parseWsCreditCardHeader(lines: PdfLine[]): PdfStatementHeader {
   const period = parsePeriod(lines);
   return {
@@ -52,6 +76,9 @@ export function parseWsCreditCardHeader(lines: PdfLine[]): PdfStatementHeader {
     periodStart: period.start,
     periodEnd: period.end,
     currency: 'CAD',
+    statementBalance: parseSummaryMoney(lines, /New balance\s+\$?([\d,]+\.\d{2})/),
+    minimumPayment: parseSummaryMoney(lines, /Minimum payment\s+\$?([\d,]+\.\d{2})/),
+    paymentDueDate: parseSummaryDate(lines, /Payment due date\s+([A-Z][a-z]{2})\s+(\d{1,2}),\s+(\d{4})/),
   };
 }
 
