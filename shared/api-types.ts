@@ -1883,3 +1883,46 @@ export interface TransferLinkResult {
   dryRun: boolean;
   elapsedMs: number;
 }
+
+// ---------------------------------------------------------------------------
+// SimpleFIN Bridge connection (issue #790)
+// ---------------------------------------------------------------------------
+
+/** Lifecycle of a stored SimpleFIN connection. */
+export type SimplefinStatus = 'connected' | 'error' | 'disconnected';
+
+/** Request body for POST /api/simplefin/connect. */
+export interface SimplefinConnectRequest {
+  /** One-time base64 setup token pasted from SimpleFIN Bridge. */
+  setupToken: string;
+}
+
+/** A SimpleFIN account discovered at connect time that matched no Account row. */
+export interface SimplefinUnlinkedAccount {
+  simplefinId: string;
+  name: string;
+}
+
+/** Success body for POST /api/simplefin/connect. */
+export interface SimplefinConnectResponse {
+  status: SimplefinStatus;
+  accountsFound: number;
+  accountsLinked: number;
+  unlinkedAccounts: SimplefinUnlinkedAccount[];
+}
+
+/** Body for GET /api/simplefin/status. Never carries credentials. */
+export interface SimplefinStatusResponse {
+  connected: boolean;
+  status: SimplefinStatus;
+  statusReason: string | null;
+  lastSyncedAt: string | null;
+  /** Masked host of the access URL (never the credentials), or null. */
+  host: string | null;
+  accountsLinked?: number | null;
+}
+
+/** Body for POST /api/simplefin/disconnect. */
+export interface SimplefinDisconnectResponse {
+  status: 'disconnected';
+}
