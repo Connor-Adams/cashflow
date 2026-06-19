@@ -281,6 +281,7 @@ export async function discoverReceiptSources(
         // user can decide, but write no order.
         r.status = 'no_items';
         failed++;
+        await upsertSenderSuggestion({ householdId: opts.householdId, fromAddr: r.from, subject: r.subject });
         await recordProcessed({ messageId: summary.id, status: 'no_items', parser, subject: r.subject, fromAddr: r.from });
         return r;
       }
@@ -318,7 +319,11 @@ export async function discoverReceiptSources(
         } catch (err) {
           logger.warn({ err, orderId }, 'discovery_match_failed');
         }
-        await categorizeAndApplyReceiptItems({ householdId: opts.householdId, orderId });
+        try {
+          await categorizeAndApplyReceiptItems({ householdId: opts.householdId, orderId });
+        } catch (err) {
+          logger.warn({ err, orderId }, 'discovery_categorize_failed');
+        }
         await recordProcessed({ messageId: summary.id, status: 'auto_learned', parser, externalOrderId: orderId, subject: r.subject, fromAddr: r.from });
       } else {
         const before = await suggestionExists(opts.householdId, r.from);
