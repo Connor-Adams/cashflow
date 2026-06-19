@@ -8,5 +8,8 @@
   },
   "scripts": {
     "test": "tsx --test *.test.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
   }
 }

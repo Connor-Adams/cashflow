@@ -2,18 +2,12 @@
   "name": "cashflow",
   "private": true,
   "license": "UNLICENSED",
-  "packageManager": "yarn@1.22.22",
-  "workspaces": {
-    "packages": [
-      "backend",
-      "frontend",
-      "shared"
-    ],
-    "nohoist": [
-      "**/@vitest/coverage-v8",
-      "**/@vitest/coverage-v8/**"
-    ]
-  },
+  "packageManager": "yarn@4.17.0",
+  "workspaces": [
+    "backend",
+    "frontend",
+    "shared"
+  ],
   "scripts": {
     "prepare": "husky || true",
     "lint-staged": "lint-staged",
