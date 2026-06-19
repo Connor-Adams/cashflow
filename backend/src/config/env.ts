@@ -145,7 +145,11 @@ export function loadEnvConfig(
     e.WEEKLY_DIGEST_ENABLED,
     nodeEnv,
   );
-  const weeklyDigestCron = e.WEEKLY_DIGEST_CRON?.trim() || '0 9 * * 1';
+  // Daily 09:00 UTC tick (#796): the orchestrator routes each user to their
+  // chosen `digestDayOfWeek` and the `lastDigestSentAt` 6-day eligibility guard
+  // keeps it to at most one digest per ~week. A Monday-only cron (the #267
+  // default) could never serve users who pick another weekday.
+  const weeklyDigestCron = e.WEEKLY_DIGEST_CRON?.trim() || '0 9 * * *';
   const budgetBreachCheckEnabled = parseBudgetBreachCheckEnabled(
     e.BUDGET_BREACH_CHECK_ENABLED,
     nodeEnv,

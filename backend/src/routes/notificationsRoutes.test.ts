@@ -75,3 +75,20 @@ test('validateNotificationPreferencePatch: rejects non-boolean channelEmail', ()
   assert.equal(r.ok, false);
   if (!r.ok) assert.match(r.error, /channelEmail must be boolean/);
 });
+
+test('validateNotificationPreferencePatch: accepts channelPush + digestDayOfWeek (#796)', () => {
+  const r = validateNotificationPreferencePatch({
+    channelPush: true,
+    digestDayOfWeek: 3,
+  });
+  assert.equal(r.ok, true);
+  if (r.ok) assert.deepEqual(r.patch, { channelPush: true, digestDayOfWeek: 3 });
+});
+
+test('validateNotificationPreferencePatch: rejects out-of-range digestDayOfWeek (#796)', () => {
+  for (const bad of [7, -1, 1.5, '1' as unknown as number]) {
+    const r = validateNotificationPreferencePatch({ digestDayOfWeek: bad });
+    assert.equal(r.ok, false, `${String(bad)} should be rejected`);
+    if (!r.ok) assert.match(r.error, /digestDayOfWeek must be an integer 0\.\.6/);
+  }
+});

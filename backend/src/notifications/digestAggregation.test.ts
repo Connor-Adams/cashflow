@@ -218,6 +218,82 @@ test('aggregateDigest: uncategorized rows surface as "Uncategorized"', () => {
   assert.equal(d.topCategories[0].category, 'Uncategorized');
 });
 
+test('aggregateDigest: netChange = income minus spend in chosen currency (#796 AC1)', () => {
+  const current = [
+    row({ id: 1, amount: '-100.00', finalCategory: 'Groceries' }),
+    row({ id: 2, amount: '-50.00', finalCategory: 'Dining' }),
+    row({ id: 3, amount: '500.00', txnType: 'income', finalCategory: null }),
+  ];
+  const d = aggregateDigest(current, [], {
+    weekStart: '2026-05-18',
+    weekEnd: '2026-05-24',
+    hasAnyHistory: true,
+    pendingCount: 0,
+  });
+  // income 500 - spend 150 = +350
+  assert.equal(d.netChange, 350);
+});
+
+test('aggregateDigest: netChange is zero for an empty week (#796 AC9)', () => {
+  const d = aggregateDigest([], [], {
+    weekStart: '2026-05-18',
+    weekEnd: '2026-05-24',
+    hasAnyHistory: true,
+    pendingCount: 0,
+    fallbackCurrency: 'CAD',
+  });
+  assert.equal(d.netChange, 0);
+  assert.deepEqual(d.categoryDeltas, []);
+});
+
+test('aggregateDigest: categoryDeltas is the FULL array with delta=total-priorTotal (#796 AC2)', () => {
+  const current = [
+    row({ id: 1, amount: '-100.00', finalCategory: 'Groceries' }),
+    row({ id: 2, amount: '-200.00', finalCategory: 'Dining' }),
+    row({ id: 3, amount: '-300.00', finalCategory: 'Rent' }),
+    row({ id: 4, amount: '-50.00', finalCategory: 'Misc' }),
+  ];
+  const prior = [
+    row({ id: 10, amount: '-150.00', finalCategory: 'Groceries' }),
+  ];
+  const d = aggregateDigest(current, prior, {
+    weekStart: '2026-05-18',
+    weekEnd: '2026-05-24',
+    hasAnyHistory: true,
+    pendingCount: 0,
+  });
+  // Not sliced to 3 — all four categories present.
+  assert.equal(d.categoryDeltas.length, 4);
+  for (const c of d.categoryDeltas) {
+    assert.equal(c.delta, c.total - c.priorTotal, `${c.category} delta consistent`);
+  }
+  // topCategories still capped at 3.
+  assert.equal(d.topCategories.length, 3);
+  const groceries = d.categoryDeltas.find((c) => c.category === 'Groceries');
+  assert.equal(groceries?.delta, -50);
+});
+
+test('aggregateDigest: insight rollup + upcoming expectations passed through (#796 AC3/AC4)', () => {
+  const d = aggregateDigest([], [], {
+    weekStart: '2026-05-18',
+    weekEnd: '2026-05-24',
+    hasAnyHistory: true,
+    pendingCount: 0,
+    openInsightCount: 4,
+    topInsights: [
+      { id: 91, type: 'subscription_price_increase', severity: 'warning', title: 'Netflix up' },
+    ],
+    upcomingExpectations: [
+      { id: 33, name: 'Rent', dueDate: '2026-05-25', amount: 2200, currency: 'CAD' },
+    ],
+  });
+  assert.equal(d.openInsightCount, 4);
+  assert.equal(d.topInsights.length, 1);
+  assert.equal(d.topInsights[0].id, 91);
+  assert.equal(d.upcomingExpectations.length, 1);
+  assert.equal(d.upcomingExpectations[0].name, 'Rent');
+});
+
 test('aggregateDigest: cross-currency top categories filtered to chosen currency', () => {
   const current = [
     row({ id: 1, amount: '-100.00', finalCategory: 'A', currency: 'USD' }),
