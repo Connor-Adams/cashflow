@@ -57,8 +57,16 @@ else
   TSX="$BACKEND_ROOT/node_modules/.bin/tsx"
 fi
 
-# Word-splitting on $FILES is intentional (newline/space-separated paths).
+# Optional sharding for CI fan-out: TEST_SHARD="<index>/<total>" (1-based) makes
+# node:test run only its slice of the discovered files, so a matrix of N jobs
+# splits the suite N ways. Empty/unset => run everything (local + single-runner).
+SHARD_FLAG=""
+if [ -n "${TEST_SHARD:-}" ]; then
+  SHARD_FLAG="--test-shard=$TEST_SHARD"
+fi
+
+# Word-splitting on $FILES (and $SHARD_FLAG) is intentional.
 # setup.ts gives each worker a per-PID SQLite temp DB; without --import here
 # parallel workers corrupt each other.
 # shellcheck disable=SC2086
-exec "$TSX" --import ./test/setup.ts --test $FILES
+exec "$TSX" --import ./test/setup.ts --test $SHARD_FLAG $FILES
