@@ -26,11 +26,11 @@ import { decryptSecret, encryptSecret } from '../util/symmetricEncryption';
 import {
   buildAuthUrl,
   exchangeCodeForTokens,
-  fetchMessage,
+  fetchMessage as realFetchMessage,
   fetchUserEmail,
   extractMessageBody,
   getHeader,
-  listMessageIds,
+  listMessageIds as realListMessageIds,
   refreshAccessToken,
   revokeToken,
   isReauthRequiredError,
@@ -39,6 +39,7 @@ import {
   type OauthTokenResponse,
 } from './gmail';
 import { extractReceiptFromText } from '../ai/extractReceiptItems';
+import { collectPdfParts, extractPdfReceiptText as realExtractPdfReceiptText } from './pdfAttachments';
 import { defaultCurrency } from '../config/env';
 import { uberVendorOverride } from './parsers/uber';
 import { categorizeUberTrip } from '../ai/aiCategorizeUberTrip';
@@ -149,6 +150,24 @@ export function buildDiscoveryQuery(opts: {
     parts.push(`after:${y}/${m}/${d}`);
   }
   return parts.join(' ');
+}
+
+/**
+ * Parse receipt text (an email body OR PDF-extracted text) into a structured
+ * order: try the cheap deterministic vendor parsers first, then fall back to AI.
+ * `extractFromText` is injected so callers (and tests) can supply the real AI
+ * extractor or a fake. `usedAi` lets callers track AI-call counts.
+ */
+export async function parseReceiptText(opts: {
+  fromAddress: string | null;
+  subject: string | null;
+  text: string;
+  extractFromText: (text: string) => Promise<ExtractedReceiptOrder>;
+}): Promise<{ extracted: ExtractedReceiptOrder; parser: string; usedAi: boolean }> {
+  const det = tryDeterministicParse({ fromAddress: opts.fromAddress, subject: opts.subject, body: opts.text });
+  if (det.ok) return { extracted: det.order, parser: det.parser, usedAi: false };
+  const extracted = await opts.extractFromText(opts.text);
+  return { extracted, parser: 'ai', usedAi: true };
 }
 
 /** Senders the household explicitly dismissed during discovery — excluded from
@@ -367,6 +386,13 @@ export interface ScanCallbacks {
   onMessage?: (msg: ScanResultMessage) => void;
 }
 
+export interface ScanDeps {
+  listMessageIds: typeof realListMessageIds;
+  fetchMessage: typeof realFetchMessage;
+  extractFromText: (text: string) => Promise<ExtractedReceiptOrder>;
+  extractPdfReceiptText: typeof realExtractPdfReceiptText;
+}
+
 export async function scanInbox(
   opts: {
     userId: number;
@@ -376,7 +402,13 @@ export async function scanInbox(
     sinceDateOverride?: Date | null;
   },
   callbacks: ScanCallbacks = {},
+  deps: Partial<ScanDeps> = {},
 ): Promise<ScanResult> {
+  const listMessageIds = deps.listMessageIds ?? realListMessageIds;
+  const fetchMessage = deps.fetchMessage ?? realFetchMessage;
+  const extractFromText = deps.extractFromText ?? extractReceiptFromText;
+  const extractPdfReceiptText = deps.extractPdfReceiptText ?? realExtractPdfReceiptText;
+
   const integ = await UserEmailIntegration.findOne({
     where: { userId: opts.userId, provider: 'google' },
   });
@@ -513,7 +545,32 @@ export async function scanInbox(
       }
 
       const body = extractMessageBody(full.payload);
-      if (!body.trim()) {
+
+      let extracted: ExtractedReceiptOrder | null = null;
+      let parser: string = 'ai';
+      let fromPdf = false;
+      if (body.trim()) {
+        const parsed = await parseReceiptText({ fromAddress: result.from, subject: result.subject, text: body, extractFromText });
+        extracted = parsed.extracted;
+        parser = parsed.parser;
+        if (parsed.usedAi) aiExtractions++;
+      }
+
+      const bodyClean = extracted != null && extracted.total != null && extracted.items.length > 0;
+      if (!bodyClean && collectPdfParts(full.payload).length > 0) {
+        const pdfText = await extractPdfReceiptText({ accessToken, messageId: summary.id, payload: full.payload });
+        if (pdfText.trim()) {
+          const parsed = await parseReceiptText({ fromAddress: result.from, subject: result.subject, text: pdfText, extractFromText });
+          if (parsed.extracted.total != null && parsed.extracted.items.length > 0) {
+            extracted = parsed.extracted;
+            parser = parsed.parser;
+            fromPdf = true;
+            if (parsed.usedAi) aiExtractions++;
+          }
+        }
+      }
+
+      if (extracted == null) {
         result.status = 'extraction_failed';
         result.error = 'empty body';
         failed++;
@@ -526,24 +583,6 @@ export async function scanInbox(
           fromAddr: result.from,
         });
         return result;
-      }
-
-      // 1) Try the cheap deterministic vendor parser first.
-      let extracted: ExtractedReceiptOrder | null = null;
-      let parser: string = 'ai';
-      const detResult = tryDeterministicParse({
-        fromAddress: result.from,
-        subject: result.subject,
-        body,
-      });
-      if (detResult.ok) {
-        extracted = detResult.order;
-        parser = detResult.parser;
-      } else {
-        // 2) Fall back to AI extraction.
-        extracted = await extractReceiptFromText(body);
-        parser = 'ai';
-        aiExtractions++;
       }
 
       // Uber rides and Uber Eats both arrive from uber.com but the AI returns
@@ -621,7 +660,7 @@ export async function scanInbox(
             total: extracted!.total != null ? String(extracted!.total) : null,
             currency: receiptCurrencyOrDefault(extracted!.currency),
             paymentLast4: extracted!.paymentLast4,
-            source: `gmail-scan:${parser}`,
+            source: `gmail-scan:${parser}${fromPdf ? '-pdf' : ''}`,
             rawPayload: { extracted, gmailMessageId: summary.id, parser, trip: extracted!.trip ?? null } as unknown,
           } as never,
           transaction: t,
