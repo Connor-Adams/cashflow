@@ -83,6 +83,11 @@ account is resolved/created and `header.accountType === 'credit_card'`:
   (= day-of-month of `paymentDueDate`).
 - Only overwrite a field when the parsed value is non-null (a parser that didn't
   extract minimum payment must not wipe an existing value).
+- **Staleness guard (newer-wins).** Skip the upsert + auto-place entirely when the
+  imported statement is older than what's stored: if `LiabilityAccount.statementDate`
+  is set and the incoming statement date ≤ it, do nothing (a back-fill of an old
+  statement must not clobber the current bill). Equal dates → treat as a re-import
+  (idempotent replace). This makes re-importing an older statement safe.
 - This is gated to `credit_card` accounts so non-card imports are untouched.
 
 ### Link 3 — Auto-place (shared materialize service)
@@ -125,6 +130,7 @@ WS credit-card PDF
   guard treats it as "not clean".
 - Non-`credit_card` imports → untouched (existing behavior).
 - Re-import of the same statement → idempotent replace of the pending event.
+- Import of an *older* statement than the stored `statementDate` → no-op (staleness guard).
 
 ## Testing
 
@@ -137,6 +143,8 @@ WS credit-card PDF
   missing → card fields upserted, **no** PlannedEvent created.
 - **Idempotency test:** import the same statement twice → exactly one pending
   `source=credit_card` payment.
+- **Staleness test:** import statement B (newer), then statement A (older) →
+  card fields + event reflect B, the A import is a no-op.
 - **Service-refactor regression:** the existing
   `POST /api/credit-cards/:id/payment` integration test still passes unchanged
   (proves the extracted service preserves route behavior).
