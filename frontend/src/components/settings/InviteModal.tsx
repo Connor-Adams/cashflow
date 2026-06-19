@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Check, Copy } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import {
   Dialog,
   DialogBody,
@@ -9,9 +9,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+} from '@cashflow/ui'
+import { Input } from '@cashflow/ui'
+import { Label } from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { postJson } from '@/lib/api'
 import { buildInviteUrl, type CreatedInvite } from './inviteLink'

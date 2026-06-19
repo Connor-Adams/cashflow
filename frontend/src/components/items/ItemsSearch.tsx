@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import { ItemsBrowse } from './ItemsBrowse'
 import type { ItemsFilters } from '@/hooks/useItems'
 import type { ItemRow } from '@cashflow/shared'

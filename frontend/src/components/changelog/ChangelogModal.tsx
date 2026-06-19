@@ -1,5 +1,5 @@
-import { Dialog, DialogHeader, DialogTitle, DialogBody, DialogFooter } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
+import { Dialog, DialogHeader, DialogTitle, DialogBody, DialogFooter } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
 import { SanitizedHtml } from '@/components/SanitizedHtml'
 
 type Props = {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Send, X } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
+import { Button } from '@cashflow/ui'
+import { Textarea } from '@cashflow/ui'
 
 type Props = {
   /** Pre-fill the textarea — used by seeded empty-state prompts. */

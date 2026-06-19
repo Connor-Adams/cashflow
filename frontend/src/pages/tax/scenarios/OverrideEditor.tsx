@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@cashflow/ui';
 import {
   Table,
   TableHeader,
@@ -7,7 +7,7 @@ import {
   TableRow,
   TableHead,
   TableCell,
-} from '@/components/ui/table';
+} from '@cashflow/ui';
 import { todayDateInputValue } from '@/lib/dateInput';
 
 interface KeyDef {

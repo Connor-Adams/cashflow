@@ -6,9 +6,9 @@ import {
   DialogDescription,
   DialogBody,
   DialogFooter,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+} from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
+import { Badge } from '@cashflow/ui'
 import { getJson, postJson } from '../../lib/api'
 import type {
   DividendCandidate,

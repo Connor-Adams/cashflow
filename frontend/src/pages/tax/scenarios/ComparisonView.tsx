@@ -1,4 +1,4 @@
-import { Button } from '@/components/ui/button';
+import { Button } from '@cashflow/ui';
 import { useScenarioComparison } from '../../../hooks/useScenarioComparison';
 import { fmtCurrency } from '../util/format';
 import {
@@ -8,7 +8,7 @@ import {
   TableRow,
   TableHead,
   TableCell,
-} from '@/components/ui/table';
+} from '@cashflow/ui';
 
 interface Props {
   ids: number[];

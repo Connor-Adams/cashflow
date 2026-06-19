@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Card } from '@/components/ui/card'
+import { Card } from '@cashflow/ui'
 import { enrichmentFilterHref } from './enrichmentFilterHref'
 
 const SOURCE_COLOR: Record<string, string> = {

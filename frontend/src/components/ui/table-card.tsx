@@ -1,10 +1,10 @@
 import * as React from 'react'
 import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Card } from './card'
+import { Card } from '@cashflow/ui'
 import { SectionHeader } from './section-header'
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from './table'
-import { EmptyTableRow } from './empty-state'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@cashflow/ui'
+import { EmptyTableRow } from '@cashflow/ui'
 
 type SortDir = 'asc' | 'desc'
 type TableSort = { key: string; dir: SortDir }

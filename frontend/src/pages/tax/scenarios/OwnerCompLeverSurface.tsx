@@ -44,7 +44,7 @@ import {
   TableRow,
   TableHead,
   TableCell,
-} from '@/components/ui/table';
+} from '@cashflow/ui';
 
 const FIELDS = [
   { key: 'salary', label: 'Salary' },

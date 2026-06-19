@@ -12,13 +12,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Clock, Link2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { Alert } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyTableRow } from '@/components/ui/empty-state'
+import { Alert } from '@cashflow/ui'
+import { Badge } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { EmptyTableRow } from '@cashflow/ui'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@/components/ui/skeleton'
+import { SkeletonRow } from '@cashflow/ui'
 import {
   Table,
   TableBody,
@@ -26,8 +26,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
-import { Tabs, TabPanel } from '@/components/ui/tabs'
+} from '@cashflow/ui'
+import { Tabs, TabPanel } from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { getJson, postJson, patchJson } from '../lib/api'
 import { todayDateInputValue } from '../lib/dateInput'

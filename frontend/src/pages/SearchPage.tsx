@@ -8,10 +8,10 @@
  */
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Search as SearchIcon, Bookmark, Save, X, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Badge } from '@/components/ui/badge'
+import { Button } from '@cashflow/ui'
+import { Input } from '@cashflow/ui'
+import { EmptyState } from '@cashflow/ui'
+import { Badge } from '@cashflow/ui'
 import { getJson, postJson, patchJson, deleteReq } from '@/lib/api'
 import { formatMoney } from '@/lib/formatMoney'
 

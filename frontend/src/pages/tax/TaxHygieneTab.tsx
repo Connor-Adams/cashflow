@@ -20,7 +20,7 @@ import {
   useTaxTags,
   type TaxScope,
 } from '../../hooks/useTaxHygiene';
-import { Button } from '@/components/ui/button';
+import { Button } from '@cashflow/ui';
 import { fmtCurrency, fmtPct } from './util/format';
 import {
   Table,
@@ -29,7 +29,7 @@ import {
   TableHead,
   TableRow,
   TableCell,
-} from '@/components/ui/table';
+} from '@cashflow/ui';
 
 interface Props {
   year: number;

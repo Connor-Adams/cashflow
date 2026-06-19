@@ -1,4 +1,4 @@
-import { Card } from '@/components/ui/card'
+import { Card } from '@cashflow/ui'
 import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import type { PortfolioPerformancePoint } from '../../types/api'
 

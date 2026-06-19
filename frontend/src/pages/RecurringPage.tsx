@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Badge } from '@/components/ui/badge'
+import { Badge } from '@cashflow/ui'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
-import { EmptyTableRow } from '@/components/ui/empty-state'
+import { EmptyTableRow } from '@cashflow/ui'
 import { FilterBar } from '@/components/ui/filter-bar'
 import { FilterCard } from '@/components/ui/filter-card'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@/components/ui/skeleton'
+import { SkeletonRow } from '@cashflow/ui'
 import {
   Table,
   TableBody,
@@ -13,7 +13,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@cashflow/ui'
 import { SortableTableHead } from '@/components/table/SortableTableHead'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'

@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
-import { TableHead } from '@/components/ui/table'
+import { TableHead } from '@cashflow/ui'
 import type { SortDir } from '@/hooks/useUrlSort'
 
 type Props = {

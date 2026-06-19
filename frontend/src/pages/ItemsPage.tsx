@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Tabs, TabPanel } from '@/components/ui/tabs'
+import { Tabs, TabPanel } from '@cashflow/ui'
 import { ItemsBrowse } from '@/components/items/ItemsBrowse'
 import { ItemsSearch } from '@/components/items/ItemsSearch'
 import { ItemsFilterStrip } from '@/components/items/ItemsFilterStrip'

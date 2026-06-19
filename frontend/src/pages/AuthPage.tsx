@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { LogIn, UserPlus } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { Input } from '@cashflow/ui'
 import { useAuth } from '../lib/useAuth'
 
 export function AuthPage() {

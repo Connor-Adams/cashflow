@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, TrendingDown, TrendingUp } from 'lucide-react'
-import { Alert } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Card } from '@/components/ui/card'
-import { Grid } from '@/components/ui/grid'
+import { Alert } from '@cashflow/ui'
+import { Badge } from '@cashflow/ui'
+import { EmptyState } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { Grid } from '@cashflow/ui'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
 import { StatCard } from '@/components/ui/stat-card'
@@ -16,7 +16,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@cashflow/ui'
 import { formatMoney } from '../lib/formatMoney'
 import { ReportFilterBar } from './report/ReportFilterBar'
 import { defaultReportMonth, type ScopeOption } from './report/reportFilters'

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Sparkles } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
 import { getJson, postJson } from '@/lib/api'
 
 type SyncSummary = {

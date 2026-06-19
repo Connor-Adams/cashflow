@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@cashflow/ui';
 import { useInstalments } from '../../hooks/useInstalments';
 import { fmtCurrency } from './util/format';
 import {
@@ -9,7 +9,7 @@ import {
   TableRow,
   TableHead,
   TableCell,
-} from '@/components/ui/table';
+} from '@cashflow/ui';
 
 type Props = {
   year: number;

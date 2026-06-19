@@ -11,9 +11,9 @@ import {
   BarChart,
   Bar,
 } from 'recharts'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { Badge } from '@cashflow/ui'
 import {
   Table,
   TableBody,
@@ -21,9 +21,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
-import { SkeletonRow } from '@/components/ui/skeleton'
-import { EmptyTableRow } from '@/components/ui/empty-state'
+} from '@cashflow/ui'
+import { SkeletonRow } from '@cashflow/ui'
+import { EmptyTableRow } from '@cashflow/ui'
 import { getJson } from '../../lib/api'
 import {
   fromDateInputValue,

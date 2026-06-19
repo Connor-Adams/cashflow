@@ -1,4 +1,4 @@
-import { Card } from '@/components/ui/card'
+import { Card } from '@cashflow/ui'
 import { CategoryTreeManager } from './CategoryTreeManager'
 
 export function CategoriesTab() {

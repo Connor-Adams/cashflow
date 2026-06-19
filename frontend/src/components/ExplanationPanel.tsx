@@ -11,7 +11,7 @@
  * for missing data.
  */
 import { Link } from 'react-router-dom'
-import { Badge } from '@/components/ui/badge'
+import { Badge } from '@cashflow/ui'
 import type {
   AppliedRuleAttribution,
   AiSuggestionAttribution,

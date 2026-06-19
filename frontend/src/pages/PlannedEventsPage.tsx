@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { Calendar, Edit3, Plus, Trash2 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { useConfirm } from '@/components/ui/dialog'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Label } from '@/components/ui/label'
-import { NativeSelect } from '@/components/ui/native-select'
+import { Badge } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { useConfirm } from '@cashflow/ui'
+import { EmptyState } from '@cashflow/ui'
+import { Label } from '@cashflow/ui'
+import { NativeSelect } from '@cashflow/ui'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
 import {
@@ -18,7 +18,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { PlannedEventFormFields } from '@/components/planned-events/PlannedEventFormFields'
 import {

@@ -9,16 +9,16 @@ import {
   Upload,
   X,
 } from 'lucide-react'
-import { Alert } from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { useConfirm } from '@/components/ui/dialog'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Grid } from '@/components/ui/grid'
+import { Alert } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { useConfirm } from '@cashflow/ui'
+import { EmptyState } from '@cashflow/ui'
+import { Grid } from '@cashflow/ui'
 import { StatCard } from '@/components/ui/stat-card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Input } from '@cashflow/ui'
+import { Label } from '@cashflow/ui'
+import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
 import {
   Table,
   TableBody,
@@ -26,7 +26,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@cashflow/ui'
 import { deleteReq, getJson, patchJson, postFormData, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import { formatSyncAge } from '../lib/formatSyncAge'

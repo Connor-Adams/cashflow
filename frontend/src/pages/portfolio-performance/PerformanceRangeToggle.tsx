@@ -1,4 +1,4 @@
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import type { PortfolioPerformanceRange } from '../../types/api'
 
 export type PerformanceRangeToggleProps = {

@@ -11,9 +11,9 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Alert } from '@/components/ui/alert'
+import { Button } from '@cashflow/ui'
+import { Badge } from '@cashflow/ui'
+import { Alert } from '@cashflow/ui'
 import { getJson, patchJson, postJson } from '@/lib/api'
 
 export type InsightSeverity = 'info' | 'warning' | 'critical'

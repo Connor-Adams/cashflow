@@ -7,7 +7,7 @@ import {
   TableRow,
   TableHead,
   TableCell,
-} from '@/components/ui/table';
+} from '@cashflow/ui';
 
 /**
  * Minimal shape shared by T1 (`TaxLineDto`) and T2 (`CorpTaxLineDto`) computed

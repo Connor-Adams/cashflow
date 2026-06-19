@@ -28,8 +28,8 @@ import {
   Sparkles,
   Users,
 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Badge } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
 import { useAuth } from '../lib/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { useAiInboxCount } from '@/hooks/useAiInboxCount'

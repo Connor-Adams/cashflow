@@ -1,4 +1,4 @@
-import { Card } from '@/components/ui/card'
+import { Card } from '@cashflow/ui'
 
 /**
  * Compact label/value summary card shared by the spend-overview pages

@@ -1,4 +1,4 @@
-import { Card } from '@/components/ui/card'
+import { Card } from '@cashflow/ui'
 import { formatMoney } from '../../lib/formatMoney'
 import type { PortfolioSecurityOverview } from '../../types/api'
 

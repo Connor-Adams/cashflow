@@ -1,0 +1,7 @@
+/* Source token/theme/utility layer for Tailwind-running consumers (the
+ * cashflow frontend). Brings the :root tokens, @theme mappings, custom
+ * @utility definitions, and keyframes into the consumer's own Tailwind
+ * compile. Does NOT @import "tailwindcss" — the consumer already does. */
+@import "./tokens.css";
+@import "./theme.css";
+@import "./utilities.css";

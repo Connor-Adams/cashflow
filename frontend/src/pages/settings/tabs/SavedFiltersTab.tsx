@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ChevronDown, ChevronUp, Edit3, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
 import {
   Dialog,
   DialogBody,
@@ -10,9 +10,9 @@ import {
   DialogHeader,
   DialogTitle,
   useConfirm,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label as FieldLabel } from '@/components/ui/label'
+} from '@cashflow/ui'
+import { Input } from '@cashflow/ui'
+import { Label as FieldLabel } from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, patchJson } from '../../../lib/api'
 import type { SavedFilter } from '../../../components/transactions/SavedFiltersDropdown'

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@cashflow/ui'
 import { getJson } from '@/lib/api'
 import { SanitizedHtml } from '@/components/SanitizedHtml'
 import type { ChangelogListDto, ChangelogOverviewDto } from '@/lib/changelog'

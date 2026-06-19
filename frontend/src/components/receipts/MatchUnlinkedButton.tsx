@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import { postJson } from '@/lib/api'
 
 type MatchResult = { processed: number; linksCreated: number }

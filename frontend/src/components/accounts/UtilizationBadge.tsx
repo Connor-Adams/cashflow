@@ -1,4 +1,4 @@
-import { Badge } from '@/components/ui/badge'
+import { Badge } from '@cashflow/ui'
 
 /**
  * Visual badge for credit-card utilization (#437).

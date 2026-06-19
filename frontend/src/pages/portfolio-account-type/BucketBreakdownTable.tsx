@@ -1,12 +1,12 @@
 import { TableCard } from '@/components/ui/table-card'
-import { EmptyTableRow } from '@/components/ui/empty-state'
+import { EmptyTableRow } from '@cashflow/ui'
 import {
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@cashflow/ui'
 import { formatMoney } from '../../lib/formatMoney'
 import type { PortfolioByAccountTypeBucket } from '../../types/api'
 

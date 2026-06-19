@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Rectangle, ResponsiveContainer, Sankey, Tooltip } from 'recharts'
-import { Alert } from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Alert } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
+import { Card, CardContent, CardHeader, CardTitle } from '@cashflow/ui'
 import {
   Dialog,
   DialogBody,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import { EmptyState } from '@/components/ui/empty-state'
+} from '@cashflow/ui'
+import { EmptyState } from '@cashflow/ui'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatCard } from '@/components/ui/stat-card'
@@ -21,7 +21,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@cashflow/ui'
 import { getJson } from '../lib/api'
 import {
   fromDateInputValue,

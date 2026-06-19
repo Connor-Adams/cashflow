@@ -1,5 +1,5 @@
 import { PageHeader } from '@/components/ui/page-header'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent } from '@cashflow/ui'
 import { OpportunityCostCalculator } from '@/components/OpportunityCostCalculator'
 
 /**

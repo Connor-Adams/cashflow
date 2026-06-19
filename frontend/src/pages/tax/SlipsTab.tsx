@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@cashflow/ui';
 import { useTaxSlips, type SlipDto } from '../../hooks/useTaxSlips';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
 import { SLIP_FORMS, slipPreview } from './slips/registry';

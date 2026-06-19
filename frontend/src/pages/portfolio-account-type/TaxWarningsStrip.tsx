@@ -1,4 +1,4 @@
-import { Card } from '@/components/ui/card'
+import { Card } from '@cashflow/ui'
 import type { PortfolioByAccountTypeWarning } from '../../types/api'
 
 export type TaxWarningsStripProps = {

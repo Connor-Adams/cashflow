@@ -8,11 +8,11 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+} from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
+import { Label } from '@cashflow/ui'
+import { Textarea } from '@cashflow/ui'
+import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { postJson } from '@/lib/api'
 import { FRONTEND_VERSION } from '@/lib/version'

@@ -1,9 +1,9 @@
 // frontend/src/pages/settings/tabs/CategoryTreeManager.tsx
 import { useRef, useState } from 'react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Dialog, DialogBody, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@cashflow/ui';
+import { Input } from '@cashflow/ui';
+import { Dialog, DialogBody, DialogHeader, DialogTitle } from '@cashflow/ui';
 import { Tree, TreeGroup, TreeRow } from '@/components/ui/tree';
 import { CategoryIcon } from '../../../components/CategoryIcon';
 import { CategoryIconPicker } from '../../../components/CategoryIconPicker';

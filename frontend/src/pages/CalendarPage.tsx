@@ -19,10 +19,10 @@ import {
 } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Calendar as CalendarIcon, CalendarPlus, ChevronLeft, ChevronRight, Edit3, Plus, Repeat, Trash2 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { Grid } from '@/components/ui/grid'
+import { Badge } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { Grid } from '@cashflow/ui'
 import { StatCard } from '@/components/ui/stat-card'
 import {
   Dialog,
@@ -31,12 +31,12 @@ import {
   DialogHeader,
   DialogTitle,
   useConfirm,
-} from '@/components/ui/dialog'
-import { Alert } from '@/components/ui/alert'
-import { EmptyState } from '@/components/ui/empty-state'
+} from '@cashflow/ui'
+import { Alert } from '@cashflow/ui'
+import { EmptyState } from '@cashflow/ui'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
-import { Tabs } from '@/components/ui/tabs'
+import { Tabs } from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'

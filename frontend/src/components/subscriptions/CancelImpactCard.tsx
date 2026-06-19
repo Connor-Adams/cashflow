@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { NativeSelect } from '@/components/ui/native-select'
+import { NativeSelect } from '@cashflow/ui'
 import { getJson } from '../../lib/api'
 import { formatMoney } from '../../lib/formatMoney'
 import type { CancelImpact, CancelImpactHorizon } from '../../types/api'

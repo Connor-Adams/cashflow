@@ -18,12 +18,12 @@ import { fmtCurrency } from './util/format';
 import { labelForTotal } from './util/labels';
 import { TaxLineBreakdownTable } from './components/TaxLineBreakdownTable';
 import { ScenarioCompareBar } from './components/ScenarioCompareBar';
-import { Button } from '@/components/ui/button';
+import { Button } from '@cashflow/ui';
 import { StatCard } from '@/components/ui/stat-card';
-import { Card } from '@/components/ui/card';
+import { Card } from '@cashflow/ui';
 import { CollapsibleCard } from '@/components/ui/collapsible-card';
-import { Alert } from '@/components/ui/alert';
-import { EmptyState } from '@/components/ui/empty-state';
+import { Alert } from '@cashflow/ui';
+import { EmptyState } from '@cashflow/ui';
 
 const CURRENT_YEAR = new Date().getFullYear().toString();
 

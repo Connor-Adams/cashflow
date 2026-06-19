@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Edit3, GitMerge, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
 import {
   Dialog,
   DialogBody,
@@ -10,10 +10,10 @@ import {
   DialogHeader,
   DialogTitle,
   useConfirm,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label as FieldLabel } from '@/components/ui/label'
-import { NativeSelect } from '@/components/ui/native-select'
+} from '@cashflow/ui'
+import { Input } from '@cashflow/ui'
+import { Label as FieldLabel } from '@cashflow/ui'
+import { NativeSelect } from '@cashflow/ui'
 import { deleteReq, patchJson, postJson } from '../../../lib/api'
 import { useLabels } from '../../../lib/useLabels'
 import type { Label } from '../../../types/api'

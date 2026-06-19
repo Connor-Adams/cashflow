@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { getJson, postJson } from '../lib/api'
 import { useActiveImports, type BatchSummary } from '../components/import/useActiveImports'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import { PageHeader } from '@/components/ui/page-header'
 import {
   Table,
@@ -10,7 +10,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@cashflow/ui'
 
 type BatchDetail = {
   id: string

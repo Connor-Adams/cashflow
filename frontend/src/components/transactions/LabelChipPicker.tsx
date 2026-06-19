@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import { postJson } from '../../lib/api'
 import type { Label, TransactionLabelRef } from '../../types/api'
 

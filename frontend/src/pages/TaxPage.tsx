@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Tabs } from '../components/ui/tabs'
+import { Tabs } from '@cashflow/ui'
 import { YearJump } from '../components/tax/YearJump'
 import { OverviewTab } from './tax/OverviewTab'
 import { PersonalT1Tab } from './tax/PersonalT1Tab'

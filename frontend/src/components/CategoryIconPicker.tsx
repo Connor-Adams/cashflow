@@ -1,5 +1,5 @@
 import { CATEGORY_ICON_NAMES, type CategoryIconName } from '@cashflow/shared'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import { CATEGORY_ICON_COMPONENTS } from './CategoryIcon'
 import { cn } from '@/lib/utils'
 

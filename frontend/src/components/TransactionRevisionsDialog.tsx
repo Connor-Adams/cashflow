@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import {
   Dialog,
   DialogBody,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import { Badge } from '@/components/ui/badge'
+} from '@cashflow/ui'
+import { Badge } from '@cashflow/ui'
 import { getJson, postJson } from '../lib/api'
 import type { Transaction } from '../types/api'
 

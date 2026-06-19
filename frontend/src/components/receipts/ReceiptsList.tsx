@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getJson } from '@/lib/api'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@cashflow/ui'
+import { Skeleton } from '@cashflow/ui'
 import { formatMoney } from '@/lib/formatMoney'
 import {
   summarizeOrders,

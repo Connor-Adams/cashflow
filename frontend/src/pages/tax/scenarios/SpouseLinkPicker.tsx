@@ -12,7 +12,7 @@
 // us the next snapshot — keeps this component fully presentational beyond the
 // in-flight request state owned by `useSetSpouseLink`.
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@cashflow/ui';
 import { useSetSpouseLink } from '@/hooks/useSetSpouseLink';
 
 interface Props {

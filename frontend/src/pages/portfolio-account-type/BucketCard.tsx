@@ -1,5 +1,5 @@
 import { AllocationDonut } from '@/components/ui/allocation-donut'
-import { Card } from '@/components/ui/card'
+import { Card } from '@cashflow/ui'
 import { formatMoney } from '../../lib/formatMoney'
 import type { PortfolioByAccountTypeBucket } from '../../types/api'
 

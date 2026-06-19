@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Sparkles } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { Input } from '@cashflow/ui'
 import { deleteReq, getJson, patchJson, postJson } from '@/lib/api'
 
 // ---------------------------------------------------------------------------
