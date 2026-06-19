@@ -171,7 +171,7 @@ export async function getDiscoveryExclusions(householdId: number): Promise<strin
   return [...new Set([...allowed, ...dismissed])];
 }
 
-async function ensureFreshAccessToken(integ: UserEmailIntegration): Promise<string> {
+export async function ensureFreshAccessToken(integ: UserEmailIntegration): Promise<string> {
   const now = Date.now();
   const expiresAt = integ.expiresAt ? integ.expiresAt.getTime() : 0;
   const expiringSoon = expiresAt - now < 60_000;
