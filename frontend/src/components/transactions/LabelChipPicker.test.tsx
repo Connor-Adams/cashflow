@@ -18,8 +18,8 @@ function setup(overrides?: {
       value={overrides?.value ?? []}
       availableLabels={
         overrides?.available ?? [
-          { id: 1, name: 'tax-deductible', usageCount: 3 },
-          { id: 2, name: 'vacation-2026', usageCount: 1 },
+          { id: 1, name: 'tax-deductible', color: null, usageCount: 3 },
+          { id: 2, name: 'vacation-2026', color: null, usageCount: 1 },
         ]
       }
       onChange={onChange}
@@ -79,9 +79,24 @@ describe('LabelChipPicker', () => {
     expect(onLabelsMutated).toHaveBeenCalled()
   })
 
+  it('tints a chip with a color and leaves a null-color chip neutral (#794 AC 6)', () => {
+    setup({
+      value: [
+        { id: 1, name: 'tinted', color: '#3B82F6' },
+        { id: 2, name: 'plain', color: null },
+      ],
+    })
+    const tinted = screen.getByText('tinted').closest('span') as HTMLElement
+    const plain = screen.getByText('plain').closest('span') as HTMLElement
+    expect(tinted.getAttribute('data-tinted')).toBe('true')
+    expect(tinted.style.color).not.toBe('')
+    expect(plain.getAttribute('data-tinted')).toBeNull()
+    expect(plain.style.color).toBe('')
+  })
+
   it('removes an applied label when its × is clicked', async () => {
     const setSpy = vi.spyOn(api, 'postJson').mockResolvedValue({ labels: [] })
-    const { onChange } = setup({ value: [{ id: 1, name: 'tax-deductible' }] })
+    const { onChange } = setup({ value: [{ id: 1, name: 'tax-deductible', color: null }] })
 
     await userEvent.click(screen.getByRole('button', { name: /remove tax-deductible/i }))
 

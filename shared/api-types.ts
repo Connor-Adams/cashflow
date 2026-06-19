@@ -586,13 +586,20 @@ export type ResolvedCategoryPath = {
 export type Label = {
   id: number
   name: string
+  /**
+   * Optional chip color (issue #794), a 6-digit hex string (`#RRGGBB`), or
+   * `null` for the neutral chip. Always present on the GET /api/labels list.
+   */
+  color: string | null
   usageCount?: number
 }
 
-/** The shape a transaction carries for each applied label (id + name only). */
+/** The shape a transaction carries for each applied label (id + name + color). */
 export type TransactionLabelRef = {
   id: number
   name: string
+  /** Chip color (issue #794): a `#RRGGBB` hex string, or `null` for neutral. */
+  color: string | null
 }
 
 export type AuthUser = {

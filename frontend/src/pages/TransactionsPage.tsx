@@ -35,6 +35,7 @@ import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { LabelChipPicker } from '../components/transactions/LabelChipPicker'
+import { labelChipStyle } from '../lib/labelColors'
 import { SavedFiltersDropdown } from '../components/transactions/SavedFiltersDropdown'
 import type { SavedFilter } from '../components/transactions/SavedFiltersDropdown'
 import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
@@ -1299,7 +1300,8 @@ export function TransactionsPage() {
                   return (
                     <label
                       key={label.id}
-                      className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                      className="inline-flex items-center gap-1 rounded-full border border-transparent bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                      style={labelChipStyle(label.color)}
                     >
                       <input
                         type="checkbox"
