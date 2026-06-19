@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Badge } from '@/components/ui/badge'
 import { PageHeader } from '@/components/ui/page-header'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -352,13 +353,22 @@ function readViewParam(): string | null {
   return new URLSearchParams(window.location.search).get('view')
 }
 
+type SourceFilter = ReviewItemSource | 'all'
+type StatusFilter = ReviewItemCommonStatus | 'all'
+
+/** Collapse a saved view's array filters into the single-select dropdowns. */
+function sourceFromView(view: SavedView | null): SourceFilter {
+  return view && view.sources.length === 1 ? view.sources[0] : 'all'
+}
+function statusFromView(view: SavedView | null): StatusFilter {
+  return view && view.statuses.length === 1 ? view.statuses[0] : 'all'
+}
+
 export function UnifiedInboxPage() {
   const initialView = savedViewFromParam(readViewParam())
-  const [sources, setSources] = useState<Set<ReviewItemSource>>(
-    () => new Set(initialView ? initialView.sources : ALL_SOURCES),
-  )
-  const [statuses, setStatuses] = useState<Set<ReviewItemCommonStatus>>(
-    () => new Set(initialView ? initialView.statuses : (['pending'] as ReviewItemCommonStatus[])),
+  const [source, setSource] = useState<SourceFilter>(() => sourceFromView(initialView))
+  const [status, setStatus] = useState<StatusFilter>(
+    () => (initialView ? statusFromView(initialView) : 'pending'),
   )
   const [search, setSearch] = useState('')
   const [items, setItems] = useState<ReviewItem[]>([])
@@ -369,15 +379,13 @@ export function UnifiedInboxPage() {
 
   const query = useMemo(() => {
     const params = new URLSearchParams()
-    // Only send source when it's a strict subset (keeps URLs short for "all").
-    if (sources.size > 0 && sources.size < ALL_SOURCES.length) {
-      params.set('source', ALL_SOURCES.filter((s) => sources.has(s)).join(','))
-    }
-    const statusList = ALL_STATUSES.filter((s) => statuses.has(s))
-    params.set('status', statusList.length > 0 ? statusList.join(',') : 'pending')
+    // Omit source for "all" to keep URLs short.
+    if (source !== 'all') params.set('source', source)
+    const statusList = status === 'all' ? ALL_STATUSES : [status]
+    params.set('status', statusList.join(','))
     params.set('limit', '100')
     return params.toString()
-  }, [sources, statuses])
+  }, [source, status])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -396,38 +404,6 @@ export function UnifiedInboxPage() {
   useEffect(() => {
     void load()
   }, [load])
-
-  const toggleSource = useCallback((s: ReviewItemSource) => {
-    setSources((prev) => {
-      const next = new Set(prev)
-      if (next.has(s) && next.size === 1) {
-        // Re-clicking the only active chip resets to "all".
-        return new Set(ALL_SOURCES)
-      }
-      if (next.has(s) && next.size === ALL_SOURCES.length) {
-        // From "all", clicking one isolates it.
-        return new Set([s])
-      }
-      if (next.has(s)) next.delete(s)
-      else next.add(s)
-      return next.size === 0 ? new Set(ALL_SOURCES) : next
-    })
-  }, [])
-
-  const toggleStatus = useCallback((s: ReviewItemCommonStatus) => {
-    setStatuses((prev) => {
-      const next = new Set(prev)
-      if (next.has(s)) next.delete(s)
-      else next.add(s)
-      return next.size === 0 ? new Set<ReviewItemCommonStatus>(['pending']) : next
-    })
-  }, [])
-
-  const applyView = useCallback((view: SavedView) => {
-    setSources(new Set(view.sources))
-    setStatuses(new Set(view.statuses))
-    setSearch('')
-  }, [])
 
   const onAction = useCallback(
     async (item: ReviewItem, kind: ActionKind) => {
@@ -501,72 +477,49 @@ export function UnifiedInboxPage() {
     [visible],
   )
 
-  const allSourcesActive = sources.size === ALL_SOURCES.length
-
   return (
     <div>
       <PageHeader
         title="Inbox"
-        description="Every AI suggestion, review item, CFO briefing action, and chat proposal in one filterable queue."
+        description="AI suggestions, reviews, CFO briefings, and chat proposals in one queue."
       />
 
-      <div className="mb-3 flex flex-wrap gap-2" aria-label="Saved views">
-        {SAVED_VIEWS.map((view) => (
-          <Button
-            key={view.key}
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => applyView(view)}
-          >
-            {view.label}
-          </Button>
-        ))}
-      </div>
-
-      <div className="mb-2 flex flex-wrap gap-2" aria-label="Filter by source">
-        {ALL_SOURCES.map((s) => {
-          const pressed = !allSourcesActive && sources.has(s)
-          return (
-            <Button
-              key={s}
-              type="button"
-              size="sm"
-              variant={pressed ? 'primary' : 'secondary'}
-              aria-pressed={pressed}
-              onClick={() => toggleSource(s)}
-            >
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <NativeSelect
+          size="sm"
+          aria-label="Filter by source"
+          value={source}
+          onChange={(e) => setSource(e.target.value as SourceFilter)}
+        >
+          <NativeSelectOption value="all">All sources</NativeSelectOption>
+          {ALL_SOURCES.map((s) => (
+            <NativeSelectOption key={s} value={s}>
               {SOURCE_LABEL[s]}
-            </Button>
-          )
-        })}
-      </div>
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
 
-      <div className="mb-2 flex flex-wrap gap-2" aria-label="Filter by status">
-        {ALL_STATUSES.map((s) => {
-          const pressed = statuses.has(s)
-          return (
-            <Button
-              key={s}
-              type="button"
-              size="sm"
-              variant={pressed ? 'primary' : 'secondary'}
-              aria-pressed={pressed}
-              onClick={() => toggleStatus(s)}
-            >
+        <NativeSelect
+          size="sm"
+          aria-label="Filter by status"
+          value={status}
+          onChange={(e) => setStatus(e.target.value as StatusFilter)}
+        >
+          <NativeSelectOption value="all">All statuses</NativeSelectOption>
+          {ALL_STATUSES.map((s) => (
+            <NativeSelectOption key={s} value={s}>
               {STATUS_LABEL[s]}
-            </Button>
-          )
-        })}
-      </div>
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
 
-      <div className="mb-3">
         <Input
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search across item details…"
           aria-label="Search inbox items"
+          className="min-w-[160px] flex-1"
         />
       </div>
 
