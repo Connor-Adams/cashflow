@@ -18,6 +18,12 @@ import {
   parseStateUserId,
   scanInbox,
 } from '../integrations/scanReceipts';
+import { discoverReceiptSources } from '../integrations/discoverReceiptSources';
+import {
+  listSenderSuggestions,
+  promoteSuggestion,
+  dismissSuggestion,
+} from '../integrations/receiptSenderSuggestions';
 import { logger } from '../observability/logger';
 import { emailIntegrationEnabled, corsOrigin } from '../config/env';
 
@@ -230,6 +236,91 @@ router.post('/scan/google', async (req, res, next) => {
       emit({ kind: 'error', message });
       res.end();
     }
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/discover/google', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const maxMessages =
+      typeof body.maxMessages === 'number' && body.maxMessages > 0
+        ? Math.min(2000, Math.floor(body.maxMessages))
+        : 300;
+    const sinceDateOverride =
+      typeof body.sinceDays === 'number' && body.sinceDays > 0
+        ? new Date(Date.now() - Math.min(3650, body.sinceDays) * 86_400_000)
+        : undefined;
+
+    const accept = String(req.headers['accept'] ?? '').toLowerCase();
+    const wantsStream =
+      accept.includes('application/x-ndjson') ||
+      accept.includes('application/ndjson') ||
+      req.query.stream === '1';
+
+    if (!wantsStream) {
+      const result = await discoverReceiptSources({
+        userId: user.id, householdId: household.id, maxMessages, sinceDateOverride,
+      });
+      logger.info({ userId: user.id, ...result, messages: undefined, messageCount: result.messages.length }, 'gmail_discovery_completed');
+      res.json(result);
+      return;
+    }
+
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+    const emit = (obj: unknown) => res.write(`${JSON.stringify(obj)}\n`);
+    emit({ kind: 'started', maxMessages, sinceDays: body.sinceDays ?? null });
+    try {
+      const result = await discoverReceiptSources(
+        { userId: user.id, householdId: household.id, maxMessages, sinceDateOverride },
+        { onPhase: (e) => emit({ kind: 'phase', ...e }), onMessage: (m) => emit({ kind: 'message', ...m }) },
+      );
+      logger.info({ userId: user.id, ...result, messages: undefined, messageCount: result.messages.length }, 'gmail_discovery_completed');
+      emit({ kind: 'summary', ...result, messages: undefined, messageCount: result.messages.length });
+      res.end();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error({ userId: user.id, message }, 'gmail_discovery_failed');
+      emit({ kind: 'error', message });
+      res.end();
+    }
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/suggestions', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    res.json(await listSenderSuggestions(household.id));
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/suggestions/:id/approve', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const id = Number(req.params.id);
+    const ok = await promoteSuggestion({ householdId: household.id, id });
+    if (!ok) { res.status(404).json({ error: 'Suggestion not found' }); return; }
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/suggestions/:id/dismiss', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const id = Number(req.params.id);
+    const ok = await dismissSuggestion({ householdId: household.id, id });
+    if (!ok) { res.status(404).json({ error: 'Suggestion not found' }); return; }
+    res.json({ ok: true });
   } catch (e) {
     next(e);
   }
