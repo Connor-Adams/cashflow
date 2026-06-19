@@ -1883,3 +1883,37 @@ export interface TransferLinkResult {
   dryRun: boolean;
   elapsedMs: number;
 }
+
+// ── Merchant-cleanup review surface (issue #793) ──────────────────────────
+
+export interface MerchantClusterCategorySpread {
+  category: string | null;
+  count: number;
+}
+
+export interface MerchantCluster {
+  merchantClean: string;
+  canonical: string | null;
+  count: number;
+  /** Sum of absolute negative-amount (spend) rows, fixed(2) string. */
+  totalSpend: string;
+  currency: string;
+  dominantCategory: string | null;
+  categorySpread: MerchantClusterCategorySpread[];
+  sampleDescriptions: string[];
+}
+
+export interface MerchantClustersResponse {
+  clusters: MerchantCluster[];
+}
+
+export interface MerchantBulkRecategorizeResponse {
+  recategorized: number;
+  ruleCreated: boolean;
+  ruleId: number | null;
+}
+
+export interface MerchantMergeResponse {
+  reassigned: number;
+  survivor: string;
+}

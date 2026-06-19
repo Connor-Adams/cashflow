@@ -29,14 +29,23 @@
  */
 import { Router, type Request } from 'express';
 import { Op, fn, col, where as sqlWhere, QueryTypes } from 'sequelize';
-import { Account, Receipt, Rule, Transaction, sequelize } from '../models';
+import { Account, Category, Receipt, Rule, Transaction, sequelize } from '../models';
 import { serializeTransaction } from '../util/serializeTransaction';
 import {
   aggregateMerchantTimeline,
   resolveMerchantKey,
   type MerchantTimelineTxnRow,
 } from '../summary/merchantTimeline';
-import { visibleTransactionWhere, visibleAccountWhere, householdWhere } from '../auth/scope';
+import {
+  visibleTransactionWhere,
+  visibleAccountWhere,
+  householdWhere,
+  isSuperadmin,
+} from '../auth/scope';
+import { currentAuth } from '../auth/middleware';
+import { defaultCurrency } from '../config/env';
+import { FxRate } from '../models/FxRate';
+import { listMerchantClusters, clusterRulePattern } from '../merchants/clusters';
 import { aiSuggestLimiter } from './aiRateLimit';
 
 const router = Router();
@@ -161,6 +170,261 @@ router.get('/', aiSuggestLimiter, async (req, res, next) => {
     });
 
     res.json({ data: summaries.slice(0, limit) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Merchant-cleanup review surface (issue #793).
+//
+// These literal-path routes MUST be registered BEFORE the `/:name` route
+// below, otherwise Express matches `GET /clusters` against `/:name` with
+// name="clusters". They power the bulk merchant-cleanup UI: a derived
+// cluster view plus bulk mutations on the Transaction primitive (and the
+// existing Rule primitive for create-rule).
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve and validate the request currency. Defaults to DEFAULT_CURRENCY.
+ * A supplied currency must be a known FX currency: either the default, or a
+ * pair endpoint in the FxRate table (base or quote).
+ */
+async function resolveClusterCurrency(
+  raw: unknown,
+): Promise<{ ok: true; currency: string } | { ok: false }> {
+  if (raw == null || raw === '') return { ok: true, currency: defaultCurrency };
+  const currency = String(raw).toUpperCase().slice(0, 3);
+  if (currency === defaultCurrency.toUpperCase()) return { ok: true, currency };
+  const known = await FxRate.findOne({
+    where: {
+      [Op.or]: [{ fromCurrency: currency }, { toCurrency: currency }],
+    },
+    attributes: ['id'],
+  });
+  if (!known) return { ok: false };
+  return { ok: true, currency };
+}
+
+/**
+ * GET /api/merchants/clusters?currency=CAD
+ *
+ * One entry per distinct non-blank merchant_clean for the caller's
+ * household, scoped to a single currency, sorted by total spend descending.
+ */
+router.get('/clusters', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    const resolved = await resolveClusterCurrency(req.query.currency);
+    if (!resolved.ok) {
+      res.status(400).json({ error: 'unknown currency' });
+      return;
+    }
+    const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
+    const clusters = await listMerchantClusters(householdId, resolved.currency);
+    res.json({ clusters });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Confirm a category name exists for the household. Categories are
+ * household-scoped rows (not an enum), so a valid category is one whose
+ * `name` matches an existing Category for the household.
+ */
+async function categoryExists(req: Request, name: string): Promise<boolean> {
+  const count = await Category.count({
+    where: { ...householdWhere(req), name },
+  });
+  return count > 0;
+}
+
+/**
+ * POST /api/merchants/bulk-recategorize
+ *
+ * Body: { merchantClean, category, createRule? }
+ * Sets final_category on every transaction in the named cluster for the
+ * household and returns the exact count changed. When createRule is true,
+ * also creates a Rule whose merchantPattern derives from the cluster's
+ * merchant_clean — idempotent (a second identical call returns 409).
+ */
+router.post('/bulk-recategorize', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const merchantClean =
+      typeof b.merchantClean === 'string' ? b.merchantClean.trim() : '';
+    const category = typeof b.category === 'string' ? b.category.trim() : '';
+    const createRule = Boolean(b.createRule);
+
+    if (!merchantClean) {
+      res.status(400).json({ error: 'merchantClean is required' });
+      return;
+    }
+    if (!category) {
+      res.status(400).json({ error: 'category is required' });
+      return;
+    }
+    if (!(await categoryExists(req, category))) {
+      res.status(400).json({ error: 'unknown category' });
+      return;
+    }
+
+    const { household, user } = currentAuth(req);
+    const scopeWhere = householdWhere(req);
+
+    const matchWhere = { ...scopeWhere, merchantClean };
+    const matchCount = await Transaction.count({ where: matchWhere });
+    if (matchCount === 0) {
+      res.status(404).json({ error: 'no transactions match the cluster' });
+      return;
+    }
+
+    // Idempotency / 409 check happens BEFORE mutating so a duplicate
+    // create-rule request is a clean no-op (no recategorize side effect).
+    const pattern = clusterRulePattern(merchantClean);
+    if (createRule) {
+      const existing = await Rule.findOne({
+        where: { householdId: household.id, merchantPattern: pattern },
+        attributes: ['id'],
+      });
+      if (existing) {
+        res.status(409).json({ error: 'rule already exists', ruleId: existing.id });
+        return;
+      }
+    }
+
+    let ruleId: number | null = null;
+    await sequelize.transaction(async (t) => {
+      // Load + save each row so the Transaction beforeSave category
+      // reconciliation hook fires (keeps final_category_id in sync).
+      const rows = await Transaction.findAll({ where: matchWhere, transaction: t });
+      for (const row of rows) {
+        row.set('finalCategory', category);
+        await row.save({ transaction: t });
+      }
+      if (createRule) {
+        const rule = await Rule.create(
+          {
+            merchantPattern: pattern,
+            householdId: household.id,
+            createdByUserId: user.id,
+            matchKind: 'substring',
+            priority: 0,
+            category,
+            isBusiness: false,
+            splitType: 'me',
+            pctMe: null,
+            pctPartner: null,
+            effectiveFrom: null,
+            effectiveTo: null,
+          },
+          { transaction: t },
+        );
+        ruleId = rule.id;
+      }
+    });
+
+    res.json({ recategorized: matchCount, ruleCreated: createRule, ruleId });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/merchants/merge
+ *
+ * Body: {
+ *   survivorMerchantClean, mergeMerchantCleans?: string[], canonicalName?
+ * }
+ * Reassigns the canonical (merchant_canonical) of every transaction in each
+ * mergeMerchantCleans cluster to the survivor's canonical, and optionally
+ * sets/overrides the survivor cluster's canonical name. A rename-only call
+ * (empty merge list, canonicalName set) updates only the survivor cluster.
+ */
+router.post('/merge', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const survivor =
+      typeof b.survivorMerchantClean === 'string'
+        ? b.survivorMerchantClean.trim()
+        : '';
+    const mergeList = Array.isArray(b.mergeMerchantCleans)
+      ? (b.mergeMerchantCleans as unknown[])
+          .map((v) => (typeof v === 'string' ? v.trim() : ''))
+          .filter((v) => v.length > 0)
+      : [];
+    const canonicalNameRaw =
+      typeof b.canonicalName === 'string' ? b.canonicalName.trim() : '';
+
+    if (!survivor) {
+      res.status(400).json({ error: 'survivorMerchantClean is required' });
+      return;
+    }
+    if (mergeList.includes(survivor)) {
+      res.status(400).json({ error: 'survivor must not appear in mergeMerchantCleans' });
+      return;
+    }
+    if (canonicalNameRaw.length > 160) {
+      res.status(400).json({ error: 'canonicalName must be <= 160 chars' });
+      return;
+    }
+
+    const scopeWhere = householdWhere(req);
+
+    // Survivor cluster must exist for the household.
+    const survivorCount = await Transaction.count({
+      where: { ...scopeWhere, merchantClean: survivor },
+    });
+    if (survivorCount === 0) {
+      res.status(404).json({ error: 'survivor cluster has no matching transactions' });
+      return;
+    }
+
+    // Every referenced merge cluster must exist for the household.
+    for (const clean of mergeList) {
+      const c = await Transaction.count({
+        where: { ...scopeWhere, merchantClean: clean },
+      });
+      if (c === 0) {
+        res.status(404).json({ error: `cluster has no matching transactions: ${clean}` });
+        return;
+      }
+    }
+
+    // The surviving canonical: explicit canonicalName wins; otherwise reuse
+    // the survivor cluster's existing dominant canonical, falling back to the
+    // survivor's merchant_clean value.
+    let canonical = canonicalNameRaw;
+    if (!canonical) {
+      const existing = await Transaction.findOne({
+        where: {
+          ...scopeWhere,
+          merchantClean: survivor,
+          merchantCanonical: { [Op.ne]: null },
+        },
+        attributes: ['merchantCanonical'],
+        order: [['id', 'ASC']],
+      });
+      canonical = existing?.merchantCanonical?.trim() || survivor;
+    }
+    canonical = canonical.slice(0, 160);
+
+    let reassigned = 0;
+    await sequelize.transaction(async (t) => {
+      const cleansToUpdate = [survivor, ...mergeList];
+      const rows = await Transaction.findAll({
+        where: { ...scopeWhere, merchantClean: { [Op.in]: cleansToUpdate } },
+        transaction: t,
+      });
+      for (const row of rows) {
+        if (row.merchantCanonical === canonical) continue;
+        row.set('merchantCanonical', canonical);
+        await row.save({ transaction: t });
+        reassigned += 1;
+      }
+    });
+
+    res.json({ reassigned, survivor: canonical });
   } catch (e) {
     next(e);
   }
