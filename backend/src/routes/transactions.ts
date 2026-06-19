@@ -138,7 +138,8 @@ export function buildTransactionFilterWhere(
     where.currency = String(source.currency).toUpperCase().slice(0, 3);
   }
   if (source.category) {
-    where.finalCategory = String(source.category);
+    const c = String(source.category);
+    where.finalCategory = c === '(none)' ? { [Op.is]: null } : c;
   }
   if (source.importBatch) {
     where.importBatch = String(source.importBatch);
@@ -224,6 +225,20 @@ export function buildTransactionFilterWhere(
     } else {
       // All entries invalid → match nothing, consistent with ?ids= behaviour.
       (where as Record<string, unknown>).id = -1;
+    }
+  }
+  // Enrichment deep-link filters (enrichment settings tab). Each bucket value is
+  // matched exactly; the stats endpoint keys null buckets as '(none)', so that
+  // sentinel maps to IS NULL to round-trip the link.
+  for (const [param, column] of [
+    ['autoSource', 'autoSource'],
+    ['autoConfidence', 'autoConfidence'],
+    ['txnType', 'txnType'],
+    ['merchantCanonical', 'merchantCanonical'],
+  ] as const) {
+    const raw = source[param];
+    if (typeof raw === 'string' && raw.length > 0) {
+      where[column] = raw === '(none)' ? { [Op.is]: null } : raw;
     }
   }
   return where;
@@ -1941,6 +1956,9 @@ router.get('/enrichment/stats', async (req, res, next) => {
       byTxnType,
       topMerchants,
       topRules,
+      uncategorizedRow,
+      missingCanonicalRow,
+      deadRulesRows,
     ] = await Promise.all([
       sequelize.query<{ n: number }>(
         `SELECT COUNT(*) AS n FROM transactions t ${hhClause}`,
@@ -1989,6 +2007,24 @@ router.get('/enrichment/stats', async (req, res, next) => {
          ORDER BY n DESC LIMIT 15`,
         { replacements: reps, type: QueryTypes.SELECT },
       ),
+      sequelize.query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} final_category IS NULL`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      ),
+      sequelize.query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} merchant_canonical IS NULL`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      ),
+      sequelize.query<{ ruleId: number; pattern: string; category: string | null }>(
+        `SELECT r.id AS "ruleId", r.merchant_pattern AS pattern, r.category AS category
+         FROM rules r
+         ${householdId == null ? '' : 'WHERE r.household_id = ?'}
+         ${householdId == null ? 'WHERE' : 'AND'} r.id NOT IN (
+           SELECT applied_rule_id FROM transactions WHERE applied_rule_id IS NOT NULL ${householdId == null ? '' : 'AND household_id = ?'}
+         )
+         ORDER BY r.id DESC LIMIT 15`,
+        { replacements: householdId == null ? [] : [householdId, householdId], type: QueryTypes.SELECT },
+      ),
     ]);
 
     res.json({
@@ -2012,6 +2048,74 @@ router.get('/enrichment/stats', async (req, res, next) => {
         category: r.category,
         count: Number(r.n),
       })),
+      uncategorizedCount: Number(uncategorizedRow[0]?.n ?? 0),
+      merchantsMissingCanonical: Number(missingCanonicalRow[0]?.n ?? 0),
+      deadRules: deadRulesRows.map((r) => ({
+        ruleId: r.ruleId,
+        pattern: r.pattern,
+        category: r.category,
+      })),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/transactions/enrichment/coverage?bucket=month|week
+ *
+ * Enrichment coverage bucketed by SPEND DATE (transactions.date). There is no
+ * enrichment-event timestamp, so this answers "is recent spend better enriched
+ * than old spend?" — not "when did enrichment run". Newest 12 buckets, ascending.
+ */
+router.get('/enrichment/coverage', async (req, res, next) => {
+  try {
+    const bucket: 'month' | 'week' = req.query.bucket === 'week' ? 'week' : 'month';
+    const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
+    const hhClause = householdId == null ? '' : 'WHERE t.household_id = ?';
+    const reps = householdId == null ? [] : [householdId];
+
+    const isPg = sequelize.getDialect() === 'postgres';
+    const periodExpr = isPg
+      ? bucket === 'week'
+        ? `to_char(t.date, 'IYYY-"W"IW')`
+        : `to_char(t.date, 'YYYY-MM')`
+      : bucket === 'week'
+        ? `strftime('%Y-W%W', t.date)`
+        : `strftime('%Y-%m', t.date)`;
+
+    const clearedExpr = isPg
+      ? 'SUM(CASE WHEN NOT t.review_flag THEN 1 ELSE 0 END)'
+      : 'SUM(CASE WHEN t.review_flag = 0 THEN 1 ELSE 0 END)';
+
+    const rows = await sequelize.query<{
+      period: string;
+      total: number;
+      cleared: number;
+      withCanonical: number;
+    }>(
+      `SELECT ${periodExpr} AS period,
+              COUNT(*) AS total,
+              ${clearedExpr} AS cleared,
+              SUM(CASE WHEN t.merchant_canonical IS NOT NULL THEN 1 ELSE 0 END) AS "withCanonical"
+       FROM transactions t
+       ${hhClause}
+       GROUP BY period
+       ORDER BY period DESC
+       LIMIT 12`,
+      { replacements: reps, type: QueryTypes.SELECT },
+    );
+
+    res.json({
+      bucket,
+      series: rows
+        .map((r) => ({
+          period: r.period,
+          total: Number(r.total),
+          cleared: Number(r.cleared),
+          withCanonical: Number(r.withCanonical),
+        }))
+        .reverse(), // ascending for the chart x-axis
     });
   } catch (e) {
     next(e);

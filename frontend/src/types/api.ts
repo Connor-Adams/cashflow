@@ -22,6 +22,7 @@ export type {
   TransactionLabelRef,
   Contact,
   EnrichmentBackfillProgress,
+  EnrichmentCoverage,
   EnrichmentSignal,
   EnrichmentStats,
   ExplanationSource,

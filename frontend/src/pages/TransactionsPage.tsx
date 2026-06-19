@@ -78,6 +78,13 @@ import { useCategoryTree } from '../lib/useCategoryTree'
 import { buildPathById } from '../lib/categoryPathById'
 import { resolveCategoryPatch, categoryFieldChanged } from './transactionsCategory'
 
+const ENRICH_FILTER_LABEL: Record<string, string> = {
+  autoSource: 'Source',
+  autoConfidence: 'Confidence',
+  txnType: 'Type',
+  merchantCanonical: 'Merchant',
+}
+
 type CategoryHint = {
   label: string
   usageCount: number
@@ -225,6 +232,8 @@ export function TransactionsPage() {
   const [bulkPctPartner, setBulkPctPartner] = useState('')
   // intentionally plain useState — ids filter is one-shot from URL, not session-persisted
   const [idsFilter, setIdsFilter] = useState('')
+  // Enrichment deep-link filters (autoSource/autoConfidence/txnType/merchantCanonical)
+  const [enrichmentFilters, setEnrichmentFilters] = useState<Record<string, string>>({})
   const [bulkMarkReviewed, setBulkMarkReviewed] = useState(false)
   const [bulkApplying, setBulkApplying] = useState(false)
   const [bulkAllApplying, setBulkAllApplying] = useState(false)
@@ -275,6 +284,12 @@ export function TransactionsPage() {
     const urlReviewFlag = searchParams.get('reviewFlag')
     const urlIds = searchParams.get('ids')
     const urlStatus = searchParams.get('status')
+    const urlEnrich: Record<string, string> = {}
+    for (const k of ['autoSource', 'autoConfidence', 'txnType', 'merchantCanonical'] as const) {
+      const v = searchParams.get(k)
+      if (v != null) urlEnrich[k] = v
+    }
+    const hasEnrich = Object.keys(urlEnrich).length > 0
     const hasAny =
       urlCategory != null ||
       urlCurrency != null ||
@@ -283,7 +298,8 @@ export function TransactionsPage() {
       urlImportBatch != null ||
       urlReviewFlag != null ||
       urlIds != null ||
-      urlStatus != null
+      urlStatus != null ||
+      hasEnrich
     if (!hasAny) return
     if (urlCategory != null) setCategoryFilter(urlCategory)
     if (urlCurrency != null) setCurrency(urlCurrency.toUpperCase().slice(0, 3))
@@ -295,6 +311,7 @@ export function TransactionsPage() {
     if (urlStatus === 'pending' || urlStatus === 'posted' || urlStatus === 'cleared') {
       setStatusFilter(urlStatus)
     }
+    if (hasEnrich) setEnrichmentFilters(urlEnrich)
     setPage(1)
     setSearchParams({}, { replace: true })
   }, [
@@ -308,6 +325,7 @@ export function TransactionsPage() {
     setReviewOnly,
     setIdsFilter,
     setStatusFilter,
+    setEnrichmentFilters,
   ])
 
   useEffect(() => {
@@ -364,6 +382,9 @@ export function TransactionsPage() {
       if (batchFilter.trim()) qs.set('importBatch', batchFilter.trim())
       if (statusFilter) qs.set('status', statusFilter)
       if (labelsFilter.length > 0) qs.set('labels', labelsFilter.join(','))
+      for (const [k, v] of Object.entries(enrichmentFilters)) {
+        if (v) qs.set(k, v)
+      }
       const data = await getJson<Paginated<Transaction>>(
         `/api/transactions?${qs.toString()}`,
       )
@@ -379,7 +400,7 @@ export function TransactionsPage() {
         setLoading(false)
       }
     }
-  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter, labelsFilter, dateRangeInvalid])
+  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter, labelsFilter, enrichmentFilters, dateRangeInvalid])
 
   useEffect(() => {
     void load()
@@ -1773,6 +1794,23 @@ export function TransactionsPage() {
             </>
           }
         />
+        {Object.keys(enrichmentFilters).length > 0 && (
+          <div className="flex items-center gap-2 mb-2 text-sm">
+            <span className="text-muted-foreground">Filtered:</span>
+            {Object.entries(enrichmentFilters).map(([k, v]) => (
+              <span key={k} className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5">
+                {ENRICH_FILTER_LABEL[k] ?? k}: {v === '(none)' ? 'none' : v}
+              </span>
+            ))}
+            <button
+              type="button"
+              className="text-[var(--primary)] hover:underline"
+              onClick={() => { setEnrichmentFilters({}); setPage(1) }}
+            >
+              Clear
+            </button>
+          </div>
+        )}
         <div className="tableWrap transactionsTableWrap">
           <Table className="table transactionsTable">
             <TableHeader>

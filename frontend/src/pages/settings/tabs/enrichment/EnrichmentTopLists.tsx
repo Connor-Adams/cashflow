@@ -1,15 +1,17 @@
 import { Link } from 'react-router-dom'
 import { Card } from '@/components/ui/card'
 import type { EnrichmentStats } from '../../../../types/api'
+import { enrichmentFilterHref } from './enrichmentFilterHref'
 
 const MAX_ROWS = 6
 
 type Props = {
   topRules: EnrichmentStats['topRules']
   topMerchants: EnrichmentStats['topCanonicalMerchants']
+  deadRules: EnrichmentStats['deadRules']
 }
 
-export function EnrichmentTopLists({ topRules, topMerchants }: Props) {
+export function EnrichmentTopLists({ topRules, topMerchants, deadRules }: Props) {
   const rules = topRules.slice(0, MAX_ROWS)
   const merchants = topMerchants.slice(0, MAX_ROWS)
 
@@ -45,6 +47,20 @@ export function EnrichmentTopLists({ topRules, topMerchants }: Props) {
             ))}
           </div>
         )}
+
+        {deadRules.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-[var(--border)]">
+            <p className="text-[0.75rem] font-semibold text-[var(--warning-foreground)] m-0 mb-1">
+              Dead rules ({deadRules.length}) — never fired
+            </p>
+            {deadRules.slice(0, MAX_ROWS).map((r) => (
+              <div key={r.ruleId} className="flex justify-between text-[0.78rem] py-1">
+                <code className="bg-[color-mix(in_srgb,var(--warning)_18%,transparent)] px-[6px] py-[1px] rounded-[3px]">{r.pattern}</code>
+                <Link to={`/rules?focus=${r.ruleId}`} className="text-[var(--primary)] no-underline hover:underline" aria-label={`View dead rule for ${r.pattern}`}>View</Link>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
 
       <Card>
@@ -60,7 +76,12 @@ export function EnrichmentTopLists({ topRules, topMerchants }: Props) {
                 key={m.name}
                 className="grid gap-[0.625rem] py-2 items-baseline border-b border-[var(--border)] last:border-b-0 [grid-template-columns:1fr_auto]"
               >
-                <span className="text-[var(--foreground)] min-w-0">{m.name}</span>
+                <Link
+                  to={enrichmentFilterHref('merchantCanonical', m.name)}
+                  className="text-[var(--foreground)] min-w-0 no-underline hover:underline"
+                >
+                  {m.name}
+                </Link>
                 <span className="text-[var(--muted-foreground)] tabular-nums">{m.count.toLocaleString()}</span>
               </div>
             ))}

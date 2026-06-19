@@ -11,10 +11,13 @@ const STATS = {
   reviewedTrue: 8000,
   bySource: { rules: 10368, ai: 3354, manual: 1220, '(none)': 305 },
   byConfidence: { high: 9148, medium: 3812, low: 1525, '(none)': 762 },
-  byTxnType: {},
+  byTxnType: { purchase: 12000, refund: 800, transfer: 447 },
   isRecurringCount: 847,
   refundLinkedCount: 98,
   transferLinkedCount: 312,
+  uncategorizedCount: 432,
+  merchantsMissingCanonical: 87,
+  deadRules: [],
   topCanonicalMerchants: [
     { name: 'Amazon', count: 1247 },
     { name: 'Uber', count: 312 },
@@ -25,13 +28,17 @@ const STATS = {
   ],
 }
 
+const COVERAGE = { bucket: 'month', series: [] }
+
 function mockFetch(stats: typeof STATS) {
   vi.stubGlobal(
     'fetch',
     vi.fn((input: RequestInfo) => {
       const url = String(input)
-      if (url.endsWith('/api/transactions/enrichment/stats'))
+      if (url.includes('/api/transactions/enrichment/stats'))
         return Promise.resolve({ ok: true, json: () => Promise.resolve(stats) } as Response)
+      if (url.includes('/api/transactions/enrichment/coverage'))
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(COVERAGE) } as Response)
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
     }),
   )
@@ -50,10 +57,16 @@ describe('EnrichmentTab', () => {
 
   it('fetches stats and renders the Needs Review workflow tile', async () => {
     setup()
-    await waitFor(() => expect(screen.getByText('2,341')).toBeInTheDocument())
-    expect(screen.getByText(/needs review/i)).toBeInTheDocument()
-    const cta = screen.getByRole('link', { name: /open review queue/i })
-    expect(cta).toHaveAttribute('href', '/review')
+    await waitFor(() => expect(screen.getAllByText('2,341').length).toBeGreaterThan(0))
+    expect(screen.getAllByText(/needs review/i).length).toBeGreaterThan(0)
+    const cta = screen.getByRole('link', { name: /needs review/i })
+    expect(cta).toHaveAttribute('href', '/transactions?reviewFlag=true')
+  })
+
+  it('renders the "Uncategorized" needs-attention tile', async () => {
+    setup()
+    await waitFor(() => expect(screen.getByText(/uncategorized/i)).toBeInTheDocument())
+    expect(screen.getByText('432')).toBeInTheDocument()
   })
 
   it('renders the dashboard stat row alongside the workflow tile', async () => {
@@ -64,10 +77,11 @@ describe('EnrichmentTab', () => {
     expect(screen.getByText('12,906')).toBeInTheDocument()
   })
 
-  it('renders both chart cards', async () => {
+  it('renders chart cards including the "By type" heading', async () => {
     setup()
     await waitFor(() => expect(screen.getByText(/confidence distribution/i)).toBeInTheDocument())
     expect(screen.getByText(/by source/i)).toBeInTheDocument()
+    expect(screen.getByText(/by type/i)).toBeInTheDocument()
   })
 
   it('renders the top rules card with View links', async () => {
@@ -86,7 +100,7 @@ describe('EnrichmentTab', () => {
 
   it('does not render the old "Enrichment maintenance" or "Enrichment dashboard" headings', async () => {
     setup()
-    await waitFor(() => expect(screen.getByText('2,341')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('2,341').length).toBeGreaterThan(0))
     expect(screen.queryByRole('heading', { name: /enrichment maintenance/i })).toBeNull()
     expect(screen.queryByRole('heading', { name: /enrichment dashboard/i })).toBeNull()
   })
