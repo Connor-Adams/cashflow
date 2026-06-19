@@ -6,6 +6,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -19,7 +20,7 @@ before(async () => {
   testDb = await setupPgTestDb('txn-categoryid');
   models = await import('../../src/models/index.js');
   app = (await import('../../src/app.js')).default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   const reg = await authed
     .post('/api/auth/register')
     .send({ email: 'tc@example.com', displayName: 'T', password: 'password123' });

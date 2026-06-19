@@ -9,6 +9,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -74,7 +75,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -85,13 +86,13 @@ before(async () => {
   const primary = await seed('Primary', { openingBalance: 5000 });
   primaryHouseholdId = primary.householdId;
   primaryAccountId = primary.accountId;
-  primaryAgent = request.agent(app);
+  primaryAgent = testAgent(app);
   primaryAgent.jar.setCookie(`cashflow_session=${primary.token}; Path=/`);
 
   const other = await seed('Other', { openingBalance: 2000 });
   otherHouseholdId = other.householdId;
   otherAccountId = other.accountId;
-  otherAgent = request.agent(app);
+  otherAgent = testAgent(app);
   otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
 });
 
@@ -433,7 +434,7 @@ async function seedTxn(opts: {
 
 test('GET /api/forecast auto-projects recurring direct-deposit income', async () => {
   const h = await seed('Income', { openingBalance: 1000 });
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${h.token}; Path=/`);
 
   // Two monthly payroll deposits, tagged 'transfer' (as real banks do), before
@@ -479,7 +480,7 @@ test('GET /api/forecast auto-projects recurring direct-deposit income', async ()
 
 test('GET /api/forecast does NOT project internal transfers as income', async () => {
   const h = await seed('NoPhantom', { openingBalance: 1000 });
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${h.token}; Path=/`);
 
   // Recurring positive inflows that are really self-transfers, not income.
@@ -504,7 +505,7 @@ test('GET /api/forecast does NOT project internal transfers as income', async ()
 
 test('GET /api/forecast projects detected monthly recurring charges on calendar months', async () => {
   const h = await seed('CalMonth', { openingBalance: 1000 });
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${h.token}; Path=/`);
 
   // Three monthly Netflix charges before the window (gaps 31/30 days → the
@@ -545,7 +546,7 @@ test('GET /api/forecast projects detected monthly recurring charges on calendar 
 
 test('GET /api/forecast projects a subscription-kind expectation as an outflow', async () => {
   const h = await seed('Subs', { openingBalance: 1000 });
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${h.token}; Path=/`);
 
   // Subscriptions store a cadence + a (possibly past) seed date and a null

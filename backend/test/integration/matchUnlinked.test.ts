@@ -2,6 +2,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -16,7 +17,7 @@ before(async () => {
   testDb = await setupPgTestDb('match-unlinked');
   models = await import('../../src/models/index.js');
   app = (await import('../../src/app.js')).default;
-  authed = request.agent(app);
+  authed = testAgent(app);
 
   const register = await authed.post('/api/auth/register').send({
     email: 'matchunlinked@example.com',
@@ -158,6 +159,6 @@ test('POST /api/external-orders/match-unlinked is idempotent (second call does n
 });
 
 test('POST /api/external-orders/match-unlinked rejects unauthenticated requests', async () => {
-  const res = await request(app).post('/api/external-orders/match-unlinked');
+  const res = await testRequest(app).post('/api/external-orders/match-unlinked');
   assert.equal(res.status, 401);
 });

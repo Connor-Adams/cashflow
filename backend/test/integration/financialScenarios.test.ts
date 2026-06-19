@@ -21,6 +21,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -73,7 +74,7 @@ async function seed(emailPrefix: string): Promise<Seeded> {
     tokenHash: hashToken(token),
     expiresAt,
   });
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${token}; Path=/`);
   return { token, householdId: household.id, userId: user.id, accountId, agent };
 }
@@ -399,6 +400,6 @@ test('Cross-household: user A cannot access user B scenario', async () => {
 // ---------------------------------------------------------------------------
 
 test('GET /api/financial-scenarios: returns 401 when not logged in', async () => {
-  const res = await request(app).get('/api/financial-scenarios');
+  const res = await testRequest(app).get('/api/financial-scenarios');
   assert.ok(res.status === 401 || res.status === 403, `Expected 401/403, got ${res.status}`);
 });

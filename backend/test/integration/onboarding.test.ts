@@ -9,6 +9,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let testDb: PgTestDb;
@@ -20,7 +21,7 @@ before(async () => {
   testDb = await setupPgTestDb('onboarding');
   const mod = await import('../../src/app.js');
   app = mod.default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   const register = await authed.post('/api/auth/register').send({
     email: 'onboarding@example.com',
     displayName: 'Onboarding User',
@@ -50,7 +51,7 @@ function uniqueCsv(tag: string): string {
 }
 
 test('unauthenticated initial-import is rejected', async () => {
-  const res = await request(app)
+  const res = await testRequest(app)
     .post('/api/onboarding/initial-import')
     .attach('file', Buffer.from(VALID_CSV, 'utf8'), {
       filename: 'statement.csv',
@@ -188,6 +189,6 @@ test('onboarding-dismiss is idempotent (second call still 200)', async () => {
 });
 
 test('unauthenticated onboarding-dismiss is rejected', async () => {
-  const res = await request(app).patch('/api/preferences/onboarding-dismiss').send();
+  const res = await testRequest(app).patch('/api/preferences/onboarding-dismiss').send();
   assert.equal(res.status, 401);
 });

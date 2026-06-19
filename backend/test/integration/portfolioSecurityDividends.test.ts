@@ -1,6 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let testDb: PgTestDb;
@@ -28,7 +29,7 @@ before(async () => {
   });
   await seedDividend(models, { securityId: xeqt.id, exDividendDate: '2025-12-15', amount: 0.18 });
   await seedDividend(models, { securityId: xeqt.id, exDividendDate: '2026-03-15', amount: 0.20 });
-  authed = request.agent(app);
+  authed = testAgent(app);
   authed.jar.setCookie(`cashflow_session=${seeded.token}; Path=/`);
 });
 

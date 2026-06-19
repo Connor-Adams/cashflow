@@ -1,13 +1,14 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express; let authed: ReturnType<typeof request.agent>; let testDb: PgTestDb;
 before(async () => {
   testDb = await setupPgTestDb('category-rename');
   app = (await import('../../src/app.js')).default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   await authed.post('/api/auth/register').send({ email: 'cr@example.com', displayName: 'C', password: 'password123' });
 });
 after(async () => { await teardownPgTestDb(testDb); });

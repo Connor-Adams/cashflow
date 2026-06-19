@@ -19,6 +19,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let testDb: PgTestDb;
@@ -38,7 +39,7 @@ before(async () => {
   const me = await seedHousehold(models, `fx-routes-me-${Date.now()}@example.com`);
   myUserId = me.user.id;
   myHouseholdId = me.household.id;
-  authed = request.agent(app);
+  authed = testAgent(app);
   authed.jar.setCookie(`cashflow_session=${me.token}; Path=/`);
 
   // Seed a CAD chequing + USD chequing.
@@ -142,7 +143,7 @@ after(async () => {
 });
 
 test('GET /api/fx/exposure: 401 unauthenticated', async () => {
-  const res = await request(app).get('/api/fx/exposure');
+  const res = await testRequest(app).get('/api/fx/exposure');
   assert.equal(res.status, 401);
 });
 

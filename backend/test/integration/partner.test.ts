@@ -13,6 +13,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { seedHousehold } from '../helpers/seedHousehold.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -108,7 +109,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'super-partner@example.com',
     displayName: 'Super Partner',
@@ -120,12 +121,12 @@ before(async () => {
   householdAId = a.householdId;
   userAId = a.userId;
   contactAId = a.contactId;
-  agentA = request.agent(app);
+  agentA = testAgent(app);
   agentA.jar.setCookie(`cashflow_session=${a.token}; Path=/`);
 
   const b = await seedHousehold('PartnerB', 'B Partner');
   householdBId = b.householdId;
-  agentB = request.agent(app);
+  agentB = testAgent(app);
   agentB.jar.setCookie(`cashflow_session=${b.token}; Path=/`);
 
   const models = await import('../../src/models');

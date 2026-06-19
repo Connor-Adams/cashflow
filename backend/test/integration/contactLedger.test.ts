@@ -2,6 +2,7 @@
 import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let testDb: PgTestDb;
@@ -12,7 +13,7 @@ let householdId: number;
 before(async () => {
   testDb = await setupPgTestDb('contact-ledger');
   app = (await import('../../src/app.js')).default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   const reg = await authed.post('/api/auth/register').send({
     email: 'ledger@example.com', displayName: 'Ledger User', password: 'password123',
   });

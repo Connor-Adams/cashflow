@@ -1,6 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { rowFingerprint, stableIdentityFingerprint } from '../../src/import/fingerprint';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -24,7 +25,7 @@ before(async () => {
   models = await import('../../src/models/index.js');
   app = (await import('../../src/app.js')).default;
   backfillModule = await import('../../src/import/runEnrichmentBackfill.js');
-  authed = request.agent(app);
+  authed = testAgent(app);
   const register = await authed.post('/api/auth/register').send({
     email: 'backfill@example.com',
     displayName: 'Backfill User',

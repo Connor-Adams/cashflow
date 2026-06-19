@@ -23,6 +23,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { seedHousehold } from '../helpers/seedHousehold.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -42,7 +43,7 @@ before(async () => {
   app = (await import('../../src/app.js')).default;
 
   // Bootstrap superadmin — first registered user.
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const reg = await bootstrap.post('/api/auth/register').send({
     email: 'boot-autolink@example.com',
     displayName: 'Boot',
@@ -52,7 +53,7 @@ before(async () => {
 
   const seedA = await seedHousehold('autolinkA', 'Self A');
   householdAId = seedA.householdId;
-  agentA = request.agent(app);
+  agentA = testAgent(app);
   agentA.jar.setCookie(`cashflow_session=${seedA.token}; Path=/`);
 
   // ── Task 5 fixtures ──────────────────────────────────────────────────────
