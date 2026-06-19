@@ -27,6 +27,7 @@ let cardAccountId: number;
 let secondCardAccountId: number;
 let closedCardAccountId: number;
 let usdCardAccountId: number;
+let locAccountId: number;
 let testDb: PgTestDb;
 
 type SeededAccount = { id: number };
@@ -175,6 +176,17 @@ before(async () => {
   });
   usdCardAccountId = usdCard.id;
   await postTxn(usdCardAccountId, primary.householdId, -200, 'USD');
+
+  // Line of credit (loan type) — revolving credit, owed 800 CAD; limit 4000 →
+  // 20% utilization. Proves creditLimit + utilization apply to lines of credit.
+  const loc = await makeAccount({
+    householdId: primary.householdId,
+    userId: primary.userId,
+    name: 'LocCL',
+    accountType: 'loan',
+  });
+  locAccountId = loc.id;
+  await postTxn(locAccountId, primary.householdId, -800);
 });
 
 after(async () => {
@@ -198,6 +210,36 @@ test('PATCH /api/accounts/:id rejects creditLimit on non-credit account', async 
     .send({ creditLimit: 1000 });
   assert.equal(res.status, 400);
   assert.match(String(res.body.error), /credit_card/i);
+});
+
+// Lines of credit (loan type) are revolving credit: accept creditLimit and
+// derive utilization the same way credit cards do.
+test('PATCH /api/accounts/:id accepts creditLimit for a line of credit (loan)', async () => {
+  const res = await primaryAgent
+    .patch(`/api/accounts/${locAccountId}`)
+    .send({ creditLimit: 4000 });
+  assert.equal(res.status, 200);
+  assert.equal(Number(res.body.creditLimit), 4000);
+  // utilizationPct = 800 / 4000 * 100 = 20
+  assert.equal(Math.round(Number(res.body.utilizationPct)), 20);
+});
+
+test('GET /api/accounts enriches a line of credit with creditLimit + utilizationPct', async () => {
+  await primaryAgent.patch(`/api/accounts/${locAccountId}`).send({ creditLimit: 4000 });
+  const res = await primaryAgent.get('/api/accounts');
+  assert.equal(res.status, 200);
+  const loc = (
+    res.body as Array<{
+      id: number;
+      creditLimit: number | null;
+      utilizationPct: number | null;
+      currentBalance: number | null;
+    }>
+  ).find((a) => a.id === locAccountId);
+  assert.ok(loc);
+  assert.equal(Number(loc.creditLimit), 4000);
+  assert.equal(Number(loc.currentBalance), 800);
+  assert.equal(Math.round(Number(loc.utilizationPct)), 20);
 });
 
 // AC #11: creditLimit = 0 blocked with 400.
