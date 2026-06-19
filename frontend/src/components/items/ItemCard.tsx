@@ -1,7 +1,7 @@
 import { formatMoney } from '../../lib/formatMoney'
 import { cn } from '@/lib/utils'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
-import { Input } from '@/components/ui/input'
+import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
+import { Input } from '@cashflow/ui'
 import { useItemOverrides } from './useItemOverrides'
 import type { ExternalOrderItemView } from '../../../../shared/api-types'
 

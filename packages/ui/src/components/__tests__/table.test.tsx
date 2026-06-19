@@ -1,7 +1,7 @@
 import React from 'react'
 import { describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
-import { Table } from './table'
+import { Table } from '../table'
 
 describe('Table', () => {
   it('default: container has overflow-x-auto, no sticky classes, no inline maxHeight', () => {

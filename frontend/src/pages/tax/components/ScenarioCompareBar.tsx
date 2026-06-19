@@ -1,4 +1,4 @@
-import { Button } from '@/components/ui/button';
+import { Button } from '@cashflow/ui';
 
 /**
  * Compare bar shared by the T1 and T2 scenario workspaces. It only needs each

@@ -6,10 +6,10 @@ import {
   DialogDescription,
   DialogBody,
   DialogFooter,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Alert } from '@/components/ui/alert'
-import { Label } from '@/components/ui/label'
+} from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
+import { Alert } from '@cashflow/ui'
+import { Label } from '@cashflow/ui'
 import { postJson } from '../../lib/api'
 import type { Account, AccountMergeResult } from '../../types/api'
 

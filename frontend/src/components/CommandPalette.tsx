@@ -31,7 +31,7 @@ import {
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Search } from 'lucide-react'
-import { Input } from '@/components/ui/input'
+import { Input } from '@cashflow/ui'
 import { useCommandPalette } from '@/hooks/useCommandPalette'
 import {
   filterCommands,

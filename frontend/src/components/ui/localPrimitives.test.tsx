@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 import { buildCsv, escapeCsvField } from '../../lib/csv'
-import { Alert } from './alert'
+import { Alert } from '@cashflow/ui'
 import { CollapsibleCard } from './collapsible-card'
 import {
   Dialog,
@@ -16,13 +16,13 @@ import {
   DialogHeader,
   DialogTitle,
   useConfirm,
-} from './dialog'
-import { EmptyState } from './empty-state'
+} from '@cashflow/ui'
+import { EmptyState } from '@cashflow/ui'
 import { FilterBar, type QuickRange } from './filter-bar'
-import { Label } from './label'
-import { NativeSelect, NativeSelectOption } from './native-select'
+import { Label } from '@cashflow/ui'
+import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
 import { PageHeader } from './page-header'
-import { Skeleton, SkeletonRow, SkeletonText } from './skeleton'
+import { Skeleton, SkeletonRow, SkeletonText } from '@cashflow/ui'
 import { StatCard } from './stat-card'
 import { ToastProvider, useToast } from './toast'
 

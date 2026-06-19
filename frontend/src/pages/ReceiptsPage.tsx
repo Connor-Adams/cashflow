@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import { PageHeader } from '@/components/ui/page-header'
 import { GmailSection } from '@/pages/settings/sections/GmailSection'
 import { GmailScanHistory } from '@/components/receipts/GmailScanHistory'

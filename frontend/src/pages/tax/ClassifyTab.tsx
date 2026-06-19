@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@cashflow/ui';
 import { patchJson } from '@/lib/api';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
 import { useClassificationQueue } from '../../hooks/useClassificationQueue';

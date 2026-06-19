@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Card, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
+import { Card, CardHeader, CardTitle } from '@cashflow/ui'
+import { Badge } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
+import { Skeleton } from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { getJson, postJson } from '../../lib/api'
 import type {

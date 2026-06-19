@@ -7,7 +7,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from 'recharts'
-import { Card } from './card'
+import { Card } from '@cashflow/ui'
 import { formatMoney } from '../../lib/formatMoney'
 import { safePct } from '../../lib/num'
 

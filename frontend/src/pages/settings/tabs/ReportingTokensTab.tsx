@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Copy, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyState } from '@/components/ui/empty-state'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { EmptyState } from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postJson } from '../../../lib/api'
 

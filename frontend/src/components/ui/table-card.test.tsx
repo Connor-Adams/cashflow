@@ -9,7 +9,7 @@ import {
   TableRow,
   TableHead,
   TableCell,
-} from './table'
+} from '@cashflow/ui'
 
 describe('TableCard', () => {
   it('renders data-slot="table-card" on the Card wrapper', () => {

@@ -1,4 +1,4 @@
-import type { AlertVariant } from '@/components/ui/alert'
+import type { AlertVariant } from '@cashflow/ui'
 
 type DetectedMode = 'standard' | 'ws-bundle' | 'holdings' | 'pdf-bundle'
 

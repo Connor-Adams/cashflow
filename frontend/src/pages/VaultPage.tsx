@@ -9,16 +9,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { Download, Lock, ShieldAlert, Trash2, Upload as UploadIcon } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { useConfirm } from '@/components/ui/dialog'
-import { EmptyTableRow } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { NativeSelect } from '@/components/ui/native-select'
+import { Badge } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { useConfirm } from '@cashflow/ui'
+import { EmptyTableRow } from '@cashflow/ui'
+import { Input } from '@cashflow/ui'
+import { Label } from '@cashflow/ui'
+import { NativeSelect } from '@cashflow/ui'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@/components/ui/skeleton'
+import { SkeletonRow } from '@cashflow/ui'
 import {
   Table,
   TableBody,
@@ -26,7 +26,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postFormData } from '../lib/api'
 

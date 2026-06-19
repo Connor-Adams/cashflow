@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import { getJson } from '../../../lib/api'
 import type { EnrichmentStats } from '../../../types/api'
 import { EnrichmentStatRow } from './enrichment/EnrichmentStatRow'

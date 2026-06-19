@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, TrendingDown, TrendingUp } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import { formatCurrency } from '@/lib/formatCurrency'
 import type {
   DigestCategoryDelta,

@@ -1,5 +1,5 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Tabs, type TabItem } from '@/components/ui/tabs'
+import { Tabs, type TabItem } from '@cashflow/ui'
 
 const TRANSACTION_TABS: TabItem[] = [
   { value: 'all', label: 'All' },

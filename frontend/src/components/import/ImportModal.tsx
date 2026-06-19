@@ -8,11 +8,11 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from '@/components/ui/dialog'
-import { Alert, type AlertVariant } from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+} from '@cashflow/ui'
+import { Alert, type AlertVariant } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
+import { Input } from '@cashflow/ui'
+import { Label } from '@cashflow/ui'
 import { getJson, postFormData } from '../../lib/api'
 import { formatParseErrorLines } from '../../lib/formatParseErrors'
 import type { Account } from '../../types/api'

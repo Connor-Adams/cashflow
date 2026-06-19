@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@cashflow/ui';
 import type { Scenario } from '../../../hooks/useScenarios';
 
 interface Props {

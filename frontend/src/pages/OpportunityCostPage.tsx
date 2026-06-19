@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { PageHeader } from '@/components/ui/page-header'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
-import { EmptyState } from '@/components/ui/empty-state'
+import { Button } from '@cashflow/ui'
+import { Card, CardContent } from '@cashflow/ui'
+import { EmptyState } from '@cashflow/ui'
 import { OpportunityCostCalculator } from '@/components/OpportunityCostCalculator'
 
 /**

@@ -1,11 +1,11 @@
 import { useCallback, useMemo, useState } from 'react'
 import { CreditCard, CalendarClock, AlertTriangle, Pencil, Zap } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Badge } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { EmptyState } from '@cashflow/ui'
+import { Input } from '@cashflow/ui'
+import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatCard } from '@/components/ui/stat-card'
 import {
@@ -15,7 +15,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
 import { formatMoney } from '../lib/formatMoney'

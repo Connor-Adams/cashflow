@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { cn } from '@/lib/utils'
+import { cn } from '../lib/cn'
 
 function Label({ className, ...props }: React.ComponentProps<'label'>) {
   return (
@@ -11,5 +11,4 @@ function Label({ className, ...props }: React.ComponentProps<'label'>) {
   )
 }
 
-// Frontend UI <Label> component; unrelated to the backend Label model that shares the name across packages.
 export { Label }

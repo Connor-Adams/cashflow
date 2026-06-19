@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ChevronDown, ChevronRight, Edit3, Plus, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
 import {
   Dialog,
   DialogBody,
@@ -10,9 +10,9 @@ import {
   DialogHeader,
   DialogTitle,
   useConfirm,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+} from '@cashflow/ui'
+import { Input } from '@cashflow/ui'
+import { Label } from '@cashflow/ui'
 import { deleteReq, getJson, patchJson, postJson } from '../../../lib/api'
 import { todayDateInputValue } from '../../../lib/dateInput'
 import { formatMoney } from '../../../lib/formatMoney'

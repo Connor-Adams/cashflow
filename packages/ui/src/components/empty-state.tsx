@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { cn } from '@/lib/utils'
+import { cn } from '../lib/cn'
 
 type EmptyStateProps = Omit<React.ComponentProps<'div'>, 'title'> & {
   title: React.ReactNode
@@ -32,7 +32,10 @@ function EmptyTableRow({
 }) {
   return (
     <tr>
-      <td colSpan={colSpan} className="emptyStateCell">
+      <td
+        colSpan={colSpan}
+        className="whitespace-normal align-top px-4 py-5 [&_p]:mb-2 [&_p:last-child]:mb-0"
+      >
         <EmptyState title={title} description={description} />
       </td>
     </tr>

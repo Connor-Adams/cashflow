@@ -5,7 +5,7 @@
  * + aria-controls and keyboard arrow navigation across triggers.
  */
 import * as React from 'react'
-import { cn } from '@/lib/utils'
+import { cn } from '../lib/cn'
 
 export type TabItem = {
   value: string

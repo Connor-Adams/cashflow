@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { BentoTile } from './BentoTile'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import { getJson } from '@/lib/api'
 
 type GmailStatus = {

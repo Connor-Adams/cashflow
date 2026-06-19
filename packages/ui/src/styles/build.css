@@ -1,0 +1,14 @@
+/* Standalone stylesheet for @cashflow/ui consumers.
+ * Layered imports WITHOUT tailwindcss/preflight so we never reset the host page.
+ * @source points Tailwind at our component class strings so only used utilities
+ * are emitted. */
+@layer theme, base, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+
+@source "../components/**/*.{ts,tsx}";
+
+@import "./tokens.css";
+@import "./theme.css";
+@import "./utilities.css";

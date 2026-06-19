@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { Command as CommandIcon, Menu } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import { useLayoutWidth } from '../lib/layoutWidth'
 import { useCommandPalette } from '../hooks/useCommandPalette'
 import { CommandPalette } from './CommandPalette'

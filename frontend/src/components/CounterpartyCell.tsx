@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@cashflow/ui';
+import { Button } from '@cashflow/ui';
+import { Input } from '@cashflow/ui';
 import {
   Dialog, DialogHeader, DialogTitle, DialogBody, DialogFooter,
-} from '@/components/ui/dialog';
+} from '@cashflow/ui';
 import type { Contact } from '../types/api';
 
 export type CounterpartyCellProps = {

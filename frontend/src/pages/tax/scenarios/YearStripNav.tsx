@@ -21,7 +21,7 @@
 // awkward refactor when we add per-entity context (e.g. a label, an aria
 // region name, or analytics tagging) in a follow-up.
 
-import { Button } from '@/components/ui/button';
+import { Button } from '@cashflow/ui';
 
 interface ChainEntryShape {
   scenario: { id: number; year: number; kind: string; name: string };

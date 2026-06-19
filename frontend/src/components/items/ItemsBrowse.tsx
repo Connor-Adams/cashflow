@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Button } from '@cashflow/ui'
+import { Badge } from '@cashflow/ui'
 import {
   Dialog,
   DialogBody,
@@ -8,9 +8,9 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-} from '@/components/ui/dialog'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
-import { EmptyState } from '@/components/ui/empty-state'
+} from '@cashflow/ui'
+import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
+import { EmptyState } from '@cashflow/ui'
 import { useItemsQuery, type ItemsFilters } from '@/hooks/useItems'
 import { hasActiveItemsFilters } from '@/hooks/useItems'
 import { patchJson } from '@/lib/api'

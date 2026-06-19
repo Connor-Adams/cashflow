@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Alert } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
-import { Card } from '@/components/ui/card'
-import { Grid } from '@/components/ui/grid'
+import { Alert } from '@cashflow/ui'
+import { Badge } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { Grid } from '@cashflow/ui'
 import { SectionHeader } from '@/components/ui/section-header'
 import { StatCard } from '@/components/ui/stat-card'
 import {
@@ -12,8 +12,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
-import { Button } from '@/components/ui/button'
+} from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
 import { getJson, postJson } from '../lib/api'
 
 /** Shape returned by GET /api/rules/health. Kept inline so the component

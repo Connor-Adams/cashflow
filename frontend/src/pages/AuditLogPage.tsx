@@ -10,11 +10,11 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
 import { PageHeader } from '@/components/ui/page-header'
-import { NativeSelect } from '@/components/ui/native-select'
-import { Alert } from '@/components/ui/alert'
+import { NativeSelect } from '@cashflow/ui'
+import { Alert } from '@cashflow/ui'
 import { getJson } from '../lib/api'
 import type { AuditLogEntry, AuditLogResponse } from '../types/api'
 

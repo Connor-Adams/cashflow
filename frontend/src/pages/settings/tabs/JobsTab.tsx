@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, RotateCcw } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
 import { describeCron } from '@/lib/cron'

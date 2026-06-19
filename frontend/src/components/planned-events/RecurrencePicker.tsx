@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Input } from '@/components/ui/input'
-import { NativeSelect } from '@/components/ui/native-select'
-import { Button } from '@/components/ui/button'
+import { Input } from '@cashflow/ui'
+import { NativeSelect } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
 import {
   serializeRRule,
   parseRRule,

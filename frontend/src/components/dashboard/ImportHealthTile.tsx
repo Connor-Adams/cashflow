@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { BentoTile } from './BentoTile'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import { useImportHealth } from '@/hooks/useImportHealth'
 import type { ImportConfidenceFlagToken } from '@cashflow/shared'
 

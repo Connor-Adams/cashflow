@@ -16,9 +16,9 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyTableRow } from '@/components/ui/empty-state'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { EmptyTableRow } from '@cashflow/ui'
 import { MetricStat } from '@/components/ui/metric-stat'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
@@ -29,7 +29,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@cashflow/ui'
 import { TableCard, type TableColumn } from '@/components/ui/table-card'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'

@@ -1,7 +1,7 @@
 import React from 'react'
 import { describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
-import { Grid } from './grid'
+import { Grid } from '../grid'
 
 describe('Grid', () => {
   it('emits an auto-fit minmax template with a responsive floor by default', () => {

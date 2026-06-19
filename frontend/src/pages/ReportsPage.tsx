@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { Download, Plus, Trash2 } from 'lucide-react'
-import { Alert } from '@/components/ui/alert'
-import { EmptyState, EmptyTableRow } from '@/components/ui/empty-state'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Alert } from '@cashflow/ui'
+import { EmptyState, EmptyTableRow } from '@cashflow/ui'
+import { Badge } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
 import { FilterCard } from '@/components/ui/filter-card'
-import { Grid } from '@/components/ui/grid'
+import { Grid } from '@cashflow/ui'
 import { StatCard } from '@/components/ui/stat-card'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import {
@@ -17,18 +17,18 @@ import {
   DialogHeader,
   DialogTitle,
   useConfirm,
-} from '@/components/ui/dialog'
+} from '@cashflow/ui'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
+import { Input } from '@cashflow/ui'
+import { Label } from '@cashflow/ui'
+import { Textarea } from '@cashflow/ui'
 import {
   NativeSelect,
   NativeSelectOption,
-} from '@/components/ui/native-select'
+} from '@cashflow/ui'
 import { PageHeader } from '@/components/ui/page-header'
-import { Skeleton, SkeletonRow } from '@/components/ui/skeleton'
-import { Card } from '@/components/ui/card'
+import { Skeleton, SkeletonRow } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
 import {
   Table,
   TableBody,
@@ -36,7 +36,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
 import { buildCsv, downloadCsv } from '../lib/csv'

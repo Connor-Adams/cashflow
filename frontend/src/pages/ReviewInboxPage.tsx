@@ -11,22 +11,22 @@ import {
 } from 'lucide-react'
 import type { ImportConfidenceFlagToken } from '@cashflow/shared'
 import { IMPORT_CONFIDENCE_FLAG_TOKENS } from '@cashflow/shared'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyTableRow } from '@/components/ui/empty-state'
+import { Badge } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { EmptyTableRow } from '@cashflow/ui'
 import { EnrichmentSignalsDialog } from '@/components/EnrichmentSignalsDialog'
-import { Alert } from '@/components/ui/alert'
-import { Grid } from '@/components/ui/grid'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { Alert } from '@cashflow/ui'
+import { Grid } from '@cashflow/ui'
+import { Input } from '@cashflow/ui'
+import { Label } from '@cashflow/ui'
 import {
   NativeSelect,
   NativeSelectOption,
-} from '@/components/ui/native-select'
+} from '@cashflow/ui'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
-import { SkeletonRow } from '@/components/ui/skeleton'
+import { SkeletonRow } from '@cashflow/ui'
 import { StatCard } from '@/components/ui/stat-card'
 import {
   Table,
@@ -35,7 +35,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { TxnMerchantCell, TxnMerchantName } from '@/components/ui/txn-merchant-cell'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'

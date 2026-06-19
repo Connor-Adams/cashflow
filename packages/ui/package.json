@@ -1,0 +1,60 @@
+{
+  "name": "@cashflow/ui",
+  "version": "0.0.0",
+  "type": "module",
+  "license": "UNLICENSED",
+  "sideEffects": [
+    "*.css"
+  ],
+  "files": [
+    "dist",
+    "src/styles/preset.css",
+    "src/styles/theme.css",
+    "src/styles/tokens.css",
+    "src/styles/utilities.css"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./styles.css": "./dist/cashflow-ui.css",
+    "./theme.css": "./src/styles/preset.css"
+  },
+  "scripts": {
+    "build": "yarn build:js && yarn build:css",
+    "build:js": "tsup",
+    "build:css": "tailwindcss -i ./src/styles/build.css -o ./dist/cashflow-ui.css --minify",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "yarn build"
+  },
+  "dependencies": {
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.6.0"
+  },
+  "peerDependencies": {
+    "@radix-ui/react-slot": "^1.2.4",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@radix-ui/react-slot": "^1.2.4",
+    "@tailwindcss/cli": "^4.2.4",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "jsdom": "^26.1.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "tailwindcss": "^4.2.4",
+    "tsup": "^8.3.5",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

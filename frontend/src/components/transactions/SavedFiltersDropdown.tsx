@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bookmark, ChevronDown } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import {
   Dialog,
   DialogBody,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label as FieldLabel } from '@/components/ui/label'
+} from '@cashflow/ui'
+import { Input } from '@cashflow/ui'
+import { Label as FieldLabel } from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { getJson, patchJson, postJson } from '../../lib/api'
 

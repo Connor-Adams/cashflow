@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle2, Info, OctagonAlert } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import { DigestCard } from './DigestCard'
 import type { Notification, NotificationSeverity } from '@/types/api'
 

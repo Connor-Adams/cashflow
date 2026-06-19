@@ -20,10 +20,10 @@ import {
   TableHead,
   TableRow,
   TableCell,
-} from '@/components/ui/table'
-import { Button } from '@/components/ui/button'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Skeleton, SkeletonRow } from '@/components/ui/skeleton'
+} from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
+import { EmptyState } from '@cashflow/ui'
+import { Skeleton, SkeletonRow } from '@cashflow/ui'
 import { Link } from 'react-router-dom'
 import { formatMoney } from '@/lib/formatMoney'
 import {

@@ -1,5 +1,5 @@
-import { Button } from '@/components/ui/button'
-import { NativeSelect } from '@/components/ui/native-select'
+import { Button } from '@cashflow/ui'
+import { NativeSelect } from '@cashflow/ui'
 import type { LifestyleScope } from '../../types/api'
 import { WINDOW_OPTIONS, type ScopeOption } from './reportFilters'
 

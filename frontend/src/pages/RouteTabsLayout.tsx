@@ -1,5 +1,5 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Tabs, type TabItem } from '@/components/ui/tabs'
+import { Tabs, type TabItem } from '@cashflow/ui'
 
 export type RouteTab = { value: string; label: string; path: string }
 

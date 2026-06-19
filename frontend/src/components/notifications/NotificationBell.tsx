@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bell } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import { useNotifications } from '@/hooks/useNotifications'
 import { NotificationPanel } from './NotificationPanel'
 

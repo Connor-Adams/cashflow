@@ -9,8 +9,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
 import { getJson } from '../../lib/api'
 import { getAppConfig } from '../../lib/appConfig'
 import { formatMoney } from '../../lib/formatMoney'

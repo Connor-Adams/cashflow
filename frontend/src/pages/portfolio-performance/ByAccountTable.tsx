@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Card } from '@/components/ui/card'
+import { Card } from '@cashflow/ui'
 import type { PortfolioPerformanceByAccount } from '../../types/api'
 import { formatMoney } from '../../lib/formatMoney'
 

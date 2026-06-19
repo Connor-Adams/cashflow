@@ -6,8 +6,8 @@ import {
   DialogBody,
   DialogFooter,
   useConfirm,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
+} from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { postJson } from '@/lib/api'
 

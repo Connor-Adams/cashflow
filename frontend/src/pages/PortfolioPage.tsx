@@ -13,16 +13,16 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyTableRow } from '@/components/ui/empty-state'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { EmptyTableRow } from '@cashflow/ui'
 import { PageHeader } from '@/components/ui/page-header'
 import { SecurityLogo } from '@/components/ui/security-logo'
 import { Sparkline } from '@/components/ui/sparkline'
 import { MetricStat } from '@/components/ui/metric-stat'
 import { PctDeltaCell } from '@/components/ui/pct-delta-cell'
 import { StatCard } from '@/components/ui/stat-card'
-import { Skeleton, SkeletonRow } from '@/components/ui/skeleton'
+import { Skeleton, SkeletonRow } from '@cashflow/ui'
 import { TableCard, type TableColumn } from '@/components/ui/table-card'
 import {
   TableBody,
@@ -30,9 +30,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@cashflow/ui'
 import { SectionHeader } from '@/components/ui/section-header'
-import { TabPanel, Tabs, type TabItem } from '@/components/ui/tabs'
+import { TabPanel, Tabs, type TabItem } from '@cashflow/ui'
 import { AllocationDonut } from '@/components/ui/allocation-donut'
 import { AccountTypePanel } from './portfolio-account-type/AccountTypePanel'
 import { ForwardIncomePanel } from './portfolio-forward-income/ForwardIncomePanel'

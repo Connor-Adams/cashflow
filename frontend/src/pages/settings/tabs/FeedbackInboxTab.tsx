@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyState } from '@/components/ui/empty-state'
+import { Badge } from '@cashflow/ui'
+import { Button } from '@cashflow/ui'
+import { Card } from '@cashflow/ui'
+import { EmptyState } from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { getJson, postJson } from '../../../lib/api'
 

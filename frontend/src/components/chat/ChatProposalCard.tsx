@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Button } from '@cashflow/ui'
+import { Badge } from '@cashflow/ui'
 import type { ChatProposal, ChatProposalKind, ChatProposalStatus } from '@cashflow/shared'
 
 type Props = {

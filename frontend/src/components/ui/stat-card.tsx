@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
-import { Card } from './card'
+import { Card } from '@cashflow/ui'
 import {
   DELTA_SIGN_STYLE,
   parseDeltaSign,

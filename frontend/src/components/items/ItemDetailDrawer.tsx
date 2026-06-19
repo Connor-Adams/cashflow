@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@cashflow/ui'
 import { patchJson } from '@/lib/api'
 import { useItemAllocation } from '@/hooks/useItems'
 import { formatMoney } from '../../lib/formatMoney'
