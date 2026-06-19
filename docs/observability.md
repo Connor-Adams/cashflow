@@ -409,7 +409,9 @@ exceeds 2% of total requests over a 5-minute window, sustained for ≥5m.
 
 **Remediation:**
 1. Check backend logs for unhandled exceptions or database connectivity errors.
-2. Review the API health dashboard route breakdown for which endpoints are failing.
+2. Open the **5xx Error Budget** stat on the API Health dashboard to see how far
+   over the 2% budget you are, and the **Request Rate by Route and Status** panel
+   for which endpoints are failing.
 3. Check downstream dependencies (database, external APIs) for outages.
 4. Recovery: 5xx rate drops below 2%.
 
@@ -423,7 +425,8 @@ under normal load is ~150ms; the 1000ms threshold gives 6x headroom and
 catches sustained degradation without alerting on transient spikes.
 
 **Remediation:**
-1. Check the route breakdown panel in the API health dashboard for slow endpoints.
+1. Open the **Route Latency p99** panel on the API Health dashboard (the 1000ms
+   alert threshold is drawn on it) to see which routes are over budget.
 2. Look for slow database queries or missing indexes.
 3. Check for external API timeouts or memory pressure causing GC pauses.
 4. Recovery: p99 latency drops below 1000ms.
