@@ -916,7 +916,6 @@ __metadata:
     class-variance-authority: "npm:^0.7.1"
     clsx: "npm:^2.1.1"
     jsdom: "npm:^26.1.0"
-    lucide-react: "npm:^1.14.0"
     react: "npm:^19.2.4"
     react-dom: "npm:^19.2.4"
     tailwind-merge: "npm:^3.6.0"
@@ -926,7 +925,6 @@ __metadata:
     vitest: "npm:^3.2.4"
   peerDependencies:
     "@radix-ui/react-slot": ^1.2.4
-    lucide-react: ^1.14.0
     react: ^19.2.4
     react-dom: ^19.2.4
   languageName: unknown
@@ -8207,7 +8205,6 @@ __metadata:
     "@types/react-dom": "npm:^19.2.3"
     "@vitejs/plugin-react": "npm:^6.0.1"
     "@vitest/coverage-v8": "npm:^3.2.4"
-    class-variance-authority: "npm:^0.7.1"
     clsx: "npm:^2.1.1"
     eslint: "npm:^9.39.4"
     eslint-plugin-react-hooks: "npm:^7.0.1"

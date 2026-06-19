@@ -28,12 +28,19 @@ jobs:
       - name: Install
         run: yarn install --immutable
 
-      - name: Archive node_modules
+      - name: Build @cashflow/ui
+        # The frontend imports @cashflow/ui, which resolves to its built dist/.
+        # dist/ is gitignored, so build it here and ship it in the artifact that
+        # the frontend-build / frontend-test / code-audit jobs extract.
+        run: yarn workspace @cashflow/ui run build
+
+      - name: Archive node_modules + @cashflow/ui dist
         run: |
           paths=(node_modules)
-          for ws in backend frontend shared; do
+          for ws in backend frontend shared packages/ui; do
             [ -d "$ws/node_modules" ] && paths+=("$ws/node_modules")
           done
+          [ -d packages/ui/dist ] && paths+=(packages/ui/dist)
           tar -cf node_modules.tar "${paths[@]}"
 
       - name: Upload node_modules artifact
