@@ -1,0 +1,75 @@
+# Cashflow alert → GitHub issue routing (issue #386).
+#
+# This provisions the LAST mile of the observability pipeline: when one of the
+# rules in observability-stack.yaml fires, Grafana POSTs a webhook to GitHub's
+# repository_dispatch API. The .github/workflows/grafana-alert-to-issue.yml
+# workflow listens for that dispatch and turns the alert into a `bug`/`incident`
+# issue (creating, commenting on, or closing it via the `alert:<rule-uid>` label
+# — see scripts/grafana-alert-to-issue.cjs).
+#
+# This replaces the old "Notification routing (future work)" gap: the alert IS
+# the ticket now, not a row in the Grafana UI that ages out.
+#
+# Why a webhook to repository_dispatch (not gh issue create directly): Grafana
+# cannot run `gh`, and keeping issue create/dedup/close logic in a tested Node
+# script (scripts/grafana-alert-to-issue.cjs) beats templating it into YAML.
+#
+# Secret required (set in the Grafana service env, NOT committed):
+#   GITHUB_DISPATCH_TOKEN — a fine-scoped PAT with `contents: read` +
+#   repository_dispatch write on Connor-Adams/cashflow. Referenced below as
+#   $GITHUB_DISPATCH_TOKEN; Grafana expands env vars in provisioning values.
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: github-issues
+    receivers:
+      - uid: cashflow-github-dispatch
+        type: webhook
+        settings:
+          url: https://api.github.com/repos/Connor-Adams/cashflow/dispatches
+          httpMethod: POST
+          # GitHub's dispatch API authenticates with a bearer PAT.
+          authorization_scheme: Bearer
+          authorization_credentials: $GITHUB_DISPATCH_TOKEN
+          # GitHub requires this Accept header on the dispatch endpoint.
+          # (Grafana sends application/json by default; the extra header is set
+          #  via the payload template's transport below.)
+          #
+          # Emit GitHub's exact { event_type, client_payload } body. The
+          # client_payload is the Alertmanager-shaped alert group so that
+          # scripts/grafana-alert-to-issue.cjs#normalizeAlerts can parse it:
+          # status + alerts[].{status,labels,annotations,generatorURL,startsAt}.
+          payload:
+            template: |
+              {
+                "event_type": "grafana-alert",
+                "client_payload": {
+                  "status": "{{ .Status }}",
+                  "alerts": [
+                    {{ range $i, $a := .Alerts }}{{ if $i }},{{ end }}{
+                      "status": "{{ $a.Status }}",
+                      "labels": { {{ range $k, $v := $a.Labels }}"{{ $k }}": "{{ $v }}",{{ end }}"__alert_rule_uid__": "{{ $a.Labels.__alert_rule_uid__ }}" },
+                      "annotations": {
+                        "summary": "{{ $a.Annotations.summary }}",
+                        "description": "{{ $a.Annotations.description }}",
+                        "runbook_url": "{{ $a.Annotations.runbook_url }}"
+                      },
+                      "generatorURL": "{{ $a.GeneratorURL }}",
+                      "startsAt": "{{ $a.StartsAt }}",
+                      "endsAt": "{{ $a.EndsAt }}"
+                    }{{ end }}
+                  ]
+                }
+              }
+
+# Route every alert in the Cashflow folder to the github-issues contact point.
+# group_by alertname keeps one notification per rule so the dedup label
+# (alert:<rule-uid>) maps cleanly to one open issue.
+policies:
+  - orgId: 1
+    receiver: github-issues
+    group_by: [alertname]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h

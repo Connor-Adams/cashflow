@@ -29,6 +29,11 @@ export const INSIGHT_STATUSES: readonly InsightStatus[] = [
  *
  * Future AI review (#210) reuses this table via `type: 'ai_review'` (not
  * implemented in this PR) — keep the column wide enough to absorb new values.
+ *
+ * The money-leak `type` values below carry dismissed-leak Observations (#639):
+ * a dismissed MoneyLeak is an Insight with status='dismissed',
+ * entityType='money_leak', and fingerprint=`${leakType}|${identityKey}`. They
+ * fold the retired `money_leak_dismissals` table onto the Observation primitive.
  */
 export type InsightType =
   | 'duplicate_transactions'
@@ -37,7 +42,11 @@ export type InsightType =
   | 'subscription_price_increase'
   | 'missing_receipt'
   | 'unusual_category_spend'
-  | 'settlement_imbalance';
+  | 'settlement_imbalance'
+  | 'small_subscription'
+  | 'recurring_fee'
+  | 'duplicate_service'
+  | 'delivery_fee_high';
 
 export class Insight extends Model<
   InferAttributes<Insight>,

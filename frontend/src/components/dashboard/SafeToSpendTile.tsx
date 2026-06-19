@@ -236,7 +236,7 @@ function SurplusActions({
           className={
             onGradient
               ? 'text-2xl font-semibold tabular-nums text-white'
-              : 'text-2xl font-semibold tabular-nums text-emerald-600'
+              : 'text-2xl font-semibold tabular-nums text-success'
           }
         >
           {formatMoney(surplus.amount, currency)} surplus

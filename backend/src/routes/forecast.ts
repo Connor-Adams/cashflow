@@ -1,27 +1,13 @@
 import { Router, type Request } from 'express';
-import { Op, type WhereOptions } from 'sequelize';
-import { PlannedEvent } from '../models/PlannedEvent';
-import { Account, Transaction } from '../models';
+import { Account } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
 import { resolveHouseholdToday, type HasTimezone } from '../time/householdToday';
-import { balanceAtDate } from '../networth/balanceAtDate';
-import { expandRecurrence } from '../forecast/expandRecurrence';
-import {
-  gatherPlannedOccurrences,
-  pickCurrencyByLargestAbsBalance,
-} from '../forecast/gatherOccurrences';
 import {
   buildForecast,
   type ForecastOccurrence,
 } from '../forecast/buildForecast';
-import {
-  detectRecurringIncome,
-  type IncomeInputTxn,
-} from '../forecast/detectIncome';
-import { detectRecurring, type RecurringInputTxn } from './recurring';
-import { num } from '../util/numbers';
-import { classifyPositiveFlow } from '../summary/classifyTransactionFlow';
+import { assembleForecast } from '../forecast/assembleForecast';
 import { computeSafeToSpend, computeSurplus } from '../cashflow/safeToSpend';
 
 const router = Router();
@@ -40,11 +26,6 @@ const MAX_FORECAST_DAYS = 365;
 // money available to spend, not paper net worth.
 const FORECAST_EXCLUDED_TYPES = new Set(['investment']);
 
-// Recurring detector tuning for forecast use. We only project txns that
-// looked recurring over the last 180 days (the detector default) with at
-// least three occurrences. Anything weaker is too noisy to project forward.
-const RECURRING_LOOKBACK_DAYS = 180;
-const RECURRING_MIN_OCCURRENCES = 3;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** Forecast-window origin: "today" in the household's zone (not UTC). */
@@ -87,30 +68,6 @@ function parseRange(req: Request): { dateFrom: string; dateTo: string } | { erro
     return { error: `dateTo cannot be more than ${MAX_FORECAST_DAYS} days after dateFrom` };
   }
   return { dateFrom, dateTo };
-}
-
-/**
- * Map PlannedEventType → forecast direction. Income flows in; expense and
- * debt_payment flow out; transfer and settlement net out at the household
- * level (zero net cash impact unless one side is a real outflow, which we
- * surface via the underlying expense/income row instead); savings is a
- * household-level outflow (cash leaves the cashflow accounts and lands in
- * an investment / parked account).
- */
-function directionOfPlannedEvent(
-  type: PlannedEvent['type'],
-): ForecastOccurrence['direction'] {
-  switch (type) {
-    case 'income':
-      return 'in';
-    case 'expense':
-    case 'debt_payment':
-    case 'savings':
-      return 'out';
-    case 'transfer':
-    case 'settlement':
-      return 'neutral';
-  }
 }
 
 type SerializedOccurrence = {
@@ -193,263 +150,45 @@ router.get('/', async (req, res, next) => {
       currencyFilter = raw;
     }
 
-    // ----- 1. Resolve in-scope accounts ----------------------------------
-    const accountWhere: WhereOptions = { ...householdWhere(req) };
+    // ----- 1. Validate accountId scope before assembling -----------------
+    // The shared assembler resolves eligible accounts itself, but the route
+    // contract is to 404 when a specific accountId resolves to nothing
+    // eligible. Do that check up front against the same eligibility rules.
     if (accountIdFilter !== null) {
-      (accountWhere as Record<string, unknown>).id = accountIdFilter;
-    }
-    const allAccounts = await Account.findAll({ where: accountWhere });
-
-    const eligible = allAccounts.filter((a) => {
-      if (FORECAST_EXCLUDED_TYPES.has(a.accountType)) return false;
-      // Closed accounts can't contribute to a future-looking forecast.
-      if (a.closedAt && a.closedAt <= dateFrom) return false;
-      return true;
-    });
-
-    if (accountIdFilter !== null && eligible.length === 0) {
-      res.status(404).json({ error: 'Account not found or not eligible for forecast' });
-      return;
-    }
-
-    // ----- 2. Pick the forecast currency ---------------------------------
-    // If caller didn't specify, use the currency of the largest balance
-    // among eligible accounts (computed in step 3). For now stage default
-    // to CAD; we'll recompute below if no override was given.
-    let forecastCurrency = currencyFilter ?? 'CAD';
-
-    // ----- 3. Compute opening balance per currency across eligible accounts
-    // We compute balances per-currency for each account (an account may hold
-    // multiple currencies) then sum them, picking the requested currency.
-    type CurrencyBalanceSum = Map<string, number>;
-    const summed: CurrencyBalanceSum = new Map();
-    for (const acc of eligible) {
-      const balances = await balanceAtDate(acc, dateFrom);
-      for (const { currency, amount } of balances) {
-        summed.set(currency, (summed.get(currency) ?? 0) + amount);
+      const scoped = await Account.findAll({
+        where: { ...householdWhere(req), id: accountIdFilter },
+      });
+      const eligible = scoped.filter((a) => {
+        if (FORECAST_EXCLUDED_TYPES.has(a.accountType)) return false;
+        if (a.closedAt && a.closedAt <= dateFrom) return false;
+        return true;
+      });
+      if (eligible.length === 0) {
+        res
+          .status(404)
+          .json({ error: 'Account not found or not eligible for forecast' });
+        return;
       }
     }
 
-    if (currencyFilter === null) {
-      // Pick the currency with the largest absolute balance (most cash on
-      // hand). Tie-breaker: prefer CAD when present. Shared tiebreak (#404).
-      const picked = pickCurrencyByLargestAbsBalance(summed);
-      if (picked) forecastCurrency = picked;
-    }
-
-    const openingBalance = summed.get(forecastCurrency) ?? 0;
-
-    // ----- 4. Gather PlannedEvent occurrences in the window --------------
-    // Shared occurrence pipeline (#404): the currency-matched
-    // `planned`+`subscription` query, subscription-RRULE synthesis, and
-    // expandRecurrence loop all live in one place (forecast/gatherOccurrences)
-    // so safe-to-spend derives from the exact same derivation. The forecast
-    // route layers direction/sourceName onto each occurrence below; recurring
-    // DETECTION (step 5) stays forecast-only.
-    const plannedOccurrences = await gatherPlannedOccurrences({
+    // ----- 2. Assemble the forecast (shared with goals #653) -------------
+    // The occurrence-gathering + opening-balance + recurring-detection
+    // pipeline lives in forecast/assembleForecast so the goals projection can
+    // derive forecasted free cash from the exact same series.
+    const assembled = await assembleForecast({
       householdId: currentAuth(req).household.id,
-      currency: forecastCurrency,
-      from: dateFrom,
-      to: dateTo,
+      dateFrom,
+      dateTo,
+      currency: currencyFilter,
       accountId: accountIdFilter,
+      includeRecurring,
     });
+    const forecastCurrency = assembled.currency;
+    const allOccurrences = assembled.occurrences;
 
-    // Distinct planned rows that surfaced in this window — used to dedupe the
-    // recurring detector (step 5) against events the user already planned.
-    const plannedRows = [
-      ...new Map(plannedOccurrences.map((o) => [o.row.id, o.row])).values(),
-    ];
-
-    const allOccurrences: ForecastOccurrence[] = [];
-    for (const { date, row } of plannedOccurrences) {
-      const amount = Number(row.amount);
-      if (!Number.isFinite(amount)) continue;
-      allOccurrences.push({
-        date,
-        amount,
-        direction: directionOfPlannedEvent(row.type),
-        sourceType: 'planned_event',
-        sourceId: row.id,
-        sourceName: row.name,
-        accountId: row.accountId,
-      });
-    }
-
-    // ----- 5. Optionally include detected recurring charges --------------
-    // These come from the existing recurring detector — merchants that
-    // historically charge weekly/monthly. We project each future occurrence
-    // inside the window as an expense (negative direction). We dedupe
-    // against PlannedEvent rows so a user who has already created a
-    // planned event for "Netflix" doesn't get a duplicate from the detector.
-    if (includeRecurring) {
-      const txnSince = addDaysIso(dateFrom, -RECURRING_LOOKBACK_DAYS);
-      const txnWhere: WhereOptions = {
-        ...householdWhere(req),
-        date: { [Op.gte]: txnSince, [Op.lt]: dateFrom },
-        currency: forecastCurrency,
-      };
-      if (accountIdFilter !== null) {
-        (txnWhere as Record<string, unknown>).accountId = accountIdFilter;
-      }
-      const txnRows = await Transaction.findAll({
-        where: txnWhere,
-        attributes: [
-          'date',
-          'currency',
-          'amount',
-          'merchantRaw',
-          'merchantClean',
-          'finalCategory',
-          'txnType',
-        ],
-        raw: true,
-      });
-
-      type RawTxnRow = {
-        date: string;
-        currency: string;
-        amount: unknown;
-        merchantRaw: string | null;
-        merchantClean: string | null;
-        finalCategory: string | null;
-        txnType: string | null;
-      };
-
-      const candidates: RecurringInputTxn[] = [];
-      for (const row of txnRows as unknown as RawTxnRow[]) {
-        const amount = num(row.amount);
-        if (amount == null) continue;
-        if (amount >= 0) continue; // charges only — same as /api/recurring
-        if (
-          classifyPositiveFlow({
-            merchantRaw: row.merchantRaw,
-            merchantClean: row.merchantClean,
-            category: row.finalCategory,
-          }) === 'payment'
-        ) {
-          continue;
-        }
-        const merchant =
-          (row.merchantClean ?? '').trim() || (row.merchantRaw ?? '').trim();
-        if (!merchant) continue;
-        candidates.push({
-          merchant,
-          amount,
-          currency: row.currency,
-          date: row.date,
-          category: row.finalCategory,
-        });
-      }
-
-      const recurringItems = detectRecurring(candidates, {
-        minOccurrences: RECURRING_MIN_OCCURRENCES,
-      });
-
-      // Dedupe set of planned-event names (lowercased) so we skip detector
-      // hits that the user has already manually planned in this window.
-      const plannedNameKeys = new Set(
-        plannedRows.map((r) => r.name.trim().toLowerCase()),
-      );
-
-      // For each detected item, project occurrences forward using its
-      // cadence and avgAmount. The detector emits `nextExpected` and a
-      // `cadence` ('monthly'|'weekly') — expand on a true calendar schedule
-      // (like the income path below): fixed 30-day steps drift across month
-      // boundaries and add a spurious extra charge when the window length is
-      // a multiple of 30 (e.g. a 90-day window saw 4 "monthly" charges).
-      let recurringIdCounter = 1;
-      for (const item of recurringItems) {
-        if (plannedNameKeys.has(item.merchant.trim().toLowerCase())) continue;
-        const rule = item.cadence === 'weekly' ? 'FREQ=WEEKLY' : 'FREQ=MONTHLY';
-        const id = recurringIdCounter++;
-        const occs = expandRecurrence(
-          {
-            id,
-            expectedDate: item.nextExpected,
-            recurrenceRule: rule,
-            status: 'planned',
-          },
-          dateFrom,
-          dateTo,
-        );
-        for (const occ of occs) {
-          allOccurrences.push({
-            date: occ.date,
-            amount: item.avgAmount,
-            direction: 'out',
-            sourceType: 'recurring_detection',
-            sourceId: id,
-            sourceName: item.merchant,
-            accountId: null,
-          });
-        }
-      }
-
-      // ----- 5b. Detect & project recurring INCOME ----------------------
-      // The detector above only projects charges (money out). Income is
-      // identified by an explicit txn_type='income' or a direct-deposit /
-      // payroll description — NOT by merchant-blind recurrence, because real
-      // payroll is often tagged like an internal transfer and we must not
-      // count self-transfers as new money. Detected streams are projected
-      // forward at their cadence and deduped against any income planned event
-      // the user has already created.
-      const incomeCandidates: IncomeInputTxn[] = [];
-      for (const row of txnRows as unknown as RawTxnRow[]) {
-        const inflow = num(row.amount);
-        if (inflow == null || inflow <= 0) continue;
-        const merchant =
-          (row.merchantClean ?? '').trim() || (row.merchantRaw ?? '').trim();
-        incomeCandidates.push({
-          merchant: merchant || null,
-          txnType: row.txnType ?? null,
-          amount: inflow,
-          currency: row.currency,
-          date: row.date,
-        });
-      }
-
-      const incomePlannedKeys = new Set(
-        plannedRows
-          .filter((r) => r.type === 'income')
-          .map((r) => r.name.trim().toLowerCase()),
-      );
-
-      for (const item of detectRecurringIncome(incomeCandidates)) {
-        if (incomePlannedKeys.has(item.source.trim().toLowerCase())) continue;
-        const rule =
-          item.cadence === 'weekly'
-            ? 'FREQ=WEEKLY'
-            : item.cadence === 'biweekly'
-              ? 'FREQ=WEEKLY;INTERVAL=2'
-              : 'FREQ=MONTHLY';
-        const id = recurringIdCounter++;
-        const occs = expandRecurrence(
-          {
-            id,
-            expectedDate: item.nextExpected,
-            recurrenceRule: rule,
-            status: 'planned',
-          },
-          dateFrom,
-          dateTo,
-        );
-        for (const occ of occs) {
-          allOccurrences.push({
-            date: occ.date,
-            amount: item.avgAmount,
-            direction: 'in',
-            sourceType: 'recurring_detection',
-            sourceId: id,
-            sourceName: item.source,
-            accountId: null,
-          });
-        }
-      }
-    }
-
-    // ----- 6. Build the forecast -----------------------------------------
+    // ----- 3. Build the forecast -----------------------------------------
     const result = buildForecast({
-      openingBalance,
+      openingBalance: assembled.openingBalance,
       occurrences: allOccurrences,
       dateFrom,
       dateTo,

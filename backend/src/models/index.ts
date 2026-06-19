@@ -79,10 +79,6 @@ import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
 import { CfoBriefing, initCfoBriefing } from './CfoBriefing';
-import {
-  MoneyLeakDismissal,
-  initMoneyLeakDismissal,
-} from './MoneyLeakDismissal';
 import { TaxReserveSetting, initTaxReserveSetting } from './TaxReserveSetting';
 import {
   MonthlyClosePeriod,
@@ -188,7 +184,6 @@ initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
 initAiReviewRun(sequelize);
 initCfoBriefing(sequelize);
-initMoneyLeakDismissal(sequelize);
 initTaxReserveSetting(sequelize);
 initMonthlyClosePeriod(sequelize);
 initMonthlyCloseTask(sequelize);
@@ -612,25 +607,6 @@ Account.hasMany(FinancialGoal, {
 FinancialGoal.belongsTo(Account, {
   foreignKey: 'linked_account_id',
   as: 'linkedAccount',
-});
-
-Household.hasMany(MoneyLeakDismissal, {
-  foreignKey: 'household_id',
-  as: 'moneyLeakDismissals',
-  onDelete: 'CASCADE',
-  hooks: true,
-});
-MoneyLeakDismissal.belongsTo(Household, {
-  foreignKey: 'household_id',
-  as: 'household',
-});
-User.hasMany(MoneyLeakDismissal, {
-  foreignKey: 'dismissed_by_user_id',
-  as: 'moneyLeakDismissals',
-});
-MoneyLeakDismissal.belongsTo(User, {
-  foreignKey: 'dismissed_by_user_id',
-  as: 'dismissedByUser',
 });
 
 Household.hasMany(AiReviewRun, {
@@ -1125,9 +1101,6 @@ export {
   FinancialGoal,
   AiReviewRun,
   CfoBriefing,
-  // Model registry barrel: re-exported for API symmetry though current consumers import from the model file directly.
-  // fallow-ignore-next-line unused-export
-  MoneyLeakDismissal,
   TaxReserveSetting,
   MonthlyClosePeriod,
   MonthlyCloseTask,
