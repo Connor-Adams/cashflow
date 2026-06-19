@@ -24,7 +24,10 @@ import { RulesHealthSection } from '../components/RulesHealthSection'
 import { ImportRulesModal } from '../components/rules/ImportRulesModal'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import { useUrlSort } from '../hooks/useUrlSort'
-import type { Rule } from '../types/api'
+import { useLabels } from '../lib/useLabels'
+import type { Rule, RuleAction } from '../types/api'
+
+type AlertSeverity = 'info' | 'warn' | 'critical'
 
 const RULES_SORT_FIELDS = ['name', 'matchType', 'priority', 'updatedAt'] as const
 
@@ -93,6 +96,19 @@ export function RulesPage() {
   const [newPctPartner, setNewPctPartner] = useState('')
   const [shareError, setShareError] = useState<string | null>(null)
   const [patternError, setPatternError] = useState<string | null>(null)
+  // Issue #795 — composable action rows on the create form.
+  const { labels, loading: labelsLoading } = useLabels()
+  const [newLabelIds, setNewLabelIds] = useState<number[]>([])
+  const [alertEnabled, setAlertEnabled] = useState(false)
+  const [alertSeverity, setAlertSeverity] = useState<AlertSeverity>('info')
+  const [alertTitle, setAlertTitle] = useState('')
+  const [alertBody, setAlertBody] = useState('')
+  // A set_label row referencing a label that no longer exists must block save
+  // and surface a warning (AC #9, editor side).
+  const danglingLabelIds = useMemo(
+    () => newLabelIds.filter((id) => !labels.some((l) => l.id === id)),
+    [newLabelIds, labels],
+  )
   const [previewState, setPreviewState] = useState<
     null | 'counting' | { matches: number } | { error: string }
   >(null)
@@ -224,6 +240,10 @@ export function RulesPage() {
     const fd = new FormData(form)
     if (!validateShares(newPctMe, newPctPartner, newSplitType)) return
     if (patternError) return
+    if (danglingLabelIds.length > 0) {
+      setErr('Tag no longer exists — remove or pick another before saving.')
+      return
+    }
     setErr(null)
     try {
       // Convert share values from 0–100 (display) to 0–1 (stored).
@@ -231,15 +251,44 @@ export function RulesPage() {
       const pctPartnerRaw = fd.get('pctPartner') ? String(fd.get('pctPartner')) : null
       const pctMe = pctMeRaw ? String(parseFloat(pctMeRaw) / 100) : null
       const pctPartner = pctPartnerRaw ? String(parseFloat(pctPartnerRaw) / 100) : null
+
+      const category = String(fd.get('category') ?? '') || null
+      const isBusiness = fd.get('isBusiness') === 'on'
+      const splitType = String(fd.get('splitType') ?? 'me')
+
+      // Build the composable actions list (issue #795): the scalar-backed
+      // effects plus any set_label / set_alert rows. The backend re-derives
+      // the scalar columns from these, keeping both representations in sync.
+      const actions: RuleAction[] = []
+      if (category) actions.push({ type: 'set_category', payload: { category } })
+      if (isBusiness) actions.push({ type: 'set_business', payload: { isBusiness: true } })
+      if (splitType !== 'me' || pctMe != null || pctPartner != null) {
+        actions.push({ type: 'set_split', payload: { splitType, pctMe, pctPartner } })
+      }
+      for (const labelId of newLabelIds) {
+        actions.push({ type: 'set_label', payload: { labelId } })
+      }
+      if (alertEnabled) {
+        actions.push({
+          type: 'set_alert',
+          payload: {
+            severity: alertSeverity,
+            ...(alertTitle.trim() ? { title: alertTitle.trim() } : {}),
+            ...(alertBody.trim() ? { body: alertBody.trim() } : {}),
+          },
+        })
+      }
+
       await postJson('/api/rules', {
         merchantPattern: String(fd.get('merchantPattern') ?? ''),
         matchKind: String(fd.get('matchKind') ?? 'substring'),
         priority: Number(fd.get('priority') ?? 0),
-        category: String(fd.get('category') ?? '') || null,
-        isBusiness: fd.get('isBusiness') === 'on',
-        splitType: String(fd.get('splitType') ?? 'me'),
+        category,
+        isBusiness,
+        splitType,
         pctMe,
         pctPartner,
+        actions,
       })
       form.reset()
       setRuleCategory('')
@@ -248,6 +297,11 @@ export function RulesPage() {
       setNewSplitType('me')
       setNewPctMe('')
       setNewPctPartner('')
+      setNewLabelIds([])
+      setAlertEnabled(false)
+      setAlertSeverity('info')
+      setAlertTitle('')
+      setAlertBody('')
       setShareError(null)
       setPatternError(null)
       setPreviewState(null)
@@ -528,8 +582,99 @@ export function RulesPage() {
               )}
             </div>
           )}
+
+          {/* Issue #795 — Add tag action rows. */}
+          <div className="col-span-full" data-testid="rule-label-action">
+            <span className="block text-sm font-medium mb-1">Add tag</span>
+            {labelsLoading ? (
+              <span className="text-xs text-muted-foreground">Loading tags…</span>
+            ) : labels.length === 0 ? (
+              <span className="text-xs text-muted-foreground">
+                No tags yet — create one in Settings → Labels.
+              </span>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {labels.map((l) => {
+                  const selected = newLabelIds.includes(l.id)
+                  return (
+                    <button
+                      key={l.id}
+                      type="button"
+                      aria-pressed={selected}
+                      className={
+                        selected
+                          ? 'rounded-full border border-primary bg-primary/10 px-3 py-1 text-xs'
+                          : 'rounded-full border border-input px-3 py-1 text-xs'
+                      }
+                      onClick={() =>
+                        setNewLabelIds((ids) =>
+                          ids.includes(l.id) ? ids.filter((x) => x !== l.id) : [...ids, l.id],
+                        )
+                      }
+                    >
+                      {l.name}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            {danglingLabelIds.length > 0 && (
+              <span className="text-xs text-destructive" role="alert">
+                Tag no longer exists — remove or pick another.
+              </span>
+            )}
+          </div>
+
+          {/* Issue #795 — Raise alert action row. */}
+          <div className="col-span-full" data-testid="rule-alert-action">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={alertEnabled}
+                onChange={(e) => setAlertEnabled(e.target.checked)}
+              />{' '}
+              Raise alert when this rule fires
+            </label>
+            {alertEnabled && (
+              <div className="mt-2 flex flex-col gap-2">
+                <label>
+                  Severity
+                  <select
+                    name="alertSeverity"
+                    value={alertSeverity}
+                    onChange={(e) => setAlertSeverity(e.target.value as AlertSeverity)}
+                  >
+                    <option value="info">info</option>
+                    <option value="warn">warn</option>
+                    <option value="critical">critical</option>
+                  </select>
+                </label>
+                <label>
+                  Title (optional)
+                  <input
+                    name="alertTitle"
+                    type="text"
+                    maxLength={160}
+                    value={alertTitle}
+                    onChange={(e) => setAlertTitle(e.target.value)}
+                    placeholder="Charge from a watched vendor"
+                  />
+                </label>
+                <label>
+                  Message (optional)
+                  <input
+                    name="alertBody"
+                    type="text"
+                    value={alertBody}
+                    onChange={(e) => setAlertBody(e.target.value)}
+                    placeholder="A transaction matched this rule."
+                  />
+                </label>
+              </div>
+            )}
+          </div>
         </div>
-        <Button type="submit" disabled={!isNewFormValid}>Add rule</Button>
+        <Button type="submit" disabled={!isNewFormValid || danglingLabelIds.length > 0}>Add rule</Button>
         </form>
       </Card>
 

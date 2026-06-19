@@ -607,6 +607,18 @@ export type AuthUser = {
   } | null
 }
 
+/**
+ * A rule's composable effect (issue #795). The scalar columns below mirror the
+ * `set_category` / `set_business` / `set_split` actions for backward compat;
+ * `set_label` / `set_alert` live only in the actions list.
+ */
+export type RuleAction =
+  | { type: 'set_category'; payload: { category: string | null } }
+  | { type: 'set_business'; payload: { isBusiness: boolean } }
+  | { type: 'set_split'; payload: { splitType: string; pctMe: string | null; pctPartner: string | null } }
+  | { type: 'set_label'; payload: { labelId: number } }
+  | { type: 'set_alert'; payload: { severity: 'info' | 'warn' | 'critical'; title?: string; body?: string } }
+
 export type Rule = {
   id: number
   merchantPattern: string
@@ -619,6 +631,7 @@ export type Rule = {
   pctPartner: string | null
   effectiveFrom: string | null
   effectiveTo: string | null
+  actions?: RuleAction[]
   usageCount?: number
   updatedAt?: string
 }
