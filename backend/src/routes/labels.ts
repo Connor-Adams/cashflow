@@ -3,7 +3,7 @@ import { fn, col, where as sqWhere, Op } from 'sequelize';
 import { Label, TransactionLabel, sequelize } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
-import { validateLabelName } from '../labels/validate';
+import { validateLabelName, validateLabelColor } from '../labels/validate';
 
 const router = Router();
 
@@ -21,7 +21,7 @@ function lowerNameEq(name: string) {
  * label. Accepts a pre-computed count so the list endpoint can batch.
  */
 function serializeLabel(row: Label, usageCount: number) {
-  return { id: row.id, name: row.name, usageCount };
+  return { id: row.id, name: row.name, color: row.color ?? null, usageCount };
 }
 
 /**
@@ -67,6 +67,11 @@ router.post('/', async (req, res, next) => {
       res.status(400).json({ error: 'INVALID_LABEL_NAME' });
       return;
     }
+    const parsedColor = validateLabelColor(b.color);
+    if (!parsedColor.ok) {
+      res.status(400).json({ error: 'INVALID_COLOR' });
+      return;
+    }
     const existing = await Label.findOne({
       where: { householdId: household.id, [Op.and]: [lowerNameEq(parsed.name)] },
     });
@@ -75,7 +80,11 @@ router.post('/', async (req, res, next) => {
       return;
     }
     try {
-      const row = await Label.create({ householdId: household.id, name: parsed.name });
+      const row = await Label.create({
+        householdId: household.id,
+        name: parsed.name,
+        color: parsedColor.color,
+      });
       res.status(201).json(serializeLabel(row, 0));
     } catch (e) {
       // Race: the functional unique index is the authoritative backstop.
@@ -110,6 +119,19 @@ router.patch('/:id', async (req, res, next) => {
       res.status(400).json({ error: 'INVALID_LABEL_NAME' });
       return;
     }
+    // Color is optional: only validate/apply when the key is present, so a
+    // plain rename leaves the existing color untouched. An invalid color leaves
+    // the label entirely unchanged (validated before any row mutation, AC #3).
+    const colorProvided = Object.prototype.hasOwnProperty.call(b, 'color');
+    let nextColor: string | null = row.color ?? null;
+    if (colorProvided) {
+      const parsedColor = validateLabelColor(b.color);
+      if (!parsedColor.ok) {
+        res.status(400).json({ error: 'INVALID_COLOR' });
+        return;
+      }
+      nextColor = parsedColor.color;
+    }
     const clash = await Label.findOne({
       where: {
         householdId: row.householdId,
@@ -122,6 +144,7 @@ router.patch('/:id', async (req, res, next) => {
       return;
     }
     row.set('name', parsed.name);
+    if (colorProvided) row.set('color', nextColor);
     try {
       await row.save();
     } catch (e) {

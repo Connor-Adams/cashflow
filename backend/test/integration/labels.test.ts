@@ -178,6 +178,92 @@ test('DELETE /api/labels/:id removes the label; 404 for another household', asyn
   assert.equal(forbidden.status, 404);
 });
 
+test('POST /api/labels persists and returns a valid color (#794 AC 2,4)', async () => {
+  const res = await primaryAgent
+    .post('/api/labels')
+    .send({ name: 'colored-label', color: '#3B82F6' });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.color, '#3B82F6');
+
+  // GET includes the color, and pre-existing colorless labels report null (AC 4).
+  const list = await primaryAgent.get('/api/labels');
+  assert.equal(list.status, 200);
+  const colored = list.body.find((r: { name: string }) => r.name === 'colored-label');
+  assert.equal(colored.color, '#3B82F6');
+  const plain = list.body.find((r: { name: string }) => r.name === 'tax-deductible');
+  assert.equal(plain.color, null, 'pre-existing labels backfill to null color');
+});
+
+test('POST /api/labels with an invalid color is 400 INVALID_COLOR and creates nothing (#794 AC 3)', async () => {
+  const res = await primaryAgent
+    .post('/api/labels')
+    .send({ name: 'bad-color-label', color: 'not-a-hex' });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'INVALID_COLOR');
+  const list = await primaryAgent.get('/api/labels');
+  assert.ok(!list.body.map((r: { name: string }) => r.name).includes('bad-color-label'));
+});
+
+test('PATCH /api/labels/:id sets a color and an invalid color leaves the label unchanged (#794 AC 3)', async () => {
+  const created = await primaryAgent.post('/api/labels').send({ name: 'patch-color' });
+  assert.equal(created.status, 201);
+  const id = created.body.id as number;
+
+  const ok = await primaryAgent.patch(`/api/labels/${id}`).send({ name: 'patch-color', color: '#10B981' });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.color, '#10B981');
+
+  const bad = await primaryAgent
+    .patch(`/api/labels/${id}`)
+    .send({ name: 'patch-color', color: '#zzz' });
+  assert.equal(bad.status, 400);
+  assert.equal(bad.body.error, 'INVALID_COLOR');
+
+  // unchanged: still the previously-set color
+  const list = await primaryAgent.get('/api/labels');
+  const row = list.body.find((r: { id: number }) => r.id === id);
+  assert.equal(row.color, '#10B981');
+
+  // explicit null clears the color
+  const cleared = await primaryAgent.patch(`/api/labels/${id}`).send({ name: 'patch-color', color: null });
+  assert.equal(cleared.status, 200);
+  assert.equal(cleared.body.color, null);
+});
+
+test('transaction labels[] entries include color (#794 AC 5)', async () => {
+  const acc = await primaryAgent.post('/api/accounts').send({
+    name: 'Color Txn Account',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+
+  const csv = 'Date,Description,Amount\n2025-07-01,Color Cafe,-4.25\n';
+  const imp = await primaryAgent
+    .post('/api/import/upload')
+    .field('accountId', String(acc.body.id))
+    .field('profileId', 'generic_simple')
+    .field('batchLabel', 'color-batch')
+    .attach('file', Buffer.from(csv, 'utf8'), { filename: 'c.csv', contentType: 'text/csv' });
+  assert.equal(imp.status, 200);
+
+  const list = await primaryAgent.get('/api/transactions?pageSize=25&importBatch=color-batch');
+  const txnId = (list.body.data as { id: number }[])[0].id;
+
+  const label = await primaryAgent.post('/api/labels').send({ name: 'txn-color', color: '#EF4444' });
+  const applied = await primaryAgent
+    .post(`/api/transactions/${txnId}/labels`)
+    .send({ labelIds: [label.body.id] });
+  assert.equal(applied.status, 200);
+
+  // The transaction DTO carries labels[] on the list endpoint rows.
+  const after = await primaryAgent.get('/api/transactions?pageSize=25&importBatch=color-batch');
+  const txn = (after.body.data as { id: number; labels: { id: number; color: string | null }[] }[])
+    .find((t) => t.id === txnId);
+  const ref = txn?.labels.find((l) => l.id === label.body.id);
+  assert.equal(ref?.color, '#EF4444');
+});
+
 test('POST /api/labels/:id/merge-into/:targetId repoints rows then deletes the source (AC #8)', async () => {
   // Set up two labels and a transaction tagged with both source and target,
   // plus a transaction tagged with source only. After merge: source gone, the

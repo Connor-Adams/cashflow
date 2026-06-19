@@ -23,6 +23,11 @@ export class Label extends Model<
   declare id: CreationOptional<number>;
   declare householdId: number;
   declare name: string;
+  /**
+   * Optional per-label chip color (issue #794), a 6-digit hex string
+   * (`#RRGGBB`). `null` means "no color → render the neutral chip".
+   */
+  declare color: CreationOptional<string | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -37,6 +42,7 @@ export function initLabel(sequelize: Sequelize): typeof Label {
         allowNull: false,
       },
       name: { type: DataTypes.STRING(32), allowNull: false },
+      color: { type: DataTypes.STRING(7), allowNull: true },
     } as ModelAttributes<Label>,
     {
       sequelize,

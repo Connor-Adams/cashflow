@@ -311,17 +311,23 @@ export async function itemizedSummaries(
  */
 export async function loadLabelsForTransactions(
   txnIds: number[]
-): Promise<Record<number, Array<{ id: number; name: string }>>> {
+): Promise<Record<number, Array<{ id: number; name: string; color: string | null }>>> {
   if (txnIds.length === 0) return {};
   const rows = (await TransactionLabel.findAll({
     where: { transactionId: { [Op.in]: txnIds } },
-    include: [{ model: Label, as: 'label', attributes: ['id', 'name'] }],
+    include: [{ model: Label, as: 'label', attributes: ['id', 'name', 'color'] }],
     order: [[{ model: Label, as: 'label' }, 'name', 'ASC']],
-  })) as Array<TransactionLabel & { label?: { id: number; name: string } }>;
-  const map: Record<number, Array<{ id: number; name: string }>> = {};
+  })) as Array<
+    TransactionLabel & { label?: { id: number; name: string; color: string | null } }
+  >;
+  const map: Record<number, Array<{ id: number; name: string; color: string | null }>> = {};
   for (const row of rows) {
     if (!row.label) continue;
-    (map[row.transactionId] ??= []).push({ id: row.label.id, name: row.label.name });
+    (map[row.transactionId] ??= []).push({
+      id: row.label.id,
+      name: row.label.name,
+      color: row.label.color ?? null,
+    });
   }
   return map;
 }
