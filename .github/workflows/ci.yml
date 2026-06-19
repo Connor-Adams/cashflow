@@ -253,9 +253,12 @@ jobs:
         run: |
           mkdir -p reports
           # fallow exits non-zero when it finds issues; don't let that (under
-          # bash -e) abort the step before the second command runs.
-          yarn --silent fallow dead-code --format json > reports/fallow-deadcode.json || true
-          yarn --silent fallow health --format json > reports/fallow-health.json || true
+          # bash -e) abort the step before the second command runs. Invoke the
+          # binary directly (not `yarn fallow`) so nothing from the package
+          # manager can leak into the JSON on stdout — Yarn 4 dropped the
+          # `yarn --silent` flag this script used to rely on.
+          ./node_modules/.bin/fallow dead-code --format json > reports/fallow-deadcode.json || true
+          ./node_modules/.bin/fallow health --format json > reports/fallow-health.json || true
 
       - name: Duplicate code (jscpd)
         continue-on-error: true
