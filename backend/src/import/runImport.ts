@@ -70,6 +70,7 @@ export { aiSuggestionToSignal, dedupeColdRowsByMerchantKey } from './enrichment/
 import { logger } from '../observability/logger';
 import { findOrCreateAccount } from './accountLookup';
 import { extractAccountNumber } from './csvProfiles';
+import { applyCreditCardStatementSummary } from '../cards/applyStatementSummary';
 
 /** Max row-level parse diagnostics returned on a single import response */
 export const PARSE_ERRORS_MAX = 50;
@@ -1135,6 +1136,12 @@ export async function resolvePdfAccountFromHeader(
   if (entity && account.entityId !== entity.id) {
     await account.update({ entityId: entity.id });
   }
+
+  // Credit-card statement → calendar auto-fill (#243 follow-up). Runs for both
+  // the bundle path and the async pdfImportProcessor worker, since both resolve
+  // their account through this function. Self-guards on accountType.
+  await applyCreditCardStatementSummary({ account, header, userId, householdId });
+
   return { account, accountCreated, overrideBusiness };
 }
 
