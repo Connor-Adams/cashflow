@@ -31,6 +31,7 @@ import {
 import {
   computeOwedBack,
   realCostOf,
+  computePeerLending,
   type OwedBackRow,
 } from '../summary/periodInsight';
 import { householdWhere, visibleAccountWhere, visibleTransactionWhere } from '../auth/scope';
@@ -207,6 +208,7 @@ type PeriodRow = SummaryTxnRow &
     accountId: number;
     partnerShareAmount: string | null;
     accountType?: string | null;
+    counterpartyContactId: number | null;
   };
 
 /**
@@ -244,6 +246,7 @@ async function loadPeriodRows(
       'reviewFlag',
       'txnType',
       'linkedTransactionId',
+      'counterpartyContactId',
     ],
     raw: true,
   });
@@ -351,6 +354,18 @@ router.get('/period-insight', async (req, res, next) => {
     );
     const owed = computeOwedBack(mainRows, reimbursableByTxn);
 
+    const partnerContacts = await Contact.findAll({
+      where: householdWhere(req),
+      attributes: ['id', 'isPartner'],
+      raw: true,
+    });
+    const partnerContactIds = new Set<number>(
+      (partnerContacts as Array<{ id: number; isPartner: boolean | number }>)
+        .filter((c) => Boolean(c.isPartner))
+        .map((c) => c.id),
+    );
+    const lending = computePeerLending(mainRows, partnerContactIds);
+
     // Assemble per currency — everything period-scoped, read off the one window.
     const byCurrency: PeriodInsightCurrency[] = [];
     for (const [cur, metrics] of agg.metricsByCurrency) {
@@ -361,6 +376,7 @@ router.get('/period-insight', async (req, res, next) => {
         realCost: realCostOf(metrics.netSpend, o.owedBack),
         owedBack: o.owedBack,
         owedBackBreakdown: { reimbursable: o.reimbursable, partnerShare: o.partnerShare },
+        peerLending: lending.get(cur) ?? { lent: 0, received: 0 },
         totalSpend: metrics.totalSpend,
         totalCredits: metrics.totalCredits,
         totalIncome: metrics.totalIncome,
