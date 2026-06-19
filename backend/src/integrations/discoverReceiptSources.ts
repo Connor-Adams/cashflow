@@ -277,11 +277,15 @@ export async function discoverReceiptSources(
 
       const hasCleanExtract = extracted.total != null && extracted.items.length > 0;
       if (!hasCleanExtract && parser === 'ai') {
-        // Nothing usable and no deterministic signal — surface the sender so the
-        // user can decide, but write no order.
+        // Nothing usable and no deterministic signal — surface the sender as a
+        // suggestion so the user can decide, but write no order. Count it toward
+        // the suggestion tally (not failures) so the run summary matches the
+        // suggestion rows actually written.
         r.status = 'no_items';
-        failed++;
+        const before = await suggestionExists(opts.householdId, r.from);
         await upsertSenderSuggestion({ householdId: opts.householdId, fromAddr: r.from, subject: r.subject });
+        if (before) suggestionsUpdated++;
+        else suggestionsAdded++;
         await recordProcessed({ messageId: summary.id, status: 'no_items', parser, subject: r.subject, fromAddr: r.from });
         return r;
       }
