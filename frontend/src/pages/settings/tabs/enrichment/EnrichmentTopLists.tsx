@@ -56,7 +56,7 @@ export function EnrichmentTopLists({ topRules, topMerchants, deadRules }: Props)
             {deadRules.slice(0, MAX_ROWS).map((r) => (
               <div key={r.ruleId} className="flex justify-between text-[0.78rem] py-1">
                 <code className="bg-[color-mix(in_srgb,var(--warning)_18%,transparent)] px-[6px] py-[1px] rounded-[3px]">{r.pattern}</code>
-                <Link to={`/rules?focus=${r.ruleId}`} className="text-[var(--primary)] no-underline hover:underline">View</Link>
+                <Link to={`/rules?focus=${r.ruleId}`} className="text-[var(--primary)] no-underline hover:underline" aria-label={`View dead rule for ${r.pattern}`}>View</Link>
               </div>
             ))}
           </div>
