@@ -139,3 +139,23 @@ describe('PeopleLedgerPage — drill-in', () => {
     expect(await screen.findByRole('button', { name: /mark as loan/i })).toBeInTheDocument();
   });
 });
+
+describe('PeopleLedgerPage — partner exclusion', () => {
+  it('does not list a partner contact but does list a normal contact', async () => {
+    vi.spyOn(api, 'getJson').mockResolvedValue([
+      { id: 1, name: 'Caelan', isSelf: false },
+      { id: 2, name: 'Fairness Partner', isSelf: false, isPartner: true },
+    ] as never);
+
+    const { queryByText } = render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    // Normal contact should appear
+    expect(await screen.findByText('Caelan')).toBeInTheDocument();
+    // Partner contact must NOT appear
+    expect(queryByText('Fairness Partner')).toBeNull();
+  });
+});

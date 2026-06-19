@@ -354,6 +354,19 @@ function PartnerFairnessSection({
         />
       </div>
 
+      {/* Direct transfers — transparency line; only rendered when non-zero.
+          The headline balance already nets these out; this is for visibility. */}
+      {(data.partnerTransfers.in > 0 || data.partnerTransfers.out > 0) && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <StatCard
+            label="Direct transfers"
+            value={`${formatMoney(data.partnerTransfers.in, cur)} in · ${formatMoney(data.partnerTransfers.out, cur)} out`}
+            hint="Direct money transfers between you and your partner in the selected range."
+            tone="neutral"
+          />
+        </div>
+      )}
+
       {/* AC5 — category breakdown of shared spend. */}
       <Card>
         <CardHeader>

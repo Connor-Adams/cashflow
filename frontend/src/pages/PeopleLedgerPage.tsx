@@ -50,6 +50,7 @@ interface ContactLite {
   id: number
   name: string
   isSelf: boolean
+  isPartner: boolean
 }
 
 interface ContactWithLedger {
@@ -100,7 +101,7 @@ function deriveMetrics(cwl: ContactWithLedger[]) {
   let trackedLoansCount = 0
   const seen = new Set<number>()
   for (const { contact, ledger } of cwl) {
-    if (contact.isSelf || !ledger) continue
+    if (contact.isSelf || contact.isPartner || !ledger) continue
     const cadRow =
       ledger.transferNet.find((n) => n.currency === 'CAD') ??
       ledger.transferNet[0]
@@ -252,8 +253,8 @@ export function PeopleLedgerPage() {
       if (isActive()) setContacts(rawContacts)
       if (isActive()) setSelfSuggestions(suggestionsResp.suggestions)
 
-      // Fetch ledgers for all non-self contacts in parallel (small N)
-      const realContacts = rawContacts.filter((c) => !c.isSelf)
+      // Fetch ledgers for all non-self, non-partner contacts in parallel (small N)
+      const realContacts = rawContacts.filter((c) => !c.isSelf && !c.isPartner)
       if (realContacts.length > 0) {
         if (isActive()) setLedgersLoading(true)
         const entries = await Promise.all(
@@ -379,8 +380,8 @@ export function PeopleLedgerPage() {
 
   const ambiguous = linkResult?.ambiguous ?? []
 
-  // Non-self contacts sorted by their primary net desc
-  const realContacts = contacts.filter((c) => !c.isSelf)
+  // Non-self, non-partner contacts sorted by their primary net desc
+  const realContacts = contacts.filter((c) => !c.isSelf && !c.isPartner)
   const sortedContacts = [...realContacts].sort((a, b) => {
     const aLedger = ledgerMap.get(a.id)
     const bLedger = ledgerMap.get(b.id)
