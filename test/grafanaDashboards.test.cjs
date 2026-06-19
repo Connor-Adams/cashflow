@@ -48,6 +48,55 @@ test('api health dashboard shows useful metrics and links to logs and traces', (
   assert.match(serialized, /"uid":"loki"/);
 });
 
+test('api health dashboard has an SLO view matching the app-level alert thresholds', () => {
+  // Issue #417: the HighHttp5xxRate (5xx ratio > 0.02) and HighRouteLatencyP99
+  // (p99 > 1000ms) alerts must be visualizable on the dashboard so the on-call
+  // can see how close we are to the error budget, not just that it tripped.
+  const dashboard = JSON.parse(
+    readFileSync('infra/grafana/provisioning/dashboards/cashflow/api-health.json', 'utf8'),
+  );
+  const panelsByTitle = Object.fromEntries(dashboard.panels.map((p) => [p.title, p]));
+
+  // p99 route-latency panel — the signal HighRouteLatencyP99 fires on.
+  const p99 = panelsByTitle['Route Latency p99'];
+  assert.ok(p99, 'api-health dashboard must have a "Route Latency p99" panel');
+  const p99Exprs = (p99.targets || []).map((t) => t.expr).filter(Boolean);
+  assert.ok(
+    p99Exprs.some((e) => /histogram_quantile\(\s*0\.99/.test(e)),
+    'Route Latency p99 panel must use histogram_quantile(0.99, ...)',
+  );
+  assert.ok(
+    p99Exprs.some((e) => e.includes('cashflow_http_server_duration_milliseconds_bucket')),
+    'Route Latency p99 panel must read the request-duration histogram',
+  );
+  // The 1000ms alert threshold should be drawn on the panel.
+  const p99Steps = p99.fieldConfig?.defaults?.thresholds?.steps || [];
+  assert.ok(
+    p99Steps.some((s) => s.value === 1000),
+    'Route Latency p99 panel must mark the 1000ms alert threshold',
+  );
+
+  // 5xx error-budget stat — the ratio HighHttp5xxRate fires on (> 0.02).
+  const budget = panelsByTitle['5xx Error Budget'];
+  assert.ok(budget, 'api-health dashboard must have a "5xx Error Budget" SLO stat');
+  const budgetExprs = (budget.targets || []).map((t) => t.expr).filter(Boolean);
+  assert.ok(
+    budgetExprs.some(
+      (e) =>
+        e.includes('http_response_status_code=~"5..') &&
+        e.includes('/') &&
+        e.includes('cashflow_http_server_requests_total'),
+    ),
+    'SLO stat must compute the 5xx ratio (5xx rate / total rate)',
+  );
+  assert.equal(budget.fieldConfig?.defaults?.unit, 'percentunit', 'SLO stat must render as a percentage');
+  const budgetSteps = budget.fieldConfig?.defaults?.thresholds?.steps || [];
+  assert.ok(
+    budgetSteps.some((s) => s.value === 0.02),
+    'SLO stat must mark the 2% error-budget threshold',
+  );
+});
+
 test('observability stack dashboard shows telemetry pipeline health', () => {
   const dashboard = JSON.parse(
     readFileSync('infra/grafana/provisioning/dashboards/cashflow/observability-stack.json', 'utf8'),
