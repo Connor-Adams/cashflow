@@ -19,7 +19,6 @@
     "frontend/test/**/*.test.{ts,tsx}",
     "packages/ui/src/index.ts",
     "packages/ui/src/**/*.test.{ts,tsx}",
-    "packages/ui/scripts/**/*.mjs",
     "scripts/**/*.cjs",
     "test/**/*.test.cjs",
     "shared/*.test.ts",
@@ -29,7 +28,8 @@
     "**/dist/**",
     "**/build/**",
     "**/coverage/**",
-    "**/.next/**"
+    "**/.next/**",
+    "packages/ui/src/styles/build.css"
   ],
   "ignoreDependencies": [
     "@aws-sdk/client-s3",
