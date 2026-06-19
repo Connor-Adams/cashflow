@@ -237,6 +237,66 @@ test('buildForecast: dailyPoints balances are rounded to 2 decimals', () => {
   assert.equal(result.projectedClosingBalance, 1);
 });
 
+test('buildForecast: below-zero dip is attributable to its out-occurrences (#652 drilldown contract)', () => {
+  // Guards the data the forecast shortfall drilldown relies on: when the
+  // projection dips below zero, the `out` occurrences dated on-or-before
+  // lowestProjectedBalanceDate are present and carry full source attribution
+  // (sourceType / sourceId / sourceName), so the UI can list and deep-link
+  // the dip drivers from the already-fetched response — no extra fetch.
+  const occurrences: ForecastOccurrence[] = [
+    makeOccurrence({
+      date: '2026-06-02',
+      amount: 1200,
+      direction: 'out',
+      sourceType: 'planned_event',
+      sourceId: 42,
+      sourceName: 'Rent',
+    }),
+    makeOccurrence({
+      date: '2026-06-02',
+      amount: 150,
+      direction: 'out',
+      sourceType: 'recurring_detection',
+      sourceId: 7,
+      sourceName: 'Streaming',
+    }),
+    makeOccurrence({
+      date: '2026-06-04',
+      amount: 5000,
+      direction: 'in',
+      sourceType: 'planned_event',
+      sourceId: 99,
+      sourceName: 'Salary',
+    }),
+  ];
+  const result = buildForecast({
+    openingBalance: 1000,
+    occurrences,
+    dateFrom: '2026-06-01',
+    dateTo: '2026-06-05',
+    currency: 'CAD',
+  });
+
+  // 1000 - 1200 - 150 = -350 on 2026-06-02 (the dip), recovering on 06-04.
+  assert.equal(result.lowestProjectedBalance, -350);
+  assert.equal(result.lowestProjectedBalanceDate, '2026-06-02');
+
+  // The drivers the UI derives: out-occurrences on/before the dip date.
+  const dipDate = result.lowestProjectedBalanceDate;
+  assert.ok(dipDate);
+  const drivers = occurrences.filter(
+    (o) => o.direction === 'out' && o.date <= dipDate,
+  );
+  assert.equal(drivers.length, 2);
+  for (const d of drivers) {
+    assert.ok(d.sourceName.length > 0);
+    assert.ok(['planned_event', 'recurring_detection'].includes(d.sourceType));
+    assert.equal(typeof d.sourceId, 'number');
+  }
+  // The inflow after the dip is not a driver.
+  assert.ok(!drivers.some((d) => d.sourceName === 'Salary'));
+});
+
 test('buildForecast: empty range (dateTo < dateFrom) returns zero-day series', () => {
   const result = buildForecast({
     openingBalance: 100,

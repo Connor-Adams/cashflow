@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Calendar, Edit3, Plus, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -90,6 +90,14 @@ export function PlannedEventsPage() {
   const [editSaving, setEditSaving] = useState(false)
   const [statusFilter, setStatusFilter] = useState<PlannedEventStatus | ''>('')
 
+  // Deep-link focus: /planned?focus=<id> (e.g. from the forecast shortfall
+  // drilldown) scrolls the matching row into view and applies a ring
+  // highlight that fades via CSS animation. Unknown ids are a silent no-op.
+  const [searchParams] = useSearchParams()
+  const focusParam = searchParams.get('focus')
+  const focusId = focusParam != null ? Number(focusParam) : null
+  const focusRowRef = useRef<HTMLTableRowElement | null>(null)
+
   const loadEvents = useCallback(async () => {
     try {
       const path = statusFilter
@@ -111,6 +119,21 @@ export function PlannedEventsPage() {
       .then((rows) => setAccounts(rows))
       .catch(() => setAccounts([]))
   }, [])
+
+  // The id (if any) of the loaded row to highlight. Persistent class — the
+  // CSS animation (.plannedRow.isFocused) handles the visual fade, so there
+  // is no JS timer to race component tests.
+  const highlightId =
+    focusId != null && !Number.isNaN(focusId) && events.some((e) => e.id === focusId)
+      ? focusId
+      : null
+
+  // Scroll the focused row into view once it is in the DOM.
+  useEffect(() => {
+    if (highlightId == null) return
+    // scrollIntoView is undefined in jsdom; guard so tests don't throw.
+    focusRowRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+  }, [highlightId, events])
 
   const accountOptions = useMemo(() => {
     return accounts
@@ -320,8 +343,17 @@ export function PlannedEventsPage() {
                     )
                   }
                   const tone = TYPE_TONE[row.type]
+                  const isFocused = highlightId === row.id
                   return (
-                    <TableRow key={row.id}>
+                    <TableRow
+                      key={row.id}
+                      ref={isFocused ? focusRowRef : undefined}
+                      className={
+                        isFocused
+                          ? 'plannedRow isFocused ring-2 ring-warning'
+                          : undefined
+                      }
+                    >
                       <TableCell>{row.expectedDate}</TableCell>
                       <TableCell>
                         <div className="font-medium">{row.name}</div>
