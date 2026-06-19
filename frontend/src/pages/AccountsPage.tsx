@@ -32,7 +32,7 @@ function formatMoney(value: number | null | undefined, currency: string | null |
   if (value == null || !Number.isFinite(value)) return '—'
   const code = (currency ?? 'CAD').toUpperCase()
   try {
-    return new Intl.NumberFormat(undefined, {
+    return new Intl.NumberFormat('en-CA', {
       style: 'currency',
       currency: code,
       maximumFractionDigits: 0,

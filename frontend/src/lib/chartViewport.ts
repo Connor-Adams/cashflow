@@ -65,7 +65,7 @@ export function formatCompactMoney(value: number, currency: string | null): stri
   if (!Number.isFinite(value)) return ''
   try {
     if (currency) {
-      return new Intl.NumberFormat(undefined, {
+      return new Intl.NumberFormat('en-CA', {
         style: 'currency',
         currency,
         notation: 'compact',
