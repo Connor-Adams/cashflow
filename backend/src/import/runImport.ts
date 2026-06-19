@@ -1140,7 +1140,11 @@ export async function resolvePdfAccountFromHeader(
   // Credit-card statement → calendar auto-fill (#243 follow-up). Runs for both
   // the bundle path and the async pdfImportProcessor worker, since both resolve
   // their account through this function. Self-guards on accountType.
-  await applyCreditCardStatementSummary({ account, header, userId, householdId });
+  try {
+    await applyCreditCardStatementSummary({ account, header, userId, householdId });
+  } catch (err) {
+    logger.error({ err, accountId: account.id }, 'cc-statement: auto-fill failed (non-fatal)');
+  }
 
   return { account, accountCreated, overrideBusiness };
 }

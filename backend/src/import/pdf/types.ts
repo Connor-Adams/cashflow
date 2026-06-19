@@ -63,11 +63,9 @@ export type PdfStatementHeader = {
    * cannot reliably extract a holder.
    */
   accountHolder?: string;
-  /**
-   * Credit-card statement summary fields, when the parser can read the bill
-   * block. Drive the statement→calendar auto-fill (#243 follow-up). `null` when
-   * absent or unparseable — never throw, never break the transaction path.
-   */
+  // Credit-card statement summary fields, when the parser can read the bill
+  // block. Drive the statement→calendar auto-fill (#243 follow-up). `null` when
+  // absent or unparseable — never throw, never break the transaction path.
   /** New balance owed for the cycle (positive). */
   statementBalance?: number | null;
   /** ISO YYYY-MM-DD payment due date as printed on the statement. */
