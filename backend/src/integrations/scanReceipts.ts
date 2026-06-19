@@ -112,7 +112,66 @@ export function buildGmailQuery(opts: { sinceDate: Date | null; senders: string[
   return parts.join(' ');
 }
 
-async function ensureFreshAccessToken(integ: UserEmailIntegration): Promise<string> {
+/** Receipt-ish subject keywords for the discovery net. Quoted phrases are kept
+ *  as Gmail exact-phrase matches. */
+export const DISCOVERY_SUBJECT_KEYWORDS = [
+  'receipt',
+  'invoice',
+  '"order confirmation"',
+  '"your order"',
+  '"payment received"',
+  '"tax invoice"',
+];
+
+/** Builds the broad discovery query: Gmail's purchases category OR receipt
+ *  subject keywords (OR PDF-attachment invoices when enabled), minus senders we
+ *  already handle, within the date window. */
+export function buildDiscoveryQuery(opts: {
+  sinceDate: Date | null;
+  excludeSenders: string[];
+  includePdfAttachments?: boolean;
+}): string {
+  const signals = [
+    'category:purchases',
+    `subject:(${DISCOVERY_SUBJECT_KEYWORDS.join(' OR ')})`,
+  ];
+  if (opts.includePdfAttachments) {
+    signals.push('(has:attachment filename:pdf subject:(invoice OR receipt))');
+  }
+  const parts = [`(${signals.join(' OR ')})`];
+  for (const addr of opts.excludeSenders) {
+    parts.push(`-from:${addr}`);
+  }
+  if (opts.sinceDate) {
+    const y = opts.sinceDate.getUTCFullYear();
+    const m = String(opts.sinceDate.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(opts.sinceDate.getUTCDate()).padStart(2, '0');
+    parts.push(`after:${y}/${m}/${d}`);
+  }
+  return parts.join(' ');
+}
+
+/** Senders the household explicitly dismissed during discovery — excluded from
+ *  future discovery queries so they never re-surface. */
+export async function getDismissedSenders(householdId: number): Promise<string[]> {
+  const rows = await ReceiptSenderAllowlist.findAll({
+    where: { householdId, status: 'dismissed' },
+    attributes: ['emailAddress'],
+  });
+  return rows.map((r) => r.emailAddress.toLowerCase());
+}
+
+/** Everything the discovery query should exclude: senders the fast scan already
+ *  covers (enabled allowlist + baked-in defaults) plus dismissed senders. */
+export async function getDiscoveryExclusions(householdId: number): Promise<string[]> {
+  const [allowed, dismissed] = await Promise.all([
+    getEffectiveAllowlist(householdId),
+    getDismissedSenders(householdId),
+  ]);
+  return [...new Set([...allowed, ...dismissed])];
+}
+
+export async function ensureFreshAccessToken(integ: UserEmailIntegration): Promise<string> {
   const now = Date.now();
   const expiresAt = integ.expiresAt ? integ.expiresAt.getTime() : 0;
   const expiringSoon = expiresAt - now < 60_000;
