@@ -160,7 +160,7 @@ describe('UnifiedInboxPage', () => {
     expect(screen.getByText(/bulk_patch/i)).toBeTruthy()
   })
 
-  it('clicking a source chip refetches scoped to that source', async () => {
+  it('selecting a source in the dropdown refetches scoped to that source', async () => {
     const { urls } = mockReviewItems(SAMPLE)
     render(
       <MemoryRouter>
@@ -168,8 +168,8 @@ describe('UnifiedInboxPage', () => {
       </MemoryRouter>,
     )
     await waitFor(() => screen.getByText('Netflix recurring'))
-    const reviewChip = screen.getByRole('button', { name: /AI review/i })
-    fireEvent.click(reviewChip)
+    const sourceSelect = screen.getByLabelText(/Filter by source/i)
+    fireEvent.change(sourceSelect, { target: { value: 'ai-review' } })
     await waitFor(() => {
       const last = urls[urls.length - 1]
       expect(last).toContain('source=ai-review')
@@ -179,7 +179,23 @@ describe('UnifiedInboxPage', () => {
     expect(screen.getByText('Netflix recurring')).toBeTruthy()
   })
 
-  it('renders the default saved views', async () => {
+  it('selecting a status in the dropdown refetches scoped to that status', async () => {
+    const { urls } = mockReviewItems(SAMPLE)
+    render(
+      <MemoryRouter>
+        <UnifiedInboxPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => screen.getByText('Netflix recurring'))
+    const statusSelect = screen.getByLabelText(/Filter by status/i)
+    fireEvent.change(statusSelect, { target: { value: 'resolved' } })
+    await waitFor(() => {
+      const last = urls[urls.length - 1]
+      expect(last).toContain('status=resolved')
+    })
+  })
+
+  it('does not render the legacy saved-views buttons', async () => {
     mockReviewItems(SAMPLE)
     render(
       <MemoryRouter>
@@ -187,11 +203,23 @@ describe('UnifiedInboxPage', () => {
       </MemoryRouter>,
     )
     await waitFor(() => screen.getByText('Netflix recurring'))
-    expect(screen.getByRole('button', { name: /AI suggestions \(pending\)/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Review queue \(pending\)/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /CFO briefings \(pending\)/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Chat proposals \(pending\)/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /All resolved \(last 30 days\)/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /AI suggestions \(pending\)/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /All resolved \(last 30 days\)/i })).toBeNull()
+  })
+
+  it('preselects source and status from a ?view= deep link', async () => {
+    window.history.pushState({}, '', '/inbox?view=all-resolved-30d')
+    const { urls } = mockReviewItems(SAMPLE)
+    render(
+      <MemoryRouter>
+        <UnifiedInboxPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(urls.length).toBeGreaterThan(0))
+    expect(urls[0]).toContain('status=resolved')
+    // all-resolved view spans every source → no source param.
+    expect(urls[0]).not.toContain('source=')
+    window.history.pushState({}, '', '/')
   })
 
   it('clicking accept on an ai-review card POSTs to the per-source accept endpoint', async () => {
