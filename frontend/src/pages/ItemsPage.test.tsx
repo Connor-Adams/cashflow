@@ -63,4 +63,17 @@ describe('ItemsPage', () => {
       expect(api.getJson).toHaveBeenLastCalledWith(expect.stringContaining('vendor=amazon')),
     )
   })
+
+  it('shows the "No items yet" EmptyState with an Import CTA when there is no data and no filters (#799)', async () => {
+    renderAt('/items')
+    expect(await screen.findByText('No items yet')).toBeInTheDocument()
+    const cta = screen.getByRole('link', { name: /import a statement/i })
+    expect(cta).toHaveAttribute('href', '/import')
+  })
+
+  it('shows the "Nothing matches this filter" EmptyState with a Clear filters CTA when a filter excludes everything (#799)', async () => {
+    renderAt('/items?vendor=Costco')
+    expect(await screen.findByText('Nothing matches this filter')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /clear filters/i })).toBeInTheDocument()
+  })
 })

@@ -37,6 +37,10 @@ import {
 } from './DividendReconciliation';
 import { FxRate, initFxRate } from './FxRate';
 import { UserEmailIntegration, initUserEmailIntegration } from './UserEmailIntegration';
+import {
+  UserSimplefinIntegration,
+  initUserSimplefinIntegration,
+} from './UserSimplefinIntegration';
 import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSenderAllowlist';
 import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEmailMessage';
 import { UserCaptureToken, initUserCaptureToken } from './UserCaptureToken';
@@ -153,6 +157,7 @@ initSecurityDividend(sequelize);
 initDividendReconciliation(sequelize);
 initFxRate(sequelize);
 initUserEmailIntegration(sequelize);
+initUserSimplefinIntegration(sequelize);
 initReceiptSenderAllowlist(sequelize);
 initProcessedEmailMessage(sequelize);
 initUserCaptureToken(sequelize);
@@ -328,6 +333,12 @@ User.hasMany(UserEmailIntegration, {
   as: 'emailIntegrations',
 });
 UserEmailIntegration.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+User.hasOne(UserSimplefinIntegration, {
+  foreignKey: 'user_id',
+  as: 'simplefinIntegration',
+});
+UserSimplefinIntegration.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 Account.hasMany(Transaction, { foreignKey: 'account_id', as: 'transactions' });
 Transaction.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
@@ -1081,6 +1092,7 @@ export {
   SecurityDividend,
   FxRate,
   UserEmailIntegration,
+  UserSimplefinIntegration,
   ReceiptSenderAllowlist,
   ProcessedEmailMessage,
   UserCaptureToken,

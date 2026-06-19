@@ -717,7 +717,7 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
       <div
         role="grid"
         aria-label="Month calendar"
-        style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '1px', background: 'var(--border)' }}
+        className="grid grid-cols-7 gap-px bg-border"
       >
         {WEEKDAYS.map((d) => (
           <div
@@ -742,12 +742,7 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
               aria-label={`${cell.iso}, ${events.length} event${events.length === 1 ? '' : 's'}`}
               data-in-month={cell.inMonth}
               data-today={cell.isToday}
-              className="bg-card min-h-[5.5rem] p-[0.4rem] text-left border-0 cursor-pointer flex flex-col gap-1"
-              style={{
-                opacity: cell.inMonth ? 1 : 0.45,
-                outline: cell.isToday ? '2px solid var(--primary, currentColor)' : 'none',
-                outlineOffset: '-2px',
-              }}
+              className={`bg-card min-h-[5.5rem] p-[0.4rem] text-left border-0 cursor-pointer flex flex-col gap-1 -outline-offset-2 ${cell.inMonth ? 'opacity-100' : 'opacity-45'} ${cell.isToday ? 'outline outline-2 outline-[var(--primary)]' : 'outline-none'}`}
             >
               <span className="text-xs font-medium">{cell.day}</span>
               {visible.map((ev, i) => (

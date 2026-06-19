@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { ReceiptsList } from './ReceiptsList'
 
 vi.mock('@/lib/api', () => ({
@@ -49,10 +49,22 @@ describe('ReceiptsList', () => {
     ).toBeGreaterThan(0)
   })
 
-  it('shows an empty state when there are no receipts', async () => {
+  it('shows the "No receipts yet" empty state with an Upload CTA for the all group (#799)', async () => {
+    const onUploadClick = vi.fn()
     vi.mocked(getJson).mockResolvedValue([])
-    render(<ReceiptsList group="all" />)
-    await waitFor(() => expect(screen.getByText(/no receipts/i)).toBeInTheDocument())
+    render(<ReceiptsList group="all" onUploadClick={onUploadClick} />)
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /upload a receipt/i }))
+    expect(onUploadClick).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows a "Nothing matches this filter" empty state with a Clear filters CTA for a non-all group (#799)', async () => {
+    const onClearGroup = vi.fn()
+    vi.mocked(getJson).mockResolvedValue([])
+    render(<ReceiptsList group="gmail" onClearGroup={onClearGroup} />)
+    await waitFor(() => expect(screen.getByText('Nothing matches this filter')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /clear filters/i }))
+    expect(onClearGroup).toHaveBeenCalledTimes(1)
   })
 
   it('renders the financial breakdown for present fields', async () => {

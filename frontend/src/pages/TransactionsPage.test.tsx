@@ -344,6 +344,17 @@ describe('TransactionsPage enrichment deep-link filters', () => {
   })
 })
 
+describe('TransactionsPage empty state (#799)', () => {
+  it('shows the "No transactions yet" EmptyState with an Import CTA when there is no data', async () => {
+    renderPage()
+    expect(
+      await screen.findByText('No transactions yet'),
+    ).toBeInTheDocument()
+    const cta = screen.getByRole('link', { name: /import a statement/i })
+    expect(cta).toHaveAttribute('href', '/import')
+  })
+})
+
 function makeTransaction(
   overrides: Partial<Transaction> & Pick<Transaction, 'id' | 'merchantClean' | 'status'>,
 ): Transaction {

@@ -239,11 +239,7 @@ function GrowthStat({
   // the raw inline color here because StatCard's delta chip applies a bordered-badge
   // style that differs visually from the original plain inline row.
   const deltaColor =
-    delta === 0
-      ? 'var(--muted-foreground, inherit)'
-      : good
-        ? 'var(--accent-green)'
-        : 'var(--danger)'
+    delta === 0 ? 'text-muted-foreground' : good ? 'text-positive' : 'text-danger'
   const TrendIcon = rising ? TrendingUp : TrendingDown
   return (
     <StatCard
@@ -251,7 +247,7 @@ function GrowthStat({
       value={formatMoney(secondHalf, currency)}
       hint={`from ${formatMoney(firstHalf, currency)}`}
       delta={
-        <span style={{ color: deltaColor }}>
+        <span className={deltaColor}>
           <TrendIcon size={14} aria-hidden="true" /> {formatPct(pct)}
         </span>
       }
@@ -275,14 +271,7 @@ function CategoryDrivers({
         {risers.map((d) => (
           <li
             key={d.category}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr auto auto',
-              gap: 12,
-              alignItems: 'center',
-              padding: '8px 0',
-              borderBottom: '1px solid var(--border)',
-            }}
+            className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-border py-2"
           >
             <Link
               to={`/transactions?category=${encodeURIComponent(d.category)}&currency=${currency}`}
@@ -331,12 +320,7 @@ function MonthlySeriesTable({
               <TableCell className="text-right">
                 {formatMoney(m.spend, currency)}
               </TableCell>
-              <TableCell
-                className="text-right"
-                style={{
-                  color: m.savings < 0 ? 'var(--danger)' : undefined,
-                }}
-              >
+              <TableCell className={m.savings < 0 ? 'text-right text-danger' : 'text-right'}>
                 {formatMoney(m.savings, currency)}
               </TableCell>
             </TableRow>
