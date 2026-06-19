@@ -17,12 +17,40 @@
  * "small" shows up under exactly one leak type — never both.
  */
 
-import type { MoneyLeakType } from './../models/MoneyLeakDismissal';
 import type { SubscriptionCadence } from './../models/PlannedEvent';
 import type { SubscriptionStatus } from './../expectations/subscriptionMapper';
 
-// Re-export for convenience.
-export type { MoneyLeakType } from './../models/MoneyLeakDismissal';
+/**
+ * Money leak types surfaced by the detectors (Cashflow #220).
+ *
+ * Stored persistence-side as a plain STRING (the `type` column on the
+ * Observation/`insights` table when a leak is dismissed — see #639), not a PG
+ * enum, so adding new detector outputs later needs no ALTER TYPE migration.
+ * The route layer validates user-supplied values against MONEY_LEAK_TYPES.
+ *
+ * Each detector emits a stable `identityKey` so dismissals stick across
+ * detection refreshes:
+ *
+ *   subscription_price_increase  → `${subscriptionId}`
+ *   small_subscription           → `${subscriptionId}`
+ *   recurring_fee                → `${normalizedMerchant}|${currency}`
+ *   duplicate_service            → `${currency}|${category}`
+ *   delivery_fee_high            → `${currency}|delivery`
+ */
+export type MoneyLeakType =
+  | 'subscription_price_increase'
+  | 'small_subscription'
+  | 'recurring_fee'
+  | 'duplicate_service'
+  | 'delivery_fee_high';
+
+export const MONEY_LEAK_TYPES: readonly MoneyLeakType[] = [
+  'subscription_price_increase',
+  'small_subscription',
+  'recurring_fee',
+  'duplicate_service',
+  'delivery_fee_high',
+] as const;
 
 /**
  * Detector input row representing one active/cancelled/ignored subscription
