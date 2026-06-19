@@ -18,6 +18,7 @@ import { loadAllRules } from './applyRules';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import { caseInsensitiveLikeOp } from '../ai/chat/_common';
 import { enrichTransaction } from './enrich';
+import { applyRuleSideEffects, findRuleActionsSignal } from '../rules/applyRuleSideEffects';
 import { upsertSuggestedOrderLink } from '../amazon/matcher';
 import {
   loadAmazonOrdersCache,
@@ -404,6 +405,20 @@ export async function runBackfill(
                   confidence: orderLink.confidence,
                   matchReason: orderLink.matchReason,
                   transaction: t,
+                });
+              }
+
+              // Rule actions side-effects (issue #795): re-apply labels
+              // (idempotent), but do NOT re-fire alerts on a backfill — that
+              // would re-notify the user for already-seen transactions.
+              const ruleActions = findRuleActionsSignal(enriched.signals);
+              if (ruleActions) {
+                await applyRuleSideEffects({
+                  ruleActions,
+                  transactionId: txn.id,
+                  householdId: txn.householdId,
+                  transaction: t,
+                  applyAlerts: false,
                 });
               }
             });

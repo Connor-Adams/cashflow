@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Op, QueryTypes } from 'sequelize';
 import crypto from 'crypto';
-import { Rule, Transaction, sequelize } from '../models';
+import { Rule, Transaction, Label, sequelize } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere, isSuperadmin, visibleTransactionWhere } from '../auth/scope';
 import { scheduleInternalBackfill } from '../import/backfillCoordinator';
@@ -24,6 +24,21 @@ import {
   FINANCE_EVENT_ENTITY_TYPES,
   recordFinanceEvent,
 } from '../events/financeEvents';
+import {
+  validateActions,
+  deriveActionsFromScalars,
+  deriveScalarsFromActions,
+  type RuleAction,
+} from '../rules/actions';
+
+/**
+ * Resolve the household's Label id set for `set_label` validation. Returns null
+ * for a superadmin with no household scope (skips the scope check).
+ */
+async function householdLabelIds(householdId: number): Promise<Set<number>> {
+  const labels = await Label.findAll({ where: { householdId }, attributes: ['id'] });
+  return new Set(labels.map((l) => l.id));
+}
 
 /**
  * Map a rule's shape to the InternalBackfillRequest parameters. Regex
@@ -161,19 +176,46 @@ router.post('/', async (req, res, next) => {
       res.status(400).json({ error: 'effectiveFrom must be < effectiveTo' });
       return;
     }
+
+    // Issue #795: when `actions[]` is present, validate it and DERIVE the
+    // scalar columns from the set_category/business/split actions. When absent
+    // (legacy client), build actions from the scalar body. Either way the
+    // scalar columns and the actions array are persisted in sync.
+    let actions: RuleAction[];
+    let scalar: ReturnType<typeof deriveScalarsFromActions>;
+    if (Object.prototype.hasOwnProperty.call(b, 'actions')) {
+      const validated = validateActions(b.actions, await householdLabelIds(household.id));
+      if (!validated.ok) {
+        res.status(400).json({ error: validated.error, message: validated.message, index: validated.index });
+        return;
+      }
+      actions = validated.actions;
+      scalar = deriveScalarsFromActions(actions);
+    } else {
+      scalar = {
+        category: (b.category as string | null) ?? null,
+        isBusiness: Boolean(b.isBusiness),
+        splitType: (b.splitType as string) || 'me',
+        pctMe: b.pctMe != null ? String(b.pctMe) : null,
+        pctPartner: b.pctPartner != null ? String(b.pctPartner) : null,
+      };
+      actions = deriveActionsFromScalars(scalar);
+    }
+
     const row = await Rule.create({
       merchantPattern: String(b.merchantPattern),
       householdId: household.id,
       createdByUserId: user.id,
       matchKind: (b.matchKind as string) || 'substring',
       priority: b.priority != null ? Number(b.priority) : 0,
-      category: (b.category as string | null) ?? null,
-      isBusiness: Boolean(b.isBusiness),
-      splitType: (b.splitType as string) || 'me',
-      pctMe: b.pctMe != null ? String(b.pctMe) : null,
-      pctPartner: b.pctPartner != null ? String(b.pctPartner) : null,
+      category: scalar.category,
+      isBusiness: scalar.isBusiness,
+      splitType: scalar.splitType,
+      pctMe: scalar.pctMe,
+      pctPartner: scalar.pctPartner,
       effectiveFrom: fromParsed.value,
       effectiveTo: toParsed.value,
+      actions,
     });
     scheduleRuleBackfill(
       household.id,
@@ -290,18 +332,49 @@ router.patch('/:id', async (req, res, next) => {
       res.status(400).json({ error: 'effectiveFrom must be < effectiveTo' });
       return;
     }
-    const fields = [
-      'merchantPattern',
-      'matchKind',
-      'priority',
-      'category',
-      'isBusiness',
-      'splitType',
-      'pctMe',
-      'pctPartner',
-    ] as const;
+    // Always-patchable identity/match fields.
+    const fields = ['merchantPattern', 'matchKind', 'priority'] as const;
     for (const f of fields) {
       if (Object.prototype.hasOwnProperty.call(b, f)) row.set(f, b[f] as never);
+    }
+
+    // Issue #795 effect sync. If `actions[]` is present it is authoritative:
+    // validate it, derive the scalar columns from it. Otherwise apply any
+    // scalar fields in the body, then re-derive the actions array from the
+    // resulting scalars so the two never drift.
+    if (Object.prototype.hasOwnProperty.call(b, 'actions')) {
+      const { household } = currentAuth(req);
+      const validated = validateActions(b.actions, await householdLabelIds(household.id));
+      if (!validated.ok) {
+        res.status(400).json({ error: validated.error, message: validated.message, index: validated.index });
+        return;
+      }
+      const scalar = deriveScalarsFromActions(validated.actions);
+      row.set('category', scalar.category);
+      row.set('isBusiness', scalar.isBusiness);
+      row.set('splitType', scalar.splitType);
+      row.set('pctMe', scalar.pctMe);
+      row.set('pctPartner', scalar.pctPartner);
+      row.set('actions', validated.actions);
+    } else {
+      const scalarFields = ['category', 'isBusiness', 'splitType', 'pctMe', 'pctPartner'] as const;
+      for (const f of scalarFields) {
+        if (Object.prototype.hasOwnProperty.call(b, f)) row.set(f, b[f] as never);
+      }
+      const scalar = {
+        category: (row.get('category') as string | null) ?? null,
+        isBusiness: Boolean(row.get('isBusiness')),
+        splitType: (row.get('splitType') as string) || 'me',
+        pctMe: row.get('pctMe') != null ? String(row.get('pctMe')) : null,
+        pctPartner: row.get('pctPartner') != null ? String(row.get('pctPartner')) : null,
+      };
+      // Preserve any non-scalar (set_label / set_alert) actions already on the
+      // rule; only re-derive the scalar-backed action triplet.
+      const existing = (row.get('actions') as RuleAction[] | null) ?? [];
+      const nonScalar = existing.filter(
+        (a) => a.type === 'set_label' || a.type === 'set_alert',
+      );
+      row.set('actions', [...deriveActionsFromScalars(scalar), ...nonScalar]);
     }
     await row.save();
     const { household } = currentAuth(req);
@@ -761,6 +834,12 @@ type ExportedRule = {
   pctPartner: string | null;
   effectiveFrom: string | null;
   effectiveTo: string | null;
+  /**
+   * Issue #795: the composable actions list. Additive to the v1 schema — older
+   * importers whitelist the fields they read and ignore this key, so the file
+   * still round-trips on pre-#795 instances using the scalar fields alone.
+   */
+  actions: RuleAction[];
 };
 
 router.get('/export', async (req, res, next) => {
@@ -781,6 +860,18 @@ router.get('/export', async (req, res, next) => {
       pctPartner: r.pctPartner != null ? String(r.pctPartner) : null,
       effectiveFrom: r.effectiveFrom,
       effectiveTo: r.effectiveTo,
+      // Fall back to deriving from scalars for any row that predates the column
+      // backfill (defensive — the migration backfills every row).
+      actions:
+        Array.isArray(r.actions) && r.actions.length > 0
+          ? r.actions
+          : deriveActionsFromScalars({
+              category: r.category,
+              isBusiness: r.isBusiness,
+              splitType: r.splitType,
+              pctMe: r.pctMe != null ? String(r.pctMe) : null,
+              pctPartner: r.pctPartner != null ? String(r.pctPartner) : null,
+            }),
     }));
     const today = new Date().toISOString().slice(0, 10);
     res.setHeader('Content-Type', 'application/json');
@@ -826,6 +917,8 @@ router.post('/import', async (req, res, next) => {
 
     const validated: ExportedRule[] = [];
     const errors: { name: string; reason: string }[] = [];
+    // Household label scope for any `set_label` actions in the file.
+    const labelIds = await householdLabelIds(household.id);
 
     for (const r of rawRules) {
       if (!r || typeof r !== 'object') {
@@ -847,17 +940,50 @@ router.post('/import', async (req, res, next) => {
         errors.push({ name: rule.merchantPattern, reason: `effectiveTo ${toParsed.error}` });
         continue;
       }
-      validated.push({
-        merchantPattern: rule.merchantPattern,
-        matchKind: typeof rule.matchKind === 'string' ? rule.matchKind : 'substring',
-        priority: typeof rule.priority === 'number' ? rule.priority : 0,
+
+      const scalar = {
         category: typeof rule.category === 'string' ? rule.category : null,
         isBusiness: Boolean(rule.isBusiness),
         splitType: typeof rule.splitType === 'string' ? rule.splitType : 'me',
         pctMe: rule.pctMe != null ? String(rule.pctMe) : null,
         pctPartner: rule.pctPartner != null ? String(rule.pctPartner) : null,
+      };
+
+      // Issue #795: when the imported rule carries `actions`, validate and use
+      // them, deriving the scalar columns from the action triplet so they stay
+      // in sync. When it doesn't (a pre-#795 v1 file), derive `actions` from the
+      // scalar fields exactly as the migration does — so an old export imports
+      // identically to today.
+      let actions: RuleAction[];
+      if (Object.prototype.hasOwnProperty.call(rule, 'actions')) {
+        const v = validateActions(rule.actions, labelIds);
+        if (!v.ok) {
+          errors.push({ name: rule.merchantPattern, reason: `actions ${v.message}` });
+          continue;
+        }
+        actions = v.actions;
+        const derived = deriveScalarsFromActions(actions);
+        scalar.category = derived.category;
+        scalar.isBusiness = derived.isBusiness;
+        scalar.splitType = derived.splitType;
+        scalar.pctMe = derived.pctMe;
+        scalar.pctPartner = derived.pctPartner;
+      } else {
+        actions = deriveActionsFromScalars(scalar);
+      }
+
+      validated.push({
+        merchantPattern: rule.merchantPattern,
+        matchKind: typeof rule.matchKind === 'string' ? rule.matchKind : 'substring',
+        priority: typeof rule.priority === 'number' ? rule.priority : 0,
+        category: scalar.category,
+        isBusiness: scalar.isBusiness,
+        splitType: scalar.splitType,
+        pctMe: scalar.pctMe,
+        pctPartner: scalar.pctPartner,
         effectiveFrom: fromParsed.value,
         effectiveTo: toParsed.value,
+        actions,
       });
     }
 
@@ -890,6 +1016,7 @@ router.post('/import', async (req, res, next) => {
           pctPartner: rule.pctPartner,
           effectiveFrom: rule.effectiveFrom,
           effectiveTo: rule.effectiveTo,
+          actions: rule.actions,
         }, { transaction: t });
         imported++;
       }

@@ -54,6 +54,17 @@ export interface Signal {
    * mergeSignals (not in AUTO_FIELD_KEYS) and by TransactionSignal storage.
    */
   orderLink?: { externalOrderId: number; confidence: number; matchReason: string };
+  /**
+   * Set only by the apply-rule stage (issue #795): the matched rule's id and
+   * its `set_label` / `set_alert` actions, to be applied as side-effects
+   * (TransactionLabel insert / Notification enqueue) at persist time. Ignored
+   * by mergeSignals and TransactionSignal storage — mirrors `orderLink`.
+   */
+  ruleActions?: {
+    ruleId: number;
+    labelIds: number[];
+    alerts: Array<{ severity: import('../../models/Notification').NotificationSeverity; title?: string; body?: string }>;
+  };
 }
 
 

@@ -1,4 +1,5 @@
 import { Rule } from '../models';
+import type { RuleAction } from '../rules/actions';
 
 export interface RuleRow {
   id: number;
@@ -14,6 +15,8 @@ export interface RuleRow {
   effectiveFrom: string | null;
   /** Exclusive upper bound on Transaction.date (YYYY-MM-DD); null = "forever". */
   effectiveTo: string | null;
+  /** Composable effect list (issue #795). May be undefined for legacy rows. */
+  actions?: RuleAction[];
 }
 
 export function findBestRule(

@@ -41,6 +41,7 @@ import { findMerchantMemory } from '../ai/merchantMemory';
 import { upsertSuggestedOrderLink } from '../amazon/matcher';
 import * as env from '../config/env';
 import { enrichTransaction } from './enrich';
+import { applyRuleSideEffects, findRuleActionsSignal } from '../rules/applyRuleSideEffects';
 import {
   computeImportConfidence,
   serializeFlags,
@@ -581,6 +582,17 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
               externalOrderId: orderLink.externalOrderId,
               confidence: orderLink.confidence,
               matchReason: orderLink.matchReason,
+              transaction: sp,
+            });
+          }
+
+          // Rule actions side-effects (issue #795): set_label / set_alert.
+          const ruleActions = findRuleActionsSignal(enriched.signals);
+          if (ruleActions) {
+            await applyRuleSideEffects({
+              ruleActions,
+              transactionId: txn.id,
+              householdId: opts.householdId ?? account.householdId ?? null,
               transaction: sp,
             });
           }
