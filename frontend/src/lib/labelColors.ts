@@ -14,15 +14,18 @@ import type { CSSProperties } from 'react'
  * 500-weight hues that read well as a soft tinted pill with dark text.
  */
 
+// The swatch hexes are intentionally off-token: they are user-selectable label
+// colors rendered via inline styles (Tailwind JIT can't emit classes for them),
+// so each carries a `palette-allow` marker for the design-system palette gate.
 export const LABEL_COLOR_PALETTE: readonly string[] = [
-  '#EF4444', // red
-  '#F97316', // orange
-  '#EAB308', // amber
-  '#22C55E', // green
-  '#14B8A6', // teal
-  '#3B82F6', // blue
-  '#8B5CF6', // violet
-  '#EC4899', // pink
+  '#EF4444', // red — palette-allow
+  '#F97316', // orange — palette-allow
+  '#EAB308', // amber — palette-allow
+  '#22C55E', // green — palette-allow
+  '#14B8A6', // teal — palette-allow
+  '#3B82F6', // blue — palette-allow
+  '#8B5CF6', // violet — palette-allow
+  '#EC4899', // pink — palette-allow
 ] as const
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/

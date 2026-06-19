@@ -44,7 +44,7 @@ before(async () => {
   );
   void qi;
 
-  migration = require('../20260627000001-add-digest-day-of-week.js');
+  migration = require('../20260627000002-add-digest-day-of-week.js');
 });
 
 after(async () => {
