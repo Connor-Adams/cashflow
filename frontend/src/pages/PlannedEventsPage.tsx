@@ -91,12 +91,11 @@ export function PlannedEventsPage() {
   const [statusFilter, setStatusFilter] = useState<PlannedEventStatus | ''>('')
 
   // Deep-link focus: /planned?focus=<id> (e.g. from the forecast shortfall
-  // drilldown) scrolls the matching row into view and applies a transient
-  // ring highlight that fades after ~2s. Unknown ids are a silent no-op.
+  // drilldown) scrolls the matching row into view and applies a ring
+  // highlight that fades via CSS animation. Unknown ids are a silent no-op.
   const [searchParams] = useSearchParams()
   const focusParam = searchParams.get('focus')
   const focusId = focusParam != null ? Number(focusParam) : null
-  const [highlightId, setHighlightId] = useState<number | null>(null)
   const focusRowRef = useRef<HTMLTableRowElement | null>(null)
 
   const loadEvents = useCallback(async () => {
@@ -121,17 +120,20 @@ export function PlannedEventsPage() {
       .catch(() => setAccounts([]))
   }, [])
 
-  // Apply the focus highlight once the matching row exists in the loaded
-  // list. Scroll it into view, then fade the ring after ~2s.
+  // The id (if any) of the loaded row to highlight. Persistent class — the
+  // CSS animation (.plannedRow.isFocused) handles the visual fade, so there
+  // is no JS timer to race component tests.
+  const highlightId =
+    focusId != null && !Number.isNaN(focusId) && events.some((e) => e.id === focusId)
+      ? focusId
+      : null
+
+  // Scroll the focused row into view once it is in the DOM.
   useEffect(() => {
-    if (focusId == null || Number.isNaN(focusId)) return
-    if (!events.some((e) => e.id === focusId)) return
-    setHighlightId(focusId)
+    if (highlightId == null) return
     // scrollIntoView is undefined in jsdom; guard so tests don't throw.
     focusRowRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
-    const timer = setTimeout(() => setHighlightId(null), 2000)
-    return () => clearTimeout(timer)
-  }, [focusId, events])
+  }, [highlightId, events])
 
   const accountOptions = useMemo(() => {
     return accounts
@@ -348,8 +350,8 @@ export function PlannedEventsPage() {
                       ref={isFocused ? focusRowRef : undefined}
                       className={
                         isFocused
-                          ? 'ring-2 ring-warning transition-shadow'
-                          : 'transition-shadow'
+                          ? 'plannedRow isFocused ring-2 ring-warning'
+                          : undefined
                       }
                     >
                       <TableCell>{row.expectedDate}</TableCell>
