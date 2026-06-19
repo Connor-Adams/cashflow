@@ -138,11 +138,13 @@ export type FairnessByCurrency = {
    */
   nonPartnerInflows: number;
   /**
-   * Cumulative settlement-adjusted balance: −partnerShareTotal + (iPaid − partnerPaid).
-   * Spend is stored negative (purchases), so negating partnerShareTotal yields the
-   * positive "what partner owes me" value. Matches `partnerMath.rawNetForRow` /
-   * `queryBuilders.executePartnerBalance` sign convention.
-   * Positive: partner owes me. Negative: I owe partner.
+   * Cumulative settlement-adjusted balance: sum of per-row viewer-relative
+   * balance contributions + (iPaid − partnerPaid). Each shared row contributes
+   * `payer==viewer ? −partnerShare : +partnerShare` (see `projectRow`). In the
+   * owner / no-viewer POV this collapses to `−partnerShareTotal + (iPaid −
+   * partnerPaid)` — the original single-payer formula. Spend is stored negative,
+   * so the payer's `−partnerShare` yields the positive "owed to me" value.
+   * Positive: partner owes me (this viewer). Negative: I owe partner.
    */
   balance: number;
   /** Direction is computed at sub-cent precision so 0.001 renders as "even". */
@@ -167,9 +169,10 @@ export type FairnessMonthlyPoint = {
   /** Total settlement movement in this month (iPaid - partnerPaid). */
   settlementDelta: number;
   /**
-   * Net change to outstanding balance in this month: −partnerShare + settlementDelta.
-   * Spend is stored negative; negating yields "what partner owes me" delta for the month.
-   * Mirrors `partnerMath.rawNetForRow` / `queryBuilders.executePartnerBalance`.
+   * Net change to outstanding balance in this month: sum of per-row viewer-relative
+   * balance contributions + settlementDelta (see `projectRow`). In the owner /
+   * no-viewer POV this equals `−partnerShare + settlementDelta`. Spend is stored
+   * negative; the payer's contribution yields the "owed to me" delta for the month.
    */
   netDelta: number;
   /** Running cumulative balance through the END of this month. */

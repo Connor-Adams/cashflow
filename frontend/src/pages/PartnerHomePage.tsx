@@ -111,6 +111,8 @@ export function PartnerHomePage() {
         </Alert>
       ) : null}
 
+      {loading ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
+
       {!loading && !hasSharedAccount ? (
         <EmptyState
           title="Nothing shared yet"
