@@ -8,7 +8,7 @@ import {
   type ForecastOccurrence,
 } from '../forecast/buildForecast';
 import { assembleForecast } from '../forecast/assembleForecast';
-import { computeSafeToSpend } from '../cashflow/safeToSpend';
+import { computeSafeToSpend, computeSurplus } from '../cashflow/safeToSpend';
 
 const router = Router();
 
@@ -257,7 +257,18 @@ router.get('/safe-to-spend', async (req, res, next) => {
       currency,
       asOfDate,
     });
-    res.json(result);
+
+    // #654 — turn the surplus into an actionable decision hub: investable
+    // amount, top goal to accelerate, and a payoff-vs-invest comparison. Pure
+    // advice; nothing is persisted and no money moves.
+    const surplus = await computeSurplus({
+      userId: user.id,
+      householdId: household.id,
+      asOfDate,
+      result,
+    });
+
+    res.json({ ...result, surplus });
   } catch (e) {
     next(e);
   }

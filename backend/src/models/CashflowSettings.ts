@@ -62,6 +62,13 @@ export class CashflowSettings extends Model<
    */
   declare onboardingDismissedAt: CreationOptional<Date | null>;
   declare dismissedActivationCards: CreationOptional<string[]>;
+  /**
+   * #654 — assumed annual return rate (decimal, 0.05 == 5%) used by the
+   * safe-to-spend surplus "pay off debt vs. invest it" comparison. DECIMAL(5,4)
+   * stored as string for lossless transport, matching `minimumCashBuffer`.
+   * Route validates 0 <= rate <= 1. Default '0.0500'.
+   */
+  declare assumedAnnualReturnRate: CreationOptional<string>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -74,6 +81,7 @@ export const CASHFLOW_SETTINGS_DEFAULTS = {
   counterpartyPromotionThreshold: 3,
   excludeNonPartnerInflows: true,
   largePurchaseThreshold: '500.0000',
+  assumedAnnualReturnRate: '0.0500',
 } as const;
 
 export const MIN_SAFE_TO_SPEND_WINDOW_DAYS = 1;
@@ -82,6 +90,9 @@ export const MIN_COUNTERPARTY_PROMOTION_THRESHOLD = 2;
 export const MAX_COUNTERPARTY_PROMOTION_THRESHOLD = 50;
 export const MIN_LARGE_PURCHASE_THRESHOLD = 0;
 export const MAX_LARGE_PURCHASE_THRESHOLD = 1_000_000;
+/** #654 — assumed annual return bounds (reuse opportunityCost's [0, 1]). */
+export const MIN_ASSUMED_ANNUAL_RETURN_RATE = 0;
+export const MAX_ASSUMED_ANNUAL_RETURN_RATE = 1;
 
 export function initCashflowSettings(sequelize: Sequelize): typeof CashflowSettings {
   CashflowSettings.init(
@@ -146,6 +157,12 @@ export function initCashflowSettings(sequelize: Sequelize): typeof CashflowSetti
         field: 'dismissed_activation_cards',
         allowNull: false,
         defaultValue: [],
+      },
+      assumedAnnualReturnRate: {
+        type: DataTypes.DECIMAL(5, 4),
+        field: 'assumed_annual_return_rate',
+        allowNull: false,
+        defaultValue: '0.0500',
       },
     } as ModelAttributes<CashflowSettings>,
     {

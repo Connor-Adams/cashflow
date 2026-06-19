@@ -1462,6 +1462,12 @@ export type CashflowSettings = {
   /** #375 — Partner Fairness "exclude non-partner inflows" toggle. */
   excludeNonPartnerInflows: boolean;
   /**
+   * #654 — assumed annual return rate (decimal string, e.g. "0.0500" for 5%)
+   * used by the safe-to-spend surplus "pay off debt vs. invest it" calc.
+   * Optional so older clients/responses without it still type-check.
+   */
+  assumedAnnualReturnRate?: string;
+  /**
    * #259 — ISO8601 timestamp the user dismissed/completed first-run
    * onboarding, or null if they never did. The onboarding gate reads this
    * (with the active-account count) to decide whether to show the wizard.
@@ -1477,6 +1483,39 @@ export type SafeToSpendBreakdown = {
   minimumBuffer: number;
 };
 
+/** #654 — the top active goal the surplus could be put toward, or null. */
+export type SurplusTopGoal = {
+  id: number;
+  name: string;
+  currency: string;
+};
+
+/** #654 — recommendation from the payoff-vs-invest comparison. */
+export type SurplusRecommendation = 'payoff' | 'invest' | 'tie';
+
+/** #654 — static "pay off debt vs. invest the surplus" comparison. */
+export type SurplusPayoffVsInvest = {
+  /** Interest avoided by throwing the surplus at debt (from the payoff engine). */
+  interestSaved: number;
+  /** Growth from investing the surplus one-time over the horizon. */
+  investGain: number;
+  assumedAnnualReturnRate: number;
+  horizonYears: number;
+  recommendation: SurplusRecommendation;
+};
+
+/**
+ * #654 — the actionable surplus block. Safe-to-spend is already net of the
+ * minimum buffer, so `amount` (max(0, value)) is genuinely spendable beyond it.
+ */
+export type Surplus = {
+  amount: number;
+  buffer: number;
+  topGoal: SurplusTopGoal | null;
+  /** null when the household has no debt in the surplus currency. */
+  payoffVsInvest: SurplusPayoffVsInvest | null;
+};
+
 /** Response shape for GET /api/forecast/safe-to-spend. */
 export type SafeToSpendResponse = {
   currency: string;
@@ -1487,6 +1526,8 @@ export type SafeToSpendResponse = {
   isNegative: boolean;
   breakdown: SafeToSpendBreakdown;
   settings: CashflowSettings;
+  /** #654 — surplus decision hub. Present on the safe-to-spend response. */
+  surplus: Surplus;
 };
 
 // --- FX & currency intelligence (issue #221) -------------------------------
