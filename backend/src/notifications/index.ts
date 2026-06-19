@@ -41,6 +41,7 @@ import {
   NotificationPreference,
   NOTIFICATION_PREFERENCE_DEFAULTS,
 } from '../models/NotificationPreference';
+import { fanOutWebPush, type WebPushSender } from './webPush';
 
 export type EnqueueNotificationPayload = {
   severity?: NotificationSeverity;
@@ -58,12 +59,14 @@ export type SerializedNotificationPreference = {
   type: string;
   channelInApp: boolean;
   channelEmail: boolean;
+  channelPush: boolean;
 };
 
 /** Validated patch shape for a preference upsert. */
 export type NotificationPreferencePatch = {
   channelInApp?: boolean;
   channelEmail?: boolean;
+  channelPush?: boolean;
 };
 
 /**
@@ -110,8 +113,8 @@ function validatePayload(payload: EnqueueNotificationPayload): void {
 }
 
 /**
- * Resolve the (channelInApp, channelEmail) preference for a given (user,
- * type) tuple. Returns the explicit row if it exists, otherwise the
+ * Resolve the (channelInApp, channelEmail, channelPush) preference for a given
+ * (user, type) tuple. Returns the explicit row if it exists, otherwise the
  * defaults.
  *
  * PRIVATE (issue #379): this is the dispatch path's preference lookup. It is
@@ -123,7 +126,7 @@ function validatePayload(payload: EnqueueNotificationPayload): void {
 async function resolvePreference(
   userId: number,
   type: string,
-): Promise<{ channelInApp: boolean; channelEmail: boolean }> {
+): Promise<{ channelInApp: boolean; channelEmail: boolean; channelPush: boolean }> {
   const row = await NotificationPreference.findOne({
     where: { userId, type },
   });
@@ -131,11 +134,13 @@ async function resolvePreference(
     return {
       channelInApp: row.channelInApp,
       channelEmail: row.channelEmail,
+      channelPush: row.channelPush,
     };
   }
   return {
     channelInApp: NOTIFICATION_PREFERENCE_DEFAULTS.channelInApp,
     channelEmail: NOTIFICATION_PREFERENCE_DEFAULTS.channelEmail,
+    channelPush: NOTIFICATION_PREFERENCE_DEFAULTS.channelPush,
   };
 }
 
@@ -143,14 +148,27 @@ async function resolvePreference(
  * Enqueue a notification for a user. Writes the in-app row when the user's
  * preference for `type` allows it; otherwise no-ops.
  *
+ * Web-push (issue #651): after a successful in-app write, if the user's
+ * `channelPush` is enabled, fan a web-push out to every active subscription
+ * the user owns (see `fanOutWebPush`). This is the single dispatch seam, so
+ * every event source (budget breach, future types) gets push for free without
+ * coupling each job to the push library. Push delivery is best-effort: a send
+ * failure NEVER affects the in-app result. When `channelPush` is false, or the
+ * user has no subscriptions, or VAPID is unconfigured, no push is sent and the
+ * in-app behavior is unchanged.
+ *
  * Does NOT touch any email queue / mailer — that's the responsibility of
  * the channel-specific follow-up issue. Until that lands, `channelEmail`
  * is recorded purely for UI / preference-table purposes.
+ *
+ * `pushSender` is injectable for tests; production uses the default web-push
+ * sender inside `fanOutWebPush`.
  */
 export async function enqueueNotification(
   userId: number,
   type: string,
   payload: EnqueueNotificationPayload,
+  pushSender?: WebPushSender,
 ): Promise<EnqueueNotificationResult> {
   validateType(type);
   validatePayload(payload);
@@ -169,6 +187,23 @@ export async function enqueueNotification(
     dataJson: payload.dataJson ?? null,
   });
 
+  if (pref.channelPush) {
+    try {
+      await fanOutWebPush(
+        userId,
+        {
+          title: payload.title,
+          body: payload.body,
+          severity: payload.severity ?? 'info',
+          dataJson: payload.dataJson ?? null,
+        },
+        pushSender,
+      );
+    } catch {
+      // Best-effort: a push fan-out failure must never break the in-app write.
+    }
+  }
+
   return { status: 'created', notification };
 }
 
@@ -179,6 +214,7 @@ function serializeRow(
     type: row.type,
     channelInApp: row.channelInApp,
     channelEmail: row.channelEmail,
+    channelPush: row.channelPush,
   };
 }
 
@@ -187,6 +223,7 @@ function defaultsFor(type: string): SerializedNotificationPreference {
     type,
     channelInApp: NOTIFICATION_PREFERENCE_DEFAULTS.channelInApp,
     channelEmail: NOTIFICATION_PREFERENCE_DEFAULTS.channelEmail,
+    channelPush: NOTIFICATION_PREFERENCE_DEFAULTS.channelPush,
   };
 }
 
@@ -214,6 +251,13 @@ export function validateNotificationPreferencePatch(
       return { ok: false, error: 'channelEmail must be boolean' };
     }
     patch.channelEmail = raw.channelEmail;
+  }
+
+  if (raw.channelPush !== undefined) {
+    if (typeof raw.channelPush !== 'boolean') {
+      return { ok: false, error: 'channelPush must be boolean' };
+    }
+    patch.channelPush = raw.channelPush;
   }
 
   return { ok: true, patch };
@@ -291,6 +335,7 @@ export async function upsertNotificationPreference(
       type,
       channelInApp: NOTIFICATION_PREFERENCE_DEFAULTS.channelInApp,
       channelEmail: NOTIFICATION_PREFERENCE_DEFAULTS.channelEmail,
+      channelPush: NOTIFICATION_PREFERENCE_DEFAULTS.channelPush,
     },
   });
 
@@ -299,6 +344,9 @@ export async function upsertNotificationPreference(
   }
   if (patch.channelEmail !== undefined) {
     row.set('channelEmail', patch.channelEmail);
+  }
+  if (patch.channelPush !== undefined) {
+    row.set('channelPush', patch.channelPush);
   }
   await row.save();
 

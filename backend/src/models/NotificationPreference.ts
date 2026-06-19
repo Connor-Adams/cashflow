@@ -13,9 +13,13 @@ import { NOTIFICATION_TYPE_MAX_LENGTH } from './Notification';
  * Per-user, per-type notification preference (issue #266).
  *
  * At most one row per (user_id, type). A *missing* row is the default
- * `(channelInApp=true, channelEmail=false)` — the route layer returns
- * defaults for unknown types and `enqueueNotification` treats "no row"
- * as "deliver in-app".
+ * `(channelInApp=true, channelEmail=false, channelPush=false)` — the route
+ * layer returns defaults for unknown types and `enqueueNotification` treats
+ * "no row" as "deliver in-app, no push".
+ *
+ * `channelPush` (issue #651) is opt-in (default false): a user only receives
+ * web-push when they have explicitly enabled it AND have ≥1 active push
+ * subscription.
  */
 export class NotificationPreference extends Model<
   InferAttributes<NotificationPreference>,
@@ -26,6 +30,7 @@ export class NotificationPreference extends Model<
   declare type: string;
   declare channelInApp: CreationOptional<boolean>;
   declare channelEmail: CreationOptional<boolean>;
+  declare channelPush: CreationOptional<boolean>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -33,6 +38,7 @@ export class NotificationPreference extends Model<
 export const NOTIFICATION_PREFERENCE_DEFAULTS = {
   channelInApp: true,
   channelEmail: false,
+  channelPush: false,
 } as const;
 
 export function initNotificationPreference(
@@ -61,6 +67,12 @@ export function initNotificationPreference(
         field: 'channel_email',
         allowNull: false,
         defaultValue: NOTIFICATION_PREFERENCE_DEFAULTS.channelEmail,
+      },
+      channelPush: {
+        type: DataTypes.BOOLEAN,
+        field: 'channel_push',
+        allowNull: false,
+        defaultValue: NOTIFICATION_PREFERENCE_DEFAULTS.channelPush,
       },
     } as ModelAttributes<NotificationPreference>,
     {
