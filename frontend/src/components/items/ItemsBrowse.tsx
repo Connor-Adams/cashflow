@@ -172,13 +172,14 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
                   checked={selected.has(r.id)}
                   onChange={() => toggleSelect(r.id)}
                 />
-                <button
-                  type="button"
-                  className="min-w-0 flex-1 truncate text-left text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto min-w-0 flex-1 justify-start truncate px-1 py-0 text-left text-sm font-normal"
                   onClick={() => onOpenItem(r.id, r)}
                 >
                   {r.title}
-                </button>
+                </Button>
                 {r.categoryEffective ? (
                   <Badge variant="secondary">{r.categoryEffective}</Badge>
                 ) : (
