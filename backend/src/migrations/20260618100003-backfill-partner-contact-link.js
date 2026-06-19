@@ -6,7 +6,7 @@ module.exports = {
       SELECT c.id AS contact_id, m.user_id AS user_id
       FROM contacts c
       JOIN (
-        SELECT household_id, COUNT(*) AS member_count, MIN(user_id) AS user_id
+        SELECT household_id, MIN(user_id) AS user_id
         FROM household_members
         WHERE role <> 'owner'
         GROUP BY household_id

@@ -31,5 +31,12 @@ test('settlement-recorded-by: adds column and backfills owner', async () => {
   await migration.up(qi, Sequelize);
   const rows = await sequelize.query('SELECT recorded_by_user_id FROM partner_settlements', { type: QueryTypes.SELECT });
   assert.equal((rows as Array<{ recorded_by_user_id: number | null }>)[0].recorded_by_user_id, 99);
+
+  // down removes the column; the settlement row itself survives.
+  await migration.down(qi, Sequelize);
+  const cols = await sequelize.query('PRAGMA table_info(partner_settlements)', { type: QueryTypes.SELECT });
+  assert.ok(!(cols as Array<{ name: string }>).some((c) => c.name === 'recorded_by_user_id'));
+  const survivors = await sequelize.query('SELECT COUNT(*) AS c FROM partner_settlements', { type: QueryTypes.SELECT });
+  assert.equal((survivors as Array<{ c: number }>)[0].c, 1);
   await sequelize.close();
 });

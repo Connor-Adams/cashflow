@@ -16,6 +16,10 @@ export async function resolveOrCreatePartnerContact(opts: {
 }): Promise<Contact> {
   const { householdId, userId, displayName, transaction } = opts;
 
+  // A household should hold at most one unlinked partner Contact (the invite
+  // flow creates exactly one). If multiple ever exist, adopt the oldest
+  // deterministically — the partial unique index on (household_id, user_id)
+  // still prevents two contacts from linking to the same user.
   const existing = await Contact.findOne({
     where: { householdId, isPartner: true, userId: null },
     order: [['id', 'ASC']],
