@@ -67,6 +67,8 @@ function compareInsights(a: InsightRow, b: InsightRow): number {
 }
 
 function entityHref(row: InsightRow): string | null {
+  // The forecast drill-down is a derivation, not a row — it has no entityId.
+  if (row.entityType === 'forecast') return '/planned/forecast'
   if (!row.entityType || row.entityId == null) return null
   switch (row.entityType) {
     case 'transaction':

@@ -34,14 +34,23 @@ beforeEach(async () => {
   await models.Insight.destroy({ where: {}, truncate: true });
   await models.PartnerSettlement.destroy({ where: {}, truncate: true });
   await models.Receipt.destroy({ where: {}, truncate: true });
+  await models.PlannedEvent.destroy({ where: {}, truncate: true });
   await models.Transaction.destroy({ where: {}, truncate: true });
   await models.Account.destroy({ where: {}, truncate: true });
   await models.Contact.destroy({ where: {}, truncate: true });
+  await models.User.destroy({ where: {}, truncate: true });
   await models.Household.destroy({ where: {}, truncate: true });
 });
 
-async function seedHousehold(name: string): Promise<{ householdId: number; accountId: number }> {
+async function seedHousehold(name: string): Promise<{ householdId: number; accountId: number; userId: number }> {
   const hh = await models.Household.create({ name });
+  const user = await models.User.create({
+    email: `${name.toLowerCase()}-${crypto.randomBytes(4).toString('hex')}@test.local`,
+    displayName: name,
+    passwordHash: 'x',
+    passwordSalt: 'x',
+    passwordParams: 'x',
+  });
   const account = await models.Account.create({
     householdId: hh.id,
     ownerUserId: null,
@@ -52,7 +61,7 @@ async function seedHousehold(name: string): Promise<{ householdId: number; accou
     defaultCurrency: 'CAD',
     shortCode: name.slice(0, 3).toUpperCase(),
   });
-  return { householdId: hh.id, accountId: account.id };
+  return { householdId: hh.id, accountId: account.id, userId: user.id };
 }
 
 async function createTxn(
@@ -212,4 +221,97 @@ test('runDetectorsForHousehold preserves user status across reruns (dismissed st
     where: { householdId, type: 'duplicate_transactions' },
   });
   assert.equal(after!.status, 'dismissed');
+});
+
+// ---- cash_runway_low + category_trend wiring (issue #797) --------------
+
+async function seedPlannedExpense(
+  householdId: number,
+  userId: number,
+  accountId: number,
+  date: string,
+  amount: number,
+): Promise<void> {
+  await models.PlannedEvent.create({
+    userId,
+    householdId,
+    accountId,
+    type: 'expense',
+    name: 'Rent',
+    amount: amount.toFixed(4),
+    currency: 'CAD',
+    expectedDate: date,
+    recurrenceRule: null,
+    linkedTransactionId: null,
+    notes: null,
+    cadence: null,
+    normalizedName: null,
+    lastChargeDate: null,
+    nextExpectedDate: null,
+    annualizedCost: null,
+    cancellationUrl: null,
+    category: null,
+  });
+}
+
+test('runDetectorsForHousehold persists a category_trend insight', async () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const { householdId, accountId } = await seedHousehold('T');
+  // Prior 3 full months trend up: Feb 200 → Mar 250 → Apr 300 (+50%).
+  await createTxn(householdId, accountId, '2026-02-10', 'WholeFoods', -200, 'Groceries');
+  await createTxn(householdId, accountId, '2026-03-10', 'WholeFoods', -250, 'Groceries');
+  await createTxn(householdId, accountId, '2026-04-10', 'WholeFoods', -300, 'Groceries');
+
+  const result = await runDetectorsForHousehold(householdId, { now });
+  const persisted = await models.Insight.findAll({ where: { householdId, type: 'category_trend' } });
+  assert.equal(persisted.length, 1);
+  assert.ok(persisted[0].fingerprint.startsWith('category-trend:CAD:groceries:'));
+  assert.equal(result.detectorCounts['category_trend'], 1);
+});
+
+test('runDetectorsForHousehold persists a cash_runway_low insight when projection crosses negative', async () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const { householdId, accountId, userId } = await seedHousehold('R');
+  // Opening cash: one prior inflow of +500 (before the forecast window).
+  await createTxn(householdId, accountId, '2026-05-01', 'Paycheck', 500, null, 'income');
+  // A large planned expense inside the 30-day horizon drives the balance < 0.
+  await seedPlannedExpense(householdId, userId, accountId, '2026-05-25', 2000);
+
+  const result = await runDetectorsForHousehold(householdId, { now });
+  const persisted = await models.Insight.findAll({ where: { householdId, type: 'cash_runway_low' } });
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0].entityType, 'forecast');
+  assert.equal(persisted[0].entityId, null);
+  assert.ok(persisted[0].fingerprint.startsWith('runway:CAD:'));
+  assert.equal(result.detectorCounts['cash_runway_low'], 1);
+});
+
+test('runDetectorsForHousehold: new detectors are idempotent and preserve dismissal', async () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const { householdId, accountId, userId } = await seedHousehold('T');
+  await createTxn(householdId, accountId, '2026-02-10', 'WholeFoods', -200, 'Groceries');
+  await createTxn(householdId, accountId, '2026-03-10', 'WholeFoods', -250, 'Groceries');
+  await createTxn(householdId, accountId, '2026-04-10', 'WholeFoods', -300, 'Groceries');
+  await createTxn(householdId, accountId, '2026-05-01', 'Paycheck', 500, null, 'income');
+  await seedPlannedExpense(householdId, userId, accountId, '2026-05-25', 2000);
+
+  const first = await runDetectorsForHousehold(householdId, { now });
+  const second = await runDetectorsForHousehold(householdId, { now });
+  // Re-run over unchanged data: no new rows, the new findings come back refreshed.
+  const rows = await models.Insight.findAll({ where: { householdId } });
+  assert.equal(rows.length, first.total);
+  assert.equal(second.created, 0);
+
+  // Dismiss the runway + trend rows, re-run, assert they stay dismissed.
+  for (const type of ['cash_runway_low', 'category_trend'] as const) {
+    const row = await models.Insight.findOne({ where: { householdId, type } });
+    assert.ok(row, `expected a ${type} row`);
+    row!.set('status', 'dismissed');
+    await row!.save();
+  }
+  await runDetectorsForHousehold(householdId, { now });
+  for (const type of ['cash_runway_low', 'category_trend'] as const) {
+    const row = await models.Insight.findOne({ where: { householdId, type } });
+    assert.equal(row!.status, 'dismissed', `${type} should remain dismissed`);
+  }
 });
