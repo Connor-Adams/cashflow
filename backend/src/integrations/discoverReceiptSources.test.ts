@@ -152,3 +152,56 @@ test('an already-processed message id is skipped', async () => {
   );
   assert.equal(result.skippedAlreadySeen, 1);
 });
+
+test('a PDF attachment on an empty-body message is extracted and auto-ingested when an amount matches', async () => {
+  await Transaction.create({
+    accountId: TEST_ACCOUNT_ID, householdId: 1, date: '2026-06-10', amount: '42.00', currency: 'CAD',
+    merchantRaw: 'PDFSHOP', merchantClean: 'Pdfshop',
+    importBatch: 'test', sourceRowFingerprint: 'fp-pdf1', sourceIdentityFingerprint: 'fi-pdf1',
+  } as never);
+  // Empty body, one PDF attachment part.
+  const msg = {
+    id: 'pdf1', threadId: 't', internalDate: '1718000000000', labelIds: ['CATEGORY_PURCHASES'],
+    payload: {
+      headers: [{ name: 'From', value: 'Shop <orders@pdfshop.test>' }, { name: 'Subject', value: 'Your invoice' }],
+      mimeType: 'multipart/mixed',
+      parts: [
+        { mimeType: 'text/plain', body: { data: Buffer.from('   ').toString('base64url') } },
+        { mimeType: 'application/pdf', filename: 'invoice.pdf', body: { size: 2000, attachmentId: 'att-pdf1' } },
+      ],
+    },
+  } as unknown as GmailMessageFull;
+
+  const result = await discoverReceiptSources(
+    { userId: 1, householdId: 1 },
+    {},
+    {
+      listMessageIds: async () => [{ id: 'pdf1', threadId: 't' }],
+      fetchMessage: async () => msg,
+      // body is empty -> extractFromText would receive '' or pdf text; return no items for empty, clean for pdf text
+      extractFromText: async (text: string) => (text.includes('PDF-RECEIPT') ? cleanExtract : { ...cleanExtract, total: null, items: [] }),
+      extractPdfReceiptText: async () => 'PDF-RECEIPT total 42.00',
+    },
+  );
+  assert.equal(result.autoIngested, 1);
+  assert.equal(await ExternalOrder.count(), 1);
+  const order = await ExternalOrder.findOne();
+  assert.equal(order?.source, 'gmail-discovery:ai-pdf');
+});
+
+test('PDF fetch is NOT attempted when the body already yields items', async () => {
+  let pdfCalled = false;
+  const msg = fakeMessage({ id: 'nopdf', from: 'A <a@a.test>', subject: 'Your order confirmation', labelIds: ['CATEGORY_PURCHASES'] });
+  await Transaction.create({ accountId: TEST_ACCOUNT_ID, householdId: 1, date: '2026-06-10', amount: '42.00', currency: 'CAD', merchantRaw: 'A', merchantClean: 'A', importBatch: 'test', sourceRowFingerprint: 'fp-nopdf', sourceIdentityFingerprint: 'fi-nopdf' } as never);
+  await discoverReceiptSources(
+    { userId: 1, householdId: 1 },
+    {},
+    {
+      listMessageIds: async () => [{ id: 'nopdf', threadId: 't1' }],
+      fetchMessage: async () => msg,
+      extractFromText: async () => cleanExtract,
+      extractPdfReceiptText: async () => { pdfCalled = true; return 'x'; },
+    },
+  );
+  assert.equal(pdfCalled, false);
+});

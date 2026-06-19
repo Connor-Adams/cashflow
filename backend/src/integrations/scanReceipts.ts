@@ -151,6 +151,24 @@ export function buildDiscoveryQuery(opts: {
   return parts.join(' ');
 }
 
+/**
+ * Parse receipt text (an email body OR PDF-extracted text) into a structured
+ * order: try the cheap deterministic vendor parsers first, then fall back to AI.
+ * `extractFromText` is injected so callers (and tests) can supply the real AI
+ * extractor or a fake. `usedAi` lets callers track AI-call counts.
+ */
+export async function parseReceiptText(opts: {
+  fromAddress: string | null;
+  subject: string | null;
+  text: string;
+  extractFromText: (text: string) => Promise<ExtractedReceiptOrder>;
+}): Promise<{ extracted: ExtractedReceiptOrder; parser: string; usedAi: boolean }> {
+  const det = tryDeterministicParse({ fromAddress: opts.fromAddress, subject: opts.subject, body: opts.text });
+  if (det.ok) return { extracted: det.order, parser: det.parser, usedAi: false };
+  const extracted = await opts.extractFromText(opts.text);
+  return { extracted, parser: 'ai', usedAi: true };
+}
+
 /** Senders the household explicitly dismissed during discovery — excluded from
  *  future discovery queries so they never re-surface. */
 export async function getDismissedSenders(householdId: number): Promise<string[]> {
