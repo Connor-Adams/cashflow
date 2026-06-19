@@ -26,8 +26,8 @@ function directionLabel(d: 'partner_owes_me' | 'i_owe_partner' | 'even'): string
 }
 
 function balanceTone(d: 'partner_owes_me' | 'i_owe_partner' | 'even'): string {
-  if (d === 'partner_owes_me') return 'text-emerald-600 dark:text-emerald-400'
-  if (d === 'i_owe_partner') return 'text-rose-600 dark:text-rose-400'
+  if (d === 'partner_owes_me') return 'text-positive'
+  if (d === 'i_owe_partner') return 'text-negative'
   return 'text-muted-foreground'
 }
 
