@@ -744,44 +744,74 @@ git commit -m "test(ui): assert built css + js artifacts carry the public surfac
 
 ---
 
-### Task 8: Rewire the frontend to consume `@cashflow/ui`
+### Task 8: Rewire the frontend to consume `@cashflow/ui` (single-source tokens)
+
+**Why this is not "import the compiled CSS":** The frontend runs its OWN Tailwind
+over app code, and app code (NOT just primitives) uses custom-theme utilities
+heavily — `text-muted-foreground` (107 files), `border-border` (53), `bg-card`
+(24), `bg-background` (13). Those classes are emitted only because the `@theme`
+block + tokens live where the frontend's Tailwind can see them. The package's
+COMPILED `styles.css` is a static post-Tailwind stylesheet — it cannot drive the
+frontend's compilation, so importing it alone would silently drop styling on
+100+ app files (no build error). The fix: the package also exports its `@theme`
+SOURCE; the frontend imports that source (single source of truth for tokens) so
+its own Tailwind regenerates every app + primitive utility, and `@source`-scans
+the package components so primitive-only utilities are emitted too.
 
 **Files:**
+- Create: `packages/ui/src/styles/preset.css` (source theme bundle: tokens + @theme + utilities, no Tailwind core)
+- Modify: `packages/ui/package.json` (export `./theme.css` → the source bundle; add `src/styles` to `files`)
 - Modify: `frontend/package.json` (add `@cashflow/ui` dependency)
-- Modify: `frontend/src/index.css` (remove the moved token/theme/utility blocks; import package CSS + keep frontend-only CSS)
+- Modify: `frontend/src/index.css` (remove moved token/theme/utility blocks; import package SOURCE theme; @source the package components; keep frontend-only CSS)
 - Delete: the 14 moved files under `frontend/src/components/ui/`
-- Create: `frontend/src/components/ui/index.ts` (re-export shim from `@cashflow/ui` — preserves existing deep imports without touching every call site)
-- Modify: any frontend imports that referenced the deleted files by path (see Step 4)
+- Create: `frontend/src/components/ui/index.ts` (re-export shim from `@cashflow/ui`)
+- Modify: every frontend import that referenced a deleted primitive by path (Step 5)
 
 **Interfaces:**
-- Consumes: `@cashflow/ui` primitives + `@cashflow/ui/styles.css` + `@cashflow/ui/styles` token layer.
-- Produces: a frontend that builds, tests, and lints green with zero local copies of the 14 primitives.
+- Consumes: `@cashflow/ui` primitives (JS) + `@cashflow/ui/theme.css` (source token/theme/utility layer for the frontend's own Tailwind).
+- Produces: a frontend that builds with all app + primitive utilities present, tests + lints green, zero local copies of the 14 primitives, tokens defined ONLY in the package.
 
-- [ ] **Step 1: Add the workspace dependency**
+- [ ] **Step 1: Add the package source-theme export**
 
-Edit `frontend/package.json` `dependencies`, add:
-
-```json
-    "@cashflow/ui": "*",
-```
-
-Run: `yarn install`
-Expected: `@cashflow/ui` linked into the frontend.
-
-- [ ] **Step 2: Move token CSS ownership to the package**
-
-In `frontend/src/index.css`, DELETE lines 12–447 (the `:root` token blocks, the `@theme inline` block, and the three `@utility` blocks) AND the skeleton shimmer block (≈499–523) — everything now living in `@cashflow/ui`. KEEP: the top `@import "tailwindcss";` (line 1), `@custom-variant dark` (line 3), the `.livingBg` / `livingGradientDrift` block, and the global resets / body / `#root` / selection rules at the bottom.
-
-At the top of `frontend/src/index.css`, immediately after `@import "tailwindcss";`, add:
+Create `packages/ui/src/styles/preset.css`:
 
 ```css
-/* Design tokens, theme, and custom utilities now live in @cashflow/ui. */
-@import "@cashflow/ui/styles.css";
+/* Source token/theme/utility layer for Tailwind-running consumers (the
+ * cashflow frontend). Brings the :root tokens, @theme mappings, custom
+ * @utility definitions, and keyframes into the consumer's own Tailwind
+ * compile. Does NOT @import "tailwindcss" — the consumer already does. */
+@import "./tokens.css";
+@import "./theme.css";
+@import "./utilities.css";
 ```
 
-Note: importing the package's compiled CSS brings the token `:root` layer + custom utilities. The frontend's own `@import "tailwindcss"` continues to generate utilities for app-level (non-primitive) code, which reference the same CSS vars.
+Edit `packages/ui/package.json`: add `"./theme.css": "./src/styles/preset.css"` to the `exports` map (alongside the existing `"./styles.css"` compiled entry), and add `"src/styles"` to the `files` array so the source ships for external Tailwind consumers too.
 
-- [ ] **Step 3: Delete the moved primitives and add a re-export shim**
+Run: `yarn workspace @cashflow/ui run typecheck` (sanity; no TS change expected) — exit 0.
+
+- [ ] **Step 2: Add the workspace dependency**
+
+Edit `frontend/package.json` `dependencies`, add `"@cashflow/ui": "*",`. Run `yarn install` from the worktree root. Expected: `@cashflow/ui` linked into the frontend.
+
+- [ ] **Step 3: Move token CSS ownership to the package**
+
+In `frontend/src/index.css`, DELETE the `:root` token blocks (lines 12–275), the `@theme inline` block (284–412), the three `@utility` blocks (414–447), and the skeleton shimmer rule + keyframes (≈499–523) — all now owned by `@cashflow/ui`. KEEP: `@import "tailwindcss";` (line 1), `@custom-variant dark` (line 3), the `.livingBg` / `@keyframes livingGradientDrift` block, and the global resets / body / `#root` / selection rules.
+
+Immediately after `@import "tailwindcss";`, add:
+
+```css
+/* Design tokens + theme + custom utilities are owned by @cashflow/ui.
+ * Import the SOURCE (not compiled CSS) so the frontend's Tailwind generates
+ * app-level custom utilities (bg-card, text-muted-foreground, …) from the one
+ * shared source, and scan the package components so primitive-only utilities
+ * are emitted too. */
+@import "@cashflow/ui/theme.css";
+@source "../../packages/ui/src/components/**/*.{ts,tsx}";
+```
+
+(The `@source` path is relative to this CSS file: `frontend/src/index.css` → `../../packages/ui/src/components`.)
+
+- [ ] **Step 4: Delete the moved primitives and add a re-export shim**
 
 ```bash
 git rm frontend/src/components/ui/{button,card,input,textarea,label,badge,alert,table,tabs,skeleton,empty-state,dialog,grid,native-select}.tsx
@@ -791,38 +821,53 @@ Create `frontend/src/components/ui/index.ts`:
 
 ```ts
 // The generic primitives now live in @cashflow/ui. Re-export so existing
-// `@/components/ui` imports keep resolving. Domain components below stay local.
+// `@/components/ui` imports keep resolving. Domain components stay local files.
 export * from '@cashflow/ui'
 ```
 
-- [ ] **Step 4: Repoint deep path imports**
+- [ ] **Step 5: Repoint every import of a moved primitive**
 
-Find any frontend imports that referenced a deleted file directly (e.g. `from '@/components/ui/button'`):
+Both deep app imports AND sibling imports from the domain components that remain in `frontend/src/components/ui/` must be repointed (a domain file doing `import { Card } from './card'` now points at a deleted file).
 
-Run: `cd frontend && grep -rn "components/ui/\(button\|card\|input\|textarea\|label\|badge\|alert\|table\|tabs\|skeleton\|empty-state\|dialog\|grid\|native-select\)\b" src`
+Run, from `frontend/`:
+```bash
+grep -rn "from '\(@/components/ui/\|\./\|\.\./ui/\)\(button\|card\|input\|textarea\|label\|badge\|alert\|table\|tabs\|skeleton\|empty-state\|dialog\|grid\|native-select\)'" src
+```
+For each hit, change the import source to `@cashflow/ui`. Do NOT touch imports of domain components that remain local (`stat-card`, `filter-bar`, `metric-stat`, `page-header`, `section-header`, `collapsible-card`, `tree`, `toast`, `letter-avatar`, `DeltaBadge`, `delta-tone`, `sparkline`, `allocation-donut`, `pct-delta-cell`, `txn-merchant-cell`, `table-card`, `filter-card`, `security-logo`). After editing, re-run the grep — it must return nothing.
 
-For each hit, change the import to come from `@cashflow/ui` (or `@/components/ui` which re-exports it). Do not touch imports of domain components (`stat-card`, `filter-bar`, etc.) that remain local.
-
-- [ ] **Step 5: Run the frontend test suite**
+- [ ] **Step 6: Run the frontend test suite**
 
 Run: `yarn workspace frontend run test`
-Expected: PASS. Investigate any failure caused by a missing re-export name (fix the barrel in `@cashflow/ui`, rebuild, rerun).
+Expected: PASS. A failure naming a missing export means a name isn't re-exported by the `@cashflow/ui` barrel — fix the barrel, rebuild the package (`yarn workspace @cashflow/ui run build:js`), rerun.
 
-- [ ] **Step 6: Build the frontend (verifies CSS resolves at build time)**
+- [ ] **Step 7: Build the package, then the frontend**
 
 Run: `yarn workspace @cashflow/ui run build && yarn workspace frontend run build`
-Expected: both succeed. The frontend build must resolve `@cashflow/ui/styles.css`.
+Expected: both succeed.
 
-- [ ] **Step 7: Lint + palette guard**
+- [ ] **Step 8: Verify app + primitive utilities are actually in the built CSS (silent-failure guard)**
+
+This is the critical check — the whole reason for the single-source approach.
+
+Run, from the worktree root:
+```bash
+CSS=$(ls -1 frontend/dist/assets/*.css | head -1)
+for needle in 'bg-card' 'text-muted-foreground' 'border-border' 'bg-button-primary' 'skeleton-shimmer'; do
+  grep -q -- "$needle" "$CSS" && echo "OK  $needle" || echo "MISSING  $needle"
+done
+```
+Expected: all five print `OK`. `bg-card`/`text-muted-foreground`/`border-border` prove app-level custom utilities still generate; `bg-button-primary`/`skeleton-shimmer` prove the package's `@theme`/`@utility` source + the `@source` component scan reached the frontend's Tailwind. ANY `MISSING` means the single-source wiring failed — stop and fix (check the `@import "@cashflow/ui/theme.css"` resolves and the `@source` path is correct) before committing.
+
+- [ ] **Step 9: Lint + palette guard**
 
 Run: `yarn workspace frontend run lint && yarn workspace frontend run lint:palette`
-Expected: exit 0. (If `lint:palette` now flags the moved token file, scope its file walk to `frontend/src` only — it should already, since the tokens left the frontend tree.)
+Expected: exit 0. (The palette guard walks `frontend/src`; the hex-bearing token blocks have left that tree, so it should be satisfied.)
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add frontend
-git commit -m "refactor(frontend): consume primitives + tokens from @cashflow/ui"
+git add packages/ui frontend
+git commit -m "refactor(frontend): consume primitives + single-source tokens from @cashflow/ui"
 ```
 
 ---
