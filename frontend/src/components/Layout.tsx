@@ -59,8 +59,14 @@ export function Layout() {
     }
   }, [sidebarOpen, closeSidebar])
 
+  // Living-gradient backdrop is reserved for the dashboard (index route). It
+  // fades in here and fades out on every other route, so switching tabs reads
+  // as a soft transition rather than a hard cut.
+  const onDashboard = location.pathname === '/'
+
   return (
     <div className="layout" data-sidebar-open={sidebarOpen}>
+      <div className="livingBg" data-active={onDashboard} aria-hidden="true" />
       <Sidebar open={sidebarOpen} onClose={closeSidebar} />
 
       {/* Mobile backdrop. Hidden via CSS on desktop. */}

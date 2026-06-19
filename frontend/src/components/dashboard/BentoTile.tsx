@@ -233,8 +233,16 @@ export function BentoTile({
                   type="button"
                   onClick={onDismiss}
                   aria-label={dismissLabel}
-                  className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                  style={variant === 'gradient' ? { color: '#fff' } : undefined}
+                  title={dismissLabel}
+                  className={cn(
+                    // A real, visible chip at rest — border + faint fill + shadow
+                    // so it reads as a button, not a stray glyph. Grows slightly
+                    // and lifts on hover.
+                    'flex size-7 items-center justify-center rounded-full border shadow-sm transition-all hover:scale-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+                    variant === 'gradient'
+                      ? 'border-white/40 bg-white/15 text-white hover:bg-white/25'
+                      : 'border-border bg-card/80 text-muted-foreground hover:border-foreground/30 hover:bg-muted hover:text-foreground',
+                  )}
                 >
                   <X className="size-4" aria-hidden="true" />
                 </button>

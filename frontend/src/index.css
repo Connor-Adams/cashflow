@@ -521,3 +521,63 @@ textarea {
     animation: none;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Living gradient backdrop
+ *
+ * A fixed, full-viewport aurora built from the hero-gradient stops, washed
+ * down to a low alpha so it tints the flat --background rather than replacing
+ * it. Two offset radial blooms drift slowly in counterpoint, giving the page
+ * a gentle "breathing" feel. The layer sits at z-index 0 inside #root (which
+ * we promote to a stacking context) so it paints above the body background
+ * but below all app chrome.
+ *
+ * Opacity is route-gated: the dashboard fades it in (data-active="true"),
+ * every other route fades it back out, so the delight is reserved for the
+ * one surface it belongs to and the fade reads as a soft transition between
+ * tabs. Honours prefers-reduced-motion by freezing the drift (the static
+ * wash still shows).
+ * ──────────────────────────────────────────────────────────────────────── */
+@keyframes livingGradientDrift {
+  0%   { background-position:   0% 50%, 100% 50%; }
+  50%  { background-position: 100% 50%,   0% 50%; }
+  100% { background-position:   0% 50%, 100% 50%; }
+}
+
+#root {
+  position: relative;
+  isolation: isolate;
+}
+
+.livingBg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 700ms ease;
+  background-image:
+    radial-gradient(
+      60% 55% at 18% 22%,
+      color-mix(in oklch, var(--gradient-hero-from) 24%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      55% 55% at 82% 78%,
+      color-mix(in oklch, var(--gradient-hero-to) 22%, transparent),
+      transparent 70%
+    );
+  background-size: 180% 180%, 180% 180%;
+  background-repeat: no-repeat;
+  animation: livingGradientDrift 24s ease-in-out infinite;
+}
+
+.livingBg[data-active='true'] {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .livingBg {
+    animation: none;
+  }
+}
