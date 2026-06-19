@@ -152,6 +152,45 @@ after(async () => {
   await teardownPgTestDb(testDb);
 });
 
+// ── seed + request helpers (keep each test terse, avoid clone groups) ──────
+
+/** Seed a household-A transaction; only the varying fields are passed. */
+function seedA(
+  date: string,
+  amount: number,
+  fields: Partial<TxnSeed> = {},
+): Promise<number> {
+  return createTxn({ householdId: householdAId, accountId: accountAId, date, amount, ...fields });
+}
+
+/** GET /clusters for an agent and return the parsed cluster array. */
+async function getClusters(
+  agent: ReturnType<typeof request.agent>,
+  currency = 'CAD',
+): Promise<Array<Record<string, unknown>>> {
+  const res = await agent.get('/api/merchants/clusters').query({ currency });
+  assert.equal(res.status, 200);
+  return res.body.clusters as Array<Record<string, unknown>>;
+}
+
+/** The merchant_clean keys of an agent's clusters, in returned order. */
+async function clusterCleans(
+  agent: ReturnType<typeof request.agent>,
+): Promise<string[]> {
+  return (await getClusters(agent)).map((c) => c.merchantClean as string);
+}
+
+/** Read back the merchant_canonical values of every row in a cluster. */
+async function canonicalsOf(clean: string): Promise<Array<string | null>> {
+  const models = await import('../../src/models');
+  const rows = await models.Transaction.findAll({
+    where: { householdId: householdAId, merchantClean: clean },
+    attributes: ['merchantCanonical'],
+    raw: true,
+  });
+  return (rows as Array<{ merchantCanonical: string | null }>).map((r) => r.merchantCanonical);
+}
+
 // ───────────────────────── unauthenticated ─────────────────────────
 
 test('clusters/bulk-recategorize/merge reject unauthenticated requests with 401', async () => {
@@ -167,27 +206,15 @@ test('clusters/bulk-recategorize/merge reject unauthenticated requests with 401'
 // ───────────────────────── GET /clusters ─────────────────────────
 
 test('/clusters: one entry per distinct merchant_clean, sorted by spend desc', async () => {
-  // Blue Bottle cluster: 3 rows in CAD, totalling 80 spend, mixed categories.
-  await createTxn({ householdId: householdAId, accountId: accountAId, date: '2026-01-01', amount: -50, merchantRaw: 'SQ *BLUE BOTTLE', merchantClean: 'BLUE BOTTLE COFFEE', finalCategory: 'Coffee' });
-  await createTxn({ householdId: householdAId, accountId: accountAId, date: '2026-01-02', amount: -20, merchantRaw: 'BLUE BOTTLE COFFEE #12', merchantClean: 'BLUE BOTTLE COFFEE', finalCategory: 'Coffee' });
-  await createTxn({ householdId: householdAId, accountId: accountAId, date: '2026-01-03', amount: -10, merchantRaw: 'BLUE BOTTLE', merchantClean: 'BLUE BOTTLE COFFEE', finalCategory: 'Dining' });
-  // Tiny Cafe cluster: 1 row, 5 spend.
-  await createTxn({ householdId: householdAId, accountId: accountAId, date: '2026-01-04', amount: -5, merchantRaw: 'TINY CAFE', merchantClean: 'TINY CAFE', finalCategory: 'Coffee' });
-  // A positive (refund) row must not inflate spend.
-  await createTxn({ householdId: householdAId, accountId: accountAId, date: '2026-01-05', amount: 7, merchantRaw: 'BLUE BOTTLE REFUND', merchantClean: 'BLUE BOTTLE COFFEE', finalCategory: 'Coffee' });
+  // Blue Bottle cluster: 3 spend rows (80 total), mixed categories, + a refund.
+  await seedA('2026-01-01', -50, { merchantRaw: 'SQ *BLUE BOTTLE', merchantClean: 'BLUE BOTTLE COFFEE', finalCategory: 'Coffee' });
+  await seedA('2026-01-02', -20, { merchantRaw: 'BLUE BOTTLE COFFEE #12', merchantClean: 'BLUE BOTTLE COFFEE', finalCategory: 'Coffee' });
+  await seedA('2026-01-03', -10, { merchantRaw: 'BLUE BOTTLE', merchantClean: 'BLUE BOTTLE COFFEE', finalCategory: 'Dining' });
+  await seedA('2026-01-04', -5, { merchantRaw: 'TINY CAFE', merchantClean: 'TINY CAFE', finalCategory: 'Coffee' });
+  await seedA('2026-01-05', 7, { merchantRaw: 'BLUE BOTTLE REFUND', merchantClean: 'BLUE BOTTLE COFFEE', finalCategory: 'Coffee' }); // refund excluded from spend
 
-  const res = await agentA.get('/api/merchants/clusters').query({ currency: 'CAD' });
-  assert.equal(res.status, 200);
-  const clusters = res.body.clusters as Array<{
-    merchantClean: string;
-    count: number;
-    totalSpend: string;
-    currency: string;
-    dominantCategory: string | null;
-    categorySpread: Array<{ category: string | null; count: number }>;
-    sampleDescriptions: string[];
-  }>;
-
+  const clusters = await getClusters(agentA);
+  const cleans = clusters.map((c) => c.merchantClean as string);
   const blue = clusters.find((c) => c.merchantClean === 'BLUE BOTTLE COFFEE');
   const tiny = clusters.find((c) => c.merchantClean === 'TINY CAFE');
   assert.ok(blue, 'BLUE BOTTLE COFFEE cluster present');
@@ -197,26 +224,20 @@ test('/clusters: one entry per distinct merchant_clean, sorted by spend desc', a
   assert.equal(blue.totalSpend, '80.00', 'spend = 50+20+10, refund excluded');
   assert.equal(blue.currency, 'CAD');
   assert.equal(blue.dominantCategory, 'Coffee', '3 Coffee vs 1 Dining');
-  assert.ok(blue.categorySpread.length >= 2, 'mixed-category spread');
-  assert.ok(blue.sampleDescriptions.length >= 1, 'has at least one sample description');
-
-  // Sorted by spend desc → Blue Bottle (80) before Tiny Cafe (5).
+  assert.ok((blue.categorySpread as unknown[]).length >= 2, 'mixed-category spread');
+  assert.ok((blue.sampleDescriptions as unknown[]).length >= 1, 'has a sample description');
   assert.ok(
-    clusters.indexOf(blue) < clusters.indexOf(tiny),
-    `expected Blue Bottle before Tiny Cafe: ${JSON.stringify(clusters.map((c) => c.merchantClean))}`,
+    cleans.indexOf('BLUE BOTTLE COFFEE') < cleans.indexOf('TINY CAFE'),
+    `expected Blue Bottle before Tiny Cafe: ${JSON.stringify(cleans)}`,
   );
 });
 
 test('/clusters never leaks another household; B sees only its own', async () => {
   await createTxn({ householdId: householdBId, accountId: accountBId, date: '2026-02-01', amount: -12, merchantRaw: 'B ONLY', merchantClean: 'B ONLY SHOP', finalCategory: null });
 
-  const resB = await agentB.get('/api/merchants/clusters').query({ currency: 'CAD' });
-  assert.equal(resB.status, 200);
-  const cleansB = (resB.body.clusters as Array<{ merchantClean: string }>).map((c) => c.merchantClean);
-  assert.deepEqual(cleansB, ['B ONLY SHOP']);
+  assert.deepEqual(await clusterCleans(agentB), ['B ONLY SHOP']);
 
-  const resA = await agentA.get('/api/merchants/clusters').query({ currency: 'CAD' });
-  const cleansA = (resA.body.clusters as Array<{ merchantClean: string }>).map((c) => c.merchantClean);
+  const cleansA = await clusterCleans(agentA);
   assert.ok(!cleansA.includes('B ONLY SHOP'), `cross-household leak: ${JSON.stringify(cleansA)}`);
 });
 
@@ -295,9 +316,9 @@ test('bulk-recategorize with createRule creates one rule and is idempotent (409 
 
 test('merge reassigns canonical of merge clusters to the survivor and returns count', async () => {
   // Seed three sibling clusters of the same real merchant.
-  await createTxn({ householdId: householdAId, accountId: accountAId, date: '2026-03-01', amount: -11, merchantRaw: 'SQ *STARBUCKS', merchantClean: 'STARBUCKS', finalCategory: 'Coffee' });
-  await createTxn({ householdId: householdAId, accountId: accountAId, date: '2026-03-02', amount: -12, merchantRaw: 'STARBUCKS #99', merchantClean: 'SBUX', finalCategory: 'Coffee' });
-  await createTxn({ householdId: householdAId, accountId: accountAId, date: '2026-03-03', amount: -13, merchantRaw: 'STARBUCKS STORE', merchantClean: 'STARBUCKS COFFEE', finalCategory: 'Coffee' });
+  await seedA('2026-03-01', -11, { merchantClean: 'STARBUCKS', finalCategory: 'Coffee' });
+  await seedA('2026-03-02', -12, { merchantClean: 'SBUX', finalCategory: 'Coffee' });
+  await seedA('2026-03-03', -13, { merchantClean: 'STARBUCKS COFFEE', finalCategory: 'Coffee' });
 
   const res = await agentA.post('/api/merchants/merge').send({
     survivorMerchantClean: 'STARBUCKS',
@@ -308,23 +329,16 @@ test('merge reassigns canonical of merge clusters to the survivor and returns co
   assert.equal(res.body.survivor, 'Starbucks');
   assert.equal(res.body.reassigned, 3, 'all three rows now carry the survivor canonical');
 
-  const models = await import('../../src/models');
   for (const clean of ['STARBUCKS', 'SBUX', 'STARBUCKS COFFEE']) {
-    const rows = await models.Transaction.findAll({
-      where: { householdId: householdAId, merchantClean: clean },
-      attributes: ['merchantCanonical'],
-      raw: true,
-    });
-    for (const r of rows as Array<{ merchantCanonical: string | null }>) {
-      assert.equal(r.merchantCanonical, 'Starbucks');
+    for (const canonical of await canonicalsOf(clean)) {
+      assert.equal(canonical, 'Starbucks');
     }
   }
 });
 
 test('merge rename-only (empty merge list) updates only the survivor cluster', async () => {
-  await createTxn({ householdId: householdAId, accountId: accountAId, date: '2026-04-01', amount: -9, merchantRaw: 'LONE WOLF', merchantClean: 'LONE WOLF', finalCategory: 'Dining' });
-  // A bystander cluster that must NOT be touched.
-  await createTxn({ householdId: householdAId, accountId: accountAId, date: '2026-04-02', amount: -8, merchantRaw: 'BYSTANDER', merchantClean: 'BYSTANDER', finalCategory: 'Dining' });
+  await seedA('2026-04-01', -9, { merchantClean: 'LONE WOLF', finalCategory: 'Dining' });
+  await seedA('2026-04-02', -8, { merchantClean: 'BYSTANDER', finalCategory: 'Dining' }); // must NOT be touched
 
   const res = await agentA.post('/api/merchants/merge').send({
     survivorMerchantClean: 'LONE WOLF',
@@ -334,20 +348,8 @@ test('merge rename-only (empty merge list) updates only the survivor cluster', a
   assert.equal(res.status, 200);
   assert.equal(res.body.survivor, 'Lone Wolf Diner');
 
-  const models = await import('../../src/models');
-  const lone = await models.Transaction.findAll({
-    where: { householdId: householdAId, merchantClean: 'LONE WOLF' },
-    attributes: ['merchantCanonical'],
-    raw: true,
-  });
-  assert.equal((lone[0] as { merchantCanonical: string | null }).merchantCanonical, 'Lone Wolf Diner');
-
-  const bystander = await models.Transaction.findAll({
-    where: { householdId: householdAId, merchantClean: 'BYSTANDER' },
-    attributes: ['merchantCanonical'],
-    raw: true,
-  });
-  assert.equal((bystander[0] as { merchantCanonical: string | null }).merchantCanonical, null);
+  assert.deepEqual(await canonicalsOf('LONE WOLF'), ['Lone Wolf Diner']);
+  assert.deepEqual(await canonicalsOf('BYSTANDER'), [null], 'bystander untouched');
 });
 
 test('merge rejects survivor appearing in merge list (400) and missing survivor (404)', async () => {

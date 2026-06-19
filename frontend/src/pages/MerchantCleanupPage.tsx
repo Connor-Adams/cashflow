@@ -35,6 +35,117 @@ const EMPTY_BODY =
 const ERROR_FALLBACK =
   "We couldn't load your merchants. Check your connection and try again."
 
+type RowCallbacks = {
+  selected: boolean
+  renaming: boolean
+  renameValue: string
+  pendingCategory: string
+  categoryLabels: string[]
+  onToggleSelect: () => void
+  onStartRename: () => void
+  onRenameChange: (v: string) => void
+  onSubmitRename: () => void
+  onCancelRename: () => void
+  onCategoryChange: (v: string) => void
+  onApplyCategory: () => void
+  onCreateRule: () => void
+}
+
+/** A single cluster row. Split out to keep the page component flat. */
+function ClusterRow({
+  cluster,
+  cb,
+}: {
+  cluster: MerchantCluster
+  cb: RowCallbacks
+}) {
+  const mixed = cluster.categorySpread.length > 1
+  const label = cluster.canonical ?? cluster.merchantClean
+  return (
+    <TableRow>
+      <TableCell>
+        <input
+          type="checkbox"
+          aria-label={`Select ${cluster.merchantClean}`}
+          checked={cb.selected}
+          onChange={cb.onToggleSelect}
+        />
+      </TableCell>
+      <TableCell>
+        {cb.renaming ? (
+          <div className="flex items-center gap-2">
+            <Input
+              autoFocus
+              value={cb.renameValue}
+              aria-label={`Rename ${cluster.merchantClean}`}
+              onChange={(e) => cb.onRenameChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') cb.onSubmitRename()
+                if (e.key === 'Escape') cb.onCancelRename()
+              }}
+            />
+            <Button size="sm" onClick={cb.onSubmitRename}>
+              Save
+            </Button>
+            <Button size="sm" variant="outline" onClick={cb.onCancelRename}>
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="text-left hover:underline"
+            title="Rename canonical merchant"
+            onClick={cb.onStartRename}
+          >
+            <span className="font-medium">{label}</span>
+            {cluster.sampleDescriptions.length > 0 ? (
+              <span className="block text-xs text-muted-foreground">
+                {cluster.sampleDescriptions.join(' · ')}
+              </span>
+            ) : null}
+          </button>
+        )}
+      </TableCell>
+      <TableCell className="text-right tabular-nums">{cluster.count}</TableCell>
+      <TableCell className="text-right tabular-nums">
+        {formatCurrency(Number(cluster.totalSpend), cluster.currency)}
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-2">
+          <span>{cluster.dominantCategory ?? '—'}</span>
+          {mixed ? (
+            <Badge
+              variant="secondary"
+              title={cluster.categorySpread
+                .map((s) => `${s.category ?? 'Uncategorized'} (${s.count})`)
+                .join(', ')}
+            >
+              mixed +{cluster.categorySpread.length - 1}
+            </Badge>
+          ) : null}
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <CategoryCloudPicker
+            value={cb.pendingCategory}
+            options={cb.categoryLabels}
+            placeholder="Category"
+            onChange={cb.onCategoryChange}
+          />
+          <Button size="sm" onClick={cb.onApplyCategory}>
+            Apply category
+          </Button>
+          <Button size="sm" variant="outline" onClick={cb.onCreateRule}>
+            Create rule
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
+  )
+}
+
 /**
  * Bulk merchant-cleanup review surface (issue #793). Lists every merchant
  * cluster (a derived GROUP BY merchant_clean view) sorted by total spend,
@@ -85,96 +196,105 @@ export function MerchantCleanupPage() {
       .catch(() => setCategoryHints([]))
   }, [])
 
-  function toggleSelect(merchantClean: string) {
+  const toggleSelect = useCallback((merchantClean: string) => {
     setSelected((prev) => {
       const next = new Set(prev)
       if (next.has(merchantClean)) next.delete(merchantClean)
       else next.add(merchantClean)
       return next
     })
-  }
+  }, [])
 
-  async function applyCategory(cluster: MerchantCluster, createRule: boolean) {
-    const category = (pendingCategory[cluster.merchantClean] ?? cluster.dominantCategory ?? '').trim()
-    if (!category) {
-      showToast({ title: 'Pick a category first', variant: 'warning' })
-      return
-    }
-    if (cluster.categorySpread.length > 1) {
-      const ok = await confirm({
-        title: 'Apply category',
-        description: `This overwrites the category on all ${cluster.count} transactions in "${cluster.merchantClean}".`,
-        confirmLabel: 'Apply category',
-      })
-      if (!ok) return
-    }
-    try {
-      const res = await postJson<MerchantBulkRecategorizeResponse>(
-        '/api/merchants/bulk-recategorize',
-        { merchantClean: cluster.merchantClean, category, createRule },
-      )
-      showToast({
-        title: createRule
-          ? `Recategorized ${res.recategorized} transactions and created a rule for ${cluster.canonical ?? cluster.merchantClean}`
-          : `Recategorized ${res.recategorized} transactions under ${cluster.canonical ?? cluster.merchantClean}`,
-        variant: 'success',
-      })
-      await load()
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Could not apply category'
-      showToast({ title: msg, variant: 'destructive' })
-    }
-  }
+  const applyCategory = useCallback(
+    async (cluster: MerchantCluster, createRule: boolean) => {
+      const category = (
+        pendingCategory[cluster.merchantClean] ??
+        cluster.dominantCategory ??
+        ''
+      ).trim()
+      if (!category) {
+        showToast({ title: 'Pick a category first', variant: 'warning' })
+        return
+      }
+      if (cluster.categorySpread.length > 1) {
+        const ok = await confirm({
+          title: 'Apply category',
+          description: `This overwrites the category on all ${cluster.count} transactions in "${cluster.merchantClean}".`,
+          confirmLabel: 'Apply category',
+        })
+        if (!ok) return
+      }
+      try {
+        const res = await postJson<MerchantBulkRecategorizeResponse>(
+          '/api/merchants/bulk-recategorize',
+          { merchantClean: cluster.merchantClean, category, createRule },
+        )
+        const name = cluster.canonical ?? cluster.merchantClean
+        showToast({
+          title: createRule
+            ? `Recategorized ${res.recategorized} transactions and created a rule for ${name}`
+            : `Recategorized ${res.recategorized} transactions under ${name}`,
+          variant: 'success',
+        })
+        await load()
+      } catch (e) {
+        showToast({
+          title: e instanceof Error ? e.message : 'Could not apply category',
+          variant: 'destructive',
+        })
+      }
+    },
+    [pendingCategory, confirm, showToast, load],
+  )
 
-  async function submitRename(cluster: MerchantCluster) {
-    const canonicalName = renameValue.trim()
-    if (!canonicalName) {
-      setRenaming(null)
-      return
-    }
-    try {
-      const res = await postJson<MerchantMergeResponse>('/api/merchants/merge', {
-        survivorMerchantClean: cluster.merchantClean,
-        mergeMerchantCleans: [],
-        canonicalName,
-      })
-      showToast({ title: `Renamed to ${res.survivor}`, variant: 'success' })
-      setRenaming(null)
-      setRenameValue('')
-      await load()
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Could not rename'
-      showToast({ title: msg, variant: 'destructive' })
-    }
-  }
+  const submitRename = useCallback(
+    async (cluster: MerchantCluster) => {
+      const canonicalName = renameValue.trim()
+      if (!canonicalName) {
+        setRenaming(null)
+        return
+      }
+      try {
+        const res = await postJson<MerchantMergeResponse>('/api/merchants/merge', {
+          survivorMerchantClean: cluster.merchantClean,
+          mergeMerchantCleans: [],
+          canonicalName,
+        })
+        showToast({ title: `Renamed to ${res.survivor}`, variant: 'success' })
+        setRenaming(null)
+        setRenameValue('')
+        await load()
+      } catch (e) {
+        showToast({
+          title: e instanceof Error ? e.message : 'Could not rename',
+          variant: 'destructive',
+        })
+      }
+    },
+    [renameValue, showToast, load],
+  )
 
-  async function mergeSelected() {
+  const mergeSelected = useCallback(async () => {
     const cleans = Array.from(selected)
     if (cleans.length < 2) {
       showToast({ title: 'Select at least two merchants to merge', variant: 'warning' })
       return
     }
-    // Survivor = the selected cluster with the most spend (first by sort order).
-    const survivorClean =
-      clusters.find((c) => selected.has(c.merchantClean))?.merchantClean ?? cleans[0]
-    const survivor = clusters.find((c) => c.merchantClean === survivorClean)!
-    const mergeCleans = cleans.filter((c) => c !== survivorClean)
-    const affected = clusters
-      .filter((c) => selected.has(c.merchantClean))
-      .reduce((sum, c) => sum + c.count, 0)
+    const picked = clusters.filter((c) => selected.has(c.merchantClean))
+    // Survivor = the selected cluster with the most spend (first in sort order).
+    const survivor = picked[0]
+    const mergeCleans = cleans.filter((c) => c !== survivor.merchantClean)
+    const affected = picked.reduce((sum, c) => sum + c.count, 0)
     const canonicalName = survivor.canonical ?? survivor.merchantClean
+    // v1 does not rewrite existing rules; warn if a selected cluster has one.
+    const hasRuleWarning = picked.some((c) => c.canonical != null)
 
-    // Warn if any selected cluster appears to already have a rule (its
-    // canonical/clean derives a pattern v1 will NOT rewrite).
-    const hasRuleWarning = clusters
-      .filter((c) => selected.has(c.merchantClean))
-      .some((c) => c.canonical != null)
-
+    const baseCopy = `This reassigns ${affected} transactions to the new canonical merchant and can't be undone in bulk.`
     const ok = await confirm({
       title: `Merge ${cleans.length} merchants into "${canonicalName}"?`,
       description: hasRuleWarning
-        ? `This reassigns ${affected} transactions to the new canonical merchant and can't be undone in bulk. Existing rules still match their old patterns and will not be rewritten.`
-        : `This reassigns ${affected} transactions to the new canonical merchant and can't be undone in bulk.`,
+        ? `${baseCopy} Existing rules still match their old patterns and will not be rewritten.`
+        : baseCopy,
       confirmLabel: 'Merge merchants',
       destructive: true,
     })
@@ -182,7 +302,7 @@ export function MerchantCleanupPage() {
 
     try {
       const res = await postJson<MerchantMergeResponse>('/api/merchants/merge', {
-        survivorMerchantClean: survivorClean,
+        survivorMerchantClean: survivor.merchantClean,
         mergeMerchantCleans: mergeCleans,
         canonicalName,
       })
@@ -192,10 +312,12 @@ export function MerchantCleanupPage() {
       })
       await load()
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Could not merge merchants'
-      showToast({ title: msg, variant: 'destructive' })
+      showToast({
+        title: e instanceof Error ? e.message : 'Could not merge merchants',
+        variant: 'destructive',
+      })
     }
-  }
+  }, [selected, clusters, confirm, showToast, load])
 
   const showEmpty = !loading && !error && clusters.length === 0
 
@@ -260,112 +382,37 @@ export function MerchantCleanupPage() {
                 }
               />
             ) : (
-              clusters.map((cluster) => {
-                const mixed = cluster.categorySpread.length > 1
-                const pending =
-                  pendingCategory[cluster.merchantClean] ?? cluster.dominantCategory ?? ''
-                return (
-                  <TableRow key={cluster.merchantClean}>
-                    <TableCell>
-                      <input
-                        type="checkbox"
-                        aria-label={`Select ${cluster.merchantClean}`}
-                        checked={selected.has(cluster.merchantClean)}
-                        onChange={() => toggleSelect(cluster.merchantClean)}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {renaming === cluster.merchantClean ? (
-                        <div className="flex items-center gap-2">
-                          <Input
-                            autoFocus
-                            value={renameValue}
-                            aria-label={`Rename ${cluster.merchantClean}`}
-                            onChange={(e) => setRenameValue(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') void submitRename(cluster)
-                              if (e.key === 'Escape') setRenaming(null)
-                            }}
-                          />
-                          <Button size="sm" onClick={() => void submitRename(cluster)}>
-                            Save
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setRenaming(null)}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className="text-left hover:underline"
-                          title="Rename canonical merchant"
-                          onClick={() => {
-                            setRenaming(cluster.merchantClean)
-                            setRenameValue(cluster.canonical ?? cluster.merchantClean)
-                          }}
-                        >
-                          <span className="font-medium">
-                            {cluster.canonical ?? cluster.merchantClean}
-                          </span>
-                          {cluster.sampleDescriptions.length > 0 ? (
-                            <span className="block text-xs text-muted-foreground">
-                              {cluster.sampleDescriptions.join(' · ')}
-                            </span>
-                          ) : null}
-                        </button>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{cluster.count}</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatCurrency(Number(cluster.totalSpend), cluster.currency)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <span>{cluster.dominantCategory ?? '—'}</span>
-                        {mixed ? (
-                          <Badge
-                            variant="secondary"
-                            title={cluster.categorySpread
-                              .map((s) => `${s.category ?? 'Uncategorized'} (${s.count})`)
-                              .join(', ')}
-                          >
-                            mixed +{cluster.categorySpread.length - 1}
-                          </Badge>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap items-center justify-end gap-2">
-                        <CategoryCloudPicker
-                          value={pending}
-                          options={categoryLabels}
-                          placeholder="Category"
-                          onChange={(v) =>
-                            setPendingCategory((prev) => ({
-                              ...prev,
-                              [cluster.merchantClean]: v,
-                            }))
-                          }
-                        />
-                        <Button size="sm" onClick={() => void applyCategory(cluster, false)}>
-                          Apply category
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void applyCategory(cluster, true)}
-                        >
-                          Create rule
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )
-              })
+              clusters.map((cluster) => (
+                <ClusterRow
+                  key={cluster.merchantClean}
+                  cluster={cluster}
+                  cb={{
+                    selected: selected.has(cluster.merchantClean),
+                    renaming: renaming === cluster.merchantClean,
+                    renameValue,
+                    pendingCategory:
+                      pendingCategory[cluster.merchantClean] ??
+                      cluster.dominantCategory ??
+                      '',
+                    categoryLabels,
+                    onToggleSelect: () => toggleSelect(cluster.merchantClean),
+                    onStartRename: () => {
+                      setRenaming(cluster.merchantClean)
+                      setRenameValue(cluster.canonical ?? cluster.merchantClean)
+                    },
+                    onRenameChange: setRenameValue,
+                    onSubmitRename: () => void submitRename(cluster),
+                    onCancelRename: () => setRenaming(null),
+                    onCategoryChange: (v) =>
+                      setPendingCategory((prev) => ({
+                        ...prev,
+                        [cluster.merchantClean]: v,
+                      })),
+                    onApplyCategory: () => void applyCategory(cluster, false),
+                    onCreateRule: () => void applyCategory(cluster, true),
+                  }}
+                />
+              ))
             )}
           </TableBody>
         </Table>
