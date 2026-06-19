@@ -8,6 +8,7 @@ import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
 import { ImportsPage } from './pages/ImportsPage'
 import { PartnerFairnessPage } from './pages/PartnerFairnessPage'
+import { PartnerHomePage } from './pages/PartnerHomePage'
 import { ReportsPage } from './pages/ReportsPage'
 import { ReportsLayout } from './pages/ReportsLayout'
 import { ExplainMonthPage } from './pages/ExplainMonthPage'
@@ -150,6 +151,7 @@ function AppRoutes() {
           <Route path="money-leaks" element={<Navigate to="/transactions/leaks" replace />} />
           <Route path="rules" element={<RulesPage />} />
           <Route path="partner" element={<Navigate to="/reports/partner" replace />} />
+          <Route path="partner-home" element={<PartnerHomePage />} />
           <Route path="reports" element={<ReportsLayout />}>
             <Route index element={<ReportsPage />} />
             <Route path="explain-month" element={<ExplainMonthPage />} />
