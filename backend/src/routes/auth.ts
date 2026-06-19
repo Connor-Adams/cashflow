@@ -144,24 +144,26 @@ router.post('/register', async (req, res, next) => {
           { transaction: t }
         );
         if (userCount === 0) {
-          await Promise.all([
-            Account.update(
-              { householdId: household.id, ownerUserId: createdUser.id, visibility: 'private' },
-              { where: { householdId: null }, transaction: t }
-            ),
-            Transaction.update(
-              { householdId: household.id, createdByUserId: createdUser.id, visibility: 'private' },
-              { where: { householdId: null }, transaction: t }
-            ),
-            Rule.update(
-              { householdId: household.id, createdByUserId: createdUser.id },
-              { where: { householdId: null }, transaction: t }
-            ),
-            ImportHistory.update(
-              { householdId: household.id, createdByUserId: createdUser.id },
-              { where: { householdId: null }, transaction: t }
-            ),
-          ]);
+          // These updates share one transaction (one pg connection), so they
+          // must run sequentially — firing them via Promise.all pipelines
+          // queries on the same client ("already executing a query", a hard
+          // error in pg@9).
+          await Account.update(
+            { householdId: household.id, ownerUserId: createdUser.id, visibility: 'private' },
+            { where: { householdId: null }, transaction: t }
+          );
+          await Transaction.update(
+            { householdId: household.id, createdByUserId: createdUser.id, visibility: 'private' },
+            { where: { householdId: null }, transaction: t }
+          );
+          await Rule.update(
+            { householdId: household.id, createdByUserId: createdUser.id },
+            { where: { householdId: null }, transaction: t }
+          );
+          await ImportHistory.update(
+            { householdId: household.id, createdByUserId: createdUser.id },
+            { where: { householdId: null }, transaction: t }
+          );
         }
       }
     });

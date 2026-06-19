@@ -369,16 +369,17 @@ router.post('/link', async (req, res, next) => {
     }
 
     const result = await sequelize.transaction(async (t) => {
-      const [a, b] = await Promise.all([
-        Transaction.findOne({
-          where: { id: idA, ...visibleTransactionWhere(req) },
-          transaction: t,
-        }),
-        Transaction.findOne({
-          where: { id: idB, ...visibleTransactionWhere(req) },
-          transaction: t,
-        }),
-      ]);
+      // Both reads share transaction `t` (one pg connection), so they must run
+      // sequentially — Promise.all pipelines queries on the same client
+      // ("already executing a query", a hard error in pg@9).
+      const a = await Transaction.findOne({
+        where: { id: idA, ...visibleTransactionWhere(req) },
+        transaction: t,
+      });
+      const b = await Transaction.findOne({
+        where: { id: idB, ...visibleTransactionWhere(req) },
+        transaction: t,
+      });
       if (!a || !b) {
         const err = new Error('Transaction not found') as Error & { status?: number };
         err.status = 404;
