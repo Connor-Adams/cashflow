@@ -400,6 +400,28 @@ is the root cause, not necessarily the backend.
 3. `railway redeploy --service cashflow-backend --yes` if the process is stuck.
 4. Recovery: `cashflow_up` gauge reappears in Prometheus.
 
+**Why a heartbeat gauge (design rationale):** Prometheus scrapes only the
+otel-collector (`up{job="cashflow-otel-collector"}`); the backend *pushes*
+metrics through that collector, so there is no `up{job="cashflow-backend"}`
+series to alert on. The backend could be dead while the collector stays alive
+and nothing would fire. Two alternatives were considered and rejected:
+
+- **(A) `absent(cashflow_http_server_requests_total)`** — cheap (reuses an
+  existing counter) but false-positives during legitimate idle windows
+  (overnight, low traffic): no requests means the series goes stale even
+  though the backend is perfectly healthy. Rejected — a liveness signal must
+  be independent of inbound traffic.
+- **(C) blackbox_exporter probing `/api/health`** — the most faithful check
+  because it actually exercises the HTTP request path end-to-end, but it adds
+  a new service plus a dedicated Prometheus scrape job to operate. Noted as a
+  future upgrade if synthetic HTTP probing becomes worthwhile; out of scope
+  for the heartbeat.
+
+The `cashflow.up` observable gauge (registered in
+`backend/src/observability/metrics.ts`) reports `1` on every 15s export
+interval regardless of traffic, so `absent(cashflow_up)` is true only when the
+backend has actually stopped exporting — traffic-independent by construction.
+
 #### HighHttp5xxRate
 
 **Rule:** `cashflow-high-http-5xx-rate` — fires when the 5xx error rate
