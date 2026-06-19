@@ -289,15 +289,13 @@ function MonthlySeriesTable({
                 {formatMoney(m.debtPrincipal, currency)}
               </TableCell>
               <TableCell
-                className="text-right"
-                style={{
-                  color:
-                    m.savingsRatePct == null
-                      ? 'var(--muted-foreground, inherit)'
-                      : m.savingsRatePct < 0
-                        ? 'var(--danger)'
-                        : undefined,
-                }}
+                className={
+                  m.savingsRatePct == null
+                    ? 'text-right text-muted-foreground'
+                    : m.savingsRatePct < 0
+                      ? 'text-right text-danger'
+                      : 'text-right'
+                }
               >
                 {formatRate(m.savingsRatePct)}
               </TableCell>
