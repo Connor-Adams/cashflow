@@ -726,6 +726,35 @@ test('/fairness: #375 toggle default falls back to CashflowSettings (defaults tr
   assert.equal(res.body.excludeNonPartnerInflows, true);
 });
 
+test('partner direct transfer nets into fairness balance (period-scoped)', async () => {
+  const models = await import('../../src/models');
+  const partner = await models.Contact.create({
+    householdId: householdAId,
+    name: 'Fairness Partner',
+    isPartner: true,
+  });
+  // Partner sent me 2000 in an isolated window; pure transfer (split 'me', partnerShare 0).
+  await createTxn({
+    householdId: householdAId, accountId: accountAId, date: '2027-03-10',
+    amount: 2000, currency: 'CAD', merchantRaw: 'Cash received', txnType: 'transfer',
+    finalSplitType: 'me', myShareAmount: 2000, partnerShareAmount: 0,
+    counterpartyContactId: partner.id,
+  });
+
+  const res = await agentA
+    .get('/api/partner/fairness')
+    .query({ dateFrom: '2027-03-01', dateTo: '2027-03-31', currency: 'CAD' });
+  assert.equal(res.status, 200);
+  const cad = (res.body.byCurrency as Array<{
+    currency: string;
+    balance: number;
+    partnerTransfers: { in: number; out: number };
+  }>).find((c) => c.currency === 'CAD');
+  assert.ok(cad, `expected CAD entry: ${JSON.stringify(res.body.byCurrency)}`);
+  assert.deepEqual(cad.partnerTransfers, { in: 2000, out: 0 });
+  assert.equal(cad.balance, -2000, 'partner-sent money reduces balance (I owe partner)');
+});
+
 test('/fairness: #375 override query param wins over CashflowSettings', async () => {
   // Persist the user's preference as TRUE.
   const r1 = await agentA

@@ -5,6 +5,7 @@ import {
   buildFairnessByCurrency,
   buildFairnessMonthly,
   buildSettlementRecommendation,
+  computePartnerTransferDelta,
   topLargestShared,
   type SettlementTotals,
   type SharedTxnRow,
@@ -571,4 +572,45 @@ test('buildFairnessByCurrency: refunds (negative-amount rows) are unaffected by 
   assert.equal(result[0].sharedTransactionCount, 2);
   assert.equal(result[0].partnerInflows, 50);
   assert.equal(result[0].nonPartnerInflows, 0);
+});
+
+// ---------------- computePartnerTransferDelta ----------------
+
+test('computePartnerTransferDelta splits partner transfers into in/out per currency', () => {
+  const rows = [
+    { date: '2026-09-01', currency: 'CAD', category: null, merchant: 'Cash received', amount: 2000, myShare: 2000, partnerShare: 0, txnId: 1, ownershipType: 'me', ownershipContactId: null, contactName: null, counterpartyContactId: 7 },
+    { date: '2026-09-02', currency: 'CAD', category: null, merchant: 'Cash sent', amount: -500, myShare: -500, partnerShare: 0, txnId: 2, ownershipType: 'me', ownershipContactId: null, contactName: null, counterpartyContactId: 7 },
+    { date: '2026-09-03', currency: 'USD', category: null, merchant: 'Cash received', amount: 100, myShare: 100, partnerShare: 0, txnId: 3, ownershipType: 'me', ownershipContactId: null, contactName: null, counterpartyContactId: 7 },
+  ];
+  const out = computePartnerTransferDelta(rows, new Set([7]));
+  assert.deepEqual(out.get('CAD'), { in: 2000, out: 500 });
+  assert.deepEqual(out.get('USD'), { in: 100, out: 0 });
+});
+
+test('computePartnerTransferDelta excludes shared-split rows, non-partners, and zero amounts', () => {
+  const rows = [
+    // shared-split row (partnerShare != 0) — excluded
+    { date: '2026-09-01', currency: 'CAD', category: 'Groceries', merchant: 'Shared', amount: -100, myShare: -60, partnerShare: -40, txnId: 1, ownershipType: 'me', ownershipContactId: null, contactName: null, counterpartyContactId: 7 },
+    // non-partner counterparty — excluded
+    { date: '2026-09-02', currency: 'CAD', category: null, merchant: 'Friend', amount: 300, myShare: 300, partnerShare: 0, txnId: 2, ownershipType: 'me', ownershipContactId: null, contactName: null, counterpartyContactId: 9 },
+    // null counterparty — excluded
+    { date: '2026-09-03', currency: 'CAD', category: null, merchant: 'x', amount: 50, myShare: 50, partnerShare: 0, txnId: 3, ownershipType: 'me', ownershipContactId: null, contactName: null, counterpartyContactId: null },
+    // zero amount — skipped
+    { date: '2026-09-04', currency: 'CAD', category: null, merchant: 'x', amount: 0, myShare: 0, partnerShare: 0, txnId: 4, ownershipType: 'me', ownershipContactId: null, contactName: null, counterpartyContactId: 7 },
+  ];
+  const out = computePartnerTransferDelta(rows, new Set([7]));
+  assert.equal(out.has('CAD'), false);
+});
+
+test('buildFairnessByCurrency folds partner transfers into balance', () => {
+  // No shared rows; only a partner transfer-in of 2000 → balance -2000.
+  const transfers = new Map([['CAD', { in: 2000, out: 0 }]]);
+  const out = buildFairnessByCurrency([], [], '2026-09-01', '2026-10-01', {
+    partnerContactIds: new Set([7]),
+    partnerTransfersByCurrency: transfers,
+  });
+  const cad = out.find((c) => c.currency === 'CAD');
+  assert.ok(cad, 'expected a CAD entry from transfers-only input');
+  assert.equal(cad.balance, -2000);
+  assert.deepEqual(cad.partnerTransfers, { in: 2000, out: 0 });
 });

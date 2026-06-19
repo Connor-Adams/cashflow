@@ -15,6 +15,7 @@ const FAIRNESS_PAYLOAD = {
       currentMonthSharedSpend: 300,
       partnerInflows: 500,
       nonPartnerInflows: 75,
+      partnerTransfers: { in: 0, out: 0 },
       balance: -400,
       direction: 'i_owe_partner',
       paidMore: { youCovered: 400, partnerCovered: 0 },
@@ -285,5 +286,43 @@ describe('PartnerFairnessPage', () => {
       })
       expect(patchCall).toBeTruthy()
     })
+  })
+
+  it('renders the direct-transfers line when partnerTransfers.in is non-zero', async () => {
+    const payloadWithTransfers = {
+      ...FAIRNESS_PAYLOAD,
+      byCurrency: [
+        {
+          ...FAIRNESS_PAYLOAD.byCurrency[0],
+          partnerTransfers: { in: 8425, out: 0 },
+        },
+      ],
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo) => {
+        const url = String(input)
+        if (url.includes('/api/settings/cashflow')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(SETTINGS_PAYLOAD) } as Response)
+        }
+        if (url.includes('/api/partner/fairness')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(payloadWithTransfers) } as Response)
+        }
+        if (url.includes('/api/partner/monthly')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(MONTHLY_PAYLOAD) } as Response)
+        }
+        if (url.includes('/api/partner/settlement-recommendation')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(RECOMMENDATION_PAYLOAD) } as Response)
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
+      }),
+    )
+
+    render(
+      <MemoryRouter>
+        <PartnerFairnessPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText(/8,425/)).toBeTruthy())
   })
 })
