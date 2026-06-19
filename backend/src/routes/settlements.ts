@@ -219,6 +219,7 @@ router.post('/', async (req, res, next) => {
 
     const row = await PartnerSettlement.create({
       householdId: household.id,
+      recordedByUserId: currentAuth(req).user.id,
       contactId: contact.id,
       direction: result.value.direction,
       currency: result.value.currency,

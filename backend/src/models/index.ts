@@ -402,6 +402,8 @@ Contact.hasMany(PartnerSettlement, {
   as: 'partnerSettlements',
 });
 PartnerSettlement.belongsTo(Contact, { foreignKey: 'contact_id', as: 'contact' });
+User.hasMany(PartnerSettlement, { foreignKey: 'recorded_by_user_id', as: 'recordedSettlements' });
+PartnerSettlement.belongsTo(User, { foreignKey: 'recorded_by_user_id', as: 'recordedByUser' });
 Household.hasMany(BudgetTarget, {
   foreignKey: 'household_id',
   as: 'budgetTargets',
