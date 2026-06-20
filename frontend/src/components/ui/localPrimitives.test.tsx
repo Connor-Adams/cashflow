@@ -318,6 +318,29 @@ describe('Toast primitive', () => {
     const toastEl = document.querySelector('[data-slot="toast"]')
     expect(toastEl?.getAttribute('role')).toBe('alert')
   })
+
+  it('renders the inner card via the DS Toast with a dismiss button', async () => {
+    const api = await captureToastApi(harness)
+    await act(async () => {
+      api.showToast({ title: 'Heads up', description: 'Details', durationMs: Infinity })
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(50)
+    })
+    const wrapper = document.querySelector('[data-slot="toast"]')
+    expect(wrapper).not.toBeNull()
+    // DS Toast renders its own card with a "Dismiss" button inside the wrapper.
+    const dismiss = wrapper?.querySelector(
+      'button[aria-label="Dismiss"]'
+    ) as HTMLButtonElement | null
+    expect(dismiss).not.toBeNull()
+    expect(wrapper?.textContent).toContain('Heads up')
+    expect(wrapper?.textContent).toContain('Details')
+    await act(async () => {
+      dispatchClick(dismiss!)
+    })
+    expect(document.querySelector('[data-slot="toast"]')).toBeNull()
+  })
 })
 
 describe('Skeleton primitive', () => {
