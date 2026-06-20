@@ -28,7 +28,7 @@ export function ClassifiedTab({ year }: { year: number }) {
       {corp.length > 0 && (
         <section>
           <h3>Corp → personal · {corp.length}</h3>
-          <ul className="flex flex-col divide-y divide-[var(--border)]">
+          <ul className="flex flex-col divide-y divide-border">
             {corp.map((d) => (
               <ClassifiedRow
                 key={d.personal.id}
@@ -46,7 +46,7 @@ export function ClassifiedTab({ year }: { year: number }) {
       {payroll.length > 0 && (
         <section>
           <h3>Payroll · {payroll.length}</h3>
-          <ul className="flex flex-col divide-y divide-[var(--border)]">
+          <ul className="flex flex-col divide-y divide-border">
             {payroll.map((p) => (
               <ClassifiedRow key={p.id} targetId={p.id} kind="payroll" primary={p} onChanged={reload} />
             ))}

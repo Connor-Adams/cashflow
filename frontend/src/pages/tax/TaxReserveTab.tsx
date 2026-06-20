@@ -79,7 +79,7 @@ function Disclaimer({ text }: { text?: string }) {
     <aside
       role="note"
       aria-label="Reserve calculator disclaimer"
-      className="rounded-[6px] border border-[var(--warning)] bg-[var(--warning-bg)] px-3 py-2 text-sm text-[var(--warning-foreground)]"
+      className="rounded-[6px] border border-warning bg-warning-bg px-3 py-2 text-sm text-warning-foreground"
     >
       <strong>Note:</strong> {body}
     </aside>
@@ -344,7 +344,7 @@ function SummarySection({ rows, loading, error }: SummarySectionProps) {
                 {fmtCurrency(r.components.deductibleExpenses)}
               </TableCell>
               <TableCell
-                className={`text-right${r.netBusinessIncome < 0 ? ' text-[var(--danger)]' : ''}`}
+                className={`text-right${r.netBusinessIncome < 0 ? ' text-danger' : ''}`}
               >
                 {fmtCurrency(r.netBusinessIncome)}
               </TableCell>

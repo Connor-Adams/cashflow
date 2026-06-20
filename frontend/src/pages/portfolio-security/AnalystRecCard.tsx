@@ -7,6 +7,8 @@ export type AnalystRecCardProps = {
 
 type BucketKey = 'strongBuy' | 'buy' | 'hold' | 'sell' | 'strongSell'
 
+// Per-bucket swatch colors consumed as inline style.background (some are
+// color-mix tints); a dynamic indexed swatch can't be a static utility — keep var().
 const BUCKET_DEFS: Array<{ key: BucketKey; label: string; color: string }> = [
   { key: 'strongBuy', label: 'Strong Buy', color: 'var(--positive)' },
   { key: 'buy', label: 'Buy', color: 'color-mix(in oklab, var(--positive) 60%, var(--background))' },

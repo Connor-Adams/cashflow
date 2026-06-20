@@ -39,7 +39,7 @@ export function ChatProposalCard({ proposal, onApply, onReject, busy, error }: P
       </div>
       <ProposalBody proposal={proposal} />
       {error ? (
-        <p className="mt-2 text-xs" style={{ color: 'var(--danger)' }}>
+        <p className="mt-2 text-xs text-danger">
           {error}
         </p>
       ) : null}

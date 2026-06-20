@@ -51,7 +51,7 @@ export function ReceiptsPage() {
         <CategorizeItemsButton />
       </div>
 
-      <nav className="flex gap-2 border-b border-[var(--border)]" aria-label="Filter receipts by source">
+      <nav className="flex gap-2 border-b border-border" aria-label="Filter receipts by source">
         {GROUPS.map((g) => (
           <Button
             key={g.value}
@@ -61,8 +61,8 @@ export function ReceiptsPage() {
             aria-pressed={group === g.value}
             className={
               group === g.value
-                ? 'px-3 py-2 border-b-2 border-[var(--primary)] font-semibold rounded-none'
-                : 'px-3 py-2 border-b-2 border-transparent text-[var(--muted-foreground)] rounded-none'
+                ? 'px-3 py-2 border-b-2 border-primary font-semibold rounded-none'
+                : 'px-3 py-2 border-b-2 border-transparent text-muted-foreground rounded-none'
             }
           >
             {g.label}

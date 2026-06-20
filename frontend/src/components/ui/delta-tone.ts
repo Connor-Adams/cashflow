@@ -32,6 +32,8 @@ export function parseDeltaSign(delta: React.ReactNode): DeltaSign {
   return num > 0 ? 'positive' : 'negative'
 }
 
+// A CSSProperties lookup (not JSX className context) — each tone pairs a
+// color-mix tint with its base token, so the whole object stays inline var().
 export const DELTA_SIGN_STYLE: Record<DeltaTone, React.CSSProperties> = {
   positive: {
     background: 'color-mix(in srgb, var(--positive) 16%, transparent)',

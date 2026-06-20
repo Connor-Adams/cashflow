@@ -189,7 +189,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
         <h1 id="onboarding-title" className="text-2xl font-semibold tracking-tight">
           Let&apos;s get your money in one place.
         </h1>
-        <p className="mt-2 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+        <p className="mt-2 text-sm text-muted-foreground">
           Drop a CSV, OFX, or QIF export. We&apos;ll create the account and import
           everything for you.
         </p>
@@ -226,7 +226,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
           ) : (
             <>
               <p className="text-base font-semibold">Drop your first statement</p>
-              <p className="mt-1 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+              <p className="mt-1 text-xs text-muted-foreground">
                 CSV · OFX · QIF
               </p>
             </>
@@ -257,7 +257,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
         {/* Name/type prompt — shown only when inference failed (AC #5). */}
         {needsAccountForm && (
           <form onSubmit={onSubmitForm} className="mt-6 space-y-4">
-            <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
+            <p className="text-sm text-muted-foreground">
               We couldn&apos;t detect the account from that file. Give it a name and
               type to finish importing.
             </p>
@@ -343,8 +343,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
             variant="link"
             onClick={onSkip}
             disabled={status === 'loading'}
-            className="text-sm underline disabled:opacity-50"
-            style={{ color: 'var(--muted-foreground)' }}
+            className="text-sm text-muted-foreground underline disabled:opacity-50"
           >
             Skip for now
           </Button>

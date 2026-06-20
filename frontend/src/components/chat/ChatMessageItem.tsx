@@ -27,10 +27,7 @@ export function ChatMessageItem({ message }: Props) {
 function UserMessage({ message }: { message: ChatMessage }) {
   return (
     <div data-role="user" className="flex justify-end">
-      <div
-        className="max-w-[80%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm"
-        style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
-      >
+      <div className="max-w-[80%] whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
         {message.contentText ?? ''}
       </div>
     </div>
@@ -60,9 +57,8 @@ function ToolMessage({ message }: { message: ChatMessage }) {
     <div
       data-role="tool"
       className={cn(
-        'mx-auto flex max-w-[90%] items-start gap-2 rounded-md border border-dashed border-border bg-muted/20 px-3 py-1.5 text-xs',
+        'mx-auto flex max-w-[90%] items-start gap-2 rounded-md border border-dashed border-border bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground',
       )}
-      style={{ color: 'var(--muted-foreground)' }}
     >
       <Wrench size={12} aria-hidden="true" className="mt-0.5 shrink-0" />
       <div className="min-w-0 flex-1">
