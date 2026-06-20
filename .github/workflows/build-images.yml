@@ -132,5 +132,9 @@ jobs:
           build-args: |
             VITE_API_BASE=${{ secrets.VITE_API_BASE }}
             APP_VERSION=${{ steps.meta.outputs.app_version }}
+          # Authenticates `yarn install` against GitHub Packages (@connor-adams/*)
+          # inside the build. Secret mount → never written to an image layer.
+          secrets: |
+            node_auth_token=${{ secrets.GITHUB_TOKEN }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
