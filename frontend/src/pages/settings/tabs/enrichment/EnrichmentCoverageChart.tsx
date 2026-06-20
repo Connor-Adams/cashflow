@@ -36,7 +36,7 @@ export function EnrichmentCoverageChart() {
               key={b}
               type="button"
               onClick={() => setBucket(b)}
-              className={`px-2 py-0.5 rounded-full border ${b === bucket ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)]'}`}
+              className={`px-2 py-0.5 rounded-full border ${b === bucket ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
             >
               {b}
             </button>

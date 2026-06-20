@@ -84,7 +84,7 @@ export function TableTile<R>({
           <div className="flex min-h-0 flex-1 flex-col">
             {/* formerly .tableTile__header */}
             <div
-              className="grid items-center gap-2 py-1 border-b border-[var(--border)]"
+              className="grid items-center gap-2 py-1 border-b border-border"
               style={{ gridTemplateColumns: gridTemplate }}
               role="row"
             >
@@ -93,7 +93,7 @@ export function TableTile<R>({
                 <span
                   key={c.key}
                   role="columnheader"
-                  className="truncate text-[0.7rem] font-bold uppercase tracking-wide text-[var(--muted-foreground)]"
+                  className="truncate text-[0.7rem] font-bold uppercase tracking-wide text-muted-foreground"
                   style={c.align === 'right' ? { textAlign: 'right', fontVariantNumeric: 'tabular-nums' } : undefined}
                   data-align={c.align ?? 'left'}
                 >
@@ -117,7 +117,7 @@ export function TableTile<R>({
                         'cursor-pointer rounded-[6px] mx-[-4px] px-[4px]',
                         'transition-colors duration-[150ms]',
                         'hover:bg-[color-mix(in_oklch,var(--muted)_50%,transparent)]',
-                        'focus-visible:outline-2 focus-visible:outline-[var(--ring)] focus-visible:outline-offset-2',
+                        'focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2',
                       ],
                     )}
                     data-interactive={interactive}
@@ -131,7 +131,7 @@ export function TableTile<R>({
                       <span
                         key={c.key}
                         role="cell"
-                        className="truncate text-sm text-[var(--foreground)]"
+                        className="truncate text-sm text-foreground"
                         style={c.align === 'right' ? { textAlign: 'right', fontVariantNumeric: 'tabular-nums' } : undefined}
                         data-align={c.align ?? 'left'}
                       >
@@ -145,9 +145,9 @@ export function TableTile<R>({
           </div>
           {viewAllLabel && viewAllHref && (
             // formerly .tableTile__footer
-            <div className="mt-2 flex justify-end pt-2 border-t border-[var(--border)]">
+            <div className="mt-2 flex justify-end pt-2 border-t border-border">
               {/* formerly .tableTile__viewAll + :hover */}
-              <Link to={viewAllHref} className="text-xs font-semibold no-underline text-[var(--primary)] hover:underline">
+              <Link to={viewAllHref} className="text-xs font-semibold no-underline text-primary hover:underline">
                 {viewAllLabel} →
               </Link>
             </div>

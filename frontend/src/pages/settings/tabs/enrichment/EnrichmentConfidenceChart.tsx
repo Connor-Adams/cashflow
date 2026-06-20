@@ -8,6 +8,7 @@ type Band = {
   cssVar: string
 }
 
+// Dynamic indexed swatch colors consumed as style.background — keep inline var().
 const BANDS: Band[] = [
   { key: 'high',   label: 'High', cssVar: 'var(--success)' },
   { key: 'medium', label: 'Med',  cssVar: 'var(--primary)' },
@@ -27,10 +28,10 @@ export function EnrichmentConfidenceChart({ byConfidence }: Props) {
     <Card>
       <div className="flex justify-between items-baseline mb-3">
         <h3 className="text-[0.95rem] font-semibold m-0">Confidence distribution</h3>
-        <span className="bg-[color-mix(in_srgb,var(--primary)_24%,transparent)] text-[var(--primary-foreground)] px-[10px] py-[2px] rounded-full text-[0.7rem] font-semibold tracking-[0.04em] whitespace-nowrap">{total.toLocaleString()} rows</span>
+        <span className="bg-[color-mix(in_srgb,var(--primary)_24%,transparent)] text-primary-foreground px-[10px] py-[2px] rounded-full text-[0.7rem] font-semibold tracking-[0.04em] whitespace-nowrap">{total.toLocaleString()} rows</span>
       </div>
       <div
-        className="flex h-[22px] rounded-[4px] overflow-hidden mb-[0.625rem] bg-[var(--muted)]"
+        className="flex h-[22px] rounded-[4px] overflow-hidden mb-[0.625rem] bg-muted"
         role="img"
         aria-label={`Confidence distribution: ${counts.map((c) => `${c.label} ${c.n}`).join(', ')}`}
       >
@@ -43,7 +44,7 @@ export function EnrichmentConfidenceChart({ byConfidence }: Props) {
           />
         ))}
       </div>
-      <div className="flex gap-[0.875rem] flex-wrap text-[0.74rem] text-[var(--muted-foreground)]">
+      <div className="flex gap-[0.875rem] flex-wrap text-[0.74rem] text-muted-foreground">
         {counts.map((c) => (
           <Link
             key={c.key}
@@ -52,7 +53,7 @@ export function EnrichmentConfidenceChart({ byConfidence }: Props) {
             aria-label={`View ${c.label} confidence transactions`}
           >
             <span className="inline-block w-[10px] h-[10px] rounded-[2px]" style={{ background: c.cssVar }} />
-            <span className="text-[var(--foreground)] font-medium">{c.label}</span>{' '}
+            <span className="text-foreground font-medium">{c.label}</span>{' '}
             <span className="tabular-nums">{c.n.toLocaleString()}</span>
           </Link>
         ))}
