@@ -9,21 +9,11 @@
 // "pension split: −$X" / "+$X" annotation pulled from `planCompute.spouse`.
 //
 // Style: Tailwind utilities matching `IntegratedRateCard` in OverviewTab.
-import type {
-  HouseholdPlanComputeResult,
-  PersonalScenarioComputeEntry,
-  SpouseShift,
-} from '@/hooks/useHouseholdPlanCompute';
+import type { HouseholdPlanComputeResult, PersonalScenarioComputeEntry, SpouseShift, } from '@/hooks/useHouseholdPlanCompute';
 import { fmtCurrency, fmtPct } from '../util/format';
 import { StatCard } from '@/components/ui/stat-card';
 import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from '@cashflow/ui';
+  Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 
 interface Props {
   planCompute: HouseholdPlanComputeResult | null;

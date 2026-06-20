@@ -12,23 +12,16 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { CheckCircle2, XCircle } from 'lucide-react'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { EmptyTableRow } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@cashflow/ui'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
-import { Tabs, TabPanel, type TabItem } from '@cashflow/ui'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
+import { Tabs, type TabItem } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { getJson, patchJson } from '../lib/api'
 import { todayDateInputValue } from '../lib/dateInput'
@@ -227,32 +220,38 @@ export function LargePurchasesPage() {
           items={TAB_ITEMS}
         />
 
-        <TabPanel value="inbox" active={tab}>
-          <PurchaseTable
-            rows={rows}
-            loading={loading}
-            err={err}
-            onReview={openReview}
-          />
-        </TabPanel>
+        {tab === 'inbox' && (
+          <div role="tabpanel">
+            <PurchaseTable
+              rows={rows}
+              loading={loading}
+              err={err}
+              onReview={openReview}
+            />
+          </div>
+        )}
 
-        <TabPanel value="reviewed" active={tab}>
-          <PurchaseTable
-            rows={rows}
-            loading={loading}
-            err={err}
-            onReview={openReview}
-          />
-        </TabPanel>
+        {tab === 'reviewed' && (
+          <div role="tabpanel">
+            <PurchaseTable
+              rows={rows}
+              loading={loading}
+              err={err}
+              onReview={openReview}
+            />
+          </div>
+        )}
 
-        <TabPanel value="dismissed" active={tab}>
-          <PurchaseTable
-            rows={rows}
-            loading={loading}
-            err={err}
-            onReview={openReview}
-          />
-        </TabPanel>
+        {tab === 'dismissed' && (
+          <div role="tabpanel">
+            <PurchaseTable
+              rows={rows}
+              loading={loading}
+              err={err}
+              onReview={openReview}
+            />
+          </div>
+        )}
       </Card>
 
       {reviewing && form && (

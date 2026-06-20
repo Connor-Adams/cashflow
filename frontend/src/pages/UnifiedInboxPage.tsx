@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Button } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { EmptyState } from '@cashflow/ui'
+import { EmptyState } from '@connor-adams/designsystem'
 import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
 import { getJson, postJson } from '@/lib/api'
 
@@ -491,11 +491,11 @@ export function UnifiedInboxPage() {
           value={source}
           onChange={(e) => setSource(e.target.value as SourceFilter)}
         >
-          <NativeSelectOption value="all">All sources</NativeSelectOption>
+          <option value="all">All sources</option>
           {ALL_SOURCES.map((s) => (
-            <NativeSelectOption key={s} value={s}>
+            <option key={s} value={s}>
               {SOURCE_LABEL[s]}
-            </NativeSelectOption>
+            </option>
           ))}
         </NativeSelect>
 
@@ -505,11 +505,11 @@ export function UnifiedInboxPage() {
           value={status}
           onChange={(e) => setStatus(e.target.value as StatusFilter)}
         >
-          <NativeSelectOption value="all">All statuses</NativeSelectOption>
+          <option value="all">All statuses</option>
           {ALL_STATUSES.map((s) => (
-            <NativeSelectOption key={s} value={s}>
+            <option key={s} value={s}>
               {STATUS_LABEL[s]}
-            </NativeSelectOption>
+            </option>
           ))}
         </NativeSelect>
 

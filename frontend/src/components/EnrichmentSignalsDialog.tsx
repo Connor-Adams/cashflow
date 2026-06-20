@@ -1,14 +1,8 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
-import { Button } from '@cashflow/ui'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
 import { getJson, postJson } from '../lib/api'
 import type {
   EnrichmentSignal,
@@ -134,11 +128,29 @@ export function EnrichmentSignalsDialog({
   const open = transactionId != null
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogHeader>
-        <DialogTitle>Why this transaction was categorised</DialogTitle>
-      </DialogHeader>
-      <DialogBody>
+    <Dialog
+      open={open}
+      onClose={() => onClose()}
+      title={<>Why this transaction was categorised</>}
+      footer={
+        <>
+          {onReenriched && (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={reenriching || loading}
+              onClick={() => void reenrich()}
+            >
+              <RefreshCw aria-hidden="true" />
+              {reenriching ? 'Re-enriching…' : 'Re-enrich this row'}
+            </Button>
+          )}
+          <Button type="button" variant="outline" onClick={onClose}>
+            Close
+          </Button>
+        </>
+      }
+    >
         {transactionSummary && (
           <div style={{ marginBottom: '0.75rem' }}>
             <div><strong>Raw:</strong> <code>{transactionSummary.merchantRaw}</code></div>
@@ -199,23 +211,6 @@ export function EnrichmentSignalsDialog({
             </ol>
           </details>
         )}
-      </DialogBody>
-      <DialogFooter>
-        {onReenriched && (
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={reenriching || loading}
-            onClick={() => void reenrich()}
-          >
-            <RefreshCw aria-hidden="true" />
-            {reenriching ? 'Re-enriching…' : 'Re-enrich this row'}
-          </Button>
-        )}
-        <Button type="button" variant="outline" onClick={onClose}>
-          Close
-        </Button>
-      </DialogFooter>
     </Dialog>
   )
 }

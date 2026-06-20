@@ -9,24 +9,17 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CalendarClock, ShieldCheck } from 'lucide-react'
-import { Alert } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { EmptyTableRow } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { NativeSelect } from '@cashflow/ui'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@cashflow/ui'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
-import { Tabs, TabPanel } from '@cashflow/ui'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
+import { Tabs } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { getJson, patchJson } from '../lib/api'
 import { formatMoneyOr } from '../lib/formatMoney'
@@ -178,54 +171,62 @@ export function ReturnWarrantyPage() {
         </Alert>
       )}
 
-      <TabPanel value="active" active={tab} tabsId="return-warranty-tabs">
-        <ReturnTable
-          rows={rows}
-          loading={loading}
-          emptyTitle="No active return windows."
-          emptyDescription="Open a transaction and add a return deadline to track it here."
-          onEdit={setEditing}
-          showReturnDeadline
-          showWarranty
-        />
-      </TabPanel>
+      {tab === 'active' && (
+        <div role="tabpanel">
+          <ReturnTable
+            rows={rows}
+            loading={loading}
+            emptyTitle="No active return windows."
+            emptyDescription="Open a transaction and add a return deadline to track it here."
+            onEdit={setEditing}
+            showReturnDeadline
+            showWarranty
+          />
+        </div>
+      )}
 
-      <TabPanel value="expiring" active={tab} tabsId="return-warranty-tabs">
-        <ReturnTable
-          rows={rows}
-          loading={loading}
-          emptyTitle={`Nothing expiring in the next ${expiringDays} days.`}
-          emptyDescription="Widen the window or check back later."
-          onEdit={setEditing}
-          showReturnDeadline
-          showWarranty={false}
-          highlightExpiringSoon
-        />
-      </TabPanel>
+      {tab === 'expiring' && (
+        <div role="tabpanel">
+          <ReturnTable
+            rows={rows}
+            loading={loading}
+            emptyTitle={`Nothing expiring in the next ${expiringDays} days.`}
+            emptyDescription="Widen the window or check back later."
+            onEdit={setEditing}
+            showReturnDeadline
+            showWarranty={false}
+            highlightExpiringSoon
+          />
+        </div>
+      )}
 
-      <TabPanel value="warranties" active={tab} tabsId="return-warranty-tabs">
-        <ReturnTable
-          rows={rows}
-          loading={loading}
-          emptyTitle="No warranty-covered purchases."
-          emptyDescription="Add a warranty end date to a purchase to track it here."
-          onEdit={setEditing}
-          showReturnDeadline={false}
-          showWarranty
-        />
-      </TabPanel>
+      {tab === 'warranties' && (
+        <div role="tabpanel">
+          <ReturnTable
+            rows={rows}
+            loading={loading}
+            emptyTitle="No warranty-covered purchases."
+            emptyDescription="Add a warranty end date to a purchase to track it here."
+            onEdit={setEditing}
+            showReturnDeadline={false}
+            showWarranty
+          />
+        </div>
+      )}
 
-      <TabPanel value="missing" active={tab} tabsId="return-warranty-tabs">
-        <ReturnTable
-          rows={rows}
-          loading={loading}
-          emptyTitle="No purchases are missing receipts."
-          emptyDescription="Mark a purchase 'Missing' to flag it for follow-up."
-          onEdit={setEditing}
-          showReturnDeadline
-          showWarranty
-        />
-      </TabPanel>
+      {tab === 'missing' && (
+        <div role="tabpanel">
+          <ReturnTable
+            rows={rows}
+            loading={loading}
+            emptyTitle="No purchases are missing receipts."
+            emptyDescription="Mark a purchase 'Missing' to flag it for follow-up."
+            onEdit={setEditing}
+            showReturnDeadline
+            showWarranty
+          />
+        </div>
+      )}
 
       {editing && (
         <EditDialog

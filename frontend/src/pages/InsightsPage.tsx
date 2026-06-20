@@ -11,10 +11,10 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Button } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
-import { Alert } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Alert } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 import { getJson, patchJson, postJson } from '@/lib/api'
 
 export type InsightSeverity = 'info' | 'warning' | 'critical'

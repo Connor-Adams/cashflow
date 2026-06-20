@@ -1,19 +1,13 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Edit3, GitMerge, Trash2 } from 'lucide-react'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  useConfirm,
-} from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Label as FieldLabel } from '@cashflow/ui'
-import { NativeSelect } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label as FieldLabel } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { deleteReq, patchJson, postJson } from '../../../lib/api'
 import { useLabels } from '../../../lib/useLabels'
 import { LabelColorPicker } from '../../../components/LabelColorPicker'
@@ -211,35 +205,30 @@ export function LabelsTab() {
       )}
 
       {renameTarget && (
-        <Dialog open onOpenChange={(open) => { if (!open) closeRename() }}>
-          <DialogHeader>
-            <DialogTitle>Edit label</DialogTitle>
-          </DialogHeader>
+        <Dialog open onClose={closeRename} title={<>Edit label</>}>
           <form onSubmit={submitRename}>
-            <DialogBody>
-              <FieldLabel htmlFor="label-rename-name">
-                Label name
-                <Input
-                  id="label-rename-name"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  maxLength={32}
-                  required
-                  autoComplete="off"
+            <FieldLabel htmlFor="label-rename-name">
+              Label name
+              <Input
+                id="label-rename-name"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                maxLength={32}
+                required
+                autoComplete="off"
+              />
+            </FieldLabel>
+            <div className="mt-3">
+              <span className="text-sm font-medium">Color</span>
+              <div className="mt-1.5">
+                <LabelColorPicker
+                  value={renameColor}
+                  onChange={setRenameColor}
+                  disabled={renameSaving}
                 />
-              </FieldLabel>
-              <div className="mt-3">
-                <span className="text-sm font-medium">Color</span>
-                <div className="mt-1.5">
-                  <LabelColorPicker
-                    value={renameColor}
-                    onChange={setRenameColor}
-                    disabled={renameSaving}
-                  />
-                </div>
               </div>
-            </DialogBody>
-            <DialogFooter>
+            </div>
+            <div className="mt-2 flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={closeRename}>
                 Cancel
               </Button>
@@ -254,46 +243,41 @@ export function LabelsTab() {
               >
                 Save label
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         </Dialog>
       )}
 
       {mergeSource && (
-        <Dialog open onOpenChange={(open) => { if (!open) closeMerge() }}>
-          <DialogHeader>
-            <DialogTitle>Merge labels</DialogTitle>
-          </DialogHeader>
+        <Dialog open onClose={closeMerge} title={<>Merge labels</>}>
           <form onSubmit={submitMerge}>
-            <DialogBody>
-              <p className="mb-3">
-                {mergeTarget
-                  ? `Move all transactions tagged '${mergeSource.name}' to '${mergeTarget.name}'? '${mergeSource.name}' will be deleted.`
-                  : `Move all transactions tagged '${mergeSource.name}' to another label? '${mergeSource.name}' will be deleted.`}
-              </p>
-              <FieldLabel htmlFor="label-merge-target">
-                Merge into
-                <NativeSelect
-                  id="label-merge-target"
-                  value={mergeTargetId}
-                  onChange={(e) => setMergeTargetId(e.target.value)}
-                >
-                  {mergeCandidates.map((l) => (
-                    <option key={l.id} value={String(l.id)}>
-                      {l.name}
-                    </option>
-                  ))}
-                </NativeSelect>
-              </FieldLabel>
-            </DialogBody>
-            <DialogFooter>
+            <p className="mb-3">
+              {mergeTarget
+                ? `Move all transactions tagged '${mergeSource.name}' to '${mergeTarget.name}'? '${mergeSource.name}' will be deleted.`
+                : `Move all transactions tagged '${mergeSource.name}' to another label? '${mergeSource.name}' will be deleted.`}
+            </p>
+            <FieldLabel htmlFor="label-merge-target">
+              Merge into
+              <NativeSelect
+                id="label-merge-target"
+                value={mergeTargetId}
+                onChange={(e) => setMergeTargetId(e.target.value)}
+              >
+                {mergeCandidates.map((l) => (
+                  <option key={l.id} value={String(l.id)}>
+                    {l.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </FieldLabel>
+            <div className="mt-2 flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={closeMerge}>
                 Cancel
               </Button>
               <Button type="submit" disabled={mergeSaving || !mergeTargetId}>
                 Merge
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         </Dialog>
       )}

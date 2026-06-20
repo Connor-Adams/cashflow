@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Skeleton } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
+import { Skeleton } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
 import { getJson } from '@/lib/api'
 import { CategoryIcon } from '../CategoryIcon'
 import { BentoTile } from './BentoTile'
@@ -78,9 +78,9 @@ export function BudgetStatusCard({ currency = 'CAD' }: Props) {
       <BentoTile span={6} rows={1} label="Budget status">
         <div className="flex flex-col items-start gap-2" data-testid="budget-status-empty">
           <p className="text-sm text-muted-foreground">Set a budget to see pacing here.</p>
-          <Button size="sm" asChild>
-            <Link to="/budgets">Set a budget</Link>
-          </Button>
+          <Link to="/budgets">
+            <Button size="sm">Set a budget</Button>
+          </Link>
         </div>
       </BentoTile>
     )

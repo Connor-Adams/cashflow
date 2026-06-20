@@ -7,42 +7,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 import { buildCsv, escapeCsvField } from '../../lib/csv'
-import { Alert } from '@cashflow/ui'
+import { Alert } from '@connor-adams/designsystem'
 import { CollapsibleCard } from './collapsible-card'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  useConfirm,
-} from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
+import { EmptyState } from '@connor-adams/designsystem'
 import { FilterBar, type QuickRange } from './filter-bar'
-import { Label } from '@cashflow/ui'
-import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
 import { PageHeader } from './page-header'
-import { Skeleton, SkeletonRow, SkeletonText } from '@cashflow/ui'
+import { Skeleton, SkeletonText } from '@connor-adams/designsystem'
+import { SkeletonRow } from '@/lib/ds-extras'
 import { StatCard } from './stat-card'
 import { ToastProvider, useToast } from './toast'
 
 describe('local design-system primitives', () => {
-  it('renders labeled native selects with compact sizing', () => {
-    const html = renderToStaticMarkup(
-      <Label>
-        Status
-        <NativeSelect size="sm" defaultValue="open">
-          <NativeSelectOption value="open">Open</NativeSelectOption>
-          <NativeSelectOption value="closed">Closed</NativeSelectOption>
-        </NativeSelect>
-      </Label>
-    )
-
-    expect(html).toContain('data-slot="label"')
-    expect(html).toContain('data-slot="native-select"')
-    expect(html).toContain('Open')
-  })
-
   it('renders page headers with title, description, and actions', () => {
     const html = renderToStaticMarkup(
       <PageHeader
@@ -223,24 +198,6 @@ function createHarness(): Harness {
   }
 }
 
-function dispatchKey(target: EventTarget, key: string, shiftKey = false) {
-  const event = new KeyboardEvent('keydown', {
-    key,
-    shiftKey,
-    bubbles: true,
-    cancelable: true,
-  })
-  target.dispatchEvent(event)
-}
-
-function dispatchMouseDown(target: EventTarget) {
-  const event = new MouseEvent('mousedown', {
-    bubbles: true,
-    cancelable: true,
-  })
-  target.dispatchEvent(event)
-}
-
 function dispatchClick(target: EventTarget) {
   const event = new MouseEvent('click', { bubbles: true, cancelable: true })
   target.dispatchEvent(event)
@@ -289,218 +246,6 @@ function captureToastApi(harness: Harness): Promise<ReturnType<typeof useToast>>
     )
   })
 }
-
-describe('Dialog primitive', () => {
-  let harness: Harness
-
-  beforeEach(() => {
-    harness = createHarness()
-  })
-
-  afterEach(async () => {
-    await harness.unmount()
-    // Clean up any lingering portal nodes
-    document.body
-      .querySelectorAll('[data-slot="dialog-overlay"]')
-      .forEach((node) => node.remove())
-  })
-
-  it('renders nothing when closed and renders portal content when open', async () => {
-    await harness.render(
-      <Dialog open={false} onOpenChange={() => {}}>
-        <DialogHeader>
-          <DialogTitle>Closed</DialogTitle>
-        </DialogHeader>
-      </Dialog>
-    )
-    expect(document.querySelector('[data-slot="dialog"]')).toBeNull()
-
-    await harness.render(
-      <Dialog open onOpenChange={() => {}}>
-        <DialogHeader>
-          <DialogTitle>Hello</DialogTitle>
-        </DialogHeader>
-        <DialogBody>Body text</DialogBody>
-      </Dialog>
-    )
-    const dialog = document.querySelector('[data-slot="dialog"]')
-    expect(dialog).not.toBeNull()
-    expect(dialog?.getAttribute('role')).toBe('dialog')
-    expect(dialog?.getAttribute('aria-modal')).toBe('true')
-    expect(document.body.textContent).toContain('Hello')
-    expect(document.body.textContent).toContain('Body text')
-  })
-
-  it('calls onOpenChange(false) when Escape is pressed', async () => {
-    const onOpenChange = vi.fn()
-    await harness.render(
-      <Dialog open onOpenChange={onOpenChange}>
-        <DialogHeader>
-          <DialogTitle>Esc test</DialogTitle>
-        </DialogHeader>
-      </Dialog>
-    )
-    await act(async () => {
-      dispatchKey(document, 'Escape')
-    })
-    expect(onOpenChange).toHaveBeenCalledWith(false)
-  })
-
-  it('calls onOpenChange(false) when backdrop is clicked', async () => {
-    const onOpenChange = vi.fn()
-    await harness.render(
-      <Dialog open onOpenChange={onOpenChange}>
-        <DialogHeader>
-          <DialogTitle>Backdrop test</DialogTitle>
-        </DialogHeader>
-      </Dialog>
-    )
-    const overlay = document.querySelector(
-      '[data-slot="dialog-overlay"]'
-    ) as HTMLElement | null
-    expect(overlay).not.toBeNull()
-    await act(async () => {
-      dispatchMouseDown(overlay!)
-    })
-    expect(onOpenChange).toHaveBeenCalledWith(false)
-  })
-
-  it('does not dismiss on backdrop click when dismissOnBackdropClick is false', async () => {
-    const onOpenChange = vi.fn()
-    await harness.render(
-      <Dialog open onOpenChange={onOpenChange} dismissOnBackdropClick={false}>
-        <DialogHeader>
-          <DialogTitle>No backdrop</DialogTitle>
-        </DialogHeader>
-      </Dialog>
-    )
-    const overlay = document.querySelector(
-      '[data-slot="dialog-overlay"]'
-    ) as HTMLElement | null
-    await act(async () => {
-      dispatchMouseDown(overlay!)
-    })
-    expect(onOpenChange).not.toHaveBeenCalled()
-  })
-
-  it('traps focus inside the dialog on Tab', async () => {
-    function Harnessed() {
-      const ref = useRef<HTMLButtonElement>(null)
-      return (
-        <Dialog open onOpenChange={() => {}} initialFocusRef={ref}>
-          <DialogHeader>
-            <DialogTitle>Focus trap</DialogTitle>
-          </DialogHeader>
-          <DialogFooter>
-            <button type="button" ref={ref}>
-              First
-            </button>
-            <button type="button">Last</button>
-          </DialogFooter>
-        </Dialog>
-      )
-    }
-    await harness.render(<Harnessed />)
-    // Auto-focus is deferred via setTimeout(0); wait for it to land.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    })
-    const buttons = document.querySelectorAll(
-      '[data-slot="dialog"] button'
-    ) as NodeListOf<HTMLButtonElement>
-    expect(buttons.length).toBe(2)
-    const first = buttons[0]
-    const last = buttons[1]
-    expect(document.activeElement).toBe(first)
-
-    // Tab from last should wrap to first.
-    last.focus()
-    await act(async () => {
-      dispatchKey(document, 'Tab')
-    })
-    expect(document.activeElement).toBe(first)
-
-    // Shift+Tab from first should wrap to last.
-    first.focus()
-    await act(async () => {
-      dispatchKey(document, 'Tab', true)
-    })
-    expect(document.activeElement).toBe(last)
-  })
-
-  it('useConfirm resolves true on confirm and false on cancel/escape', async () => {
-    function Host({ onResult }: { onResult: (v: boolean) => void }) {
-      const confirm = useConfirm()
-      const onResultRef = useRef(onResult)
-      React.useEffect(() => {
-        onResultRef.current = onResult
-      }, [onResult])
-      return (
-        <>
-          <button
-            type="button"
-            onClick={() => {
-              confirm({ title: 'Sure?', confirmLabel: 'Yes', cancelLabel: 'No' }).then(
-                (value) => onResultRef.current(value)
-              )
-            }}
-          >
-            Open
-          </button>
-          {confirm.dialog}
-        </>
-      )
-    }
-
-    const results: boolean[] = []
-    await harness.render(<Host onResult={(v) => results.push(v)} />)
-    const openBtn = harness.container.querySelector('button') as HTMLButtonElement
-
-    // Case 1: clicking confirm resolves true
-    await act(async () => {
-      dispatchClick(openBtn)
-    })
-    const yesBtn = Array.from(
-      document.querySelectorAll('[data-slot="dialog"] button')
-    ).find((b) => b.textContent === 'Yes') as HTMLButtonElement | undefined
-    expect(yesBtn).not.toBeUndefined()
-    await act(async () => {
-      dispatchClick(yesBtn!)
-    })
-    await act(async () => {
-      await Promise.resolve()
-    })
-    expect(results[0]).toBe(true)
-
-    // Case 2: clicking cancel resolves false
-    await act(async () => {
-      dispatchClick(openBtn)
-    })
-    const noBtn = Array.from(
-      document.querySelectorAll('[data-slot="dialog"] button')
-    ).find((b) => b.textContent === 'No') as HTMLButtonElement | undefined
-    expect(noBtn).not.toBeUndefined()
-    await act(async () => {
-      dispatchClick(noBtn!)
-    })
-    await act(async () => {
-      await Promise.resolve()
-    })
-    expect(results[1]).toBe(false)
-
-    // Case 3: Escape resolves false
-    await act(async () => {
-      dispatchClick(openBtn)
-    })
-    await act(async () => {
-      dispatchKey(document, 'Escape')
-    })
-    await act(async () => {
-      await Promise.resolve()
-    })
-    expect(results[2]).toBe(false)
-  })
-})
 
 describe('Toast primitive', () => {
   let harness: Harness

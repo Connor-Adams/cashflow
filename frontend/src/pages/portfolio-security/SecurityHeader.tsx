@@ -1,4 +1,4 @@
-import { Badge } from '@cashflow/ui'
+import { Badge } from '@connor-adams/designsystem'
 import { SecurityLogo } from '@/components/ui/security-logo'
 import type { PortfolioSecurityDetail, PortfolioSecurityOverview } from '../../types/api'
 

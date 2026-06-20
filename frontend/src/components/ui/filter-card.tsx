@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
-import { Card } from '@cashflow/ui'
+import { Card } from '@connor-adams/designsystem'
 
 type FilterCardProps = React.ComponentProps<typeof Card> & {
   density?: 'compact' | 'comfortable'

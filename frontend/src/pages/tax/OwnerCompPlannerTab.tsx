@@ -22,7 +22,7 @@
 //     model where personal scenarios are the routing target.
 import { useHouseholdPlanCompute } from '../../hooks/useHouseholdPlanCompute';
 import { OwnerCompLeverSurface } from './scenarios/OwnerCompLeverSurface';
-import { EmptyState } from '@cashflow/ui';
+import { EmptyState } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header';
 
 interface Props {

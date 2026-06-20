@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Sparkles } from 'lucide-react'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { useConfirm } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
 import type { EnrichmentBackfillProgress } from '../../../../types/api'
 
 type BackfillSummary = Extract<EnrichmentBackfillProgress, { kind: 'summary' }>

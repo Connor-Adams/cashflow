@@ -1,16 +1,10 @@
 import { Fragment, useEffect, useState } from 'react'
 import { getJson, postJson } from '../lib/api'
 import { useActiveImports, type BatchSummary } from '../components/import/useActiveImports'
-import { Button } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 
 type BatchDetail = {
   id: string

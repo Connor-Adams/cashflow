@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Card } from '@cashflow/ui'
+import { Card } from '@connor-adams/designsystem'
 import { getJson } from '../../lib/api'
 import type { PortfolioForwardIncome } from '../../types/api'
 import { ForwardIncomeStatsRow } from './ForwardIncomeStatsRow'

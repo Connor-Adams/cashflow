@@ -1,5 +1,5 @@
-import { Button } from '@cashflow/ui'
-import { NativeSelect } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import type { LifestyleScope } from '../../types/api'
 import { WINDOW_OPTIONS, type ScopeOption } from './reportFilters'
 

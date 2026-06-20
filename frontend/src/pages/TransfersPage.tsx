@@ -1,24 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowLeftRight, Link2, RefreshCw, Unlink2 } from 'lucide-react'
-import { Alert } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
-import { EmptyTableRow } from '@cashflow/ui'
-import { Grid } from '@cashflow/ui'
-import { NativeSelect } from '@cashflow/ui'
+import { EmptyTableRow } from '@/lib/ds-extras'
+import { Grid } from '@/lib/ds-extras'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@cashflow/ui'
+import { SkeletonRow } from '@/lib/ds-extras'
 import { StatCard } from '@/components/ui/stat-card'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { getJson, patchJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { Alert } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
-import { Skeleton } from '@cashflow/ui'
+import { Skeleton } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { AICleanupPanel } from '../components/import/AICleanupPanel'
 import type { ImportHistoryRow } from '../components/import/ImportHistoryTable'
@@ -187,11 +187,11 @@ export function ImportBatchPage() {
           }
           actions={
             <>
-              <Button asChild variant="outline">
-                <Link to={`/transactions?${transactionsQuery.toString()}`}>
+              <Link to={`/transactions?${transactionsQuery.toString()}`}>
+                <Button variant="outline">
                   View transactions →
-                </Link>
-              </Button>
+                </Button>
+              </Link>
               {!isRolledBack ? (
                 <Button
                   type="button"

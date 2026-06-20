@@ -1,21 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  AlertTriangle,
-  Briefcase,
-  ClipboardCheck,
-  Receipt,
-  Sparkles,
-  TrendingDown,
-  TrendingUp,
-} from 'lucide-react'
-import { Alert } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
-import { Grid } from '@cashflow/ui'
-import { NativeSelect } from '@cashflow/ui'
+  AlertTriangle, Briefcase, ClipboardCheck, Receipt, Sparkles, TrendingDown, TrendingUp, } from 'lucide-react'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Grid } from '@/lib/ds-extras'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
 import { getJson } from '../lib/api'
@@ -255,9 +248,9 @@ export function ExplainMonthPage() {
               title="Nothing notable this month"
               description="Spend matched the previous month, no subscriptions changed, and nothing needs review."
               actions={
-                <Button asChild size="sm">
-                  <Link to="/transactions">View transactions</Link>
-                </Button>
+                <Link to="/transactions">
+                  <Button size="sm">View transactions</Button>
+                </Link>
               }
             />
           ) : (

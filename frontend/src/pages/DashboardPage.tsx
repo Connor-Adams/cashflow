@@ -1,26 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  LabelList,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+  Bar, BarChart, CartesianGrid, LabelList, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
 import { FilterX, Inbox, ShoppingBag, TrendingUp, Wallet } from 'lucide-react'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { Link, useNavigate } from 'react-router-dom'
-import { Alert } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
+import { Alert } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { FilterCard } from '@/components/ui/filter-card'
 import { PageHeader } from '@/components/ui/page-header'
-import { Skeleton, SkeletonText } from '@cashflow/ui'
+import { Skeleton, SkeletonText } from '@connor-adams/designsystem'
 import { BentoTile, type BentoSpan } from '@/components/dashboard/BentoTile'
 import { PeriodInsightBand } from '@/components/dashboard/PeriodInsightBand'
 import { KpiStack } from '@/components/dashboard/KpiStack'
@@ -858,7 +847,7 @@ export function DashboardPage() {
               summaryStats.reviewCount === 1 ? '' : 's'
             } flagged for review`}
             description="Waiting on category, split, or business decisions before they roll into your totals."
-            actions={<Button asChild size="sm"><Link to="/review">Open Review Inbox</Link></Button>}
+            actions={<Link to="/review"><Button size="sm">Open Review Inbox</Button></Link>}
             onDismiss={() => setReviewDismissedAt(summaryStats.reviewCount)}
             dismissLabel="Dismiss review reminder"
           />
@@ -872,7 +861,7 @@ export function DashboardPage() {
             aria-live="polite"
             icon={<TrendingUp className="size-5" />}
             label={`${priceChangeCount} subscription price change${priceChangeCount === 1 ? '' : 's'} this month`}
-            actions={<Button asChild size="sm" variant="outline"><Link to="/subscriptions?priceChange=unack">Review</Link></Button>}
+            actions={<Link to="/subscriptions?priceChange=unack"><Button size="sm" variant="outline">Review</Button></Link>}
             onDismiss={() => setPriceDismissedAt(priceChangeCount)}
             dismissLabel="Dismiss subscription price alert"
           />

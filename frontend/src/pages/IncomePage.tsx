@@ -1,31 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Plus, Pencil, Trash2 } from 'lucide-react'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@cashflow/ui'
-import { EmptyTableRow } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
-import { NativeSelect } from '@cashflow/ui'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@cashflow/ui'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
-import { Textarea } from '@cashflow/ui'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
+import { Textarea } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import { todayDateInputValue } from '../lib/dateInput'
@@ -232,12 +219,13 @@ function LogDialog({ open, onOpenChange, onSaved, editing }: LogDialogProps) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onClose={() => onOpenChange(false)}
+      title={<>{editing ? 'Edit income entry' : 'Log income'}</>}
+    >
       <form onSubmit={handleSubmit}>
-        <DialogHeader>
-          <DialogTitle>{editing ? 'Edit income entry' : 'Log income'}</DialogTitle>
-        </DialogHeader>
-        <DialogBody className="grid gap-4">
+        <div className="grid gap-4">
           <div className="grid gap-1.5">
             <Label htmlFor="income-date">Date</Label>
             <Input
@@ -320,8 +308,8 @@ function LogDialog({ open, onOpenChange, onSaved, editing }: LogDialogProps) {
               onChange={(e) => set('notes', e.target.value)}
             />
           </div>
-        </DialogBody>
-        <DialogFooter>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
           <Button
             type="button"
             variant="outline"
@@ -332,7 +320,7 @@ function LogDialog({ open, onOpenChange, onSaved, editing }: LogDialogProps) {
           <Button type="submit" disabled={saving}>
             {saving ? 'Saving…' : editing ? 'Save changes' : 'Log income'}
           </Button>
-        </DialogFooter>
+        </div>
       </form>
     </Dialog>
   )

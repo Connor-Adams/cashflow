@@ -1,7 +1,7 @@
 import { useReconciliation, type ReconciliationFinding } from '../../hooks/useReconciliation';
 import { useTaxReturn } from '../../hooks/useTaxReturn';
 import { StatCard } from '@/components/ui/stat-card';
-import { Card } from '@cashflow/ui';
+import { Card } from '@connor-adams/designsystem'
 
 export function ReconciliationTab({ year }: { year: number }) {
   const taxReturn = useTaxReturn(year);

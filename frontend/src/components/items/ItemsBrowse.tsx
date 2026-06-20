@@ -1,16 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@cashflow/ui'
-import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 import { useItemsQuery, type ItemsFilters } from '@/hooks/useItems'
 import { hasActiveItemsFilters } from '@/hooks/useItems'
 import { patchJson } from '@/lib/api'
@@ -168,9 +161,9 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched, onClearFilter
             title="No items yet"
             description="Items appear once you import receipts or orders with line-item detail."
             actions={
-              <Button asChild size="sm">
-                <Link to="/import">Import a statement</Link>
-              </Button>
+              <Link to="/import">
+                <Button size="sm">Import a statement</Button>
+              </Link>
             }
           />
         )
@@ -228,48 +221,49 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched, onClearFilter
 
       <div ref={sentinelRef} aria-hidden="true" />
 
-      <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
-        <DialogHeader>
-          <DialogTitle>Set category</DialogTitle>
-          <DialogDescription>
-            Apply a category to {selected.size} selected item{selected.size === 1 ? '' : 's'}.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogBody>
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Category</span>
-            <NativeSelect
-              aria-label="Category"
-              value={pendingCategory}
-              onChange={(e) => setPendingCategory(e.target.value)}
+      <Dialog
+        open={categoryDialogOpen}
+        onClose={() => setCategoryDialogOpen(false)}
+        title={<>Set category</>}
+        description={
+          <>Apply a category to {selected.size} selected item{selected.size === 1 ? '' : 's'}.</>
+        }
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setCategoryDialogOpen(false)}
+              disabled={bulkSaving}
             >
-              <NativeSelectOption value="">— Clear category (uncategorized)</NativeSelectOption>
-              {categoryOptions.map((c) => (
-                <NativeSelectOption key={c} value={c}>
-                  {c}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </label>
-          {bulkError && (
-            <p role="alert" className="mt-2 text-sm text-destructive">
-              {bulkError}
-            </p>
-          )}
-        </DialogBody>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => setCategoryDialogOpen(false)}
-            disabled={bulkSaving}
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void applyBulkCategory()} disabled={bulkSaving}>
+              {bulkSaving ? 'Saving…' : 'Apply'}
+            </Button>
+          </>
+        }
+      >
+        <label className="flex flex-col gap-1">
+          <span className="text-muted-foreground">Category</span>
+          <NativeSelect
+            aria-label="Category"
+            value={pendingCategory}
+            onChange={(e) => setPendingCategory(e.target.value)}
           >
-            Cancel
-          </Button>
-          <Button type="button" onClick={() => void applyBulkCategory()} disabled={bulkSaving}>
-            {bulkSaving ? 'Saving…' : 'Apply'}
-          </Button>
-        </DialogFooter>
+            <option value="">— Clear category (uncategorized)</option>
+            {categoryOptions.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </NativeSelect>
+        </label>
+        {bulkError && (
+          <p role="alert" className="mt-2 text-sm text-destructive">
+            {bulkError}
+          </p>
+        )}
       </Dialog>
     </div>
   )

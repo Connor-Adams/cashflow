@@ -4,35 +4,23 @@ import { useUrlSort, type SortDir } from '../hooks/useUrlSort'
 import { RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { EmptyTableRow } from '@cashflow/ui'
+  Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
 import { PageHeader } from '@/components/ui/page-header'
 import { SecurityLogo } from '@/components/ui/security-logo'
 import { Sparkline } from '@/components/ui/sparkline'
 import { MetricStat } from '@/components/ui/metric-stat'
 import { PctDeltaCell } from '@/components/ui/pct-delta-cell'
 import { StatCard } from '@/components/ui/stat-card'
-import { Skeleton, SkeletonRow } from '@cashflow/ui'
+import { Skeleton } from '@connor-adams/designsystem'
+import { SkeletonRow } from '@/lib/ds-extras'
 import { TableCard, type TableColumn } from '@/components/ui/table-card'
 import {
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+  TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { SectionHeader } from '@/components/ui/section-header'
-import { TabPanel, Tabs, type TabItem } from '@cashflow/ui'
+import { Tabs, type TabItem } from '@connor-adams/designsystem'
 import { AllocationDonut } from '@/components/ui/allocation-donut'
 import { AccountTypePanel } from './portfolio-account-type/AccountTypePanel'
 import { ForwardIncomePanel } from './portfolio-forward-income/ForwardIncomePanel'
@@ -278,41 +266,59 @@ export function PortfolioPage() {
         />
       </div>
 
-      <TabPanel value="performance" active={activeTab}>
-        <PerformancePanel />
-      </TabPanel>
+      {activeTab === 'performance' && (
+        <div role="tabpanel">
+          <PerformancePanel />
+        </div>
+      )}
 
-      <TabPanel value="holdings" active={activeTab}>
-        <HoldingsPanel summary={summary} accountsById={accountsById} sparklines={sparklines} loading={loading} />
-      </TabPanel>
+      {activeTab === 'holdings' && (
+        <div role="tabpanel">
+          <HoldingsPanel summary={summary} accountsById={accountsById} sparklines={sparklines} loading={loading} />
+        </div>
+      )}
 
-      <TabPanel value="by-security" active={activeTab}>
-        <BySecurityPanel data={bySec} sparklines={sparklines} />
-      </TabPanel>
+      {activeTab === 'by-security' && (
+        <div role="tabpanel">
+          <BySecurityPanel data={bySec} sparklines={sparklines} />
+        </div>
+      )}
 
-      <TabPanel value="allocation" active={activeTab}>
-        <AllocationPanel data={allocation} sort={allocSort} dir={allocDir} onSort={toggleAllocSort} />
-      </TabPanel>
+      {activeTab === 'allocation' && (
+        <div role="tabpanel">
+          <AllocationPanel data={allocation} sort={allocSort} dir={allocDir} onSort={toggleAllocSort} />
+        </div>
+      )}
 
-      <TabPanel value="by-account-type" active={activeTab}>
-        <AccountTypePanel />
-      </TabPanel>
+      {activeTab === 'by-account-type' && (
+        <div role="tabpanel">
+          <AccountTypePanel />
+        </div>
+      )}
 
-      <TabPanel value="income" active={activeTab}>
-        <IncomePanel />
-      </TabPanel>
+      {activeTab === 'income' && (
+        <div role="tabpanel">
+          <IncomePanel />
+        </div>
+      )}
 
-      <TabPanel value="dividends" active={activeTab}>
-        <DividendsTab />
-      </TabPanel>
+      {activeTab === 'dividends' && (
+        <div role="tabpanel">
+          <DividendsTab />
+        </div>
+      )}
 
-      <TabPanel value="forward-income" active={activeTab}>
-        <ForwardIncomePanel />
-      </TabPanel>
+      {activeTab === 'forward-income' && (
+        <div role="tabpanel">
+          <ForwardIncomePanel />
+        </div>
+      )}
 
-      <TabPanel value="realized" active={activeTab}>
-        <RealizedPanel />
-      </TabPanel>
+      {activeTab === 'realized' && (
+        <div role="tabpanel">
+          <RealizedPanel />
+        </div>
+      )}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { HelpCircle } from 'lucide-react'
-import { Button } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
 import { FeedbackPanel } from './FeedbackPanel'
 
 /**

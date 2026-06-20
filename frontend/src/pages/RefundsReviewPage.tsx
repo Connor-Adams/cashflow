@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postJson } from '../lib/api'

@@ -1,4 +1,4 @@
-import { Button } from '@cashflow/ui';
+import { Button } from '@connor-adams/designsystem'
 
 /**
  * Compare bar shared by the T1 and T2 scenario workspaces. It only needs each

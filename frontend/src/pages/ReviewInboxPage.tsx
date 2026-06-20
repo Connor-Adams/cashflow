@@ -1,41 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Check,
-  Keyboard,
-  ListChecks,
-  RefreshCw,
-  Search,
-  ShieldCheck,
-  Wand2,
-} from 'lucide-react'
+  Check, Keyboard, ListChecks, RefreshCw, Search, ShieldCheck, Wand2, } from 'lucide-react'
 import type { ImportConfidenceFlagToken } from '@cashflow/shared'
 import { IMPORT_CONFIDENCE_FLAG_TOKENS } from '@cashflow/shared'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { EmptyTableRow } from '@cashflow/ui'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
 import { EnrichmentSignalsDialog } from '@/components/EnrichmentSignalsDialog'
-import { Alert } from '@cashflow/ui'
-import { Grid } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@cashflow/ui'
+import { Alert } from '@connor-adams/designsystem'
+import { Grid } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
-import { SkeletonRow } from '@cashflow/ui'
+import { SkeletonRow } from '@/lib/ds-extras'
 import { StatCard } from '@/components/ui/stat-card'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { TxnMerchantCell, TxnMerchantName } from '@/components/ui/txn-merchant-cell'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
@@ -698,11 +682,11 @@ export function ReviewInboxPage() {
                   background: 'color-mix(in srgb, var(--card) 94%, transparent)',
                 }}
               >
-                <NativeSelectOption value="">All batches</NativeSelectOption>
+                <option value="">All batches</option>
                 {uniqueBatches.map((batch) => (
-                  <NativeSelectOption key={batch} value={batch}>
+                  <option key={batch} value={batch}>
                     {batch}
-                  </NativeSelectOption>
+                  </option>
                 ))}
               </NativeSelect>
             </Label>
@@ -811,7 +795,6 @@ export function ReviewInboxPage() {
             ref={tableWrapRef}
           >
             <Table
-              stickyHeader
               className="[&_thead_th]:bg-[color-mix(in_srgb,var(--muted)_88%,transparent)] [&_tr[data-cursor='true']]:shadow-[inset_4px_0_0_0_var(--primary)] [&_tr[data-cursor='true']]:bg-[color-mix(in_oklch,var(--primary)_10%,transparent)]"
             >
               <TableHeader>
@@ -1030,10 +1013,10 @@ export function ReviewInboxPage() {
                   background: 'color-mix(in srgb, var(--card) 94%, transparent)',
                 }}
               >
-                <NativeSelectOption value="">Keep current</NativeSelectOption>
-                <NativeSelectOption value="me">Me</NativeSelectOption>
-                <NativeSelectOption value="partner">Partner</NativeSelectOption>
-                <NativeSelectOption value="shared">Shared</NativeSelectOption>
+                <option value="">Keep current</option>
+                <option value="me">Me</option>
+                <option value="partner">Partner</option>
+                <option value="shared">Shared</option>
               </NativeSelect>
             </Label>
             <Label>
@@ -1046,9 +1029,9 @@ export function ReviewInboxPage() {
                   background: 'color-mix(in srgb, var(--card) 94%, transparent)',
                 }}
               >
-                <NativeSelectOption value="">Keep current</NativeSelectOption>
-                <NativeSelectOption value="false">Personal</NativeSelectOption>
-                <NativeSelectOption value="true">Business</NativeSelectOption>
+                <option value="">Keep current</option>
+                <option value="false">Personal</option>
+                <option value="true">Business</option>
               </NativeSelect>
             </Label>
             <Label>

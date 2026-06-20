@@ -8,10 +8,10 @@
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Search as SearchIcon, Bookmark, Save, X, Trash2 } from 'lucide-react'
-import { Button } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
 import { getJson, postJson, patchJson, deleteReq } from '@/lib/api'
 import { formatMoney } from '@/lib/formatMoney'
 
@@ -233,13 +233,13 @@ export function SearchPage() {
       <form onSubmit={onSubmit} className="flex gap-2">
         <div className="relative flex-1">
           <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
+          <input
             ref={inputRef}
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder='Try "category:Groceries amount:>100 has:receipt"'
-            className="pl-9"
+            className="h-9 w-full rounded-md border border-input bg-background/70 px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 pl-9"
             aria-label="Search transactions"
           />
         </div>

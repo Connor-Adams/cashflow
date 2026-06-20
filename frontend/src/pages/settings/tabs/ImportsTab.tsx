@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Sparkles } from 'lucide-react'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Textarea } from '@cashflow/ui'
-import { useConfirm } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Textarea } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
 import { postJson } from '../../../lib/api'
 import { formatMoney } from '../../../lib/formatMoney'
 import {
@@ -595,24 +595,20 @@ export function ImportsTab() {
         )}
         {captureBookmarklets && (
           <div className="row" style={{ gap: '0.5rem', marginTop: '0.75rem' }}>
-            <Button asChild variant="secondary">
-              <a
-                ref={amazonAnchorRef}
-                draggable
-                onClick={(e) => e.preventDefault()}
-              >
-                ↗ Capture Amazon orders
-              </a>
-            </Button>
-            <Button asChild variant="secondary">
-              <a
-                ref={appleAnchorRef}
-                draggable
-                onClick={(e) => e.preventDefault()}
-              >
-                ↗ Capture Apple purchases
-              </a>
-            </Button>
+            <a
+              ref={amazonAnchorRef}
+              draggable
+              onClick={(e) => e.preventDefault()}
+            >
+              <Button variant="secondary">↗ Capture Amazon orders</Button>
+            </a>
+            <a
+              ref={appleAnchorRef}
+              draggable
+              onClick={(e) => e.preventDefault()}
+            >
+              <Button variant="secondary">↗ Capture Apple purchases</Button>
+            </a>
           </div>
         )}
         {captureToken && !captureBookmarklets && (

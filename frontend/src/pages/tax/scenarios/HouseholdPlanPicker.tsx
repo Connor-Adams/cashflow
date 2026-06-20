@@ -11,7 +11,7 @@
 //  - Rename uses window.prompt; Delete confirms via window.confirm. Good enough
 //    for v1; future iterations can swap in a modal if the rough edges bite.
 //  - On delete, we clear activePlanId so the parent doesn't dangle a stale id.
-import { Button } from '@cashflow/ui';
+import { Button } from '@connor-adams/designsystem'
 import { useHouseholdPlans } from '@/hooks/useHouseholdPlans';
 
 type Plan = { id: number; name: string };

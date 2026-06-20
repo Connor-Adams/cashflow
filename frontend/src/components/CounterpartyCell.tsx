@@ -1,10 +1,8 @@
 import { useState } from 'react';
-import { NativeSelect, NativeSelectOption } from '@cashflow/ui';
-import { Button } from '@cashflow/ui';
-import { Input } from '@cashflow/ui';
-import {
-  Dialog, DialogHeader, DialogTitle, DialogBody, DialogFooter,
-} from '@cashflow/ui';
+import { NativeSelect } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
 import type { Contact } from '../types/api';
 
 export type CounterpartyCellProps = {
@@ -47,9 +45,9 @@ export function CounterpartyCell({
         onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
         className="text-xs"
       >
-        <NativeSelectOption value="">No counterparty</NativeSelectOption>
+        <option value="">No counterparty</option>
         {contacts.map((c) => (
-          <NativeSelectOption key={c.id} value={String(c.id)}>{c.name}</NativeSelectOption>
+          <option key={c.id} value={String(c.id)}>{c.name}</option>
         ))}
       </NativeSelect>
       <Button
@@ -59,28 +57,31 @@ export function CounterpartyCell({
       >
         + New
       </Button>
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogHeader><DialogTitle>New counterparty contact</DialogTitle></DialogHeader>
-        <DialogBody>
-          <Input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="Name (e.g. John)"
-            aria-label="New contact name"
-          />
-        </DialogBody>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            type="button" variant="primary"
-            disabled={creating || !newName.trim()}
-            onClick={() => void submitCreate()}
-          >
-            Create
-          </Button>
-        </DialogFooter>
+      <Dialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title={<>New counterparty contact</>}
+        footer={
+          <>
+            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button" variant="primary"
+              disabled={creating || !newName.trim()}
+              onClick={() => void submitCreate()}
+            >
+              Create
+            </Button>
+          </>
+        }
+      >
+        <Input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder="Name (e.g. John)"
+          aria-label="New contact name"
+        />
       </Dialog>
     </div>
   );

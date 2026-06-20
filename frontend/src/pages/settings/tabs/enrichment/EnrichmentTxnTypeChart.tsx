@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Card } from '@cashflow/ui'
+import { Card } from '@connor-adams/designsystem'
 import { enrichmentFilterHref } from './enrichmentFilterHref'
 
 type Props = { byTxnType: Record<string, number> }

@@ -1,12 +1,10 @@
 @import "tailwindcss";
 
-/* Design tokens + theme + custom utilities are owned by @cashflow/ui.
- * Import the SOURCE (not compiled CSS) so the frontend's Tailwind generates
- * app-level custom utilities (bg-card, text-muted-foreground, …) from the one
- * shared source, and scan the package components so primitive-only utilities
- * are emitted too. */
-@import "@cashflow/ui/theme.css";
-@source "../../packages/ui/src/components/**/*.{ts,tsx}";
+/* Design tokens come from @connor-adams/tokens (raw CSS variables). The Tailwind
+ * v4 @theme mapping (bg-card, text-muted-foreground, border-border, …) and the
+ * legacy raw-var compat aliases live in ./styles/theme.css. */
+@import "@connor-adams/tokens/styles.css";
+@import "./styles/theme.css";
 
 @custom-variant dark (&:is(.dark *));
 

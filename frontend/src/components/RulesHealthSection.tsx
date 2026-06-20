@@ -1,19 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Alert } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { Grid } from '@cashflow/ui'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Grid } from '@/lib/ds-extras'
 import { SectionHeader } from '@/components/ui/section-header'
 import { StatCard } from '@/components/ui/stat-card'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
 import { getJson, postJson } from '../lib/api'
 
 /** Shape returned by GET /api/rules/health. Kept inline so the component

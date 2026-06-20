@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Tabs } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
+import { Tabs } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 import { YearJump } from '../components/tax/YearJump'
 import { OverviewTab } from './tax/OverviewTab'
 import { PersonalT1Tab } from './tax/PersonalT1Tab'
@@ -90,9 +90,9 @@ export function TaxPage() {
           title="No tax years yet"
           description="Import transactions for a tax year and your slips, returns, and reconciliation will populate here."
           actions={
-            <Button asChild size="sm">
-              <Link to="/import">Import a statement</Link>
-            </Button>
+            <Link to="/import">
+              <Button size="sm">Import a statement</Button>
+            </Link>
           }
         />
       ) : (

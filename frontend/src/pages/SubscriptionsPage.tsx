@@ -1,31 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ExternalLink } from 'lucide-react'
-import { Alert } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
-import { Grid } from '@cashflow/ui'
+import { Grid } from '@/lib/ds-extras'
 import { SummaryStat } from '@/components/SummaryStat'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@cashflow/ui'
-import { EmptyTableRow } from '@cashflow/ui'
-import { NativeSelect } from '@cashflow/ui'
+import { Dialog } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@cashflow/ui'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { CancelImpactCard } from '@/components/subscriptions/CancelImpactCard'
 import { getJson, patchJson } from '../lib/api'
@@ -429,25 +416,26 @@ function SubscriptionRow({
           ) : null}
         </div>
         {priceDrawerOpen && pendingChange && (
-          <Dialog open={priceDrawerOpen} onOpenChange={setPriceDrawerOpen}>
-            <DialogHeader>
-              <DialogTitle>{item.merchantName} price changed</DialogTitle>
-            </DialogHeader>
-            <DialogBody>
-              <p>
-                Previously {formatMoney(pendingChange.prevCents / 100, item.currency)} / month →
-                {' '}Now {formatMoney(pendingChange.newCents / 100, item.currency)} / month.
-                Detected from charges on {pendingChange.detectedOn}.
-              </p>
-            </DialogBody>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setPriceDrawerOpen(false)}>
-                Close
-              </Button>
-              <Button onClick={() => { void acknowledgePriceChange() }}>
-                Acknowledge
-              </Button>
-            </DialogFooter>
+          <Dialog
+            open={priceDrawerOpen}
+            onClose={() => setPriceDrawerOpen(false)}
+            title={<>{item.merchantName} price changed</>}
+            footer={
+              <>
+                <Button variant="outline" onClick={() => setPriceDrawerOpen(false)}>
+                  Close
+                </Button>
+                <Button onClick={() => { void acknowledgePriceChange() }}>
+                  Acknowledge
+                </Button>
+              </>
+            }
+          >
+            <p>
+              Previously {formatMoney(pendingChange.prevCents / 100, item.currency)} / month →
+              {' '}Now {formatMoney(pendingChange.newCents / 100, item.currency)} / month.
+              Detected from charges on {pendingChange.detectedOn}.
+            </p>
           </Dialog>
         )}
         {item.cancellationUrl && (
@@ -648,27 +636,28 @@ function CancelConfirmDialog({
     : null
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogHeader>
-        <DialogTitle>Cancel {item.merchantName}?</DialogTitle>
-      </DialogHeader>
-      <DialogBody>
-        {savings
-          ? `This saves ${savings} over the next ${impact?.horizonMonths ?? 12} months but you lose ${item.merchantName}.`
-          : `This cancels ${item.merchantName}.`}
-      </DialogBody>
-      <DialogFooter>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => onOpenChange(false)}
-        >
-          Keep it
-        </Button>
-        <Button type="button" variant="destructive" onClick={onConfirm}>
-          Cancel subscription
-        </Button>
-      </DialogFooter>
+    <Dialog
+      open={open}
+      onClose={() => onOpenChange(false)}
+      title={<>Cancel {item.merchantName}?</>}
+      footer={
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+          >
+            Keep it
+          </Button>
+          <Button type="button" variant="destructive" onClick={onConfirm}>
+            Cancel subscription
+          </Button>
+        </>
+      }
+    >
+      {savings
+        ? `This saves ${savings} over the next ${impact?.horizonMonths ?? 12} months but you lose ${item.merchantName}.`
+        : `This cancels ${item.merchantName}.`}
     </Dialog>
   )
 }

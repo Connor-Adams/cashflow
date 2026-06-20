@@ -1,37 +1,9 @@
 import { useCallback, useMemo, useState, useEffect } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
-  BarChart3,
-  BookOpenCheck,
-  CalendarClock,
-  CheckSquare,
-  ChevronDown,
-  Receipt,
-  CreditCard,
-  Inbox,
-  LineChart,
-  LayoutDashboard,
-  Lock,
-  LogOut,
-  MessageSquare,
-  ReceiptText,
-  DollarSign,
-  Settings,
-  Shield,
-  Sun,
-  Moon,
-  GitCompare,
-  HeartHandshake,
-  Target,
-  Calculator,
-  Upload,
-  PiggyBank,
-  Sparkles,
-  Tags,
-  Users,
-} from 'lucide-react'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
+  BarChart3, BookOpenCheck, CalendarClock, CheckSquare, ChevronDown, Receipt, CreditCard, Inbox, LineChart, LayoutDashboard, Lock, LogOut, MessageSquare, ReceiptText, DollarSign, Settings, Shield, Sun, Moon, GitCompare, HeartHandshake, Target, Calculator, Upload, PiggyBank, Sparkles, Tags, Users, } from 'lucide-react'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
 import { useAuth } from '../lib/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { useAiInboxCount } from '@/hooks/useAiInboxCount'

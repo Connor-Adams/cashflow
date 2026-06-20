@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Card } from '@cashflow/ui'
+import { Card } from '@connor-adams/designsystem'
 
 type Swatch = { label: string; token: string; kind?: 'gradient' }
 type Group = { name: string; swatches: Swatch[] }

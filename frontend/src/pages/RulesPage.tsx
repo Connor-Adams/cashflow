@@ -1,22 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Alert } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { useConfirm } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { EmptyTableRow } from '@cashflow/ui'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { Button } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { SortableTableHead } from '@/components/table/SortableTableHead'
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
@@ -816,10 +810,14 @@ export function RulesPage() {
               />
             ) : (
               rules.map((r) => (
-                <TableRow
+                <tr
                   key={r.id}
                   ref={r.id === focusedId ? focusedRowRef : undefined}
-                  className={r.id === focusedId ? 'ruleRow isFocused' : 'ruleRow'}
+                  className={
+                    r.id === focusedId
+                      ? 'border-b border-border transition-colors hover:bg-muted/45 ruleRow isFocused'
+                      : 'border-b border-border transition-colors hover:bg-muted/45 ruleRow'
+                  }
                 >
                   <TableCell>{r.merchantPattern}</TableCell>
                   <TableCell>{r.matchKind}</TableCell>
@@ -834,7 +832,7 @@ export function RulesPage() {
                       Delete
                     </Button>
                   </TableCell>
-                </TableRow>
+                </tr>
               ))
             )}
           </TableBody>

@@ -1,9 +1,9 @@
 // frontend/src/pages/settings/tabs/CategoryTreeManager.tsx
 import { useRef, useState } from 'react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
-import { Button } from '@cashflow/ui';
-import { Input } from '@cashflow/ui';
-import { Dialog, DialogBody, DialogHeader, DialogTitle } from '@cashflow/ui';
+import { Button } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
 import { Tree, TreeGroup, TreeRow } from '@/components/ui/tree';
 import { CategoryIcon } from '../../../components/CategoryIcon';
 import { CategoryIconPicker } from '../../../components/CategoryIconPicker';
@@ -335,25 +335,20 @@ export function CategoryTreeManager() {
       )}
 
       {editing && (
-        <Dialog open onOpenChange={(open) => { if (!open) setEditingId(null); }}>
-          <DialogHeader>
-            <DialogTitle>{`Edit "${editing.name}"`}</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
-            <div className="mb-3 flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">Tax treatment</span>
-              <TaxTreatmentSelect
-                aria-label={`Tax treatment for ${editing.name}`}
-                value={editing.taxTreatment}
-                options={[...TAX_TREATMENTS]}
-                onChange={(t) => { if (t) void updateDetails(editing.id, { taxTreatment: t }); }}
-              />
-            </div>
-            <CategoryIconPicker
-              value={(editing.icon as CategoryIconName | null) ?? null}
-              onSelect={(next) => void updateDetails(editing.id, { icon: next })}
+        <Dialog open onClose={() => setEditingId(null)} title={<>{`Edit "${editing.name}"`}</>}>
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Tax treatment</span>
+            <TaxTreatmentSelect
+              aria-label={`Tax treatment for ${editing.name}`}
+              value={editing.taxTreatment}
+              options={[...TAX_TREATMENTS]}
+              onChange={(t) => { if (t) void updateDetails(editing.id, { taxTreatment: t }); }}
             />
-          </DialogBody>
+          </div>
+          <CategoryIconPicker
+            value={(editing.icon as CategoryIconName | null) ?? null}
+            onSelect={(next) => void updateDetails(editing.id, { icon: next })}
+          />
         </Dialog>
       )}
     </div>

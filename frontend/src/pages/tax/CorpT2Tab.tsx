@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTaxEntities, type TaxEntity } from '../../hooks/useTaxEntities';
 import {
-  useCorpScenarios,
-  type CorpScenarioWithComputed,
-} from '../../hooks/useCorpScenarios';
+  useCorpScenarios, type CorpScenarioWithComputed, } from '../../hooks/useCorpScenarios';
 import { useCorpScenarioDetail } from '../../hooks/useCorpScenarioDetail';
 import { useCorpScenarioChain } from '../../hooks/useCorpScenarioChain';
 import { type CorpTaxLineDto } from '../../hooks/useCorpReturn';
@@ -18,12 +16,12 @@ import { fmtCurrency } from './util/format';
 import { labelForTotal } from './util/labels';
 import { TaxLineBreakdownTable } from './components/TaxLineBreakdownTable';
 import { ScenarioCompareBar } from './components/ScenarioCompareBar';
-import { Button } from '@cashflow/ui';
+import { Button } from '@connor-adams/designsystem'
 import { StatCard } from '@/components/ui/stat-card';
-import { Card } from '@cashflow/ui';
+import { Card } from '@connor-adams/designsystem'
 import { CollapsibleCard } from '@/components/ui/collapsible-card';
-import { Alert } from '@cashflow/ui';
-import { EmptyState } from '@cashflow/ui';
+import { Alert } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 
 const CURRENT_YEAR = new Date().getFullYear().toString();
 

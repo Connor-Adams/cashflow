@@ -2,41 +2,27 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { Download, Plus, Trash2 } from 'lucide-react'
-import { Alert } from '@cashflow/ui'
-import { EmptyState, EmptyTableRow } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
+import { Alert } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
 import { FilterCard } from '@/components/ui/filter-card'
-import { Grid } from '@cashflow/ui'
+import { Grid } from '@/lib/ds-extras'
 import { StatCard } from '@/components/ui/stat-card'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  useConfirm,
-} from '@cashflow/ui'
+import { Dialog } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
-import { Input } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
-import { Textarea } from '@cashflow/ui'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@cashflow/ui'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { Textarea } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { Skeleton, SkeletonRow } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+import { Skeleton } from '@connor-adams/designsystem'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Card } from '@connor-adams/designsystem'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
 import { buildCsv, downloadCsv } from '../lib/csv'
@@ -529,9 +515,9 @@ export function ReportsPage() {
           title="No spend to report yet"
           description="Import some transactions and your monthly summary will appear here."
           actions={
-            <Button asChild size="sm">
-              <Link to="/import">Import a statement</Link>
-            </Button>
+            <Link to="/import">
+              <Button size="sm">Import a statement</Button>
+            </Link>
           }
         />
       </div>
@@ -951,18 +937,13 @@ export function ReportsPage() {
     {dialogOpen && (
       <Dialog
         open
-        onOpenChange={(open) => {
-          if (!open) {
-            setDialogOpen(false)
-            setFormError(null)
-          }
+        onClose={() => {
+          setDialogOpen(false)
+          setFormError(null)
         }}
+        title={<>Record settlement</>}
       >
-        <DialogHeader>
-          <DialogTitle>Record settlement</DialogTitle>
-        </DialogHeader>
         <form onSubmit={submitSettlement}>
-          <DialogBody>
             <Grid minItemWidth={180} fill gap="md" className="mb-3">
               <Label htmlFor="settlement-contact">
                 Contact
@@ -973,14 +954,14 @@ export function ReportsPage() {
                   required
                 >
                   {contacts.length === 0 && (
-                    <NativeSelectOption value="">
+                    <option value="">
                       No contacts — add one in Settings
-                    </NativeSelectOption>
+                    </option>
                   )}
                   {contacts.map((c) => (
-                    <NativeSelectOption key={c.id} value={String(c.id)}>
+                    <option key={c.id} value={String(c.id)}>
                       {c.name}
-                    </NativeSelectOption>
+                    </option>
                   ))}
                 </NativeSelect>
               </Label>
@@ -995,12 +976,12 @@ export function ReportsPage() {
                     )
                   }
                 >
-                  <NativeSelectOption value="i_paid_partner">
+                  <option value="i_paid_partner">
                     I paid partner
-                  </NativeSelectOption>
-                  <NativeSelectOption value="partner_paid_me">
+                  </option>
+                  <option value="partner_paid_me">
                     Partner paid me
-                  </NativeSelectOption>
+                  </option>
                 </NativeSelect>
               </Label>
               <Label htmlFor="settlement-currency">
@@ -1011,14 +992,14 @@ export function ReportsPage() {
                   onChange={(e) => setFormCurrency(e.target.value)}
                 >
                   {availableCurrencies.length === 0 && (
-                    <NativeSelectOption value="">
+                    <option value="">
                       No currencies — add an account in Settings
-                    </NativeSelectOption>
+                    </option>
                   )}
                   {availableCurrencies.map((c) => (
-                    <NativeSelectOption key={c} value={c}>
+                    <option key={c} value={c}>
                       {c}
-                    </NativeSelectOption>
+                    </option>
                   ))}
                 </NativeSelect>
               </Label>
@@ -1088,8 +1069,7 @@ export function ReportsPage() {
               </Label>
               {formError && <Alert variant="error" className="mb-4">{formError}</Alert>}
             </Grid>
-          </DialogBody>
-          <DialogFooter>
+          <div className="flex justify-end gap-2">
             <Button
               type="button"
               variant="outline"
@@ -1100,7 +1080,7 @@ export function ReportsPage() {
             <Button type="submit" disabled={formSubmitting || Boolean(formAmountError) || Boolean(formDateError)}>
               {formSubmitting ? 'Saving...' : 'Save settlement'}
             </Button>
-          </DialogFooter>
+          </div>
         </form>
       </Dialog>
     )}

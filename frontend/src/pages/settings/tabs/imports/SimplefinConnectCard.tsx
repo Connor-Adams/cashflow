@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { CheckCircle2, Landmark, Loader2 } from 'lucide-react'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { Textarea } from '@cashflow/ui'
-import { useConfirm } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Textarea } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
 import {
   connectSimplefin,
   disconnectSimplefin,

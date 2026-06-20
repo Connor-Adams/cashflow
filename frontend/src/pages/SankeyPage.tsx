@@ -1,27 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Rectangle, ResponsiveContainer, Sankey, Tooltip } from 'recharts'
-import { Alert } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card, CardContent, CardHeader, CardTitle } from '@cashflow/ui'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
+import { Alert } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card, CardContent, CardHeader, CardTitle } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatCard } from '@/components/ui/stat-card'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { getJson } from '../lib/api'
 import {
   fromDateInputValue,
@@ -291,14 +279,16 @@ export function SankeyPage() {
       {drill ? (
         <Dialog
           open
-          onOpenChange={(open) => {
-            if (!open) closeDrill()
-          }}
+          onClose={closeDrill}
+          title={<>{drill.label}</>}
+          footer={
+            <>
+              <Button type="button" variant="outline" onClick={closeDrill}>
+                Close
+              </Button>
+            </>
+          }
         >
-          <DialogHeader>
-            <DialogTitle>{drill.label}</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
             {drillErr ? (
               <p
                 role="alert"
@@ -360,12 +350,6 @@ export function SankeyPage() {
                 </Table>
               </>
             )}
-          </DialogBody>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={closeDrill}>
-              Close
-            </Button>
-          </DialogFooter>
         </Dialog>
       ) : null}
     </div>

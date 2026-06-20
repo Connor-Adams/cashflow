@@ -1,13 +1,7 @@
 import { useTaxYearCompare } from '../../hooks/useTaxYears';
 import { fmtCurrency } from './util/format';
 import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from '@cashflow/ui';
+  Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 
 type Props = {
   from: number;

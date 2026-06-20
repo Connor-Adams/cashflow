@@ -1,18 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ChevronDown, ChevronUp, Edit3, Trash2 } from 'lucide-react'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  useConfirm,
-} from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Label as FieldLabel } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label as FieldLabel } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, patchJson } from '../../../lib/api'
 import type { SavedFilter } from '../../../components/transactions/SavedFiltersDropdown'
@@ -209,30 +203,25 @@ export function SavedFiltersTab() {
       )}
 
       {renameTarget && (
-        <Dialog open onOpenChange={(open) => { if (!open) closeRename() }}>
-          <DialogHeader>
-            <DialogTitle>Rename filter</DialogTitle>
-          </DialogHeader>
+        <Dialog open onClose={closeRename} title={<>Rename filter</>}>
           <form onSubmit={submitRename}>
-            <DialogBody>
-              <FieldLabel htmlFor="saved-filter-rename">
-                Name
-                <Input
-                  id="saved-filter-rename"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  maxLength={64}
-                  required
-                  autoComplete="off"
-                />
-              </FieldLabel>
-              {renameErr && (
-                <p className="mt-1 text-sm text-danger" role="alert">
-                  {renameErr}
-                </p>
-              )}
-            </DialogBody>
-            <DialogFooter>
+            <FieldLabel htmlFor="saved-filter-rename">
+              Name
+              <Input
+                id="saved-filter-rename"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                maxLength={64}
+                required
+                autoComplete="off"
+              />
+            </FieldLabel>
+            {renameErr && (
+              <p className="mt-1 text-sm text-danger" role="alert">
+                {renameErr}
+              </p>
+            )}
+            <div className="mt-2 flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={closeRename}>
                 Cancel
               </Button>
@@ -246,7 +235,7 @@ export function SavedFiltersTab() {
               >
                 Save
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         </Dialog>
       )}

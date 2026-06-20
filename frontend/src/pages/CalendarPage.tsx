@@ -10,33 +10,21 @@
  * Month-grid math lives in lib/calendarMonth.ts (unit-tested). This file
  * is presentational + state glue.
  */
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type FormEvent,
-} from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent, } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Calendar as CalendarIcon, CalendarPlus, ChevronLeft, ChevronRight, Edit3, Plus, Repeat, Trash2 } from 'lucide-react'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { Grid } from '@cashflow/ui'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Grid } from '@/lib/ds-extras'
 import { StatCard } from '@/components/ui/stat-card'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  useConfirm,
-} from '@cashflow/ui'
-import { Alert } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
+import { Dialog } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { Alert } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
-import { Tabs } from '@cashflow/ui'
+import { Tabs } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
@@ -471,15 +459,29 @@ export function CalendarPage() {
       {dayDialogIso ? (
         <Dialog
           open
-          onOpenChange={(open) => {
-            if (!open) setDayDialogIso(null)
-          }}
+          onClose={() => setDayDialogIso(null)}
+          title={<>{dialogTitleDate}</>}
+          footer={
+            <>
+              <Button
+                variant="outline"
+                onClick={() => setDayDialogIso(null)}
+              >
+                Close
+              </Button>
+              <Button
+                onClick={() => {
+                  const iso = dayDialogIso
+                  setDayDialogIso(null)
+                  openCreate(iso ?? undefined)
+                }}
+              >
+                <Plus aria-hidden="true" /> Add event on this day
+              </Button>
+            </>
+          }
         >
-          <DialogHeader>
-            <DialogTitle>{dialogTitleDate}</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
-            {dayEvents.length === 0 ? (
+          {dayEvents.length === 0 ? (
               <EmptyState
                 title="No events on this day."
                 description="Add one below."
@@ -549,48 +551,31 @@ export function CalendarPage() {
                 ))}
               </ul>
             )}
-          </DialogBody>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDayDialogIso(null)}
-            >
-              Close
-            </Button>
-            <Button
-              onClick={() => {
-                const iso = dayDialogIso
-                setDayDialogIso(null)
-                openCreate(iso ?? undefined)
-              }}
-            >
-              <Plus aria-hidden="true" /> Add event on this day
-            </Button>
-          </DialogFooter>
         </Dialog>
       ) : null}
 
       {/* Create dialog */}
       {createOpen ? (
-        <Dialog open onOpenChange={(open) => { if (!open) closeCreate() }}>
-          <DialogHeader>
-            <DialogTitle>
+        <Dialog
+          open
+          onClose={closeCreate}
+          title={
+            <>
               {createDate
                 ? `New event on ${formatDateLabel(createDate)}`
                 : 'New planned event'}
-            </DialogTitle>
-          </DialogHeader>
+            </>
+          }
+        >
           <form onSubmit={saveCreate}>
-            <DialogBody>
-              <PlannedEventFormFields
-                form={createForm}
-                setForm={setCreateForm}
-                accountOptions={accounts.filter((a) => a.closedAt == null)}
-                idPrefix="calendar-create"
-                showStatus={false}
-              />
-            </DialogBody>
-            <DialogFooter>
+            <PlannedEventFormFields
+              form={createForm}
+              setForm={setCreateForm}
+              accountOptions={accounts.filter((a) => a.closedAt == null)}
+              idPrefix="calendar-create"
+              showStatus={false}
+            />
+            <div className="mt-4 flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={closeCreate} disabled={createSaving}>
                 Cancel
               </Button>
@@ -598,50 +583,49 @@ export function CalendarPage() {
                 <Plus aria-hidden="true" />
                 {createSaving ? 'Saving...' : 'Save event'}
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         </Dialog>
       ) : null}
 
       {/* Edit dialog */}
       {editingId != null ? (
-        <Dialog open onOpenChange={(open) => { if (!open) cancelEdit() }}>
-          <DialogHeader>
-            <DialogTitle>Edit planned event</DialogTitle>
-          </DialogHeader>
+        <Dialog
+          open
+          onClose={cancelEdit}
+          title={<>Edit planned event</>}
+        >
           <form onSubmit={saveEdit}>
-            <DialogBody>
-              <PlannedEventFormFields
-                form={editForm}
-                setForm={setEditForm}
-                accountOptions={accounts.filter((a) => a.closedAt == null)}
-                idPrefix={`calendar-edit-${editingId}`}
-                showStatus
-              />
-              <p className="mt-3 text-xs leading-6 text-muted-foreground">
-                Need to link this event to a transaction?{' '}
-                <Button
-                  type="button"
-                  variant="link"
-                  className="underline"
-                  onClick={() => {
-                    cancelEdit()
-                    navigate('/planned')
-                  }}
-                >
-                  Open the full editor
-                </Button>
-                .
-              </p>
-            </DialogBody>
-            <DialogFooter>
+            <PlannedEventFormFields
+              form={editForm}
+              setForm={setEditForm}
+              accountOptions={accounts.filter((a) => a.closedAt == null)}
+              idPrefix={`calendar-edit-${editingId}`}
+              showStatus
+            />
+            <p className="mt-3 text-xs leading-6 text-muted-foreground">
+              Need to link this event to a transaction?{' '}
+              <Button
+                type="button"
+                variant="link"
+                className="underline"
+                onClick={() => {
+                  cancelEdit()
+                  navigate('/planned')
+                }}
+              >
+                Open the full editor
+              </Button>
+              .
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={cancelEdit} disabled={editSaving}>
                 Cancel
               </Button>
               <Button type="submit" disabled={editSaving}>
                 {editSaving ? 'Saving...' : 'Save changes'}
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         </Dialog>
       ) : null}

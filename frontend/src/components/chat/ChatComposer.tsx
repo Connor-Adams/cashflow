@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Send, X } from 'lucide-react'
-import { Button } from '@cashflow/ui'
-import { Textarea } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
 
 type Props = {
   /** Pre-fill the textarea — used by seeded empty-state prompts. */
@@ -73,7 +72,7 @@ export function ChatComposer({
       }}
     >
       <div className="flex items-end gap-2">
-        <Textarea
+        <textarea
           ref={taRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -81,7 +80,7 @@ export function ChatComposer({
           placeholder={placeholder ?? 'Ask anything about your transactions… (⌘+Enter to send)'}
           disabled={disabled}
           rows={3}
-          className="flex-1 resize-y"
+          className="min-h-16 w-full rounded-md border border-input bg-background/70 px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 flex-1 resize-y"
           aria-label="Chat message"
         />
         <div className="flex shrink-0 flex-col gap-2">

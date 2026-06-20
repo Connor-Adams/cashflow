@@ -1,21 +1,15 @@
 import { useCallback, useMemo, useState } from 'react'
 import { CreditCard, CalendarClock, AlertTriangle, Pencil, Zap } from 'lucide-react'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatCard } from '@/components/ui/stat-card'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
 import { formatMoney } from '../lib/formatMoney'
@@ -345,9 +339,9 @@ function CardRow({
               aria-label={`${card.name} payment amount`}
             >
               {(['statement', 'minimum', 'current'] as const).map((s) => (
-                <NativeSelectOption key={s} value={s}>
+                <option key={s} value={s}>
                   {STRATEGY_LABEL[s]}
-                </NativeSelectOption>
+                </option>
               ))}
             </NativeSelect>
             <Button size="sm" variant="outline" onClick={planPayment} disabled={busy} title="Add this payment to your forecast">

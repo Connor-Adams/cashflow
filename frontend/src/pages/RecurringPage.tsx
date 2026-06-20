@@ -1,19 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Badge } from '@cashflow/ui'
+import { Badge } from '@connor-adams/designsystem'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
-import { EmptyTableRow } from '@cashflow/ui'
+import { EmptyTableRow } from '@/lib/ds-extras'
 import { FilterBar } from '@/components/ui/filter-bar'
 import { FilterCard } from '@/components/ui/filter-card'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@cashflow/ui'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { SortableTableHead } from '@/components/table/SortableTableHead'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'

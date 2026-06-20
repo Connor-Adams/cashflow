@@ -19,19 +19,10 @@
  *   - Commands run via react-router navigate. Contextual commands are
  *     filtered against the live URL pathname.
  */
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Search } from 'lucide-react'
-import { Input } from '@cashflow/ui'
 import { useCommandPalette } from '@/hooks/useCommandPalette'
 import {
   filterCommands,
@@ -252,7 +243,7 @@ export function CommandPalette({
       >
         <div className="flex items-center gap-2 border-b border-border p-3">
           <Search aria-hidden="true" className="h-4 w-4 opacity-70" />
-          <Input
+          <input
             ref={inputRef}
             type="text"
             value={query}
@@ -268,7 +259,7 @@ export function CommandPalette({
             aria-autocomplete="list"
             autoComplete="off"
             spellCheck={false}
-            className="border-0 shadow-none focus-visible:ring-0"
+            className="h-9 w-full rounded-md border border-input bg-background/70 px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 border-0 shadow-none focus-visible:ring-0"
             data-testid="command-palette-input"
           />
         </div>

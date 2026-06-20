@@ -1,18 +1,11 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { useLocation } from 'react-router-dom'
-import {
-  Dialog,
-  DialogBody,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
-import { Textarea } from '@cashflow/ui'
-import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
+import { Dialog } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { Textarea } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { postJson } from '@/lib/api'
 import { FRONTEND_VERSION } from '@/lib/version'
@@ -101,15 +94,14 @@ export function FeedbackPanel({ open, onOpenChange }: FeedbackPanelProps) {
   if (!open) return null
 
   return (
-    <Dialog open onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
-      <DialogHeader>
-        <DialogTitle>Send us feedback</DialogTitle>
-        <DialogDescription>
-          Your current page, browser, and app version are included so we can help.
-        </DialogDescription>
-      </DialogHeader>
+    <Dialog
+      open
+      onClose={close}
+      title={<>Send us feedback</>}
+      description={<>Your current page, browser, and app version are included so we can help.</>}
+    >
       <form onSubmit={submit}>
-        <DialogBody>
+        <div>
           <Label htmlFor="feedback-category">
             Category
             <NativeSelect
@@ -118,9 +110,9 @@ export function FeedbackPanel({ open, onOpenChange }: FeedbackPanelProps) {
               onChange={(e) => setCategory(e.target.value)}
             >
               {CATEGORIES.map((c) => (
-                <NativeSelectOption key={c.value} value={c.value}>
+                <option key={c.value} value={c.value}>
                   {c.label}
-                </NativeSelectOption>
+                </option>
               ))}
             </NativeSelect>
           </Label>
@@ -140,15 +132,15 @@ export function FeedbackPanel({ open, onOpenChange }: FeedbackPanelProps) {
               {inlineErr}
             </p>
           )}
-        </DialogBody>
-        <DialogFooter>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={close}>
             Cancel
           </Button>
           <Button type="submit" variant="primary" disabled={submitting}>
             {submitting ? 'Sending…' : 'Send'}
           </Button>
-        </DialogFooter>
+        </div>
       </form>
     </Dialog>
   )

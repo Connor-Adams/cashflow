@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Tabs, TabPanel } from '@cashflow/ui'
+import { Tabs } from '@connor-adams/designsystem'
 import { ItemsBrowse } from '@/components/items/ItemsBrowse'
 import { ItemsSearch } from '@/components/items/ItemsSearch'
 import { ItemsFilterStrip } from '@/components/items/ItemsFilterStrip'
@@ -109,19 +109,25 @@ export function ItemsPage() {
         )}
       </header>
 
-      <TabPanel value="browse" active={tab}>
-        <ItemsBrowse
-          filters={filters}
-          onOpenItem={openItem}
-          onClearFilters={() => setFilters({})}
-        />
-      </TabPanel>
-      <TabPanel value="analyze" active={tab}>
-        <AnalyzeTab />
-      </TabPanel>
-      <TabPanel value="search" active={tab}>
-        <ItemsSearch filters={filters} onChangeFilters={setFilters} onOpenItem={openItem} />
-      </TabPanel>
+      {tab === 'browse' && (
+        <div role="tabpanel">
+          <ItemsBrowse
+            filters={filters}
+            onOpenItem={openItem}
+            onClearFilters={() => setFilters({})}
+          />
+        </div>
+      )}
+      {tab === 'analyze' && (
+        <div role="tabpanel">
+          <AnalyzeTab />
+        </div>
+      )}
+      {tab === 'search' && (
+        <div role="tabpanel">
+          <ItemsSearch filters={filters} onChangeFilters={setFilters} onOpenItem={openItem} />
+        </div>
+      )}
 
       <ItemDetailDrawer
         itemId={itemId}

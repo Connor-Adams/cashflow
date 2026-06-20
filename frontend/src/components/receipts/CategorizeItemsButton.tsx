@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
 import { postJson } from '@/lib/api'
 
 type CategorizeResult = { categorized: number }

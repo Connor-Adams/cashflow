@@ -1,28 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type {
-  MerchantCluster,
-  MerchantClustersResponse,
-  MerchantBulkRecategorizeResponse,
-  MerchantMergeResponse,
-} from '@cashflow/shared'
-import { Alert } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
+  MerchantCluster, MerchantClustersResponse, MerchantBulkRecategorizeResponse, MerchantMergeResponse, } from '@cashflow/shared'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { useConfirm } from '@cashflow/ui'
-import { EmptyTableRow } from '@cashflow/ui'
+import { useConfirm } from '@/lib/ds-extras'
+import { EmptyTableRow } from '@/lib/ds-extras'
 import { useToast } from '@/components/ui/toast'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { getJson, postJson } from '../lib/api'
 import { formatCurrency } from '../lib/formatCurrency'

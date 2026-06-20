@@ -2,23 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Calendar, Edit3, Plus, Trash2 } from 'lucide-react'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { useConfirm } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
-import { NativeSelect } from '@cashflow/ui'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { PlannedEventFormFields } from '@/components/planned-events/PlannedEventFormFields'
 import {
@@ -345,13 +339,13 @@ export function PlannedEventsPage() {
                   const tone = TYPE_TONE[row.type]
                   const isFocused = highlightId === row.id
                   return (
-                    <TableRow
+                    <tr
                       key={row.id}
                       ref={isFocused ? focusRowRef : undefined}
                       className={
                         isFocused
-                          ? 'plannedRow isFocused ring-2 ring-warning'
-                          : undefined
+                          ? 'border-b border-border transition-colors hover:bg-muted/45 plannedRow isFocused ring-2 ring-warning'
+                          : 'border-b border-border transition-colors hover:bg-muted/45'
                       }
                     >
                       <TableCell>{row.expectedDate}</TableCell>
@@ -413,14 +407,14 @@ export function PlannedEventsPage() {
                             <Trash2 aria-hidden="true" />
                             Delete
                           </Button>
-                          <Button size="sm" variant="ghost" asChild>
-                            <Link to={`/forecast?date=${row.expectedDate}`}>
+                          <Link to={`/forecast?date=${row.expectedDate}`}>
+                            <Button size="sm" variant="ghost">
                               Forecast →
-                            </Link>
-                          </Button>
+                            </Button>
+                          </Link>
                         </div>
                       </TableCell>
-                    </TableRow>
+                    </tr>
                   )
                 })}
               </TableBody>

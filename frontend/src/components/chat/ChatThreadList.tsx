@@ -1,5 +1,5 @@
 import { Plus } from 'lucide-react'
-import { Button } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
 import { cn } from '@/lib/utils'
 import type { ChatThread } from '@cashflow/shared'
 

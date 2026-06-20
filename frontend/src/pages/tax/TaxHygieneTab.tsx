@@ -12,24 +12,11 @@
  */
 import { useMemo, useState } from 'react';
 import {
-  TAX_SCOPE_LABELS,
-  patchTransactionTax,
-  useMissingReceipts,
-  useReviewQueue,
-  useTaxSummary,
-  useTaxTags,
-  type TaxScope,
-} from '../../hooks/useTaxHygiene';
-import { Button } from '@cashflow/ui';
+  TAX_SCOPE_LABELS, patchTransactionTax, useMissingReceipts, useReviewQueue, useTaxSummary, useTaxTags, type TaxScope, } from '../../hooks/useTaxHygiene';
+import { Button } from '@connor-adams/designsystem'
 import { fmtCurrency, fmtPct } from './util/format';
 import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableHead,
-  TableRow,
-  TableCell,
-} from '@cashflow/ui';
+  Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@connor-adams/designsystem'
 
 interface Props {
   year: number;

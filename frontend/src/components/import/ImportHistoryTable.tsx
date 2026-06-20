@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button } from '@cashflow/ui'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { getJson } from '../../lib/api'
 
 export type ImportHistoryRow = {

@@ -1,10 +1,10 @@
 import * as React from 'react'
 import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Card } from '@cashflow/ui'
+import { Card } from '@connor-adams/designsystem'
 import { SectionHeader } from './section-header'
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@cashflow/ui'
-import { EmptyTableRow } from '@cashflow/ui'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
 
 type SortDir = 'asc' | 'desc'
 type TableSort = { key: string; dir: SortDir }
@@ -33,7 +33,6 @@ type TableCardBaseProps = {
   description?: React.ReactNode
   actions?: React.ReactNode
   maxHeight?: string
-  stickyHeader?: boolean
   className?: string
   'aria-label'?: string
 }
@@ -102,7 +101,6 @@ function TableCard<T,>(props: TableCardProps<T>) {
     description,
     actions,
     maxHeight = '72vh',
-    stickyHeader = true,
     className,
     'aria-label': ariaLabel,
   } = props
@@ -114,7 +112,7 @@ function TableCard<T,>(props: TableCardProps<T>) {
       {hasHeader ? (
         <SectionHeader title={title ?? ''} description={description} actions={actions} />
       ) : null}
-      <Table maxHeight={maxHeight} stickyHeader={stickyHeader}>
+      <Table maxHeight={maxHeight}>
         {isDataMode(props) ? <TableCardData {...props} /> : props.children}
       </Table>
     </Card>
