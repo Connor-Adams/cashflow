@@ -13,6 +13,7 @@ import { Skeleton, SkeletonText } from '@connor-adams/designsystem'
 import { BentoTile, type BentoSpan } from '@/components/dashboard/BentoTile'
 import { PeriodInsightBand } from '@/components/dashboard/PeriodInsightBand'
 import { KpiStack } from '@/components/dashboard/KpiStack'
+import { SplitPanel } from '@/components/dashboard/SplitPanel'
 import { TopGrowersTile } from '@/components/dashboard/TopGrowersTile'
 import { NetWorthTile } from '@/components/dashboard/NetWorthTile'
 import { SafeToSpendTile } from '@/components/dashboard/SafeToSpendTile'
@@ -1088,44 +1089,13 @@ export function DashboardPage() {
           label="Income · business vs personal"
           description="Earned income split by business vs personal."
         >
-          <div className="businessSpotlightGrid">
-            {([
-              ['Business', bizSplit.income.business, 'business'] as const,
-              ['Personal', bizSplit.income.personal, 'personal'] as const,
-            ]).map(([label, value, tone]) => (
-              <article key={label} className={`businessFocusCard businessFocusCard--${tone}`}>
-                <p className="businessFocusLabel">{label}</p>
-                <p className="businessFocusValue">{formatDashboardAmount(value)}</p>
-              </article>
-            ))}
-          </div>
-          <div className="businessSharePanel">
-            <div className="businessShareLabels" aria-hidden="true">
-              <span className="font-semibold text-foreground">
-                Business {bizSplit.incomeShare.toFixed(0)}%
-              </span>
-              <span className="font-semibold text-foreground">
-                Personal {(100 - bizSplit.incomeShare).toFixed(0)}%
-              </span>
-            </div>
-            <div
-              className="businessShareBar"
-              role="img"
-              aria-label={`Business ${bizSplit.incomeShare.toFixed(0)} percent, personal ${(100 - bizSplit.incomeShare).toFixed(0)} percent of income`}
-            >
-              <span
-                className="businessShareFill businessShareFill--business"
-                style={{ width: `${bizSplit.incomeShare}%` }}
-              />
-              <span
-                className="businessShareFill businessShareFill--personal"
-                style={{ width: `${100 - bizSplit.incomeShare}%` }}
-              />
-            </div>
-            {bizSplit.income.business + bizSplit.income.personal <= 0 && (
-              <p className="businessShareCaption text-sm leading-6 text-muted-foreground">No income in current filters.</p>
-            )}
-          </div>
+          <SplitPanel
+            business={bizSplit.income.business}
+            personal={bizSplit.income.personal}
+            businessShare={bizSplit.incomeShare}
+            currency={displayCurrency}
+            emptyCaption="No income in current filters."
+          />
         </BentoTile>
 
         <BentoTile
@@ -1136,44 +1106,13 @@ export function DashboardPage() {
           label="Spend · business vs personal"
           description="Spend (gross outflows net of refunds) split by business vs personal."
         >
-          <div className="businessSpotlightGrid">
-            {([
-              ['Business', bizSplit.spend.business, 'business'] as const,
-              ['Personal', bizSplit.spend.personal, 'personal'] as const,
-            ]).map(([label, value, tone]) => (
-              <article key={label} className={`businessFocusCard businessFocusCard--${tone}`}>
-                <p className="businessFocusLabel">{label}</p>
-                <p className="businessFocusValue">{formatDashboardAmount(value)}</p>
-              </article>
-            ))}
-          </div>
-          <div className="businessSharePanel">
-            <div className="businessShareLabels" aria-hidden="true">
-              <span className="font-semibold text-foreground">
-                Business {bizSplit.spendShare.toFixed(0)}%
-              </span>
-              <span className="font-semibold text-foreground">
-                Personal {(100 - bizSplit.spendShare).toFixed(0)}%
-              </span>
-            </div>
-            <div
-              className="businessShareBar"
-              role="img"
-              aria-label={`Business ${bizSplit.spendShare.toFixed(0)} percent, personal ${(100 - bizSplit.spendShare).toFixed(0)} percent of spend`}
-            >
-              <span
-                className="businessShareFill businessShareFill--business"
-                style={{ width: `${bizSplit.spendShare}%` }}
-              />
-              <span
-                className="businessShareFill businessShareFill--personal"
-                style={{ width: `${100 - bizSplit.spendShare}%` }}
-              />
-            </div>
-            {bizSplit.spend.business + bizSplit.spend.personal <= 0 && (
-              <p className="businessShareCaption text-sm leading-6 text-muted-foreground">No net spend in current filters.</p>
-            )}
-          </div>
+          <SplitPanel
+            business={bizSplit.spend.business}
+            personal={bizSplit.spend.personal}
+            businessShare={bizSplit.spendShare}
+            currency={displayCurrency}
+            emptyCaption="No net spend in current filters."
+          />
         </BentoTile>
 
         <BentoTile
