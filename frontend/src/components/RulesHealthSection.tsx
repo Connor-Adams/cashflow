@@ -4,7 +4,7 @@ import { Badge } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Grid } from '@/lib/ds-extras'
 import { SectionHeader } from '@/components/ui/section-header'
-import { StatCard } from '@/components/ui/stat-card'
+import { StatCard } from '@connor-adams/designsystem'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'

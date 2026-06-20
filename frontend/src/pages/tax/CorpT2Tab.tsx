@@ -17,7 +17,7 @@ import { labelForTotal } from './util/labels';
 import { TaxLineBreakdownTable } from './components/TaxLineBreakdownTable';
 import { ScenarioCompareBar } from './components/ScenarioCompareBar';
 import { Button } from '@connor-adams/designsystem'
-import { StatCard } from '@/components/ui/stat-card';
+import { StatCard } from '@connor-adams/designsystem';
 import { Card } from '@connor-adams/designsystem'
 import { CollapsibleCard } from '@/components/ui/collapsible-card';
 import { Alert } from '@connor-adams/designsystem'

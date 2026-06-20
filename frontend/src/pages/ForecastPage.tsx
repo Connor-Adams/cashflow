@@ -9,7 +9,7 @@ import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { StatCard } from '@/components/ui/stat-card'
+import { StatCard } from '@connor-adams/designsystem'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
