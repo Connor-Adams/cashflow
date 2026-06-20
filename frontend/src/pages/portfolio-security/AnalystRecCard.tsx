@@ -8,11 +8,11 @@ export type AnalystRecCardProps = {
 type BucketKey = 'strongBuy' | 'buy' | 'hold' | 'sell' | 'strongSell'
 
 const BUCKET_DEFS: Array<{ key: BucketKey; label: string; color: string }> = [
-  { key: 'strongBuy', label: 'Strong Buy', color: 'var(--accent-positive)' },
-  { key: 'buy', label: 'Buy', color: 'color-mix(in oklab, var(--accent-positive) 60%, var(--background))' },
+  { key: 'strongBuy', label: 'Strong Buy', color: 'var(--positive)' },
+  { key: 'buy', label: 'Buy', color: 'color-mix(in oklab, var(--positive) 60%, var(--background))' },
   { key: 'hold', label: 'Hold', color: 'var(--muted-foreground)' },
-  { key: 'sell', label: 'Sell', color: 'color-mix(in oklab, var(--accent-warm) 60%, var(--background))' },
-  { key: 'strongSell', label: 'Strong Sell', color: 'var(--accent-warm)' },
+  { key: 'sell', label: 'Sell', color: 'color-mix(in oklab, var(--warning) 60%, var(--background))' },
+  { key: 'strongSell', label: 'Strong Sell', color: 'var(--warning)' },
 ]
 
 function periodLabel(p: string | null): string {
@@ -48,9 +48,9 @@ function actionLabel(action: string | null): string {
 function actionColor(action: string | null): string | undefined {
   switch (action) {
     case 'up':
-      return 'var(--accent-positive)'
+      return 'var(--positive)'
     case 'down':
-      return 'var(--accent-warm)'
+      return 'var(--warning)'
     default:
       return undefined
   }

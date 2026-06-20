@@ -157,15 +157,13 @@ export function EarningsCard({ overview }: EarningsCardProps) {
                       {formatEps(row.epsEstimate, reportCurrency)}
                     </TableCell>
                     <TableCell
-                      className="text-right tabular-nums"
-                      style={{
-                        color:
-                          surprise != null && surprise > 0
-                            ? 'var(--accent-positive)'
-                            : surprise != null && surprise < 0
-                              ? 'var(--accent-warm)'
-                              : undefined,
-                      }}
+                      className={
+                        surprise != null && surprise > 0
+                          ? 'text-right tabular-nums text-positive'
+                          : surprise != null && surprise < 0
+                            ? 'text-right tabular-nums text-warning'
+                            : 'text-right tabular-nums'
+                      }
                     >
                       {formatPercent(surprise)}
                     </TableCell>
