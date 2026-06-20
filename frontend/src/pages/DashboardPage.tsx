@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Bar, BarChart, CartesianGrid, LabelList, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
+  Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
 import { FilterX, Inbox, ShoppingBag, TrendingUp, Wallet } from 'lucide-react'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { Link, useNavigate } from 'react-router-dom'
 import { Alert } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
+import { CategoryPill } from '@connor-adams/designsystem'
+import { AmountText } from '@connor-adams/designsystem'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
 import { Skeleton, SkeletonText } from '@connor-adams/designsystem'
@@ -1150,96 +1152,35 @@ export function DashboardPage() {
               </div>
             ) : null
           ) : (
-            <ResponsiveContainer width="100%" height={Math.max(200, chartData.length * 32)}>
-              <BarChart
-                data={chartData}
-                layout="vertical"
-                margin={{ top: 4, right: 60, bottom: 4, left: 4 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  tick={{ fontSize: 12 }}
-                  interval={0}
-                  width={isNarrowViewport ? 90 : 120}
-                />
-                <XAxis
-                  type="number"
-                  tick={narrowAxisTick}
-                  tickFormatter={compactCurrencyTickFormatter}
-                />
-                <Tooltip
-                  contentStyle={CHART_TOOLTIP_STYLE}
-                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                  cursor={CHART_TOOLTIP_CURSOR}
-                  formatter={(value) => {
-                    const v = typeof value === 'number' ? value : Number(value)
-                    if (!Number.isFinite(v)) return ''
-                    return currency
-                      ? formatCurrency(v, currency)
-                      : new Intl.NumberFormat(undefined, {
-                          maximumFractionDigits: 2,
-                        }).format(v)
-                  }}
-                />
-                <Bar
-                  dataKey="total"
-                  name="Net spend"
-                  fill="var(--chart-spend)"
-                  cursor="pointer"
-                  onClick={(entry) => {
-                    // Recharts hands us the data row as the click payload. Guard
-                    // against missing/unexpected payloads — only navigate when we
-                    // can read a category name.
-                    const name =
-                      entry && typeof entry === 'object' && 'name' in entry
-                        ? String((entry as { name: unknown }).name ?? '')
-                        : ''
-                    if (name) navigateToCategory(name)
-                  }}
-                >
-                  <LabelList
-                    dataKey="total"
-                    position="right"
-                    style={{ fontSize: 11, fill: 'var(--foreground)' }}
-                    formatter={(value) => {
-                      const v = typeof value === 'number' ? value : Number(value)
-                      if (!Number.isFinite(v)) return ''
-                      return currency
-                        ? formatCurrency(v, currency)
-                        : new Intl.NumberFormat(undefined, {
-                            maximumFractionDigits: 0,
-                          }).format(v)
-                    }}
-                  />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-          {chartData.length > 0 ? (
-            <p className="mt-2 mb-0 text-xs leading-6 text-muted-foreground">
-              Jump to:{' '}
-              {chartData.slice(0, 8).map((entry, index) => (
-                <span key={entry.name}>
-                  {index > 0 ? ', ' : ''}
-                  <Link
-                    to={`/transactions?${new URLSearchParams({
-                      category: entry.name,
-                      ...(currency ? { currency } : {}),
-                      ...(dateFrom ? { dateFrom } : {}),
-                      ...(dateTo ? { dateTo } : {}),
-                    }).toString()}`}
-                    className="font-semibold underline"
+            <div className="flex flex-col gap-2.5">
+              {chartData.map((entry) => {
+                // Bar length is the share of the largest category by magnitude
+                // (chartData is sorted by abs desc, so [0] is the max).
+                const pct =
+                  (Math.abs(entry.total) / (Math.abs(chartData[0].total) || 1)) * 100
+                return (
+                  <button
+                    key={entry.name}
+                    type="button"
+                    onClick={() => navigateToCategory(entry.name)}
+                    className="grid grid-cols-[minmax(96px,150px)_1fr_auto] items-center gap-3 rounded-md px-1 py-1 text-left transition-colors hover:bg-muted/40"
                   >
-                    {entry.name}
-                  </Link>
-                </span>
-              ))}
-              {chartData.length > 8 ? '…' : '.'}
-            </p>
-          ) : null}
+                    <CategoryPill category={entry.name.toLowerCase()} label={entry.name} size="sm" />
+                    {/* gradient-hero token bar — color-mix/gradient has no Tailwind utility */}
+                    <span
+                      className="h-[18px] rounded"
+                      style={{ background: 'var(--gradient-hero)', width: `${Math.max(2, pct)}%`, opacity: 0.85 }}
+                      aria-hidden="true"
+                    />
+                    <span className="justify-self-end tabular-nums">
+                      {/* total is the negated net spend; flip back so spend shows as −$ (out). */}
+                      <AmountText value={-entry.total} currency={currency || undefined} decimals={0} size="sm" />
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </BentoTile>
 
         <BentoTile
