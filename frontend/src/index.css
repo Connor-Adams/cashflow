@@ -4,6 +4,10 @@
  * v4 @theme mapping (bg-card, text-muted-foreground, border-border, …) and the
  * legacy raw-var compat aliases live in ./styles/theme.css. */
 @import "@connor-adams/tokens/styles.css";
+/* DS 0.3.0 moved component styling from inline style objects to `ca-*` CSS
+ * classes shipped in its stylesheet — it must be imported or every DS component
+ * renders unstyled. (styles.css re-imports the tokens above; harmless.) */
+@import "@connor-adams/designsystem/styles.css";
 @import "./styles/theme.css";
 
 @custom-variant dark (&:is(.dark *));
