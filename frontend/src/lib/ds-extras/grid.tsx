@@ -40,5 +40,3 @@ export function Grid({
     />
   )
 }
-
-export type { GridProps }

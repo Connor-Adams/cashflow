@@ -2,5 +2,5 @@
 // @connor-adams/designsystem primitives — nothing from @cashflow/ui.
 export { EmptyTableRow } from './empty-table-row'
 export { SkeletonRow } from './skeleton-row'
-export { Grid, type GridProps } from './grid'
+export { Grid } from './grid'
 export { useConfirm } from './use-confirm'
