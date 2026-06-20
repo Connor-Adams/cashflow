@@ -13,6 +13,13 @@ concurrency:
 jobs:
   install:
     runs-on: ubuntu-latest
+    # packages: read lets GITHUB_TOKEN pull @connor-adams/* from GitHub Packages.
+    # NOTE: those packages are published from the cashflow-design-system repo; if
+    # this token 403s, grant this repo read access to the package (package
+    # settings → Manage Actions access) or swap in a PAT secret with read:packages.
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v6
 
@@ -24,9 +31,13 @@ jobs:
         with:
           node-version: '22'
           cache: 'yarn'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@connor-adams'
 
       - name: Install
         run: yarn install --immutable
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build @cashflow/ui
         # The frontend imports @cashflow/ui, which resolves to its built dist/.
