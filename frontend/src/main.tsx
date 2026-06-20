@@ -1,5 +1,10 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+// DS 0.3.0 moved component styling from inline style objects to `ca-*` CSS
+// classes shipped in its stylesheet — it must be loaded or every DS component
+// renders unstyled. Imported here (not via index.css @import) so the resolver
+// reads the package `exports` map.
+import '@connor-adams/designsystem/styles.css'
 import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'

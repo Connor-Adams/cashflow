@@ -7,8 +7,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Alert } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
-import { CategoryPill } from '@connor-adams/designsystem'
-import { AmountText } from '@connor-adams/designsystem'
+import { CategoryBreakdown } from '@connor-adams/designsystem'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
 import { Skeleton, SkeletonText } from '@connor-adams/designsystem'
@@ -1116,15 +1115,15 @@ export function DashboardPage() {
           />
         </BentoTile>
 
-        <BentoTile
-          span={12}
-          rows={1}
-          aria-busy={loading}
-          label="Net spend by category"
-          description="Click a bar to open those transactions with the current filters applied. Payments and transfers are excluded."
-        >
-          {chartData.length === 0 ? (
-            !loading ? (
+        {chartData.length === 0 ? (
+          <BentoTile
+            span={12}
+            rows={1}
+            aria-busy={loading}
+            label="Net spend by category"
+            description="Click a bar to open those transactions with the current filters applied. Payments and transfers are excluded."
+          >
+            {!loading ? (
               <div>
                 <p className="m-0 text-muted-foreground">
                   No category totals for these filters. Your transactions may be in a
@@ -1150,38 +1149,29 @@ export function DashboardPage() {
                   )}
                 </div>
               </div>
-            ) : null
-          ) : (
-            <div className="flex flex-col gap-2.5">
-              {chartData.map((entry) => {
-                // Bar length is the share of the largest category by magnitude
-                // (chartData is sorted by abs desc, so [0] is the max).
-                const pct =
-                  (Math.abs(entry.total) / (Math.abs(chartData[0].total) || 1)) * 100
-                return (
-                  <button
-                    key={entry.name}
-                    type="button"
-                    onClick={() => navigateToCategory(entry.name)}
-                    className="grid grid-cols-[minmax(96px,150px)_1fr_auto] items-center gap-3 rounded-md px-1 py-1 text-left transition-colors hover:bg-muted/40"
-                  >
-                    <CategoryPill category={entry.name.toLowerCase()} label={entry.name} size="sm" />
-                    {/* gradient-hero token bar — color-mix/gradient has no Tailwind utility */}
-                    <span
-                      className="h-[18px] rounded"
-                      style={{ background: 'var(--gradient-hero)', width: `${Math.max(2, pct)}%`, opacity: 0.85 }}
-                      aria-hidden="true"
-                    />
-                    <span className="justify-self-end tabular-nums">
-                      {/* total is the negated net spend; flip back so spend shows as −$ (out). */}
-                      <AmountText value={-entry.total} currency={currency || undefined} decimals={0} size="sm" />
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </BentoTile>
+            ) : null}
+          </BentoTile>
+        ) : (
+          // DS CategoryBreakdown IS the tile (Card shell + pill | Progress bar |
+          // AmountText rows); grid placement mirrors a span-12 / rows-1 BentoTile.
+          // amount carries the negated net spend flipped back to money-out so spend
+          // reads as −$; the bar scales to the largest |amount| internally.
+          <CategoryBreakdown
+            aria-busy={loading}
+            className="col-span-full sm:col-span-6 lg:col-span-12 row-span-1"
+            title="Net spend by category"
+            subtitle="Click a bar to open those transactions with the current filters applied. Payments and transfers are excluded."
+            currency={currency || undefined}
+            rows={chartData.map((entry) => ({
+              category: entry.name.toLowerCase(),
+              label: entry.name,
+              amount: -entry.total,
+            }))}
+            onSelect={(_category, row) =>
+              navigateToCategory(typeof row.label === 'string' ? row.label : '')
+            }
+          />
+        )}
 
         <BentoTile
           span={6}
