@@ -89,8 +89,7 @@ export function ImportHistoryTable({
           </p>
         </div>
       </div>
-      <div className="tableWrap">
-        <Table className="table">
+      <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Started</TableHead>
@@ -174,7 +173,6 @@ export function ImportHistoryTable({
             )}
           </TableBody>
         </Table>
-      </div>
     </section>
   )
 }

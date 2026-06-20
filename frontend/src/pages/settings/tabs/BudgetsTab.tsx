@@ -414,8 +414,7 @@ export function BudgetsTab() {
             description="Add one to track progress with pacing comparison."
           />
         ) : (
-          <div className="tableWrap">
-            <Table className="table">
+          <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Category</TableHead>
@@ -618,7 +617,6 @@ export function BudgetsTab() {
                     })}
               </TableBody>
             </Table>
-          </div>
         )}
         <form onSubmit={createBudget}>
           <div className="formGrid">
