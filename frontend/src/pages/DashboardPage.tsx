@@ -6,8 +6,8 @@ import { CategoryIcon } from '../components/CategoryIcon'
 import { Link, useNavigate } from 'react-router-dom'
 import { Alert } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
-import { FilterCard } from '@/components/ui/filter-card'
 import { PageHeader } from '@/components/ui/page-header'
 import { Skeleton, SkeletonText } from '@connor-adams/designsystem'
 import { BentoTile, type BentoSpan } from '@/components/dashboard/BentoTile'
@@ -745,7 +745,7 @@ export function DashboardPage() {
       />
       {err && <Alert variant="error">{err}</Alert>}
 
-      <FilterCard density="compact" className="mt-2">
+      <Card className="mb-4 mt-2 w-fit max-w-full p-2 sm:p-3" style={{ padding: undefined }}>
           <FilterBar
             className="gap-2"
             currency={currency}
@@ -791,7 +791,7 @@ export function DashboardPage() {
               </p>
             }
           />
-      </FilterCard>
+      </Card>
 
       <ActivationCardDeck />
 

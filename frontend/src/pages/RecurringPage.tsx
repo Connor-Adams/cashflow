@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Badge } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import { EmptyTableRow } from '@/lib/ds-extras'
 import { FilterBar } from '@/components/ui/filter-bar'
-import { FilterCard } from '@/components/ui/filter-card'
 import { PageHeader } from '@/components/ui/page-header'
 import { SkeletonRow } from '@/lib/ds-extras'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
@@ -73,7 +73,7 @@ export function RecurringPage() {
         description={`Merchants you spend with on a regular cadence — looking back ${windowDays} days, with at least ${minOccurrences} charges to qualify.`}
       />
 
-      <FilterCard>
+      <Card className="mb-4">
         <FilterBar
           currency={currency}
           onCurrencyChange={setCurrency}
@@ -84,7 +84,7 @@ export function RecurringPage() {
             /* date filtering for recurring is driven by windowDays server-side */
           }}
         />
-      </FilterCard>
+      </Card>
 
       {err && <p className="error" role="alert">{err}</p>}
 

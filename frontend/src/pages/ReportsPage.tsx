@@ -7,7 +7,6 @@ import { EmptyState } from '@connor-adams/designsystem'
 import { EmptyTableRow } from '@/lib/ds-extras'
 import { Badge } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
-import { FilterCard } from '@/components/ui/filter-card'
 import { Grid } from '@/lib/ds-extras'
 import { StatCard } from '@/components/ui/stat-card'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
@@ -531,7 +530,7 @@ export function ReportsPage() {
         title="Reports"
         description="Partner balances and business totals stay separated by currency and time window."
       />
-      <FilterCard>
+      <Card className="mb-4">
         <FilterBar
           currency={currency}
           onCurrencyChange={setCurrency}
@@ -566,7 +565,7 @@ export function ReportsPage() {
             </p>
           }
         />
-      </FilterCard>
+      </Card>
       {err && <Alert variant="error" className="mb-4">{err}</Alert>}
 
       {loading ? (

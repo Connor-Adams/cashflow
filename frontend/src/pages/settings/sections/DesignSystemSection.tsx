@@ -9,7 +9,6 @@ import { StatCard } from '@/components/ui/stat-card'
 import { EmptyState } from '@connor-adams/designsystem'
 import { SectionHeader } from '@/components/ui/section-header'
 import { Grid } from '@/lib/ds-extras'
-import { FilterCard } from '@/components/ui/filter-card'
 import { TableCard } from '@/components/ui/table-card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 import { Skeleton, SkeletonText } from '@connor-adams/designsystem'
@@ -107,12 +106,12 @@ export function DesignSystemSection() {
       </Group>
 
       <Group name="Filter card">
-        <FilterCard className="w-full">
+        <Card className="mb-4 w-full">
           <div className="text-sm text-muted-foreground">Comfortable filter bar</div>
-        </FilterCard>
-        <FilterCard density="compact">
+        </Card>
+        <Card className="mb-4 w-fit max-w-full p-2 sm:p-3" style={{ padding: undefined }}>
           <div className="text-sm text-muted-foreground">Compact</div>
-        </FilterCard>
+        </Card>
       </Group>
 
       <Group name="Section header">
