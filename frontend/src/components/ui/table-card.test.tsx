@@ -55,10 +55,11 @@ describe('TableCard', () => {
         <TableBody><TableRow><TableCell>1</TableCell></TableRow></TableBody>
       </TableCard>
     )
-    // The DS Table renders its scroll wrapper as data-slot="table-container"
-    // with inline styles (overflow + maxHeight), not Tailwind classes.
+    // The DS Table renders its scroll wrapper as data-slot="table-container".
+    // Since DS 0.3.0 the `overflow: auto` lives in the `.ca-table-container`
+    // class; only maxHeight stays inline (so the passthrough is observable here).
     const tableContainer = container.querySelector('[data-slot="table-container"]') as HTMLElement
-    expect(tableContainer.style.overflow).toBe('auto')
+    expect(tableContainer).toHaveClass('ca-table-container')
     expect(tableContainer.style.maxHeight).toBe('72vh')
   })
 
