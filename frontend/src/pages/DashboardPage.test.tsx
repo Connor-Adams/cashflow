@@ -121,7 +121,7 @@ describe('DashboardPage (characterization)', () => {
 
   it('renders the filter caption and a section tile label', async () => {
     await renderPage()
-    // The FilterCard caption always renders the active-scope chip.
+    // The filter card caption always renders the active-scope chip.
     expect(await screen.findByText(/showing/i)).toBeInTheDocument()
     // "Net spend by category" is an always-rendered BentoTile label
     // (the tile shell renders regardless of whether there is data).

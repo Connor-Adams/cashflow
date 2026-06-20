@@ -4,7 +4,6 @@ import { Alert } from '@connor-adams/designsystem'
 import { Card, CardContent, CardHeader, CardTitle } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
-import { FilterCard } from '@/components/ui/filter-card'
 import { PageHeader } from '@/components/ui/page-header'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
@@ -180,7 +179,7 @@ export function PartnerFairnessPage() {
         title="Partner fairness"
         description="Shared spending, who covered what, and the next settlement."
       />
-      <FilterCard>
+      <Card className="mb-4">
           <FilterBar
             currency={currency}
             onCurrencyChange={(v) => setCurrency(v || DEFAULT_PARTNER_CURRENCY)}
@@ -213,7 +212,7 @@ export function PartnerFairnessPage() {
               <span className="text-xs text-muted-foreground">Saving…</span>
             )}
           </label>
-      </FilterCard>
+      </Card>
 
       {err && (
         <Alert variant="error" className="mb-4">
