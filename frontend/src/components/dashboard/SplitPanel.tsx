@@ -1,4 +1,3 @@
-import * as React from 'react'
 import { AmountText } from '@connor-adams/designsystem'
 
 type Tone = 'business' | 'personal'
