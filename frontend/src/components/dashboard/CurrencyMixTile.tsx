@@ -53,7 +53,7 @@ export function CurrencyMixTile({ metrics, loading }: CurrencyMixTileProps) {
       description="Share of net spend across all currencies in your data."
     >
       {shares.length < 2 ? (
-        <p className="emptyState">
+        <p className="m-0 text-muted-foreground">
           Currency mix shows when you have transactions in 2+ currencies.
         </p>
       ) : (

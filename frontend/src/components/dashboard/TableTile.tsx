@@ -77,7 +77,7 @@ export function TableTile<R>({
       description={description}
     >
       {rows.length === 0 ? (
-        <p className="emptyState">{emptyLabel}</p>
+        <p className="m-0 text-muted-foreground">{emptyLabel}</p>
       ) : (
         <>
           {/* formerly .tableTile */}

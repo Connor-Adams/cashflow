@@ -437,7 +437,7 @@ export function BudgetsTab() {
                       <TableRow key={budget.id}>
                         <TableCell colSpan={6}>
                           <form onSubmit={saveBudgetEdit}>
-                            <div className="formGrid">
+                            <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
                               <Label htmlFor={`settings-budget-edit-category-${budget.id}`}>
                                 Category
                                 <Input
@@ -619,7 +619,7 @@ export function BudgetsTab() {
             </Table>
         )}
         <form onSubmit={createBudget}>
-          <div className="formGrid">
+          <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
             <Label htmlFor="settings-budget-category">
               Category
               <NativeSelect

@@ -335,8 +335,8 @@ export function ImportsTab() {
             </p>
           </div>
         </div>
-        <div className="formGrid" style={{ gap: '0.75rem' }}>
-          <label htmlFor="settings-receipt-text">
+        <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
+          <label htmlFor="settings-receipt-text" className="flex flex-col gap-1 text-[0.82rem]">
             Paste receipt email body
             <Textarea
               id="settings-receipt-text"
@@ -620,10 +620,7 @@ export function ImportsTab() {
           </p>
         )}
 
-        <div
-          className="formGrid"
-          style={{ gap: '0.5rem', marginTop: '1rem', borderTop: '1px solid var(--border)', paddingTop: '0.75rem' }}
-        >
+        <div className="mt-4 grid gap-2 border-t border-border pt-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
           <div>
             <strong style={{ display: 'block' }}>Paste captured orders</strong>
             <span className="muted" style={{ fontSize: '0.85rem' }}>

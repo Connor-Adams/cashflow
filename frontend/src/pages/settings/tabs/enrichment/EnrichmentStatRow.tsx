@@ -19,8 +19,8 @@ export function EnrichmentStatRow({ stats }: Props) {
         <Card
           className="enrichWorkflowTile flex flex-col justify-between gap-2 bg-warning-bg border-[color-mix(in_srgb,var(--warning)_40%,var(--border))] text-warning-foreground"
         >
-          <p className="statLabel m-0 text-[0.7rem] uppercase tracking-[0.06em] text-warning-foreground opacity-85">Needs review</p>
-          <p className="statValue m-0 mt-[0.125rem] text-[1.7rem] font-bold leading-[1.1] text-warning-foreground tabular-nums">
+          <p className="m-0 text-[0.7rem] uppercase tracking-[0.06em] text-warning-foreground opacity-85">Needs review</p>
+          <p className="m-0 mt-[0.125rem] text-[1.7rem] font-bold leading-[1.1] text-warning-foreground tabular-nums">
             {stats.reviewFlagTrue.toLocaleString()}{' '}
             <span className="text-[0.8rem] font-medium opacity-75">{totalPct}%</span>
           </p>

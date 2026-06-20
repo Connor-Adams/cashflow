@@ -173,10 +173,10 @@ function GrowersBody({
   growers: GrowerRow[]
 }) {
   if (!hasComparisonPeriod) {
-    return <p className="emptyState">Set both dates for period comparison.</p>
+    return <p className="m-0 text-muted-foreground">Set both dates for period comparison.</p>
   }
   if (growers.length === 0) {
-    return <p className="emptyState">No movement to highlight in this view.</p>
+    return <p className="m-0 text-muted-foreground">No movement to highlight in this view.</p>
   }
   return (
     // formerly .growersList
