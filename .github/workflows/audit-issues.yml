@@ -23,6 +23,7 @@ concurrency:
 permissions:
   contents: read
   issues: write
+  packages: read
 
 jobs:
   audit-to-issues:
@@ -42,9 +43,13 @@ jobs:
         with:
           node-version: '22'
           cache: 'yarn'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@connor-adams'
 
       - name: Install
         run: yarn install --immutable
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Dead code (fallow)
         continue-on-error: true
