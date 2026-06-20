@@ -10,7 +10,7 @@ import { Card } from '@connor-adams/designsystem'
 import { EmptyTableRow } from '@/lib/ds-extras'
 import { PageHeader } from '@/components/ui/page-header'
 import { SecurityLogo } from '@/components/ui/security-logo'
-import { Sparkline } from '@/components/ui/sparkline'
+import { Sparkline } from '@connor-adams/designsystem'
 import { MetricStat } from '@/components/ui/metric-stat'
 import { PctDeltaCell } from '@/components/ui/pct-delta-cell'
 import { StatCard } from '@/components/ui/stat-card'
@@ -53,6 +53,11 @@ const CHART_COLORS = [
 
 function colorFor(index: number): string {
   return CHART_COLORS[index % CHART_COLORS.length]
+}
+
+// Adapter: DS Sparkline takes a plain number[]; our API returns {date, close}[].
+function sparklineValues(points: PortfolioSparklinePoint[] | undefined): number[] {
+  return (points ?? []).map((p) => p.close)
 }
 
 function formatRelativeTime(from: number, now: number): string {
@@ -468,10 +473,11 @@ function HoldingsPanel({
       render: (h) =>
         h.security ? (
           <Sparkline
-            data={(sparklines.get(h.security.id) ?? []).map((p) => ({
-              date: p.date,
-              value: p.close,
-            }))}
+            data={sparklineValues(sparklines.get(h.security.id))}
+            width={80}
+            height={24}
+            area={false}
+            dot={false}
           />
         ) : null,
     },
@@ -697,10 +703,11 @@ function BySecurityPanel({
       sortable: false,
       render: (row) => (
         <Sparkline
-          data={(sparklines.get(row.securityId) ?? []).map((p) => ({
-            date: p.date,
-            value: p.close,
-          }))}
+          data={sparklineValues(sparklines.get(row.securityId))}
+          width={80}
+          height={24}
+          area={false}
+          dot={false}
         />
       ),
     },
