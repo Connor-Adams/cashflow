@@ -52,6 +52,14 @@ type RuleResponse = {
 
 const PAGE_SIZE = 100
 
+// color-mix tints have no Tailwind token utility, so these surfaces keep inline
+// var(). Centralised here to avoid duplicating the literal across controls.
+const HAIRLINE_BORDER = 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%)'
+const SELECT_SURFACE_STYLE = {
+  borderColor: HAIRLINE_BORDER,
+  background: 'color-mix(in srgb, var(--card) 94%, transparent)',
+} as const
+
 const SHORTCUT_HELP: Array<{ keys: string; action: string }> = [
   { keys: 'j', action: 'Move cursor down' },
   { keys: 'k', action: 'Move cursor up' },
@@ -133,7 +141,7 @@ const CONFIDENCE_FLAG_CHIPS: Array<{
 /** Keyboard shortcut key badge — styled kbd element used in the shortcuts hint bar. */
 function KbdKey({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="inline-flex min-w-5 items-center justify-center rounded border border-[var(--border)] bg-[var(--muted)] px-1 py-0.5 font-mono text-[0.7rem] text-[var(--foreground)]">
+    <kbd className="inline-flex min-w-5 items-center justify-center rounded border border-border bg-muted px-1 py-0.5 font-mono text-[0.7rem] text-foreground">
       {children}
     </kbd>
   )
@@ -677,10 +685,7 @@ export function ReviewInboxPage() {
               <NativeSelect
                 value={batchFilter}
                 onChange={(e) => setBatchFilter(e.target.value)}
-                style={{
-                  borderColor: 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%)',
-                  background: 'color-mix(in srgb, var(--card) 94%, transparent)',
-                }}
+                style={SELECT_SURFACE_STYLE}
               >
                 <option value="">All batches</option>
                 {uniqueBatches.map((batch) => (
@@ -767,7 +772,7 @@ export function ReviewInboxPage() {
             ) : null}
           </div>
 
-          <p className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--muted-foreground)]" aria-hidden="true">
+          <p className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-hidden="true">
             <KbdKey>j</KbdKey>/<KbdKey>k</KbdKey> navigate · <KbdKey>space</KbdKey> select ·{' '}
             <KbdKey>c</KbdKey> category · <KbdKey>Enter</KbdKey> apply · <KbdKey>?</KbdKey> help
           </p>
@@ -775,11 +780,11 @@ export function ReviewInboxPage() {
           {err && <Alert variant="error">{err}</Alert>}
           {message && (
             <span
-              className="mb-3 inline-flex rounded-lg border px-3 py-2 text-sm font-semibold"
+              className="mb-3 inline-flex rounded-lg border px-3 py-2 text-sm font-semibold text-positive"
+              // color-mix tints have no Tailwind utility — keep inline var().
               style={{
                 borderColor: 'color-mix(in srgb, var(--positive) 45%, var(--border))',
                 background: 'color-mix(in srgb, var(--positive) 10%, transparent)',
-                color: 'var(--positive)',
               }}
             >
               {message}
@@ -788,10 +793,7 @@ export function ReviewInboxPage() {
 
           <div
             className="overflow-auto rounded-lg border"
-            style={{
-              maxHeight: '70vh',
-              borderColor: 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%)',
-            }}
+            style={{ maxHeight: '70vh', borderColor: HAIRLINE_BORDER }}
             ref={tableWrapRef}
           >
             <Table
@@ -851,15 +853,15 @@ export function ReviewInboxPage() {
                       <TxnMerchantCell>
                         <TxnMerchantName>{row.merchantClean}</TxnMerchantName>
                         {row.appliedRuleId ? (
-                          <span className="text-xs text-[var(--muted-foreground)]">Rule #{row.appliedRuleId}</span>
+                          <span className="text-xs text-muted-foreground">Rule #{row.appliedRuleId}</span>
                         ) : (
-                          <span className="text-xs text-[var(--muted-foreground)]">No rule</span>
+                          <span className="text-xs text-muted-foreground">No rule</span>
                         )}
                         <Button
                           type="button"
                           variant="link"
                           size="sm"
-                          className="p-0 text-xs text-[var(--muted-foreground)] underline hover:text-[var(--primary)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] focus-visible:outline-offset-2"
+                          className="p-0 text-xs text-muted-foreground underline hover:text-primary focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
                           onClick={() => setSignalsDialogTxnId(row.id)}
                         >
                           Why?
@@ -975,7 +977,7 @@ export function ReviewInboxPage() {
           </div>
         </Card>
 
-        <Card className="mb-0 bg-[var(--card)] max-[720px]:order-[-1]">
+        <Card className="mb-0 bg-card max-[720px]:order-[-1]">
           <SectionHeader
             title="Decision"
             description={
@@ -1008,10 +1010,7 @@ export function ReviewInboxPage() {
               <NativeSelect
                 value={splitType}
                 onChange={(e) => setSplitType(e.target.value)}
-                style={{
-                  borderColor: 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%)',
-                  background: 'color-mix(in srgb, var(--card) 94%, transparent)',
-                }}
+                style={SELECT_SURFACE_STYLE}
               >
                 <option value="">Keep current</option>
                 <option value="me">Me</option>
@@ -1024,10 +1023,7 @@ export function ReviewInboxPage() {
               <NativeSelect
                 value={business}
                 onChange={(e) => setBusiness(e.target.value)}
-                style={{
-                  borderColor: 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%)',
-                  background: 'color-mix(in srgb, var(--card) 94%, transparent)',
-                }}
+                style={SELECT_SURFACE_STYLE}
               >
                 <option value="">Keep current</option>
                 <option value="false">Personal</option>
@@ -1041,12 +1037,8 @@ export function ReviewInboxPage() {
                 options={TAX_TREATMENTS.filter((tt) => tt !== 'none')}
                 emptyLabel="Keep current"
                 onChange={(t) => setTaxTreatment(t ?? '')}
-                className="min-h-9 rounded-md border px-3 text-sm"
-                style={{
-                  borderColor: 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%)',
-                  background: 'color-mix(in srgb, var(--card) 94%, transparent)',
-                  color: 'var(--foreground)',
-                }}
+                className="min-h-9 rounded-md border px-3 text-sm text-foreground"
+                style={SELECT_SURFACE_STYLE}
               />
             </Label>
           </div>
@@ -1064,12 +1056,12 @@ export function ReviewInboxPage() {
                 key={label}
                 className="rounded-lg border p-3"
                 style={{
-                  borderColor: 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%)',
+                  borderColor: HAIRLINE_BORDER,
                   background: 'color-mix(in srgb, var(--muted) 46%, transparent)',
                 }}
               >
                 <strong className="block">{val}</strong>
-                <span className="mt-1 block text-xs text-[var(--muted-foreground)]">{label}</span>
+                <span className="mt-1 block text-xs text-muted-foreground">{label}</span>
               </div>
             ))}
           </div>
@@ -1095,7 +1087,8 @@ export function ReviewInboxPage() {
           </div>
 
           <div
-            className="mt-4 flex gap-2 rounded-lg border px-3 py-2 text-xs leading-5 text-[var(--muted-foreground)]"
+            className="mt-4 flex gap-2 rounded-lg border px-3 py-2 text-xs leading-5 text-muted-foreground"
+            // color-mix tints have no Tailwind utility — keep inline var().
             style={{
               borderColor: 'color-mix(in srgb, var(--primary) 18%, var(--border))',
               background: 'color-mix(in srgb, var(--muted) 42%, transparent)',

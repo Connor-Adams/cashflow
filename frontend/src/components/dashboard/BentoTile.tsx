@@ -168,8 +168,17 @@ export function BentoTile({
               )}
               {description && (
                 <CardDescription
-                  className={cn('m-0', onGradient && 'text-white/90')}
-                  style={{ fontSize: '0.75rem' }}
+                  className="m-0"
+                  style={
+                    onGradient
+                      ? {
+                          fontSize: '0.75rem',
+                          // White wash on the gradient via the DS token (no raw
+                          // rgb literal); color-mix has no Tailwind utility.
+                          color: 'color-mix(in oklch, var(--primary-foreground) 90%, transparent)',
+                        }
+                      : { fontSize: '0.75rem' }
+                  }
                 >
                   {description}
                 </CardDescription>

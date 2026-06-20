@@ -237,8 +237,8 @@ export function CommandPalette({
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="relative w-full max-w-xl rounded-lg border border-border shadow-lg outline-none"
-        style={{ background: 'var(--card)', color: 'var(--fg)' }}
+        className="relative w-full max-w-xl rounded-lg border border-border bg-card shadow-lg outline-none"
+        style={{ color: 'var(--fg)' }}
         data-testid="command-palette"
       >
         <div className="flex items-center gap-2 border-b border-border p-3">
@@ -266,8 +266,7 @@ export function CommandPalette({
 
         {visible.length === 0 ? (
           <div
-            className="p-6 text-center text-sm"
-            style={{ color: 'var(--muted-foreground)' }}
+            className="p-6 text-center text-sm text-muted-foreground"
             role="status"
             data-testid="command-palette-empty"
           >
@@ -284,8 +283,7 @@ export function CommandPalette({
             {groups.map((group) => (
               <div key={group.category} role="presentation">
                 <div
-                  className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide"
-                  style={{ color: 'var(--muted-foreground)' }}
+                  className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
                 >
                   {group.category}
                 </div>
@@ -313,8 +311,7 @@ export function CommandPalette({
                       <span className="font-medium">{cmd.label}</span>
                       {cmd.description ? (
                         <span
-                          className="text-xs"
-                          style={{ color: 'var(--muted-foreground)' }}
+                          className="text-xs text-muted-foreground"
                         >
                           {cmd.description}
                         </span>
@@ -328,8 +325,7 @@ export function CommandPalette({
         )}
 
         <div
-          className="flex items-center justify-between border-t border-border px-3 py-2 text-[11px]"
-          style={{ color: 'var(--muted-foreground)' }}
+          className="flex items-center justify-between border-t border-border px-3 py-2 text-[11px] text-muted-foreground"
         >
           <span>
             <kbd className="font-mono">↑</kbd>{' '}

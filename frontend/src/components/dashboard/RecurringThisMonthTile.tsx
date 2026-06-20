@@ -62,23 +62,23 @@ export function RecurringThisMonthTile({
               // formerly .recurringList__row + sibling border-top
               <li
                 key={`${r.merchant}:${r.currency}`}
-                className="grid items-baseline gap-2 py-1 [&+&]:border-t [&+&]:border-[var(--border)] [&+&]:pt-2"
+                className="grid items-baseline gap-2 py-1 [&+&]:border-t [&+&]:border-border [&+&]:pt-2"
                 style={{ gridTemplateColumns: 'minmax(0, 1fr) auto auto' }}
               >
                 {/* formerly .recurringList__merchant + :hover */}
                 <Link
                   to={`/transactions?merchant=${encodeURIComponent(r.merchant)}`}
-                  className="truncate text-sm font-semibold no-underline text-[var(--foreground)] hover:text-[var(--primary)] hover:underline"
+                  className="truncate text-sm font-semibold no-underline text-foreground hover:text-primary hover:underline"
                   title={r.merchant}
                 >
                   {r.merchant}
                 </Link>
                 {/* formerly .recurringList__amount */}
-                <span className="text-sm tabular-nums text-[var(--foreground)]">
+                <span className="text-sm tabular-nums text-foreground">
                   {formatMoney(r.avgAmount, r.currency)}
                 </span>
                 {/* formerly .recurringList__date */}
-                <span className="text-xs tabular-nums text-[var(--muted-foreground)]">
+                <span className="text-xs tabular-nums text-muted-foreground">
                   {formatDueDate(r.nextExpected)}
                 </span>
               </li>
@@ -86,17 +86,17 @@ export function RecurringThisMonthTile({
           </ul>
           {/* formerly .recurringList__footer */}
           <div
-            className="mt-auto flex items-baseline justify-between gap-2 pt-2 text-xs border-t border-[var(--border)]"
+            className="mt-auto flex items-baseline justify-between gap-2 pt-2 text-xs border-t border-border"
           >
             {/* formerly .recurringList__total */}
-            <span className="truncate tabular-nums text-[var(--muted-foreground)]">
+            <span className="truncate tabular-nums text-muted-foreground">
               Total:{' '}
               {totalsByCurrency
                 .map(([curr, sum]) => formatMoney(sum, curr))
                 .join(' · ')}
             </span>
             {/* formerly .recurringList__viewAll + :hover */}
-            <Link to="/recurring" className="shrink-0 font-semibold no-underline text-[var(--primary)] hover:underline">
+            <Link to="/recurring" className="shrink-0 font-semibold no-underline text-primary hover:underline">
               All recurring →
             </Link>
           </div>

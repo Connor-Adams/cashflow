@@ -198,17 +198,17 @@ function GrowerListItem({ grower }: { grower: GrowerRow }) {
   return (
     // formerly .growersList__row + .growersList__row (border-top via CSS sibling selector)
     // Using group class approach — sibling logic reproduced via [&+&] pseudo-selector
-    <li className="flex items-center gap-2 py-1 [&+&]:border-t [&+&]:border-[var(--border)] [&+&]:pt-2">
+    <li className="flex items-center gap-2 py-1 [&+&]:border-t [&+&]:border-border [&+&]:pt-2">
       {/* formerly .growersList__main */}
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {/* formerly .growersList__category */}
-        <span className="truncate text-sm font-medium text-[var(--foreground)]" title={grower.category}>
+        <span className="truncate text-sm font-medium text-foreground" title={grower.category}>
           {grower.category}
         </span>
         {grower.isNew && (
           // formerly .growersList__newBadge — color-mix values must stay inline
           <span
-            className="shrink-0 rounded-full border px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wide text-[var(--primary)]"
+            className="shrink-0 rounded-full border px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wide text-primary"
             style={{
               borderColor: 'color-mix(in oklch, var(--primary) 35%, var(--border))',
               background: 'color-mix(in oklch, var(--primary) 12%, transparent)',
@@ -219,7 +219,7 @@ function GrowerListItem({ grower }: { grower: GrowerRow }) {
         )}
       </div>
       {/* formerly .growersList__current */}
-      <span className="shrink-0 text-xs tabular-nums text-[var(--muted-foreground)]">
+      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
         {formatMoney(grower.current, grower.currency)}
       </span>
       {/* formerly .growersList__delta (combined with pre-existing inline Tailwind classes) */}

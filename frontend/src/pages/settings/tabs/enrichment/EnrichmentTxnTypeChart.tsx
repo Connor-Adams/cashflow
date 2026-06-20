@@ -26,11 +26,11 @@ export function EnrichmentTxnTypeChart({ byTxnType }: Props) {
                 className="flex items-center gap-[0.625rem] no-underline hover:opacity-80"
                 aria-label={`View ${label} transactions`}
               >
-                <span className="w-[5rem] text-right text-[var(--muted-foreground)] truncate">{label}</span>
-                <div className="flex-1 bg-[var(--muted)] h-[14px] rounded-[3px] overflow-hidden">
-                  <div className="h-full rounded-[3px] bg-[var(--chart-4)]" style={{ width: `${pct}%` }} />
+                <span className="w-[5rem] text-right text-muted-foreground truncate">{label}</span>
+                <div className="flex-1 bg-muted h-[14px] rounded-[3px] overflow-hidden">
+                  <div className="h-full rounded-[3px] bg-chart-4" style={{ width: `${pct}%` }} />
                 </div>
-                <span className="w-[6rem] text-[var(--foreground)] tabular-nums">{n.toLocaleString()} · {pct}%</span>
+                <span className="w-[6rem] text-foreground tabular-nums">{n.toLocaleString()} · {pct}%</span>
               </Link>
             )
           })}
