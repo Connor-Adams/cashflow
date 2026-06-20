@@ -49,7 +49,7 @@ export function RecurringThisMonthTile({
       description="Subscriptions and recurring charges expected this calendar month."
     >
       {dueThisMonth.length === 0 ? (
-        <p className="emptyState">
+        <p className="m-0 text-muted-foreground">
           {loading
             ? 'Loading recurring charges…'
             : 'No recurring charges expected this month.'}

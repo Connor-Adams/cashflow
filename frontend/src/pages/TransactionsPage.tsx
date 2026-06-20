@@ -1838,7 +1838,7 @@ export function TransactionsPage() {
                 ))
               ) : !sortedRows.length ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="emptyStateCell">
+                  <TableCell colSpan={9} className="whitespace-normal align-top px-4 py-5">
                     {activeFilters.length > 0 ? (
                       <EmptyState
                         title="No transactions match this filter"

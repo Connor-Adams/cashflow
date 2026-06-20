@@ -136,7 +136,7 @@ export function ContactsTab() {
               <p className="muted">Contacts track loans and reimbursements without giving login access.</p>
             </div>
           </div>
-          <div className="formGrid">
+          <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
             <Label htmlFor="settings-contact-name">
               Name
               <Input

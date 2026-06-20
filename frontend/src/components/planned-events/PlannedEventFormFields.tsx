@@ -31,7 +31,7 @@ export function PlannedEventFormFields({
   showStatus,
 }: PlannedEventFormFieldsProps) {
   return (
-    <div className="formGrid">
+    <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
       <Label htmlFor={`${idPrefix}-type`}>
         Type
         <NativeSelect

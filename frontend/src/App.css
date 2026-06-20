@@ -804,24 +804,7 @@
     @apply opacity-60;
   }
 
-  .statCard {
-    @apply mb-0 flex min-h-[148px] flex-col gap-2 px-4 py-4;
-  }
-
-  .statLabel {
-    @apply m-0 text-[0.72rem] font-semibold uppercase tracking-normal;
-    color: var(--muted-foreground);
-  }
-
-  .statValue {
-    @apply m-0 whitespace-nowrap text-[1.55rem] font-bold tracking-tight;
-  }
-
   .statHint {
-    @apply m-0 text-xs leading-5;
-  }
-
-  .statDelta {
     @apply m-0 text-xs leading-5;
   }
 
@@ -843,36 +826,6 @@
 
   .pad {
     @apply m-0 px-4 py-3;
-  }
-
-  .emptyState {
-    @apply m-0;
-    color: var(--muted-foreground);
-  }
-
-  .emptyStateCell {
-    @apply whitespace-normal align-top px-4 py-5;
-  }
-
-  .emptyStateCell p {
-    @apply mb-2;
-  }
-
-  .emptyStateCell p:last-child {
-    @apply mb-0;
-  }
-
-  .formGrid {
-    @apply mb-3 grid gap-3;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
-  }
-
-  .formGrid label {
-    @apply flex flex-col gap-1 text-[0.82rem];
-  }
-
-  .formGrid .check {
-    @apply flex-row items-center gap-2;
   }
 
 }
