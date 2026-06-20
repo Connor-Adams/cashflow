@@ -16,7 +16,6 @@
   },
   "dependencies": {
     "@cashflow/shared": "*",
-    "@cashflow/ui": "*",
     "@connor-adams/designsystem": "^0.1.0",
     "@connor-adams/tokens": "^0.1.0",
     "@radix-ui/react-slot": "^1.2.4",

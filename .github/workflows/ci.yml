@@ -39,19 +39,12 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build @cashflow/ui
-        # The frontend imports @cashflow/ui, which resolves to its built dist/.
-        # dist/ is gitignored, so build it here and ship it in the artifact that
-        # the frontend-build / frontend-test / code-audit jobs extract.
-        run: yarn workspace @cashflow/ui run build
-
-      - name: Archive node_modules + @cashflow/ui dist
+      - name: Archive node_modules
         run: |
           paths=(node_modules)
-          for ws in backend frontend shared packages/ui; do
+          for ws in backend frontend shared; do
             [ -d "$ws/node_modules" ] && paths+=("$ws/node_modules")
           done
-          [ -d packages/ui/dist ] && paths+=(packages/ui/dist)
           tar -cf node_modules.tar "${paths[@]}"
 
       - name: Upload node_modules artifact
