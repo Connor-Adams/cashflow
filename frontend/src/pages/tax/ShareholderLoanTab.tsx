@@ -3,7 +3,7 @@ import { useShareholderLoans, type ShareholderLoanKind, type ShareholderLoanDto 
 import { useTaxEntities } from '../../hooks/useTaxEntities';
 import { Button } from '@connor-adams/designsystem'
 import { fmtCurrency } from './util/format';
-import { StatCard } from '@/components/ui/stat-card';
+import { StatCard } from '@connor-adams/designsystem';
 import { EmptyState } from '@connor-adams/designsystem'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 

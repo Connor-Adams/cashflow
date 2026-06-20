@@ -10,21 +10,25 @@ describe('MetricStat', () => {
     expect(getByText('$1,234')).not.toBeNull()
   })
 
-  it('renders positive delta with up arrow', () => {
+  it('renders a positive delta as a green (positive tone) badge', () => {
     const { container } = render(<MetricStat label="x" value="1" deltaPct={1.23} />)
-    expect(container.textContent).toContain('↑')
-    expect(container.textContent).toContain('1.23%')
+    const badge = container.querySelector('[data-slot="stat-card-delta"]')!
+    expect(badge).not.toBeNull()
+    expect(badge.getAttribute('data-tone')).toBe('positive')
+    expect(badge.textContent).toContain('+1.23%')
   })
 
-  it('renders negative delta with down arrow', () => {
+  it('renders a negative delta as a red (negative tone) badge', () => {
     const { container } = render(<MetricStat label="x" value="1" deltaPct={-2.5} />)
-    expect(container.textContent).toContain('↓')
-    expect(container.textContent).toContain('2.50%')
+    const badge = container.querySelector('[data-slot="stat-card-delta"]')!
+    expect(badge).not.toBeNull()
+    expect(badge.getAttribute('data-tone')).toBe('negative')
+    expect(badge.textContent).toContain('-2.50%')
   })
 
-  it('renders em-dash for null delta', () => {
+  it('omits the delta badge for a null delta', () => {
     const { container } = render(<MetricStat label="x" value="—" />)
-    expect(container.textContent).toContain('—')
+    expect(container.querySelector('[data-slot="stat-card-delta"]')).toBeNull()
   })
 
   it('shows loading skeleton', () => {

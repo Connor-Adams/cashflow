@@ -15,7 +15,7 @@ import { EmptyTableRow } from '@/lib/ds-extras'
 import { MetricStat } from '@/components/ui/metric-stat'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
-import { StatCard } from '@/components/ui/stat-card'
+import { StatCard } from '@connor-adams/designsystem'
 import {
   TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { TableCard, type TableColumn } from '@/components/ui/table-card'

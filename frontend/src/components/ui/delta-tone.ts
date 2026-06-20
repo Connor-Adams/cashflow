@@ -1,11 +1,13 @@
 import type * as React from 'react'
+import { resolveDeltaTone, type MetricKind } from '@connor-adams/designsystem'
 
-// Semantic intent of the metric a delta belongs to. Drives how the delta
-// color is chosen: for spend metrics, less is good, so a positive (up) delta
-// reads as bad (red). For gain metrics, more is good, so up reads as green.
-// Neutral metrics (transfers, row counts) never color the delta because the
-// direction isn't inherently good or bad.
-export type MetricKind = 'gain' | 'spend' | 'neutral'
+// The metric-semantics core (`MetricKind` + `resolveDeltaTone`) now lives in the
+// design system — re-export it so app code keeps a single import surface. The
+// pieces below are genuinely app-local: the DS StatCard parses the delta sign and
+// styles its own badge, but the app's DeltaBadge / TopGrowersTile render badges
+// from numeric deltas, so they still need `parseDeltaSign` and the shared
+// `DELTA_SIGN_STYLE` (which the DS does not export).
+export { resolveDeltaTone, type MetricKind }
 
 export type DeltaSign = 'positive' | 'negative' | 'neutral'
 export type DeltaTone = 'positive' | 'negative' | 'neutral'
@@ -28,20 +30,6 @@ export function parseDeltaSign(delta: React.ReactNode): DeltaSign {
   const num = Number(match[0])
   if (!Number.isFinite(num) || num === 0) return 'neutral'
   return num > 0 ? 'positive' : 'negative'
-}
-
-// Map the parsed numeric sign + the metric's semantic intent to the styling
-// tone. For 'gain' metrics the sign and tone agree (up is good → green). For
-// 'spend' metrics the tone is inverted (up is bad → red). For 'neutral'
-// metrics every delta renders muted regardless of sign — the direction is
-// directionally meaningful but not emotionally good or bad.
-export function resolveDeltaTone(sign: DeltaSign, kind: MetricKind): DeltaTone {
-  if (kind === 'neutral') return 'neutral'
-  if (sign === 'neutral') return 'neutral'
-  if (kind === 'spend') {
-    return sign === 'positive' ? 'negative' : 'positive'
-  }
-  return sign
 }
 
 export const DELTA_SIGN_STYLE: Record<DeltaTone, React.CSSProperties> = {

@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { Card } from '@connor-adams/designsystem'
-import { StatCard } from '@/components/ui/stat-card'
+import { StatCard } from '@connor-adams/designsystem'
 import type { EnrichmentStats } from '../../../../types/api'
 
 type Props = {

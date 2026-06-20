@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/components/ui/toast'
 import { SectionHeader } from '@/components/ui/section-header'
 import { Grid } from '@/lib/ds-extras'
-import { StatCard } from '@/components/ui/stat-card'
+import { StatCard } from '@connor-adams/designsystem'
 import { UtilizationBadge } from '@/components/accounts/UtilizationBadge'
 import { MergeAccountModal } from '@/components/accounts/MergeAccountModal'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'

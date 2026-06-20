@@ -11,7 +11,7 @@
 // Style: Tailwind utilities matching `IntegratedRateCard` in OverviewTab.
 import type { HouseholdPlanComputeResult, PersonalScenarioComputeEntry, SpouseShift, } from '@/hooks/useHouseholdPlanCompute';
 import { fmtCurrency, fmtPct } from '../util/format';
-import { StatCard } from '@/components/ui/stat-card';
+import { StatCard } from '@connor-adams/designsystem';
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 

@@ -32,7 +32,7 @@ import { useCorpScenarios } from '@/hooks/useCorpScenarios';
 import {
   useHouseholdPlanCompute, type HouseholdPlanComputeResult, type IntegrationWarning, type PersonalScenarioComputeEntry, } from '@/hooks/useHouseholdPlanCompute';
 import { fmtCurrency, fmtPct, numericOrZero, sumNumeric } from '../util/format';
-import { StatCard } from '@/components/ui/stat-card';
+import { StatCard } from '@connor-adams/designsystem';
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 

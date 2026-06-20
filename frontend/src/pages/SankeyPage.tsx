@@ -7,7 +7,7 @@ import { Dialog } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
-import { StatCard } from '@/components/ui/stat-card'
+import { StatCard } from '@connor-adams/designsystem'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { getJson } from '../lib/api'

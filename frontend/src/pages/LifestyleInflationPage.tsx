@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, TrendingDown, TrendingUp } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, TrendingUp } from 'lucide-react'
 import { Alert } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
@@ -8,7 +8,7 @@ import { Card } from '@connor-adams/designsystem'
 import { Grid } from '@/lib/ds-extras'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
-import { StatCard } from '@/components/ui/stat-card'
+import { StatCard } from '@connor-adams/designsystem'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { formatMoney } from '../lib/formatMoney'
@@ -223,28 +223,17 @@ function GrowthStat({
   /** When true, an increase is rendered as concerning (red), e.g. spend. */
   invert?: boolean
 }) {
-  const delta = secondHalf - firstHalf
-  const rising = delta > 0
-  // For spend, rising is bad (red). For income/savings, rising is good (green).
-  const good = invert ? !rising : rising
-  // Computed delta color: --accent-green (==--positive) for good, --danger for bad,
-  // muted when flat. StatCard's metricKind chip uses the same tokens under the hood
-  // (--positive / --destructive), so the color semantics are equivalent. We preserve
-  // the raw inline color here because StatCard's delta chip applies a bordered-badge
-  // style that differs visually from the original plain inline row.
-  const deltaColor =
-    delta === 0 ? 'text-muted-foreground' : good ? 'text-positive' : 'text-danger'
-  const TrendIcon = rising ? TrendingUp : TrendingDown
+  // For spend, rising is bad (red): metricKind="spend" inverts the tone so an
+  // up move colors the DS delta badge red. For income/savings, rising is good
+  // (green) → metricKind="gain". The DS StatCard parses the sign from the
+  // signed percent string and resolves the tone via these semantics.
   return (
     <StatCard
       label={label}
       value={formatMoney(secondHalf, currency)}
       hint={`from ${formatMoney(firstHalf, currency)}`}
-      delta={
-        <span className={deltaColor}>
-          <TrendIcon size={14} aria-hidden="true" /> {formatPct(pct)}
-        </span>
-      }
+      delta={pct == null ? undefined : formatPct(pct)}
+      metricKind={invert ? 'spend' : 'gain'}
     />
   )
 }

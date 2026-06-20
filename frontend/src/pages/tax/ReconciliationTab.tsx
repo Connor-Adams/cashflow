@@ -1,6 +1,6 @@
 import { useReconciliation, type ReconciliationFinding } from '../../hooks/useReconciliation';
 import { useTaxReturn } from '../../hooks/useTaxReturn';
-import { StatCard } from '@/components/ui/stat-card';
+import { StatCard } from '@connor-adams/designsystem';
 import { Card } from '@connor-adams/designsystem'
 
 export function ReconciliationTab({ year }: { year: number }) {

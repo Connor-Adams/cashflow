@@ -14,7 +14,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { SkeletonRow } from '@/lib/ds-extras'
 import { SectionHeader } from '@/components/ui/section-header'
 import { Grid } from '@/lib/ds-extras'
-import { StatCard } from '@/components/ui/stat-card'
+import { StatCard } from '@connor-adams/designsystem'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'

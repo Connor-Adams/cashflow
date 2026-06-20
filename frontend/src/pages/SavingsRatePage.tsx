@@ -7,7 +7,7 @@ import { EmptyState } from '@connor-adams/designsystem'
 import { Grid } from '@/lib/ds-extras'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
-import { StatCard } from '@/components/ui/stat-card'
+import { StatCard } from '@connor-adams/designsystem'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { formatMoney } from '../lib/formatMoney'
