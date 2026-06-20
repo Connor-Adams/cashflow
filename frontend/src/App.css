@@ -394,56 +394,19 @@
     box-shadow: var(--shadow);
   }
 
-  .tableWrap {
-    @apply overflow-auto rounded-lg border;
-    border-color: color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%);
-    background: color-mix(in srgb, var(--bg) 90%, transparent);
-  }
-
-  .table {
-    @apply w-full border-collapse text-sm;
-  }
-
-  .table th,
-  .table td {
-    @apply whitespace-nowrap border-b px-3 py-2.5 text-left align-middle;
-    border-color: color-mix(in srgb, var(--border) 82%, var(--zinc-50) 6%);
-  }
-
-  .table th {
-    @apply text-[0.7rem] font-bold uppercase tracking-normal;
-    color: var(--muted-foreground);
-    background: color-mix(in srgb, var(--bg3) 72%, transparent);
-  }
-
-  /* Sticky thead opt-in: when a `.table` lives inside a CollapsibleCard
-   * we drop the wrap/container overflow so `position: sticky` resolves
-   * against window scroll, and we make the th background opaque so
-   * rows scrolling underneath don't show through. */
-  [data-slot="collapsible-card"] .tableWrap,
+  /* Sticky thead opt-in for DS Table primitives inside a CollapsibleCard:
+   * we drop the container overflow so `position: sticky` resolves against
+   * window scroll, and we make the head-cell background opaque so rows
+   * scrolling underneath don't show through. */
   [data-slot="collapsible-card"] [data-slot="table-container"] {
     overflow: visible;
   }
 
-  [data-slot="collapsible-card"] .table th,
   [data-slot="collapsible-card"] [data-slot="table-head"] {
     @apply sticky top-0 z-[1];
     background: var(--bg2);
     box-shadow: inset 0 -1px 0 0
       color-mix(in srgb, var(--border) 70%, transparent);
-  }
-
-  .table tbody tr:hover {
-    background: color-mix(in srgb, var(--bg3) 58%, transparent);
-  }
-
-  .table input,
-  .table select {
-    @apply max-w-[140px];
-  }
-
-  .table .narrowCol {
-    @apply w-9 text-center;
   }
 
   .quickFilters {
@@ -710,17 +673,24 @@
     line-height: 1.25;
   }
 
-  .transactionsTableCard {
-    @apply mb-0;
-  }
-
-  .transactionsTableWrap {
-    @apply overflow-auto;
-    max-height: 72vh;
-  }
-
   .transactionsTable thead th {
     @apply sticky top-0 z-10;
+    /* DS TableHead is transparent; give the sticky header an opaque fill so
+     * rows scrolling underneath the 72vh region don't bleed through (this
+     * was previously provided by the now-removed `.table th` background). */
+    background: color-mix(in srgb, var(--bg3) 72%, var(--bg));
+  }
+
+  /* Re-homed from the former generic `.table` block (folded onto the DS
+   * Table family): TransactionsPage is the only table with raw inputs and
+   * a narrow checkbox column, so these helpers live on its own class. */
+  .transactionsTable input,
+  .transactionsTable select {
+    @apply max-w-[140px];
+  }
+
+  .transactionsTable .narrowCol {
+    @apply w-9 text-center;
   }
 
   .transactionsActionsCol {

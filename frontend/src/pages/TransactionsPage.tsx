@@ -1799,8 +1799,7 @@ export function TransactionsPage() {
             </button>
           </div>
         )}
-        <div className="tableWrap transactionsTableWrap">
-          <Table className="table transactionsTable">
+        <Table maxHeight="72vh" className="transactionsTable">
             <TableHeader>
               <TableRow>
                 <TableHead className="narrowCol">
@@ -1896,7 +1895,6 @@ export function TransactionsPage() {
               )}
             </TableBody>
           </Table>
-        </div>
         <div className="mb-0 mt-4 justify-center flex flex-wrap items-center gap-3">
           <Button
             type="button"

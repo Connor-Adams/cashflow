@@ -93,8 +93,7 @@ export function RecurringPage() {
         title="Recurring merchants"
         description={`Detected charges that repeat within the last ${windowDays} days.`}
       >
-        <div className="tableWrap" aria-busy={loading}>
-          <Table className="table">
+        <Table aria-busy={loading}>
             <TableHeader>
               <TableRow>
                 <SortableTableHead field="merchant" label="Merchant" currentSort={sort} dir={dir} onSort={toggle} />
@@ -136,7 +135,6 @@ export function RecurringPage() {
               )}
             </TableBody>
           </Table>
-        </div>
       </CollapsibleCard>
     </div>
   )
