@@ -201,17 +201,15 @@ export function FundFactsCard({ overview, currency }: FundFactsCardProps) {
               <div key={r.label} className="flex flex-col">
                 <dt className="muted text-xs">{r.label}</dt>
                 <dd
-                  className="font-medium tabular-nums"
+                  className={
+                    r.value > 0
+                      ? 'font-medium tabular-nums text-positive'
+                      : r.value < 0
+                        ? 'font-medium tabular-nums text-warning'
+                        : 'font-medium tabular-nums'
+                  }
                   data-positive={r.value > 0 ? 'true' : undefined}
                   data-negative={r.value < 0 ? 'true' : undefined}
-                  style={{
-                    color:
-                      r.value > 0
-                        ? 'var(--accent-positive)'
-                        : r.value < 0
-                          ? 'var(--accent-warm)'
-                          : undefined,
-                  }}
                 >
                   {formatPercent(r.value)}
                 </dd>
@@ -243,7 +241,7 @@ function buildAllocations(o: PortfolioSecurityOverview): AllocationRow[] {
   if (o.bondPosition != null && o.bondPosition > 0)
     rows.push({ label: 'Bonds', fraction: o.bondPosition, color: 'var(--chart-line-2)' })
   if (o.cashPosition != null && o.cashPosition > 0)
-    rows.push({ label: 'Cash', fraction: o.cashPosition, color: 'var(--accent-positive)' })
+    rows.push({ label: 'Cash', fraction: o.cashPosition, color: 'var(--positive)' })
   return rows
 }
 

@@ -3,7 +3,7 @@ import { Card } from '@connor-adams/designsystem'
 /**
  * Compact label/value summary card shared by the spend-overview pages
  * (MoneyLeaksPage, SubscriptionsPage). `tone="warn"` tints the value with the
- * warm accent for amounts the user should notice (annual leak/spend impact).
+ * warning token for amounts the user should notice (annual leak/spend impact).
  */
 export function SummaryStat({
   label,
@@ -20,11 +20,8 @@ export function SummaryStat({
         {label}
       </div>
       <div
-        style={{
-          fontSize: 20,
-          fontWeight: 600,
-          color: tone === 'warn' ? 'var(--accent-warm)' : undefined,
-        }}
+        className={tone === 'warn' ? 'text-warning' : undefined}
+        style={{ fontSize: 20, fontWeight: 600 }}
       >
         {value}
       </div>
