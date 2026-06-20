@@ -484,7 +484,7 @@ export function GmailSection() {
                       </span>
                       <span className="muted" style={{ minWidth: '7rem', textAlign: 'right' }}>
                         {m.status === 'extracted' ? (
-                          <span style={{ color: 'var(--success)' }}>
+                          <span className="text-success">
                             {m.parser}/{m.itemsCount}
                           </span>
                         ) : m.status === 'duplicate' ? (

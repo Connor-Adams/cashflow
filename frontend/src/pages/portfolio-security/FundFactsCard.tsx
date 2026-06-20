@@ -234,6 +234,8 @@ function FactRow({ label, value }: { label: string; value: string }) {
 
 type AllocationRow = { label: string; fraction: number; color: string }
 
+// Swatch colors fed to inline style.background for the allocation bar; mixes
+// unregistered --chart-line-N tokens with --positive — keep raw var() (no utility).
 function buildAllocations(o: PortfolioSecurityOverview): AllocationRow[] {
   const rows: AllocationRow[] = []
   if (o.stockPosition != null && o.stockPosition > 0)

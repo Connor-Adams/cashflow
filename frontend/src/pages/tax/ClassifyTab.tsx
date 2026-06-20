@@ -58,7 +58,7 @@ export function ClassifyTab({ year }: { year: number }) {
       {corp.length > 0 && (
         <section>
           <h3>Corp → personal · {corp.length}</h3>
-          <ul className="flex flex-col divide-y divide-[var(--border)]">
+          <ul className="flex flex-col divide-y divide-border">
             {corp.map((d) => (
               <ClassifyRow
                 key={d.personal.id}
@@ -76,7 +76,7 @@ export function ClassifyTab({ year }: { year: number }) {
       {payroll.length > 0 && (
         <section>
           <h3>Payroll · {payroll.length}</h3>
-          <ul className="flex flex-col divide-y divide-[var(--border)]">
+          <ul className="flex flex-col divide-y divide-border">
             {payroll.map((p) => (
               <ClassifyRow
                 key={p.id}
@@ -93,7 +93,7 @@ export function ClassifyTab({ year }: { year: number }) {
       {classified.length > 0 && (
         <section>
           <h3>Classified · {classified.length}</h3>
-          <ul className="flex flex-col divide-y divide-[var(--border)]">
+          <ul className="flex flex-col divide-y divide-border">
             {classified.map((c) => (
               <li key={c.targetId} className="flex items-center gap-3 py-2">
                 <span aria-hidden>✓</span>

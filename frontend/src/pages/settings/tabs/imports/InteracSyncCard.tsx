@@ -91,7 +91,7 @@ export function InteracSyncCard() {
             applied automatically; ambiguous matches are queued in the inbox for review.
           </p>
         </div>
-        <span className="bg-[var(--accent)] text-[var(--accent-foreground)] px-[10px] py-[2px] rounded-full text-[0.7rem] font-semibold tracking-[0.04em] whitespace-nowrap">Admin action</span>
+        <span className="bg-accent text-accent-foreground px-[10px] py-[2px] rounded-full text-[0.7rem] font-semibold tracking-[0.04em] whitespace-nowrap">Admin action</span>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
         <div className="text-sm muted">

@@ -1792,7 +1792,7 @@ export function TransactionsPage() {
             ))}
             <button
               type="button"
-              className="text-[var(--primary)] hover:underline"
+              className="text-primary hover:underline"
               onClick={() => { setEnrichmentFilters({}); setPage(1) }}
             >
               Clear

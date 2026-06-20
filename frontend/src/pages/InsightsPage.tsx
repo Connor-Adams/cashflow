@@ -159,7 +159,7 @@ export function InsightsPage() {
       </header>
 
       <nav
-        className="flex gap-2 border-b border-[var(--border)] mb-4"
+        className="flex gap-2 border-b border-border mb-4"
         aria-label="Filter by status"
       >
         {TAB_ORDER.map((t) => (
@@ -171,8 +171,8 @@ export function InsightsPage() {
             aria-pressed={tab === t}
             className={
               tab === t
-                ? 'px-3 py-2 border-b-2 border-[var(--primary)] font-semibold rounded-none'
-                : 'px-3 py-2 border-b-2 border-transparent text-[var(--muted-foreground)] rounded-none'
+                ? 'px-3 py-2 border-b-2 border-primary font-semibold rounded-none'
+                : 'px-3 py-2 border-b-2 border-transparent text-muted-foreground rounded-none'
             }
           >
             {TAB_LABEL[t]} <span className="text-xs">({counts[t]})</span>
@@ -218,7 +218,7 @@ export function InsightsPage() {
           return (
             <li
               key={row.id}
-              className="rounded-lg border border-[var(--border)] bg-[var(--bg2)] p-4"
+              className="rounded-lg border border-border bg-[var(--bg2)] p-4"
               data-testid="insight-row"
               data-insight-id={row.id}
             >
@@ -237,7 +237,7 @@ export function InsightsPage() {
                   {link ? (
                     <Link
                       to={link}
-                      className="text-sm underline-offset-4 hover:underline text-[var(--primary)]"
+                      className="text-sm underline-offset-4 hover:underline text-primary"
                     >
                       View
                     </Link>

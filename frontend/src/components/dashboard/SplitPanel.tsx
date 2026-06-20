@@ -2,6 +2,9 @@ import { AmountText } from '@connor-adams/designsystem'
 
 type Tone = 'business' | 'personal'
 
+// Raw token strings fed to inline style (color-mix tints + a dynamic-width
+// swatch bar); these can't resolve to static Tailwind utilities, so keep var().
+// --chart-business is also unregistered (no token utility).
 const TONE_COLOR: Record<Tone, string> = {
   business: 'var(--chart-business)',
   personal: 'var(--positive)',
@@ -28,8 +31,8 @@ function FocusCard({
         background: 'color-mix(in oklch, var(--background) 60%, transparent)',
       }}
     >
-      <p className="m-0 text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">{label}</p>
-      <p className="m-0 mt-1 text-2xl font-bold tabular-nums tracking-tight text-[var(--foreground)]">
+      <p className="m-0 text-xs font-bold uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="m-0 mt-1 text-2xl font-bold tabular-nums tracking-tight text-foreground">
         <AmountText value={value} currency={currency || undefined} colored={false} decimals={0} />
       </p>
     </div>
@@ -54,12 +57,12 @@ export function SplitPanel({ business, personal, businessShare, currency, emptyC
         <FocusCard label="Personal" value={personal} tone="personal" currency={currency} />
       </div>
       <div className="mt-4">
-        <div className="mb-2 flex justify-between text-sm font-semibold text-[var(--foreground)]" aria-hidden="true">
+        <div className="mb-2 flex justify-between text-sm font-semibold text-foreground" aria-hidden="true">
           <span>Business {businessShare.toFixed(0)}%</span>
           <span>Personal {personalShare.toFixed(0)}%</span>
         </div>
         <div
-          className="flex h-3.5 overflow-hidden rounded-md border border-[var(--border)]"
+          className="flex h-3.5 overflow-hidden rounded-md border border-border"
           role="img"
           aria-label={`Business ${businessShare.toFixed(0)} percent, personal ${personalShare.toFixed(0)} percent`}
         >

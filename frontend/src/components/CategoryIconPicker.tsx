@@ -9,8 +9,8 @@ type Props = {
 }
 
 const CELL_BASE =
-  'flex items-center justify-center h-12 rounded-md border border-[var(--border)] bg-transparent cursor-pointer hover:bg-[var(--accent)]/10'
-const CELL_ACTIVE = 'border-[var(--accent)] bg-[var(--accent)]/15'
+  'flex items-center justify-center h-12 rounded-md border border-border bg-transparent cursor-pointer hover:bg-accent/10'
+const CELL_ACTIVE = 'border-accent bg-accent/15'
 
 export function CategoryIconPicker({ value, onSelect }: Props) {
   return (

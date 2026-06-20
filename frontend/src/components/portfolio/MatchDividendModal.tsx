@@ -166,7 +166,7 @@ export function MatchDividendModal({
         )}
         {selectedLooksWrong ? (
           <p
-            className="mt-3 rounded-md border border-[var(--danger)] bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            className="mt-3 rounded-md border border-danger bg-destructive/10 px-3 py-2 text-xs text-destructive"
             role="alert"
             data-testid="dividend-wrong-tx-warning"
           >
