@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { LetterAvatar, type LetterAvatarSize } from './letter-avatar'
+import { LetterAvatar, type LetterAvatarSize } from '@connor-adams/designsystem'
 import { securityLogoUrl } from '../../lib/securityLogo'
 
 const SIZE_PX: Record<LetterAvatarSize, number> = {
