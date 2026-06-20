@@ -1,4 +1,4 @@
-import { Card } from '@cashflow/ui'
+import { Card } from '@connor-adams/designsystem'
 import { CategoryTreeManager } from './CategoryTreeManager'
 
 export function CategoriesTab() {

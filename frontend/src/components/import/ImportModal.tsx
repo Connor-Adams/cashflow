@@ -1,18 +1,11 @@
-/* eslint-disable react-refresh/only-export-components */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ChangeEvent, DragEvent, FormEvent } from 'react'
-import {
-  Dialog,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@cashflow/ui'
-import { Alert, type AlertVariant } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
+import { Dialog } from '@connor-adams/designsystem'
+import { Alert, type AlertVariant } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
 import { getJson, postFormData } from '../../lib/api'
 import { formatParseErrorLines } from '../../lib/formatParseErrors'
 import type { Account } from '../../types/api'
@@ -321,18 +314,18 @@ export function ImportModal({
   return (
     <Dialog
       open={open}
-      onOpenChange={(o) => {
-        if (!busy) onOpenChange(o)
+      onClose={() => {
+        if (!busy) onOpenChange(false)
       }}
-      className="max-w-4xl"
-    >
-      <DialogHeader>
-        <DialogTitle>Import statements</DialogTitle>
-        <DialogDescription>
+      title={<>Import statements</>}
+      description={
+        <>
           Drag and drop one or more files. Mode is auto-detected from the file
           mix — override on the right if needed.
-        </DialogDescription>
-      </DialogHeader>
+        </>
+      }
+      className="max-w-4xl"
+    >
       <form onSubmit={submit} className="flex flex-col">
         <div className="grid grid-cols-1 md:grid-cols-[1fr_280px] gap-4 p-4">
           {/* Left: drop zone + file list */}
@@ -355,7 +348,7 @@ export function ImportModal({
               <p className="text-xs muted mt-1">
                 PDF · CSV · OFX · QFX — multi-select OK
               </p>
-              <Input
+              <input
                 ref={fileInputRef}
                 type="file"
                 multiple
@@ -515,7 +508,7 @@ export function ImportModal({
           </div>
         )}
 
-        <DialogFooter>
+        <div className="mt-4 flex justify-end gap-2 p-4 pt-0">
           <Button
             type="button"
             variant="outline"
@@ -527,7 +520,7 @@ export function ImportModal({
           <Button type="submit" disabled={busy || files.length === 0}>
             {busy ? 'Importing…' : `Import ${files.length || ''}`.trim()}
           </Button>
-        </DialogFooter>
+        </div>
       </form>
     </Dialog>
   )

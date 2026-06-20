@@ -3,10 +3,10 @@
  * `PlannedEventsPage` and `CalendarPage`. Lives in its own file so the
  * react-refresh lint rule stays happy (components-only export per file).
  */
-import { Input } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
-import { NativeSelect } from '@cashflow/ui'
-import { Textarea } from '@cashflow/ui'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
+import { Textarea } from '@connor-adams/designsystem'
 import type { Account, PlannedEventStatus, PlannedEventType } from '../../types/api'
 import {
   PLANNED_EVENT_STATUS_OPTIONS,

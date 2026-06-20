@@ -1,4 +1,4 @@
-import { Card } from '@cashflow/ui'
+import { Card } from '@connor-adams/designsystem'
 import { useLayoutWidth, layoutWidthOptions } from '@/lib/layoutWidth'
 
 export function DisplaySection() {

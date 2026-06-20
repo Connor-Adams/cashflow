@@ -1,13 +1,7 @@
 import { useState } from 'react';
 import { fmtCurrency } from '../util/format';
 import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from '@cashflow/ui';
+  Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 
 /**
  * Minimal shape shared by T1 (`TaxLineDto`) and T2 (`CorpTaxLineDto`) computed

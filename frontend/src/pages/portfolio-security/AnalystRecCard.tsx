@@ -1,4 +1,4 @@
-import { Card } from '@cashflow/ui'
+import { Card } from '@connor-adams/designsystem'
 import type { PortfolioSecurityOverview } from '../../types/api'
 
 export type AnalystRecCardProps = {

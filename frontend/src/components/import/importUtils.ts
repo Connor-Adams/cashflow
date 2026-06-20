@@ -1,4 +1,4 @@
-import type { AlertVariant } from '@cashflow/ui'
+import type { AlertVariant } from '@connor-adams/designsystem'
 
 type DetectedMode = 'standard' | 'ws-bundle' | 'holdings' | 'pdf-bundle'
 

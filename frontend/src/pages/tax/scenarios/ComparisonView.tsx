@@ -1,14 +1,8 @@
-import { Button } from '@cashflow/ui';
+import { Button } from '@connor-adams/designsystem'
 import { useScenarioComparison } from '../../../hooks/useScenarioComparison';
 import { fmtCurrency } from '../util/format';
 import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from '@cashflow/ui';
+  Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 
 interface Props {
   ids: number[];

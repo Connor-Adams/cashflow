@@ -1,5 +1,5 @@
 import React, { Component, useState, type ErrorInfo, type ReactNode } from 'react'
-import { Button } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
 import { clientLogger } from '../lib/clientLogger'
 
 void React

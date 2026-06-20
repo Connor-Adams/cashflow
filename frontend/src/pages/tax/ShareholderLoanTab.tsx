@@ -1,18 +1,11 @@
 import { useState } from 'react';
 import { useShareholderLoans, type ShareholderLoanKind, type ShareholderLoanDto } from '../../hooks/useShareholderLoans';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
-import { Button } from '@cashflow/ui';
+import { Button } from '@connor-adams/designsystem'
 import { fmtCurrency } from './util/format';
 import { StatCard } from '@/components/ui/stat-card';
-import { EmptyState } from '@cashflow/ui';
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from '@cashflow/ui';
+import { EmptyState } from '@connor-adams/designsystem'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 
 const KIND_LABELS: Record<ShareholderLoanKind, string> = {
   advance: 'Advance (corp to owner)',

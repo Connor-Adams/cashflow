@@ -1,18 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ChevronDown, ChevronRight, Edit3, Plus, Trash2 } from 'lucide-react'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  useConfirm,
-} from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
 import { deleteReq, getJson, patchJson, postJson } from '../../../lib/api'
 import { todayDateInputValue } from '../../../lib/dateInput'
 import { formatMoney } from '../../../lib/formatMoney'
@@ -194,37 +188,31 @@ export function ContactsTab() {
       {renameTarget && (
         <Dialog
           open
-          onOpenChange={(open) => {
-            if (!open) closeRename()
-          }}
+          onClose={closeRename}
+          title={<>Rename contact</>}
         >
-          <DialogHeader>
-            <DialogTitle>Rename contact</DialogTitle>
-          </DialogHeader>
           <form onSubmit={submitRename}>
-            <DialogBody>
-              <Label htmlFor="settings-rename-name">
-                Contact name
-                <Input
-                  id="settings-rename-name"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  required
-                  autoComplete="off"
-                />
-              </Label>
-              {/* #375 — let the user mark/unmark this Contact as the partner. */}
-              <Label htmlFor="settings-rename-is-partner" className="row">
-                <input
-                  id="settings-rename-is-partner"
-                  type="checkbox"
-                  checked={renameIsPartner}
-                  onChange={(e) => setRenameIsPartner(e.target.checked)}
-                />
-                <span>Partner</span>
-              </Label>
-            </DialogBody>
-            <DialogFooter>
+            <Label htmlFor="settings-rename-name">
+              Contact name
+              <Input
+                id="settings-rename-name"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                required
+                autoComplete="off"
+              />
+            </Label>
+            {/* #375 — let the user mark/unmark this Contact as the partner. */}
+            <Label htmlFor="settings-rename-is-partner" className="row">
+              <input
+                id="settings-rename-is-partner"
+                type="checkbox"
+                checked={renameIsPartner}
+                onChange={(e) => setRenameIsPartner(e.target.checked)}
+              />
+              <span>Partner</span>
+            </Label>
+            <div className="mt-2 flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={closeRename}>
                 Cancel
               </Button>
@@ -239,7 +227,7 @@ export function ContactsTab() {
               >
                 Save
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         </Dialog>
       )}

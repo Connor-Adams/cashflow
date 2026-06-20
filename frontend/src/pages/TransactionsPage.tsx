@@ -1,37 +1,22 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, } from 'react'
 import type { ChangeEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Alert } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { useConfirm } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@cashflow/ui'
+import { Alert } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@cashflow/ui'
+import { SkeletonRow } from '@/lib/ds-extras'
 import { SectionHeader } from '@/components/ui/section-header'
-import { Grid } from '@cashflow/ui'
+import { Grid } from '@/lib/ds-extras'
 import { StatCard } from '@/components/ui/stat-card'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
@@ -1339,11 +1324,11 @@ export function TransactionsPage() {
                   )
               }
             >
-              <NativeSelectOption value="date">Date</NativeSelectOption>
-              <NativeSelectOption value="merchant">Merchant</NativeSelectOption>
-              <NativeSelectOption value="amount">Amount</NativeSelectOption>
-              <NativeSelectOption value="category">Category</NativeSelectOption>
-              <NativeSelectOption value="review">Review flag</NativeSelectOption>
+              <option value="date">Date</option>
+              <option value="merchant">Merchant</option>
+              <option value="amount">Amount</option>
+              <option value="category">Category</option>
+              <option value="review">Review flag</option>
             </NativeSelect>
           </Label>
           <Label>
@@ -1352,8 +1337,8 @@ export function TransactionsPage() {
               value={sortDir}
               onChange={(e) => setSortDir(e.target.value as 'asc' | 'desc')}
             >
-              <NativeSelectOption value="desc">Descending</NativeSelectOption>
-              <NativeSelectOption value="asc">Ascending</NativeSelectOption>
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
             </NativeSelect>
           </Label>
         </Grid>
@@ -1654,9 +1639,9 @@ export function TransactionsPage() {
               value={bulkBiz}
               onChange={(e) => setBulkBiz(e.target.value)}
             >
-              <NativeSelectOption value="">(no change)</NativeSelectOption>
-              <NativeSelectOption value="true">Yes</NativeSelectOption>
-              <NativeSelectOption value="false">No</NativeSelectOption>
+              <option value="">(no change)</option>
+              <option value="true">Yes</option>
+              <option value="false">No</option>
             </NativeSelect>
           </Label>
           <Label>
@@ -1665,10 +1650,10 @@ export function TransactionsPage() {
               value={bulkSplit}
               onChange={(e) => setBulkSplit(e.target.value)}
             >
-              <NativeSelectOption value="">(no change)</NativeSelectOption>
-              <NativeSelectOption value="me">me</NativeSelectOption>
-              <NativeSelectOption value="partner">partner</NativeSelectOption>
-              <NativeSelectOption value="shared">shared</NativeSelectOption>
+              <option value="">(no change)</option>
+              <option value="me">me</option>
+              <option value="partner">partner</option>
+              <option value="shared">shared</option>
             </NativeSelect>
           </Label>
           <Label>
@@ -1709,11 +1694,11 @@ export function TransactionsPage() {
                   onChange={(e) => setBulkLabelId(e.target.value)}
                   aria-label="Bulk label"
                 >
-                  <NativeSelectOption value="">(choose)</NativeSelectOption>
+                  <option value="">(choose)</option>
                   {allLabels.map((label) => (
-                    <NativeSelectOption key={label.id} value={String(label.id)}>
+                    <option key={label.id} value={String(label.id)}>
                       {label.name}
-                    </NativeSelectOption>
+                    </option>
                   ))}
                 </NativeSelect>
                 <Button
@@ -1875,9 +1860,9 @@ export function TransactionsPage() {
                         title="No transactions yet"
                         description="Import a card CSV, OFX export, or PDF statement to start tracking your spending."
                         actions={
-                          <Button asChild size="sm">
-                            <Link to="/import">Import a statement</Link>
-                          </Button>
+                          <Link to="/import">
+                            <Button size="sm">Import a statement</Button>
+                          </Link>
                         }
                       />
                     )}
@@ -2242,9 +2227,9 @@ function TransactionRow({
           value={biz}
           onChange={(e) => setBiz(e.target.value)}
         >
-          <NativeSelectOption value="">(auto)</NativeSelectOption>
-          <NativeSelectOption value="true">Yes</NativeSelectOption>
-          <NativeSelectOption value="false">No</NativeSelectOption>
+          <option value="">(auto)</option>
+          <option value="true">Yes</option>
+          <option value="false">No</option>
         </NativeSelect>
         <TaxTreatmentSelect
           aria-label={`Tax treatment override for transaction ${t.id}`}
@@ -2257,10 +2242,10 @@ function TransactionRow({
       <TableCell>
         <div className="txnSplitCell">
           <NativeSelect value={split} onChange={(e) => setSplit(e.target.value)}>
-            <NativeSelectOption value="">(auto)</NativeSelectOption>
-            <NativeSelectOption value="me">me</NativeSelectOption>
-            <NativeSelectOption value="partner">partner</NativeSelectOption>
-            <NativeSelectOption value="shared">shared</NativeSelectOption>
+            <option value="">(auto)</option>
+            <option value="me">me</option>
+            <option value="partner">partner</option>
+            <option value="shared">shared</option>
           </NativeSelect>
           <div className="txnSplitPercents">
             <Input
@@ -2289,10 +2274,10 @@ function TransactionRow({
             }}
             aria-label={`Ownership for transaction ${t.id}`}
           >
-            <NativeSelectOption value="me">owned by me</NativeSelectOption>
-            <NativeSelectOption value="partner">owned by partner</NativeSelectOption>
-            <NativeSelectOption value="shared">shared</NativeSelectOption>
-            <NativeSelectOption value="contact">contact</NativeSelectOption>
+            <option value="me">owned by me</option>
+            <option value="partner">owned by partner</option>
+            <option value="shared">shared</option>
+            <option value="contact">contact</option>
           </NativeSelect>
           {ownershipType === 'contact' && (
             <NativeSelect
@@ -2300,11 +2285,11 @@ function TransactionRow({
               onChange={(e) => setOwnershipContactId(e.target.value)}
               aria-label={`Contact owner for transaction ${t.id}`}
             >
-              <NativeSelectOption value="">Pick contact</NativeSelectOption>
+              <option value="">Pick contact</option>
               {contacts.map((contact) => (
-                <NativeSelectOption key={contact.id} value={contact.id}>
+                <option key={contact.id} value={contact.id}>
                   {contact.name}
-                </NativeSelectOption>
+                </option>
               ))}
             </NativeSelect>
           )}
@@ -2313,8 +2298,8 @@ function TransactionRow({
             onChange={(e) => setVisibility(e.target.value as 'private' | 'shared')}
             aria-label={`Visibility for transaction ${t.id}`}
           >
-            <NativeSelectOption value="private">private</NativeSelectOption>
-            <NativeSelectOption value="shared">shared</NativeSelectOption>
+            <option value="private">private</option>
+            <option value="shared">shared</option>
           </NativeSelect>
         </div>
       </TableCell>
@@ -2343,9 +2328,9 @@ function TransactionRow({
             aria-label={`Status for ${t.merchantClean}`}
             onChange={(e) => void changeStatus(e.target.value as TransactionStatus)}
           >
-            <NativeSelectOption value="pending">Pending</NativeSelectOption>
-            <NativeSelectOption value="posted">Posted</NativeSelectOption>
-            <NativeSelectOption value="cleared">Cleared</NativeSelectOption>
+            <option value="pending">Pending</option>
+            <option value="posted">Posted</option>
+            <option value="cleared">Cleared</option>
           </NativeSelect>
           <Badge
             variant="count"

@@ -1,29 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-  BarChart,
-  Bar,
-} from 'recharts'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
-import { SkeletonRow } from '@cashflow/ui'
-import { EmptyTableRow } from '@cashflow/ui'
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, BarChart, Bar, } from 'recharts'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { EmptyTableRow } from '@/lib/ds-extras'
 import { getJson } from '../../lib/api'
 import {
   fromDateInputValue,
@@ -181,9 +165,9 @@ export function AnalyzeTab() {
         <div className="space-y-2 py-8 text-center">
           <p className="font-semibold">No item-level data yet.</p>
           <p className="text-sm text-muted-foreground">Items appear here as you import receipts.</p>
-          <Button size="sm" asChild>
-            <Link to="/import">Go to import</Link>
-          </Button>
+          <Link to="/import">
+            <Button size="sm">Go to import</Button>
+          </Link>
         </div>
       )}
 

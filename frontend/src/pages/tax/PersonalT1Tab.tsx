@@ -1,10 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
 import {
-  useScenarios,
-  useScenarioDetail,
-  type ScenarioWithComputed,
-} from '../../hooks/useScenarios';
+  useScenarios, useScenarioDetail, type ScenarioWithComputed, } from '../../hooks/useScenarios';
 import { useScenarioChain } from '../../hooks/useScenarioChain';
 import { type TaxLineDto } from '../../hooks/useTaxReturn';
 import { ScenarioTree } from './scenarios/ScenarioTree';
@@ -17,12 +14,12 @@ import { fmtCurrency } from './util/format';
 import { labelForTotal } from './util/labels';
 import { TaxLineBreakdownTable } from './components/TaxLineBreakdownTable';
 import { ScenarioCompareBar } from './components/ScenarioCompareBar';
-import { Button } from '@cashflow/ui';
+import { Button } from '@connor-adams/designsystem'
 import { StatCard } from '@/components/ui/stat-card';
-import { Card } from '@cashflow/ui';
+import { Card } from '@connor-adams/designsystem'
 import { CollapsibleCard } from '@/components/ui/collapsible-card';
-import { Alert } from '@cashflow/ui';
-import { EmptyState } from '@cashflow/ui';
+import { Alert } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 
 export function PersonalT1Tab({ year }: { year: number }) {
   const { entities, error: entitiesError } = useTaxEntities();

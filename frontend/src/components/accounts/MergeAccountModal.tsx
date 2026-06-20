@@ -1,15 +1,8 @@
 import { useMemo, useState } from 'react'
-import {
-  Dialog,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogBody,
-  DialogFooter,
-} from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Alert } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
+import { Dialog } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Alert } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
 import { postJson } from '../../lib/api'
 import type { Account, AccountMergeResult } from '../../types/api'
 
@@ -89,15 +82,27 @@ export function MergeAccountModal({ source, accounts, onClose, onMerged }: Merge
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
-      <DialogHeader>
-        <DialogTitle>Merge accounts</DialogTitle>
-        <DialogDescription>
+    <Dialog
+      open
+      onClose={() => { if (!busy) onClose() }}
+      title={<>Merge accounts</>}
+      description={
+        <>
           Move everything from “{source.name}” into another account. The source is kept,
           read-only, for audit.
-        </DialogDescription>
-      </DialogHeader>
-      <DialogBody>
+        </>
+      }
+      footer={
+        <>
+          <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button type="button" onClick={() => void onConfirm()} disabled={!canMerge}>
+            {busy ? 'Merging…' : 'Merge'}
+          </Button>
+        </>
+      }
+    >
         {eligibleTargets.length === 0 ? (
           <Alert variant="info">
             Need at least two same-currency accounts to merge. No eligible{' '}
@@ -137,15 +142,6 @@ export function MergeAccountModal({ source, accounts, onClose, onMerged }: Merge
             {error ? <Alert variant="error">{error}</Alert> : null}
           </div>
         )}
-      </DialogBody>
-      <DialogFooter>
-        <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
-          Cancel
-        </Button>
-        <Button type="button" onClick={() => void onConfirm()} disabled={!canMerge}>
-          {busy ? 'Merging…' : 'Merge'}
-        </Button>
-      </DialogFooter>
     </Dialog>
   )
 }

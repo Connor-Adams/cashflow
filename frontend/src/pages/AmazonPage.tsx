@@ -1,32 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Check,
-  LinkIcon,
-  RefreshCw,
-  Search,
-  Sparkles,
-  Trash2,
-  Upload,
-  X,
-} from 'lucide-react'
-import { Alert } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { useConfirm } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
-import { Grid } from '@cashflow/ui'
+  Check, LinkIcon, RefreshCw, Search, Sparkles, Trash2, Upload, X, } from 'lucide-react'
+import { Alert } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Grid } from '@/lib/ds-extras'
 import { StatCard } from '@/components/ui/stat-card'
-import { Input } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
-import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { deleteReq, getJson, patchJson, postFormData, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import { formatSyncAge } from '../lib/formatSyncAge'
@@ -392,7 +377,7 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
           </div>
           <Label htmlFor="amazonImportFile">
             CSV file
-            <Input
+            <input
               ref={fileRef}
               id="amazonImportFile"
               type="file"
@@ -467,11 +452,11 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
                     value={manualOrderByTxn[txn.id] ?? ''}
                     onChange={(event) => setManualOrderByTxn((prev) => ({ ...prev, [txn.id]: event.target.value }))}
                   >
-                    <NativeSelectOption value="">Manually link order...</NativeSelectOption>
+                    <option value="">Manually link order...</option>
                     {orders.map((order) => (
-                      <NativeSelectOption key={order.id} value={order.id}>
+                      <option key={order.id} value={order.id}>
                         #{order.id} {order.orderDate ?? order.shipmentDate ?? 'No date'} {order.total ? formatMoney(Number(order.total), order.currency) : ''}
-                      </NativeSelectOption>
+                      </option>
                     ))}
                   </NativeSelect>
                   <Button type="button" onClick={() => void manualLink(txn.id)} disabled={loading || !manualOrderByTxn[txn.id]}>
@@ -558,7 +543,7 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
                       onChange={(event) => void updateItem(item, { inferredCategory: event.target.value })}
                     >
                       {categories.map((cat) => (
-                        <NativeSelectOption key={cat} value={cat}>{cat}</NativeSelectOption>
+                        <option key={cat} value={cat}>{cat}</option>
                       ))}
                     </NativeSelect>
                   </TableCell>

@@ -1,4 +1,4 @@
-import { Badge } from '@cashflow/ui'
+import { Badge } from '@connor-adams/designsystem'
 
 /**
  * Visual badge for credit-card utilization (#437).

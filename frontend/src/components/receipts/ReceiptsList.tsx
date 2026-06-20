@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { getJson } from '@/lib/api'
-import { Button } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
-import { Skeleton } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Skeleton } from '@connor-adams/designsystem'
 import { formatMoney } from '@/lib/formatMoney'
 import {
   summarizeOrders,

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Sparkles } from 'lucide-react'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { useConfirm } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
 import type {
   CounterpartyBackfillProgress,
   CounterpartyBackfillStatus,

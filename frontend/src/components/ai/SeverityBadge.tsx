@@ -1,4 +1,4 @@
-import { Badge } from '@cashflow/ui'
+import { Badge } from '@connor-adams/designsystem'
 
 export type InsightSeverity = 'action' | 'watch' | 'info'
 

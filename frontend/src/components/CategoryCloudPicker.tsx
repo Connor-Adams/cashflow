@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
 import { CategoryIcon } from './CategoryIcon'
 
 function arrangeOptionsBySpace(options: string[]): string[] {

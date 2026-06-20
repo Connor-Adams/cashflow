@@ -4,12 +4,7 @@ import { render, screen, fireEvent, within } from '@testing-library/react'
 import { TableCard } from './table-card'
 import type { TableColumn } from './table-card'
 import {
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from '@cashflow/ui'
+  TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 
 describe('TableCard', () => {
   it('renders data-slot="table-card" on the Card wrapper', () => {
@@ -53,41 +48,29 @@ describe('TableCard', () => {
     expect(screen.queryByRole('heading', { level: 2 })).toBeNull()
   })
 
-  it('inner table container has overflow-auto and inline maxHeight (default 72vh)', () => {
+  it('passes maxHeight through to the DS table-container scroll wrapper (default 72vh)', () => {
     const { container } = render(
       <TableCard title="Test">
         <TableHeader><TableRow><TableHead>A</TableHead></TableRow></TableHeader>
         <TableBody><TableRow><TableCell>1</TableCell></TableRow></TableBody>
       </TableCard>
     )
+    // The DS Table renders its scroll wrapper as data-slot="table-container"
+    // with inline styles (overflow + maxHeight), not Tailwind classes.
     const tableContainer = container.querySelector('[data-slot="table-container"]') as HTMLElement
-    expect(tableContainer.className).toContain('overflow-auto')
+    expect(tableContainer.style.overflow).toBe('auto')
     expect(tableContainer.style.maxHeight).toBe('72vh')
   })
 
-  it('inner table has sticky-thead utilities (stickyHeader defaults to true)', () => {
+  it('accepts a custom maxHeight', () => {
     const { container } = render(
-      <TableCard title="Test">
-        <TableHeader><TableRow><TableHead>A</TableHead></TableRow></TableHeader>
-        <TableBody><TableRow><TableCell>1</TableCell></TableRow></TableBody>
-      </TableCard>
-    )
-    const table = container.querySelector('[data-slot="table"]') as HTMLElement
-    expect(table.className).toContain('[&_thead_th]:sticky')
-    expect(table.className).toContain('[&_thead_th]:bg-card')
-  })
-
-  it('accepts custom maxHeight and stickyHeader=false', () => {
-    const { container } = render(
-      <TableCard title="Custom" maxHeight="50vh" stickyHeader={false}>
+      <TableCard title="Custom" maxHeight="50vh">
         <TableHeader><TableRow><TableHead>A</TableHead></TableRow></TableHeader>
         <TableBody><TableRow><TableCell>1</TableCell></TableRow></TableBody>
       </TableCard>
     )
     const tableContainer = container.querySelector('[data-slot="table-container"]') as HTMLElement
     expect(tableContainer.style.maxHeight).toBe('50vh')
-    const table = container.querySelector('[data-slot="table"]') as HTMLElement
-    expect(table.className).not.toContain('[&_thead_th]:sticky')
   })
 
   it('does not render SectionHeader (no h2) when only children provided (no title/description/actions)', () => {

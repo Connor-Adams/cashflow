@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Card } from '@cashflow/ui'
+import { Card } from '@connor-adams/designsystem'
 import { getJson } from '../../../../lib/api'
 import type { EnrichmentCoverage } from '../../../../types/api'
 

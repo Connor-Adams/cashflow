@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Button } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
 import { getJson, postJson } from '@/lib/api'
 
 type ActivationState = {

@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Calculator, Info, RotateCcw } from 'lucide-react'
-import { Button } from '@cashflow/ui'
-import { Card, CardContent, CardHeader, CardTitle } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
-import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Card, CardContent, CardHeader, CardTitle } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { postJson } from '@/lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import { safeNum } from '../lib/num'
@@ -196,9 +196,9 @@ export function OpportunityCostCalculator({
                 onChange={(e) => setCadence(e.target.value as Cadence)}
               >
                 {CADENCE_OPTIONS.map((opt) => (
-                  <NativeSelectOption key={opt.value} value={opt.value}>
+                  <option key={opt.value} value={opt.value}>
                     {opt.label}
-                  </NativeSelectOption>
+                  </option>
                 ))}
               </NativeSelect>
             </Label>

@@ -1,7 +1,7 @@
 import { formatMoney } from '../../lib/formatMoney'
 import { cn } from '@/lib/utils'
-import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
+import { NativeSelect } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
 import { useItemOverrides } from './useItemOverrides'
 import type { ExternalOrderItemView } from '../../../../shared/api-types'
 
@@ -75,11 +75,11 @@ export function ItemCard({ item, categoryHints, currency, onSaved }: ItemCardPro
           onChange={(e) => setCategory(e.target.value)}
           onBlur={() => void handleCategoryBlur()}
         >
-          <NativeSelectOption value="">(uncategorized)</NativeSelectOption>
+          <option value="">(uncategorized)</option>
           {categoryHints.map((c) => (
-            <NativeSelectOption key={c} value={c}>
+            <option key={c} value={c}>
               {c}
-            </NativeSelectOption>
+            </option>
           ))}
         </NativeSelect>
 

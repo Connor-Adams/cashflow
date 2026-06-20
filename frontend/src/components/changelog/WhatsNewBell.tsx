@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
 import { getJson, patchJson } from '@/lib/api'
 import type { ChangelogLatest } from '@/lib/changelog'
 import { ChangelogModal } from './ChangelogModal'

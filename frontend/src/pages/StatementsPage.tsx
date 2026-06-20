@@ -1,19 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Plus, RefreshCw } from 'lucide-react'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
-import { EmptyTableRow } from '@cashflow/ui'
+import { EmptyTableRow } from '@/lib/ds-extras'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@cashflow/ui'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'

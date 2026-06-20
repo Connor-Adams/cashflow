@@ -1,15 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bookmark, ChevronDown } from 'lucide-react'
-import { Button } from '@cashflow/ui'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Label as FieldLabel } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Label as FieldLabel } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { getJson, patchJson, postJson } from '../../lib/api'
 
@@ -247,12 +241,13 @@ export function SavedFiltersDropdown({ currentFilter, onApply }: Props) {
         )}
       </div>
 
-      <Dialog open={saveOpen} onOpenChange={(v) => { if (!v) setSaveOpen(false) }}>
-        <DialogHeader>
-          <DialogTitle>Save filter</DialogTitle>
-        </DialogHeader>
+      <Dialog
+        open={saveOpen}
+        onClose={() => setSaveOpen(false)}
+        title={<>Save filter</>}
+      >
         <form onSubmit={(e) => { e.preventDefault(); void submitSave() }}>
-          <DialogBody>
+          <div>
             <FieldLabel htmlFor="save-filter-name">
               Name
               <Input
@@ -270,15 +265,15 @@ export function SavedFiltersDropdown({ currentFilter, onApply }: Props) {
                 {saveErr}
               </p>
             )}
-          </DialogBody>
-          <DialogFooter>
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => setSaveOpen(false)}>
               Cancel
             </Button>
             <Button type="submit" disabled={saving || !saveName.trim()}>
               {saving ? 'Saving…' : 'Save'}
             </Button>
-          </DialogFooter>
+          </div>
         </form>
       </Dialog>
     </>

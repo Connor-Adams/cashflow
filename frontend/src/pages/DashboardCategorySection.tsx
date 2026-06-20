@@ -1,5 +1,5 @@
 // frontend/src/pages/DashboardCategorySection.tsx
-import { Card } from '@cashflow/ui';
+import { Card } from '@connor-adams/designsystem'
 import { CategoryRollupTree } from '../components/CategoryRollupTree';
 import type { RollupRow } from '../types/api';
 

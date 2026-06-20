@@ -8,28 +8,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { EmptyTableRow } from '@cashflow/ui'
+  CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
 import { MetricStat } from '@/components/ui/metric-stat'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
 import { StatCard } from '@/components/ui/stat-card'
 import {
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+  TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { TableCard, type TableColumn } from '@/components/ui/table-card'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'

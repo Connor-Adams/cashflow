@@ -14,10 +14,10 @@
  * docs/sync.md for the extension points).
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Card, CardContent } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Alert } from '@cashflow/ui'
+import { Card, CardContent } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Alert } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { getJson, postJson } from '../lib/api'
 import type {

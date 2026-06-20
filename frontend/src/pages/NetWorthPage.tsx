@@ -1,29 +1,14 @@
 import { useMemo, useRef, useState } from 'react'
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+  Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
 import {
-  useNetWorthCurrent,
-  useNetWorthSeries,
-  updateOpeningBalance,
-} from '@/hooks/useNetWorth'
+  useNetWorthCurrent, useNetWorthSeries, updateOpeningBalance, } from '@/hooks/useNetWorth'
 import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableHead,
-  TableRow,
-  TableCell,
-} from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
-import { Skeleton, SkeletonRow } from '@cashflow/ui'
+  Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Skeleton } from '@connor-adams/designsystem'
+import { SkeletonRow } from '@/lib/ds-extras'
 import { Link } from 'react-router-dom'
 import { formatMoney } from '@/lib/formatMoney'
 import {
@@ -173,9 +158,9 @@ export function NetWorthPage() {
             title="No accounts yet"
             description="Connect or add an account so we can track your assets and liabilities over time."
             actions={
-              <Button asChild size="sm">
-                <Link to="/settings/accounts">Add an account</Link>
-              </Button>
+              <Link to="/settings/accounts">
+                <Button size="sm">Add an account</Button>
+              </Link>
             }
           />
         )}

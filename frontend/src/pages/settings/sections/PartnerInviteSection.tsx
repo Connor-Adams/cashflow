@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Link2 } from 'lucide-react'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
 import { postJson } from '@/lib/api'
 
 export function PartnerInviteSection() {

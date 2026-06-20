@@ -1,13 +1,7 @@
 import { useRef, useState } from 'react'
-import {
-  Dialog,
-  DialogHeader,
-  DialogTitle,
-  DialogBody,
-  DialogFooter,
-  useConfirm,
-} from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
+import { Dialog } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { Button } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { postJson } from '@/lib/api'
 
@@ -142,11 +136,26 @@ export function ImportRulesModal({ open, onOpenChange, currentRuleCount, onSucce
   return (
     <>
     {confirm.dialog}
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogHeader>
-        <DialogTitle>Import rules</DialogTitle>
-      </DialogHeader>
-      <DialogBody>
+    <Dialog
+      open={open}
+      onClose={handleClose}
+      title={<>Import rules</>}
+      footer={
+        <>
+          <Button variant="ghost" onClick={handleClose} disabled={loading}>
+            Cancel
+          </Button>
+          <Button
+            variant={mode === 'replace' ? 'destructive' : 'primary'}
+            onClick={() => void handleSubmit()}
+            disabled={!parsed || !!fileError || loading}
+          >
+            {loading ? 'Importing…' : 'Import'}
+          </Button>
+        </>
+      }
+    >
+      <div>
         <div className="grid gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Rules file</label>
@@ -199,19 +208,7 @@ export function ImportRulesModal({ open, onOpenChange, currentRuleCount, onSucce
             </div>
           </fieldset>
         </div>
-      </DialogBody>
-      <DialogFooter>
-        <Button variant="ghost" onClick={handleClose} disabled={loading}>
-          Cancel
-        </Button>
-        <Button
-          variant={mode === 'replace' ? 'destructive' : 'primary'}
-          onClick={() => void handleSubmit()}
-          disabled={!parsed || !!fileError || loading}
-        >
-          {loading ? 'Importing…' : 'Import'}
-        </Button>
-      </DialogFooter>
+      </div>
     </Dialog>
     </>
   )

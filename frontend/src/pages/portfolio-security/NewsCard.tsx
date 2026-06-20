@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Card } from '@cashflow/ui'
+import { Card } from '@connor-adams/designsystem'
 import { getJson } from '../../lib/api'
 import type { PortfolioSecurityNews } from '../../types/api'
 

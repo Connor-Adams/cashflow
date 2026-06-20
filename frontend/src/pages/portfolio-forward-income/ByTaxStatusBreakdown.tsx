@@ -1,4 +1,4 @@
-import { Card } from '@cashflow/ui'
+import { Card } from '@connor-adams/designsystem'
 import type { PortfolioForwardIncomeTaxBucket } from '../../types/api'
 import { formatMoney } from '../../lib/formatMoney'
 

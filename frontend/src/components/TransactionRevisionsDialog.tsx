@@ -1,13 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Button } from '@cashflow/ui'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
 import { getJson, postJson } from '../lib/api'
 import type { Transaction } from '../types/api'
 
@@ -194,14 +188,14 @@ export function TransactionRevisionsDialog({
   return (
     <Dialog
       open={open}
-      onOpenChange={(o) => {
-        if (!o) onClose()
-      }}
+      onClose={() => onClose()}
+      title={<>Edit history</>}
+      footer={
+        <Button type="button" variant="outline" onClick={onClose}>
+          Close
+        </Button>
+      }
     >
-      <DialogHeader>
-        <DialogTitle>Edit history</DialogTitle>
-      </DialogHeader>
-      <DialogBody>
         {loading && <p className="muted">Loading history…</p>}
         {error && (
           <p className="error" role="alert">
@@ -269,12 +263,6 @@ export function TransactionRevisionsDialog({
             })}
           </ol>
         )}
-      </DialogBody>
-      <DialogFooter>
-        <Button type="button" variant="outline" onClick={onClose}>
-          Close
-        </Button>
-      </DialogFooter>
     </Dialog>
   )
 }

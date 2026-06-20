@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Button } from '@cashflow/ui'
-import { Alert } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Alert } from '@connor-adams/designsystem'
 import type { ReceiptWithItems } from '../../../shared/api-types'
 import { formatMoney } from '../lib/formatMoney'
 import { ItemCard } from './items/ItemCard'

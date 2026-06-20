@@ -1,37 +1,17 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+  Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
 import {
-  AlertTriangle,
-  ArrowDownRight,
-  ArrowUpRight,
-  Calendar,
-  ChevronDown,
-  ChevronRight,
-} from 'lucide-react'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
+  AlertTriangle, ArrowDownRight, ArrowUpRight, Calendar, ChevronDown, ChevronRight, } from 'lucide-react'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatCard } from '@/components/ui/stat-card'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { formatMoney } from '../lib/formatMoney'
 import {
@@ -421,12 +401,12 @@ export function ForecastPage() {
                     actions={
                       !loading && (
                         <div className="flex gap-2 flex-wrap justify-center">
-                          <Button size="sm" asChild>
-                            <Link to="/planned">Add planned event</Link>
-                          </Button>
-                          <Button size="sm" variant="outline" asChild>
-                            <Link to="/recurring">View recurring</Link>
-                          </Button>
+                          <Link to="/planned">
+                            <Button size="sm">Add planned event</Button>
+                          </Link>
+                          <Link to="/recurring">
+                            <Button size="sm" variant="outline">View recurring</Button>
+                          </Link>
                         </div>
                       )
                     }

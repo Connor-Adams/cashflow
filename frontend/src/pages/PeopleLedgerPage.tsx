@@ -11,20 +11,13 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AlertTriangle, UserX, Users } from 'lucide-react'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { EmptyTableRow } from '@cashflow/ui'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@cashflow/ui'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import type {
   ContactLedgerResponse,

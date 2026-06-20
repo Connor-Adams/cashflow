@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Alert } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card, CardContent, CardHeader, CardTitle } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
+import { Alert } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card, CardContent, CardHeader, CardTitle } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
@@ -99,9 +99,9 @@ export function PartnerHomePage() {
         title="Partner home"
         description="Your shared finances at a glance — balances shown from your side."
         actions={
-          <Button variant="secondary" asChild>
-            <Link to="/reports/partner">Full fairness dashboard</Link>
-          </Button>
+          <Link to="/reports/partner">
+            <Button variant="secondary">Full fairness dashboard</Button>
+          </Link>
         }
       />
 

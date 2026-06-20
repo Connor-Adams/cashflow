@@ -1,12 +1,6 @@
 import { TableCard } from '@/components/ui/table-card'
-import { EmptyTableRow } from '@cashflow/ui'
-import {
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+import { EmptyTableRow } from '@/lib/ds-extras'
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { formatMoney } from '../../lib/formatMoney'
 import type { PortfolioByAccountTypeBucket } from '../../types/api'
 

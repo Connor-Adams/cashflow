@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { BentoTile } from './BentoTile'
-import { Button } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
 import { getJson, postJson } from '@/lib/api'
 import { usePushSubscription } from '@/hooks/usePushSubscription'
 import { deepLinkForNotification } from '@/lib/notificationLinks'

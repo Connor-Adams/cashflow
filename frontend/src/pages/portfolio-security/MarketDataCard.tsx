@@ -1,4 +1,4 @@
-import { Card } from '@cashflow/ui'
+import { Card } from '@connor-adams/designsystem'
 import { formatMoney } from '../../lib/formatMoney'
 import type { PortfolioSecurityOverview } from '../../types/api'
 

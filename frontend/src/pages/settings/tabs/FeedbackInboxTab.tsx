@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { getJson, postJson } from '../../../lib/api'
 

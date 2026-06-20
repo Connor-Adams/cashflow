@@ -1,12 +1,5 @@
-import { Card } from '@cashflow/ui'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+import { Card } from '@connor-adams/designsystem'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import type { PortfolioSecurityOverview } from '../../types/api'
 
 export type EarningsCardProps = {

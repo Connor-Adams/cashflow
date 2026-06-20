@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Button } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
 import { BentoTile } from './BentoTile'
 import { useSafeToSpend } from '@/hooks/useSafeToSpend'
 import { formatMoney } from '@/lib/formatMoney'
@@ -249,13 +249,14 @@ function SurplusActions({
 
       <div className="flex flex-wrap items-center gap-2">
         {surplus.topGoal ? (
-          <Button
-            asChild
-            variant={onGradient ? 'secondary' : 'outline'}
-            size="sm"
-          >
-            <Link to="/goals">Put it toward {surplus.topGoal.name}</Link>
-          </Button>
+          <Link to="/goals">
+            <Button
+              variant={onGradient ? 'secondary' : 'outline'}
+              size="sm"
+            >
+              Put it toward {surplus.topGoal.name}
+            </Button>
+          </Link>
         ) : null}
         <Button
           type="button"

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, DragEvent, KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
-import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { patchJson, postFormData } from '@/lib/api'
 
@@ -233,7 +233,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
           )}
         </div>
 
-        <Input
+        <input
           ref={fileInputRef}
           type="file"
           accept={ACCEPTED_EXTENSIONS}
@@ -281,9 +281,9 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                 onChange={(e) => setAccountType(e.target.value)}
               >
                 {ACCOUNT_TYPE_OPTIONS.map((o) => (
-                  <NativeSelectOption key={o.value} value={o.value}>
+                  <option key={o.value} value={o.value}>
                     {o.label}
-                  </NativeSelectOption>
+                  </option>
                 ))}
               </NativeSelect>
             </div>

@@ -12,22 +12,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Clock, Link2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { Alert } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { EmptyTableRow } from '@cashflow/ui'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@cashflow/ui'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
-import { Tabs, TabPanel } from '@cashflow/ui'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
+import { Tabs } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { getJson, postJson, patchJson } from '../lib/api'
 import { todayDateInputValue } from '../lib/dateInput'
@@ -193,23 +186,20 @@ export function ReimbursementsPage() {
         </Alert>
       )}
 
-      {(['outstanding', 'overdue', 'received', 'all'] as const).map((key) => (
-        <TabPanel
-          key={key}
-          value={key}
-          active={tab}
-          tabsId="reimbursements-tabs"
-        >
-          <ReimbursementTable
-            rows={rows}
-            loading={loading}
-            emptyTitle={emptyTitleFor(key)}
-            onSetStatus={setStatus}
-            onMatch={setMatching}
-            onUnlink={unlink}
-          />
-        </TabPanel>
-      ))}
+      {(['outstanding', 'overdue', 'received', 'all'] as const).map((key) =>
+        tab === key ? (
+          <div key={key} role="tabpanel">
+            <ReimbursementTable
+              rows={rows}
+              loading={loading}
+              emptyTitle={emptyTitleFor(key)}
+              onSetStatus={setStatus}
+              onMatch={setMatching}
+              onUnlink={unlink}
+            />
+          </div>
+        ) : null,
+      )}
 
       {matching && (
         <MatchDialog

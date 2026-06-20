@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import {
-  Dialog,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogBody,
-  DialogFooter,
-} from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
+import { Dialog } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
 import { getJson, postJson } from '../../lib/api'
 import type {
   DividendCandidate,
@@ -102,14 +95,29 @@ export function MatchDividendModal({
   if (!open || !reconciliation) return null
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} className="max-w-lg">
-      <DialogHeader>
-        <DialogTitle>Match dividend</DialogTitle>
-        <DialogDescription>
-          Choose the transaction that received this dividend payment.
-        </DialogDescription>
-      </DialogHeader>
-      <DialogBody className="max-h-96 overflow-y-auto">
+    <Dialog
+      open={open}
+      onClose={() => onOpenChange(false)}
+      title={<>Match dividend</>}
+      description={<>Choose the transaction that received this dividend payment.</>}
+      footer={
+        <>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            disabled={selected == null || submitting}
+            onClick={onConfirm}
+          >
+            {selectedLooksWrong && confirmWrong ? 'Match anyway' : 'Match'}
+          </Button>
+        </>
+      }
+      className="max-w-lg"
+    >
+      <div className="max-h-96 overflow-y-auto">
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading transactions…</p>
         ) : candidates.length === 0 ? (
@@ -165,20 +173,7 @@ export function MatchDividendModal({
             This transaction doesn&apos;t look like a dividend (debit / wrong account). Continue?
           </p>
         ) : null}
-      </DialogBody>
-      <DialogFooter>
-        <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-          Cancel
-        </Button>
-        <Button
-          type="button"
-          variant="primary"
-          disabled={selected == null || submitting}
-          onClick={onConfirm}
-        >
-          {selectedLooksWrong && confirmWrong ? 'Match anyway' : 'Match'}
-        </Button>
-      </DialogFooter>
+      </div>
     </Dialog>
   )
 }

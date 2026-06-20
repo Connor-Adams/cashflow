@@ -106,7 +106,7 @@ describe('ImportRulesModal', () => {
     expect(confirmTitle).toBeInTheDocument()
     // Scope the body + button assertions to the confirm dialog so we don't
     // collide with the import modal's own Cancel button.
-    const confirmDialog = confirmTitle.closest('[data-slot="dialog"]') as HTMLElement
+    const confirmDialog = confirmTitle.closest('[role="dialog"]') as HTMLElement
     expect(confirmDialog).toBeTruthy()
     const dialog = within(confirmDialog)
     expect(

@@ -1,8 +1,8 @@
 import * as React from 'react'
-import { Button } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
-import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { cn } from '@/lib/utils'
 
 /**
@@ -87,12 +87,12 @@ function FilterBar({
               onChange={(e) => onCurrencyChange(e.target.value)}
             >
               {allowAllCurrencies ? (
-                <NativeSelectOption value="">{allCurrenciesLabel}</NativeSelectOption>
+                <option value="">{allCurrenciesLabel}</option>
               ) : null}
               {availableCurrencies.map((c) => (
-                <NativeSelectOption key={c} value={c}>
+                <option key={c} value={c}>
                   {c}
-                </NativeSelectOption>
+                </option>
               ))}
             </NativeSelect>
           ) : (

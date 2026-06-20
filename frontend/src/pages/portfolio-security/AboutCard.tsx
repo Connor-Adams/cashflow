@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
 import type { PortfolioSecurityOverview } from '../../types/api'
 
 const TRUNCATE_LEN = 240

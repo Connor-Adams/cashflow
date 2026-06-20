@@ -1,13 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Button } from '@cashflow/ui'
-import {
-  Dialog,
-  DialogBody,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
 import { getJson, postJson } from '../../lib/api'
 
 /**
@@ -138,47 +131,45 @@ export function RollbackDialog({
   return (
     <Dialog
       open={open}
-      onOpenChange={(next) => {
-        if (!next) onClose()
-      }}
-    >
-      <DialogHeader>
-        <DialogTitle>Roll back import “{batchLabel}”?</DialogTitle>
-        <DialogDescription>
+      onClose={onClose}
+      title={<>Roll back import “{batchLabel}”?</>}
+      description={
+        <>
           This deletes the transactions created by this import batch and the
           dependent records they spawned. Manual transactions and other
           batches are preserved.
-        </DialogDescription>
-      </DialogHeader>
-      <DialogBody>
-        {loading && <p className="muted">Loading preview…</p>}
-        {error && (
-          <p role="alert" className="text-sm text-danger">
-            {error}
-          </p>
-        )}
-        {impact && (
-          <div className="space-y-3" data-testid="rollback-impact">
-            <RollbackBlockerList blockers={impact.blockers} />
-            <RollbackCounts impact={impact} />
-            <RollbackSample sample={impact.sample} />
-          </div>
-        )}
-      </DialogBody>
-      <DialogFooter>
-        <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
-          Cancel
-        </Button>
-        <Button
-          type="button"
-          variant="destructive"
-          onClick={() => void handleRollback()}
-          disabled={!impact?.canRollback || submitting}
-          aria-disabled={!impact?.canRollback || submitting}
-        >
-          {submitting ? 'Rolling back…' : 'Roll back batch'}
-        </Button>
-      </DialogFooter>
+        </>
+      }
+      footer={
+        <>
+          <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={() => void handleRollback()}
+            disabled={!impact?.canRollback || submitting}
+            aria-disabled={!impact?.canRollback || submitting}
+          >
+            {submitting ? 'Rolling back…' : 'Roll back batch'}
+          </Button>
+        </>
+      }
+    >
+      {loading && <p className="muted">Loading preview…</p>}
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
+      {impact && (
+        <div className="space-y-3" data-testid="rollback-impact">
+          <RollbackBlockerList blockers={impact.blockers} />
+          <RollbackCounts impact={impact} />
+          <RollbackSample sample={impact.sample} />
+        </div>
+      )}
     </Dialog>
   )
 }

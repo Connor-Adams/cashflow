@@ -30,21 +30,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCorpScenarioDetail } from '@/hooks/useCorpScenarioDetail';
 import { useCorpScenarios } from '@/hooks/useCorpScenarios';
 import {
-  useHouseholdPlanCompute,
-  type HouseholdPlanComputeResult,
-  type IntegrationWarning,
-  type PersonalScenarioComputeEntry,
-} from '@/hooks/useHouseholdPlanCompute';
+  useHouseholdPlanCompute, type HouseholdPlanComputeResult, type IntegrationWarning, type PersonalScenarioComputeEntry, } from '@/hooks/useHouseholdPlanCompute';
 import { fmtCurrency, fmtPct, numericOrZero, sumNumeric } from '../util/format';
 import { StatCard } from '@/components/ui/stat-card';
 import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from '@cashflow/ui';
+  Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 
 const FIELDS = [
   { key: 'salary', label: 'Salary' },

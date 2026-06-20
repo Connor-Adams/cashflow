@@ -25,24 +25,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { GitCompare, Pencil, Plus, RefreshCw, Trash2, TrendingDown, TrendingUp } from 'lucide-react'
-import { Alert } from '@cashflow/ui'
-import { Badge } from '@cashflow/ui'
-import { Button } from '@cashflow/ui'
-import { Card } from '@cashflow/ui'
-import { EmptyState } from '@cashflow/ui'
-import { Input } from '@cashflow/ui'
-import { Label } from '@cashflow/ui'
-import { NativeSelect } from '@cashflow/ui'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@cashflow/ui'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@cashflow/ui'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import { todayDateInputValue } from '../lib/dateInput'

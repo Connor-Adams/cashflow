@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { BentoTile } from './BentoTile'
-import { Button } from '@cashflow/ui'
+import { Button } from '@connor-adams/designsystem'
 import { useImportHealth } from '@/hooks/useImportHealth'
 import type { ImportConfidenceFlagToken } from '@cashflow/shared'
 
@@ -122,8 +122,8 @@ export function ImportHealthTile({ currency = 'CAD' }: Props) {
           ) : null}
 
           <div className="flex flex-wrap gap-3">
-            <Button asChild size="sm"><Link to="/review">Open Review Inbox</Link></Button>
-            <Button asChild size="sm" variant="outline"><Link to="/import">See recent imports</Link></Button>
+            <Link to="/review"><Button size="sm">Open Review Inbox</Button></Link>
+            <Link to="/import"><Button size="sm" variant="outline">See recent imports</Button></Link>
           </div>
 
           {unknown > 0 ? (
