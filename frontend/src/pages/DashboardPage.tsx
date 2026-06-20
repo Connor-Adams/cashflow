@@ -943,9 +943,9 @@ export function DashboardPage() {
                   // color-mix background must be inline (no JIT equivalent)
                   <article
                     key={item.budgetId}
-                    className="flex shrink-0 flex-col justify-center gap-1.5 rounded-md border p-2.5"
+                    className="flex shrink-0 flex-col justify-center gap-1.5 rounded-md border border-border p-2.5"
+                    // color-mix background has no Tailwind utility — keep inline var().
                     style={{
-                      borderColor: 'var(--border)',
                       background: 'color-mix(in oklch, var(--muted) 50%, transparent)',
                       minWidth: '200px',
                       maxWidth: '240px',
@@ -954,17 +954,16 @@ export function DashboardPage() {
                     {/* formerly .budgetPill__header */}
                     <header className="flex items-baseline justify-between gap-2">
                       {/* formerly .budgetPill__label */}
-                      <strong className="truncate text-sm font-semibold text-[var(--foreground)] inline-flex items-center gap-1.5 min-w-0" title={label}>
+                      <strong className="truncate text-sm font-semibold text-foreground inline-flex items-center gap-1.5 min-w-0" title={label}>
                         <CategoryIcon name={item.category} />
                         <span className="truncate">{label}</span>
                       </strong>
                       {/* formerly .budgetPill__pct */}
-                      <span className="shrink-0 text-xs font-semibold tabular-nums text-[var(--muted-foreground)]">{percentRounded}%</span>
+                      <span className="shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">{percentRounded}%</span>
                     </header>
                     {/* formerly .budgetPill__bar — color-mix bg must stay inline */}
                     <div
-                      className="relative h-1.5 w-full overflow-hidden rounded-full border border-[var(--border)]"
-                      style={{ background: 'var(--muted)' }}
+                      className="relative h-1.5 w-full overflow-hidden rounded-full border border-border bg-muted"
                       role="img"
                       aria-label={
                         elapsedRounded !== null
@@ -994,7 +993,7 @@ export function DashboardPage() {
                       )}
                     </div>
                     {/* formerly .budgetPill__amount */}
-                    <p className="m-0 truncate text-xs text-[var(--muted-foreground)]">
+                    <p className="m-0 truncate text-xs text-muted-foreground">
                       {formatCurrency(item.spent, item.currency)} /{' '}
                       {formatCurrency(item.target, item.currency)}{' '}
                       {/* formerly .budgetPill__currency */}

@@ -60,7 +60,7 @@ export function CurrencyMixTile({ metrics, loading }: CurrencyMixTileProps) {
         <>
           {/* formerly .currencyMixBar */}
           <div
-            className="mt-1 flex h-6 w-full overflow-hidden rounded-md border border-[var(--border)]"
+            className="mt-1 flex h-6 w-full overflow-hidden rounded-md border border-border"
             role="img"
             aria-label={`Currency mix: ${shares.map((s) => `${s.currency} ${Math.round(s.pct)} percent`).join(', ')}`}
           >
@@ -96,13 +96,13 @@ export function CurrencyMixTile({ metrics, loading }: CurrencyMixTileProps) {
                   aria-hidden="true"
                 />
                 {/* formerly .currencyMixLegend__code */}
-                <span className="font-semibold text-[var(--foreground)]">{s.currency}</span>
+                <span className="font-semibold text-foreground">{s.currency}</span>
                 {/* formerly .currencyMixLegend__amount */}
-                <span className="truncate text-right tabular-nums text-[var(--muted-foreground)]">
+                <span className="truncate text-right tabular-nums text-muted-foreground">
                   {formatMoney(s.value, s.currency)}
                 </span>
                 {/* formerly .currencyMixLegend__pct */}
-                <span className="shrink-0 tabular-nums font-semibold text-[var(--foreground)]">
+                <span className="shrink-0 tabular-nums font-semibold text-foreground">
                   {Math.round(s.pct)}%
                 </span>
               </li>

@@ -19,6 +19,8 @@ const LINK_LABEL: Record<ReceiptLinkStatus, string> = {
   orphan: 'Orphan',
 }
 
+// Raw token strings fed to inline `style.background` for the status dot — a
+// dynamic indexed swatch can't resolve to a static Tailwind utility, so keep var().
 const LINK_COLOR: Record<ReceiptLinkStatus, string> = {
   linked: 'var(--positive)',
   needs_match: 'var(--primary)',
@@ -134,15 +136,15 @@ export function ReceiptsList({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--muted-foreground)]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
         <span>
-          <strong className="text-[var(--foreground)]">{summary.count}</strong> receipts
+          <strong className="text-foreground">{summary.count}</strong> receipts
         </span>
         {summary.orphanCount > 0 ? (
           <>
             <span aria-hidden>·</span>
             <span>
-              <strong style={{ color: 'var(--warning)' }}>{summary.orphanCount}</strong>{' '}
+              <strong className="text-warning">{summary.orphanCount}</strong>{' '}
               {summary.orphanCount === 1 ? 'orphan' : 'orphans'}
             </span>
           </>
@@ -151,7 +153,7 @@ export function ReceiptsList({
           <>
             <span aria-hidden>·</span>
             <span className="tabular-nums">
-              <strong className="text-[var(--foreground)]">{formatMoney(summary.totalSum, currency)}</strong> total
+              <strong className="text-foreground">{formatMoney(summary.totalSum, currency)}</strong> total
             </span>
           </>
         ) : null}
@@ -159,13 +161,13 @@ export function ReceiptsList({
           <>
             <span aria-hidden>·</span>
             <span className="tabular-nums">
-              <strong className="text-[var(--foreground)]">{formatMoney(summary.taxSum, currency)}</strong> tax
+              <strong className="text-foreground">{formatMoney(summary.taxSum, currency)}</strong> tax
             </span>
           </>
         ) : null}
       </div>
 
-      <div className={`${ROW_GRID} px-3 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]`}>
+      <div className={`${ROW_GRID} px-3 text-[10px] uppercase tracking-wide text-muted-foreground`}>
         <span>Vendor</span>
         <span>Date</span>
         <span className="text-right">Tax</span>
@@ -199,12 +201,12 @@ export function ReceiptsList({
                     />
                     <span className="sr-only">{LINK_LABEL[o.linkStatus]}</span>
                   </span>
-                  <span aria-hidden className="text-[var(--muted-foreground)] transition-transform group-open:rotate-90">›</span>
+                  <span aria-hidden className="text-muted-foreground transition-transform group-open:rotate-90">›</span>
                 </summary>
 
-                <div className="flex flex-col gap-3 border-t border-border bg-[var(--card)] p-3 sm:flex-row sm:gap-6">
+                <div className="flex flex-col gap-3 border-t border-border bg-card p-3 sm:flex-row sm:gap-6">
                   <div className="min-w-0 flex-1">
-                    <p className="mb-1 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
+                    <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
                       {items.length} items
                     </p>
                     <ul className="flex max-h-40 flex-col gap-1 overflow-y-auto pr-1 text-sm">
@@ -215,12 +217,9 @@ export function ReceiptsList({
                             {it.quantity > 1 ? ` ×${it.quantity}` : ''}
                           </span>
                           <span
-                            className="muted tabular-nums"
-                            style={
-                              it.totalPrice != null && Number(it.totalPrice) < 0
-                                ? { color: 'var(--warning)' }
-                                : undefined
-                            }
+                            className={`muted tabular-nums${
+                              it.totalPrice != null && Number(it.totalPrice) < 0 ? ' text-warning' : ''
+                            }`}
                           >
                             {it.totalPrice != null ? formatMoney(Number(it.totalPrice), o.currency) : '—'}
                           </span>
@@ -231,24 +230,24 @@ export function ReceiptsList({
                   </div>
 
                   <div className="sm:w-56">
-                    <p className="mb-1 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">Breakdown</p>
+                    <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Breakdown</p>
                     <dl className="text-sm">
                       {o.subtotal != null ? (
-                        <div className="flex justify-between gap-2 py-0.5 text-[var(--muted-foreground)]">
+                        <div className="flex justify-between gap-2 py-0.5 text-muted-foreground">
                           <dt>Subtotal</dt>
-                          <dd className="tabular-nums text-[var(--foreground)]">{formatMoney(Number(o.subtotal), o.currency)}</dd>
+                          <dd className="tabular-nums text-foreground">{formatMoney(Number(o.subtotal), o.currency)}</dd>
                         </div>
                       ) : null}
                       {o.tax != null ? (
-                        <div className="flex justify-between gap-2 py-0.5 text-[var(--muted-foreground)]">
+                        <div className="flex justify-between gap-2 py-0.5 text-muted-foreground">
                           <dt>Tax</dt>
-                          <dd className="tabular-nums text-[var(--foreground)]">{formatMoney(Number(o.tax), o.currency)}</dd>
+                          <dd className="tabular-nums text-foreground">{formatMoney(Number(o.tax), o.currency)}</dd>
                         </div>
                       ) : null}
                       {o.shipping != null ? (
-                        <div className="flex justify-between gap-2 py-0.5 text-[var(--muted-foreground)]">
+                        <div className="flex justify-between gap-2 py-0.5 text-muted-foreground">
                           <dt>Shipping</dt>
-                          <dd className="tabular-nums text-[var(--foreground)]">{formatMoney(Number(o.shipping), o.currency)}</dd>
+                          <dd className="tabular-nums text-foreground">{formatMoney(Number(o.shipping), o.currency)}</dd>
                         </div>
                       ) : null}
                       <div className="mt-1 flex justify-between gap-2 border-t border-border pt-2 font-semibold">
@@ -259,15 +258,15 @@ export function ReceiptsList({
                       </div>
                     </dl>
                     {o.paymentLast4 ? (
-                      <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+                      <p className="mt-2 text-xs text-muted-foreground">
                         Paid with{' '}
-                        <span className="rounded border border-border px-1.5 py-0.5 text-[var(--foreground)]">•••• {o.paymentLast4}</span>
+                        <span className="rounded border border-border px-1.5 py-0.5 text-foreground">•••• {o.paymentLast4}</span>
                       </p>
                     ) : null}
 
                     {cats.length > 0 ? (
                       <div className="mt-3 border-t border-border pt-2">
-                        <p className="mb-1.5 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">Where it went</p>
+                        <p className="mb-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">Where it went</p>
                         <div className="mb-2 flex h-2 overflow-hidden rounded">
                           {cats.map((c, i) => (
                             <span
@@ -276,7 +275,7 @@ export function ReceiptsList({
                             />
                           ))}
                         </div>
-                        <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--muted-foreground)]">
+                        <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                           {cats.map((c, i) => (
                             <li key={c.category} className="flex items-center gap-1.5">
                               <span
@@ -284,7 +283,7 @@ export function ReceiptsList({
                                 style={{ background: CAT_COLORS[i % CAT_COLORS.length] }}
                               />
                               {c.category}{' '}
-                              <span className="tabular-nums text-[var(--foreground)]">{formatMoney(c.total, o.currency)}</span>
+                              <span className="tabular-nums text-foreground">{formatMoney(c.total, o.currency)}</span>
                             </li>
                           ))}
                         </ul>

@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { Card } from '@connor-adams/designsystem'
 import { enrichmentFilterHref } from './enrichmentFilterHref'
 
+// Dynamic indexed swatch colors consumed as style.background — keep inline var().
 const SOURCE_COLOR: Record<string, string> = {
   rules: 'var(--chart-2)',
   ai: 'var(--chart-3)',
@@ -41,14 +42,14 @@ export function EnrichmentSourceChart({ bySource }: Props) {
                 className="flex items-center gap-[0.625rem] no-underline hover:opacity-80"
                 aria-label={`View ${label} transactions`}
               >
-                <span className="enrichSourceBar__label w-[3.5rem] text-right text-[var(--muted-foreground)]">{label}</span>
-                <div className="flex-1 bg-[var(--muted)] h-[14px] rounded-[3px] overflow-hidden">
+                <span className="enrichSourceBar__label w-[3.5rem] text-right text-muted-foreground">{label}</span>
+                <div className="flex-1 bg-muted h-[14px] rounded-[3px] overflow-hidden">
                   <div
                     className="h-full rounded-[3px]"
                     style={{ width: `${pct}%`, background: color }}
                   />
                 </div>
-                <span className="w-[6rem] text-[var(--foreground)] tabular-nums">{n.toLocaleString()} · {pct}%</span>
+                <span className="w-[6rem] text-foreground tabular-nums">{n.toLocaleString()} · {pct}%</span>
               </Link>
             )
           })}
