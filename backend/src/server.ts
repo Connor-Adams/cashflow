@@ -20,6 +20,7 @@ import './jobs/definitions/budgetBreachCheck';
 import './jobs/definitions/dividendReconciliation';
 import './jobs/definitions/detectSubscriptionPriceChanges';
 import './jobs/definitions/jobRunCleanup';
+import './jobs/definitions/dataExportCleanup';
 import './jobs/definitions/auditBufferTrim';
 import './jobs/definitions/pdfImportProcess';
 import './jobs/definitions/simplefinSync';

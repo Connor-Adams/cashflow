@@ -38,6 +38,7 @@ const GROUPS: SettingsNavGroup[] = [
       { to: '/settings/api-tokens', label: 'API tokens' },
       { to: '/settings/audit-log', label: 'Audit log' },
       { to: '/settings/backup', label: 'Backup & export' },
+      { to: '/settings/data', label: 'Data export' },
       { to: '/settings/feedback', label: 'Feedback', ownerOnly: true },
       { to: '/settings/whatsnew', label: "What's new" },
     ],

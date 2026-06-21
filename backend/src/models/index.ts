@@ -113,6 +113,7 @@ import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
 import { SavedSearch, initSavedSearch } from './SavedSearch';
 import { AccountStatement, initAccountStatement } from './AccountStatement';
 import { SyncBackup, initSyncBackup } from './SyncBackup';
+import { DataExport, initDataExport } from './DataExport';
 import { LiabilityAccount, initLiabilityAccount } from './LiabilityAccount';
 import {
   DebtPayoffScenario,
@@ -214,6 +215,7 @@ initBudgetAlertState(sequelize);
 initSavedSearch(sequelize);
 initAccountStatement(sequelize);
 initSyncBackup(sequelize);
+initDataExport(sequelize);
 initLiabilityAccount(sequelize);
 initDebtPayoffScenario(sequelize);
 initFinancialScenario(sequelize);
@@ -1002,6 +1004,20 @@ SyncBackup.belongsTo(User, {
   as: 'user',
 });
 
+// Data exports (issue #302). Cascades on user delete — removing the user
+// account removes all their export rows. Physical files are cleaned up by
+// the daily `dataExportCleanup` cron before expiry.
+User.hasMany(DataExport, {
+  foreignKey: 'user_id',
+  as: 'dataExports',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+DataExport.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 // LiabilityAccount (issue #202). 1:1 sidecar for an Account whose type is a
 // liability kind. account_id is UNIQUE so we surface it as hasOne; both the
 // account and household teardown cascade-remove the profile.
@@ -1171,6 +1187,7 @@ export {
   VaultDocument,
   AccountStatement,
   SyncBackup,
+  DataExport,
   LiabilityAccount,
   DebtPayoffScenario,
   FinancialScenario,

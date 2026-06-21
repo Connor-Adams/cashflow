@@ -58,6 +58,7 @@ import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { LabelsTab } from './pages/settings/tabs/LabelsTab'
 import { SavedFiltersTab } from './pages/settings/tabs/SavedFiltersTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
+import { DataTab } from './pages/settings/tabs/DataTab'
 import { WhatsNewTab } from './pages/settings/tabs/WhatsNewTab'
 import { FeedbackInboxTab } from './pages/settings/tabs/FeedbackInboxTab'
 import { ApiTokensTab } from './pages/settings/tabs/ApiTokensTab'
@@ -191,6 +192,7 @@ function AppRoutes() {
             <Route path="api-tokens" element={<ApiTokensTab />} />
             <Route path="audit-log" element={<AuditLogPage />} />
             <Route path="backup" element={<SyncPage />} />
+            <Route path="data" element={<DataTab />} />
             <Route path="feedback" element={<FeedbackInboxTab />} />
             <Route path="whatsnew" element={<WhatsNewTab />} />
             {/* Folded/moved routes — redirect old deep links */}
