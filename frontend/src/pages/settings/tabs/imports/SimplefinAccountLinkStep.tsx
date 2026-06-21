@@ -30,12 +30,22 @@ type RowMode = 'existing' | 'create'
  * unlink results in place without a full reload. Shown inside the connected
  * SimplefinConnectCard.
  */
-export function SimplefinAccountLinkStep() {
+interface DiscoveredState {
+  accounts: SimplefinAccountLinkState[] | null
+  household: Account[]
+  loading: boolean
+  loadError: boolean
+  load: () => void
+  patchRow: (simplefinId: string, patch: Partial<SimplefinAccountLinkState>) => void
+  addHouseholdAccount: (account: Account) => void
+}
+
+/** Loads the discovered accounts + household accounts and exposes local edits. */
+function useDiscoveredAccounts(): DiscoveredState {
   const [accounts, setAccounts] = useState<SimplefinAccountLinkState[] | null>(null)
   const [household, setHousehold] = useState<Account[]>([])
   const [loading, setLoading] = useState<boolean>(true)
   const [loadError, setLoadError] = useState<boolean>(false)
-  const [skipped, setSkipped] = useState<Set<string>>(new Set())
   const mountedRef = useRef<boolean>(true)
 
   useEffect(() => {
@@ -53,12 +63,9 @@ export function SimplefinAccountLinkStep() {
         getSimplefinAccounts(),
         getJson<Account[]>('/api/accounts').catch(() => [] as Account[]),
       ])
-      if (mountedRef.current) {
-        setAccounts(Array.isArray(discovered.accounts) ? discovered.accounts : [])
-        setHousehold(
-          Array.isArray(hh) ? hh.filter((a) => a.mergedIntoId == null) : [],
-        )
-      }
+      if (!mountedRef.current) return
+      setAccounts(Array.isArray(discovered.accounts) ? discovered.accounts : [])
+      setHousehold(Array.isArray(hh) ? hh.filter((a) => a.mergedIntoId == null) : [])
     } catch {
       if (mountedRef.current) {
         setAccounts(null)
@@ -75,13 +82,25 @@ export function SimplefinAccountLinkStep() {
 
   function patchRow(simplefinId: string, patch: Partial<SimplefinAccountLinkState>) {
     setAccounts((prev) =>
-      prev == null
-        ? prev
-        : prev.map((a) => (a.simplefinId === simplefinId ? { ...a, ...patch } : a)),
+      prev == null ? prev : prev.map((a) => (a.simplefinId === simplefinId ? { ...a, ...patch } : a)),
     )
   }
 
-  if (loading) {
+  return {
+    accounts,
+    household,
+    loading,
+    loadError,
+    load: () => void load(),
+    patchRow,
+    addHouseholdAccount: (account) => setHousehold((prev) => [...prev, account]),
+  }
+}
+
+export function SimplefinAccountLinkStep() {
+  const state = useDiscoveredAccounts()
+
+  if (state.loading) {
     return (
       <p className="text-sm muted flex items-center gap-2 mt-3" data-testid="simplefin-accounts-loading">
         <Loader2 aria-hidden="true" className="size-4 animate-spin" />
@@ -89,19 +108,17 @@ export function SimplefinAccountLinkStep() {
       </p>
     )
   }
-
-  if (loadError) {
+  if (state.loadError) {
     return (
       <div className="mt-3" role="alert">
         <span className="error block mb-2">Couldn&rsquo;t load your SimpleFIN accounts.</span>
-        <Button type="button" variant="outline" onClick={() => void load()}>
+        <Button type="button" variant="outline" onClick={state.load}>
           Retry
         </Button>
       </div>
     )
   }
-
-  if (!accounts || accounts.length === 0) {
+  if (!state.accounts || state.accounts.length === 0) {
     return (
       <p className="text-sm muted mt-3">
         SimpleFIN didn&rsquo;t return any accounts for this connection. Try syncing again later, or
@@ -109,7 +126,12 @@ export function SimplefinAccountLinkStep() {
       </p>
     )
   }
+  return <LinkList state={state} accounts={state.accounts} />
+}
 
+function LinkList(props: { state: DiscoveredState; accounts: SimplefinAccountLinkState[] }) {
+  const { state, accounts } = props
+  const [skipped, setSkipped] = useState<Set<string>>(new Set())
   const allResolved = accounts.every(
     (a) => a.linkedAccountId != null || skipped.has(a.simplefinId),
   )
@@ -122,21 +144,15 @@ export function SimplefinAccountLinkStep() {
           <SimplefinAccountRow
             key={acc.simplefinId}
             account={acc}
-            household={household}
+            household={state.household}
             skipped={skipped.has(acc.simplefinId)}
-            onLinked={(linkedAccountId) => patchRow(acc.simplefinId, { linkedAccountId })}
+            onLinked={(linkedAccountId) => state.patchRow(acc.simplefinId, { linkedAccountId })}
             onCreated={(account, linkedAccountId) => {
-              setHousehold((prev) => [...prev, account])
-              patchRow(acc.simplefinId, { linkedAccountId })
+              state.addHouseholdAccount(account)
+              state.patchRow(acc.simplefinId, { linkedAccountId })
             }}
-            onUnlinked={() => patchRow(acc.simplefinId, { linkedAccountId: null })}
-            onSkip={() =>
-              setSkipped((prev) => {
-                const next = new Set(prev)
-                next.add(acc.simplefinId)
-                return next
-              })
-            }
+            onUnlinked={() => state.patchRow(acc.simplefinId, { linkedAccountId: null })}
+            onSkip={() => setSkipped((prev) => new Set(prev).add(acc.simplefinId))}
           />
         ))}
       </ul>
@@ -149,22 +165,19 @@ export function SimplefinAccountLinkStep() {
   )
 }
 
-function SimplefinAccountRow(props: {
-  account: SimplefinAccountLinkState
-  household: Account[]
-  skipped: boolean
+interface RowCallbacks {
   onLinked: (linkedAccountId: number) => void
   onCreated: (account: Account, linkedAccountId: number) => void
   onUnlinked: () => void
   onSkip: () => void
-}) {
-  const { account, household, skipped } = props
-  const [mode, setMode] = useState<RowMode>('existing')
-  const [selectedAccountId, setSelectedAccountId] = useState<string>(
-    account.suggestedAccountId != null ? String(account.suggestedAccountId) : '',
-  )
-  const [newName, setNewName] = useState<string>(account.name)
-  const [newCurrency, setNewCurrency] = useState<string>('CAD')
+}
+
+/**
+ * Row mutation state + handlers (link-existing / create / unlink), kept out of
+ * the render functions so each stays simple. `409` surfaces the already-linked
+ * warning; any other failure surfaces the row error without changing the row.
+ */
+function useRowActions(account: SimplefinAccountLinkState, cb: RowCallbacks) {
   const [busy, setBusy] = useState<boolean>(false)
   const [warning, setWarning] = useState<string | null>(
     account.alreadyLinkedElsewhere ? ALREADY_LINKED_WARNING : null,
@@ -179,112 +192,151 @@ function SimplefinAccountRow(props: {
     }
   }, [])
 
-  function handleAlreadyLinked() {
-    setWarning(ALREADY_LINKED_WARNING)
+  function handleFailure(e: unknown) {
+    if (!mountedRef.current) return
+    if (e instanceof ApiError && e.status === 409) setWarning(ALREADY_LINKED_WARNING)
+    else setRowError(ROW_ERROR)
   }
 
-  async function handleLinkExisting() {
-    if (busy || !selectedAccountId) return
+  async function run(work: () => Promise<void>) {
     setBusy(true)
     setRowError(null)
     setWarning(null)
     try {
-      const res = await linkSimplefinAccount(account.simplefinId, {
-        accountId: Number(selectedAccountId),
-      })
-      if (mountedRef.current && res.linkedAccountId != null) props.onLinked(res.linkedAccountId)
+      await work()
     } catch (e) {
-      if (!mountedRef.current) return
-      if (e instanceof ApiError && e.status === 409) handleAlreadyLinked()
-      else setRowError(ROW_ERROR)
+      handleFailure(e)
     } finally {
       if (mountedRef.current) setBusy(false)
     }
   }
 
-  async function handleCreate() {
-    if (busy || !newName.trim()) return
-    setBusy(true)
-    setRowError(null)
-    setWarning(null)
-    try {
+  async function linkExisting(accountId: number) {
+    await run(async () => {
+      const res = await linkSimplefinAccount(account.simplefinId, { accountId })
+      if (mountedRef.current && res.linkedAccountId != null) cb.onLinked(res.linkedAccountId)
+    })
+  }
+
+  async function createAndLink(name: string, defaultCurrency: string) {
+    await run(async () => {
       const res = await linkSimplefinAccount(account.simplefinId, {
-        create: { name: newName.trim(), defaultCurrency: newCurrency },
+        create: { name, defaultCurrency },
       })
       if (mountedRef.current && res.linkedAccountId != null) {
-        const created: Account = {
-          id: res.linkedAccountId,
-          name: newName.trim(),
-          owner: 'me',
-          householdId: null,
-          ownerUserId: null,
-          visibility: 'private',
-          accountType: 'checking',
-          shortCode: null,
-          defaultCurrency: newCurrency,
-          closedAt: null,
-        }
-        props.onCreated(created, res.linkedAccountId)
+        cb.onCreated(newAccountStub(res.linkedAccountId, name, defaultCurrency), res.linkedAccountId)
       }
-    } catch (e) {
-      if (!mountedRef.current) return
-      if (e instanceof ApiError && e.status === 409) handleAlreadyLinked()
-      else setRowError(ROW_ERROR)
-    } finally {
-      if (mountedRef.current) setBusy(false)
-    }
+    })
   }
 
-  async function handleUnlink() {
-    if (busy) return
-    setBusy(true)
-    setRowError(null)
-    try {
+  async function unlink() {
+    await run(async () => {
       await unlinkSimplefinAccount(account.simplefinId)
-      if (mountedRef.current) props.onUnlinked()
-    } catch {
-      if (mountedRef.current) setRowError(ROW_ERROR)
-    } finally {
-      if (mountedRef.current) setBusy(false)
-    }
+      if (mountedRef.current) cb.onUnlinked()
+    })
   }
 
-  // ── Linked summary ───────────────────────────────────────────────────────
+  return { busy, warning, rowError, linkExisting, createAndLink, unlink }
+}
+
+/** Optimistic local shape for a just-created account (id from the API). */
+function newAccountStub(id: number, name: string, defaultCurrency: string): Account {
+  return {
+    id,
+    name,
+    owner: 'me',
+    householdId: null,
+    ownerUserId: null,
+    visibility: 'private',
+    accountType: 'checking',
+    shortCode: null,
+    defaultCurrency,
+    closedAt: null,
+  }
+}
+
+function SimplefinAccountRow(props: {
+  account: SimplefinAccountLinkState
+  household: Account[]
+  skipped: boolean
+  onLinked: (linkedAccountId: number) => void
+  onCreated: (account: Account, linkedAccountId: number) => void
+  onUnlinked: () => void
+  onSkip: () => void
+}) {
+  const { account, household, skipped } = props
+  const actions = useRowActions(account, props)
+
   if (account.linkedAccountId != null) {
-    const linked = household.find((a) => a.id === account.linkedAccountId)
-    return (
-      <li className="text-sm flex items-center justify-between gap-3 border border-[var(--border,#ddd)] rounded p-2">
-        <span>
-          SimpleFIN &ldquo;{account.name}&rdquo; →{' '}
-          <strong>{linked ? linked.name : `account #${account.linkedAccountId}`}</strong>
-        </span>
-        <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void handleUnlink()}>
-          Unlink
-        </Button>
-      </li>
-    )
+    return <LinkedRow account={account} household={household} busy={actions.busy} onUnlink={actions.unlink} />
   }
-
-  // ── Skipped ──────────────────────────────────────────────────────────────
   if (skipped) {
-    return (
-      <li className="text-sm muted flex items-center justify-between gap-3 border border-dashed border-[var(--border,#ddd)] rounded p-2">
-        <span>
-          SimpleFIN &ldquo;{account.name}&rdquo; — skipped
-        </span>
-      </li>
-    )
+    return <SkippedRow account={account} />
   }
+  return (
+    <UnlinkedRow
+      account={account}
+      household={household}
+      busy={actions.busy}
+      warning={actions.warning}
+      rowError={actions.rowError}
+      onLinkExisting={actions.linkExisting}
+      onCreate={actions.createAndLink}
+      onSkip={props.onSkip}
+    />
+  )
+}
 
-  // ── Unlinked: link controls ───────────────────────────────────────────────
+function LinkedRow(props: {
+  account: SimplefinAccountLinkState
+  household: Account[]
+  busy: boolean
+  onUnlink: () => Promise<void>
+}) {
+  const { account, household, busy } = props
+  const linked = household.find((a) => a.id === account.linkedAccountId)
+  return (
+    <li className="text-sm flex items-center justify-between gap-3 border border-[var(--border,#ddd)] rounded p-2">
+      <span>
+        SimpleFIN &ldquo;{account.name}&rdquo; →{' '}
+        <strong>{linked ? linked.name : `account #${account.linkedAccountId}`}</strong>
+      </span>
+      <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void props.onUnlink()}>
+        Unlink
+      </Button>
+    </li>
+  )
+}
+
+function SkippedRow(props: { account: SimplefinAccountLinkState }) {
+  return (
+    <li className="text-sm muted flex items-center justify-between gap-3 border border-dashed border-[var(--border,#ddd)] rounded p-2">
+      <span>SimpleFIN &ldquo;{props.account.name}&rdquo; — skipped</span>
+    </li>
+  )
+}
+
+function UnlinkedRow(props: {
+  account: SimplefinAccountLinkState
+  household: Account[]
+  busy: boolean
+  warning: string | null
+  rowError: string | null
+  onLinkExisting: (accountId: number) => Promise<void>
+  onCreate: (name: string, currency: string) => Promise<void>
+  onSkip: () => void
+}) {
+  const { account, household, busy, warning, rowError } = props
+  const [mode, setMode] = useState<RowMode>('existing')
+  const showSuggestion =
+    account.suggestedAccountId != null && !account.alreadyLinkedElsewhere
+
   return (
     <li className="text-sm border border-[var(--border,#ddd)] rounded p-2 flex flex-col gap-2">
       <div className="flex items-center gap-2">
         <strong>{account.name}</strong>
-        {account.suggestedAccountId != null && !account.alreadyLinkedElsewhere && (
-          <span className="muted text-xs">
-            We think this is your account — confirm to link.
-          </span>
+        {showSuggestion && (
+          <span className="muted text-xs">We think this is your account — confirm to link.</span>
         )}
       </div>
 
@@ -299,74 +351,26 @@ function SimplefinAccountRow(props: {
         </span>
       )}
 
-      <div className="flex items-center gap-2">
-        <NativeSelect
-          size="sm"
-          aria-label="Link mode"
-          value={mode}
-          onChange={(e) => setMode(e.target.value as RowMode)}
-          disabled={busy}
-        >
-          <option value="existing">Link to existing account</option>
-          <option value="create">Create a new account</option>
-        </NativeSelect>
-      </div>
+      <NativeSelect
+        size="sm"
+        aria-label="Link mode"
+        value={mode}
+        onChange={(e) => setMode(e.target.value as RowMode)}
+        disabled={busy}
+      >
+        <option value="existing">Link to existing account</option>
+        <option value="create">Create a new account</option>
+      </NativeSelect>
 
       {mode === 'existing' ? (
-        <div className="flex items-center gap-2 flex-wrap">
-          <NativeSelect
-            size="sm"
-            aria-label="Existing account"
-            value={selectedAccountId}
-            onChange={(e) => setSelectedAccountId(e.target.value)}
-            disabled={busy}
-          >
-            <option value="">Select an account&hellip;</option>
-            {household.map((a) => (
-              <option key={a.id} value={String(a.id)}>
-                {a.name}
-              </option>
-            ))}
-          </NativeSelect>
-          <Button
-            type="button"
-            size="sm"
-            disabled={busy || !selectedAccountId}
-            onClick={() => void handleLinkExisting()}
-          >
-            {busy ? 'Linking…' : 'Link to existing account'}
-          </Button>
-        </div>
+        <LinkExistingControls
+          account={account}
+          household={household}
+          busy={busy}
+          onLink={props.onLinkExisting}
+        />
       ) : (
-        <div className="flex items-center gap-2 flex-wrap">
-          <Input
-            aria-label="New account name"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            disabled={busy}
-            placeholder="Account name"
-          />
-          <NativeSelect
-            size="sm"
-            aria-label="New account currency"
-            value={newCurrency}
-            onChange={(e) => setNewCurrency(e.target.value)}
-            disabled={busy}
-          >
-            <option value="CAD">CAD</option>
-            <option value="USD">USD</option>
-            <option value="EUR">EUR</option>
-            <option value="GBP">GBP</option>
-          </NativeSelect>
-          <Button
-            type="button"
-            size="sm"
-            disabled={busy || !newName.trim()}
-            onClick={() => void handleCreate()}
-          >
-            {busy ? 'Creating…' : 'Create a new account'}
-          </Button>
-        </div>
+        <CreateAccountControls account={account} busy={busy} onCreate={props.onCreate} />
       )}
 
       <div>
@@ -375,5 +379,84 @@ function SimplefinAccountRow(props: {
         </Button>
       </div>
     </li>
+  )
+}
+
+function LinkExistingControls(props: {
+  account: SimplefinAccountLinkState
+  household: Account[]
+  busy: boolean
+  onLink: (accountId: number) => Promise<void>
+}) {
+  const { account, household, busy } = props
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(
+    account.suggestedAccountId != null ? String(account.suggestedAccountId) : '',
+  )
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <NativeSelect
+        size="sm"
+        aria-label="Existing account"
+        value={selectedAccountId}
+        onChange={(e) => setSelectedAccountId(e.target.value)}
+        disabled={busy}
+      >
+        <option value="">Select an account&hellip;</option>
+        {household.map((a) => (
+          <option key={a.id} value={String(a.id)}>
+            {a.name}
+          </option>
+        ))}
+      </NativeSelect>
+      <Button
+        type="button"
+        size="sm"
+        disabled={busy || !selectedAccountId}
+        onClick={() => void props.onLink(Number(selectedAccountId))}
+      >
+        {busy ? 'Linking…' : 'Link to existing account'}
+      </Button>
+    </div>
+  )
+}
+
+function CreateAccountControls(props: {
+  account: SimplefinAccountLinkState
+  busy: boolean
+  onCreate: (name: string, currency: string) => Promise<void>
+}) {
+  const { account, busy } = props
+  const [newName, setNewName] = useState<string>(account.name)
+  const [newCurrency, setNewCurrency] = useState<string>('CAD')
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <Input
+        aria-label="New account name"
+        value={newName}
+        onChange={(e) => setNewName(e.target.value)}
+        disabled={busy}
+        placeholder="Account name"
+      />
+      <NativeSelect
+        size="sm"
+        aria-label="New account currency"
+        value={newCurrency}
+        onChange={(e) => setNewCurrency(e.target.value)}
+        disabled={busy}
+      >
+        <option value="CAD">CAD</option>
+        <option value="USD">USD</option>
+        <option value="EUR">EUR</option>
+        <option value="GBP">GBP</option>
+      </NativeSelect>
+      <Button
+        type="button"
+        size="sm"
+        disabled={busy || !newName.trim()}
+        onClick={() => void props.onCreate(newName.trim(), newCurrency)}
+      >
+        {busy ? 'Creating…' : 'Create a new account'}
+      </Button>
+    </div>
   )
 }
