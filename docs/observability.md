@@ -97,6 +97,44 @@ To onboard:
    - `GIT_SHA=${{RAILWAY_GIT_COMMIT_SHA}}`
    - Redeploy.
 
+## Postgres engine metrics (prod only)
+
+Postgres exists **only in prod** — local dev runs on SQLite. So PG engine metrics
+are a **prod-only overlay** on the collector, not part of the base config that
+local `docker-compose` loads. The collector's `postgresql` receiver
+(`infra/otel-collector/config.postgres.yaml`) scrapes `pg_stat_*` / `pg_settings`
+and emits the metrics through the **existing** prometheus exporter on `:9464`,
+which the `cashflow-otel-collector` Prometheus job already scrapes — so there is
+**no new scrape job**. (App-side query spans already reach Tempo via the backend's
+Sequelize auto-instrumentation; this adds the engine-health layer.) No extension
+is needed — `pg_stat_statements` is only for query-digest analytics, which this
+does not collect.
+
+Dashboard: **Cashflow Postgres Engine** (`cashflow-postgres-engine`), auto-provisioned.
+
+One-time Railway setup (on the existing `otel-collector` service):
+
+1. **Create a read-only monitoring role** on the Railway Postgres. `pg_monitor`
+   unlocks the optional metrics (deadlocks, locks); core metrics work without it.
+   ```sql
+   CREATE ROLE cashflow_metrics LOGIN PASSWORD '<strong-password>';
+   GRANT pg_monitor TO cashflow_metrics;
+   ```
+2. **Add env vars** to the `otel-collector` service:
+   - `PG_METRICS_ENDPOINT=postgres.railway.internal:5432` (the PG service's private host:port)
+   - `PG_METRICS_USERNAME=cashflow_metrics`
+   - `PG_METRICS_PASSWORD=<strong-password>`
+   - `PG_METRICS_DATABASE=<db name>` (usually `railway`)
+3. **Set the service's Custom Start Command** so the collector loads the overlay
+   on top of the base config (a single image, two `--config` flags):
+   ```
+   --config=/etc/otel-collector-config.yaml --config=/etc/otel-collector-pg-config.yaml
+   ```
+   Without this flag the overlay is dormant — the base CMD loads only the first
+   config. This is exactly why local stays quiet: it never gets the second flag.
+4. Redeploy. Verify in Grafana → Explore → Prometheus: `postgresql_backends`
+   should return a series within ~30s.
+
 ## Grafana service
 
 The cashflow stack includes a self-hosted Grafana instance for querying Loki, Tempo, and Prometheus. Grafana runs as a Railway service at `ghcr.io/connor-adams/cashflow-grafana`. Datasources auto-provision on boot from `infra/grafana/provisioning/`.
@@ -344,6 +382,103 @@ the last line of defense for the whole pipeline.
    Prometheus is the problem, `railway redeploy --service prometheus --yes`.
 5. Recovery: `up{job="cashflow-otel-collector"}` returns to `1`; TempoExportFailing/LokiExportFailing become evaluable again.
 
+
+#### BackendDown
+
+**Rule:** `cashflow-backend-down` — fires when `absent(cashflow_up)` for ≥2m.
+
+**What it means:** The cashflow backend is not reporting its heartbeat gauge
+to Prometheus. The process is likely down or failing to push metrics through
+the otel-collector.
+
+**Note:** If OtelCollectorScrapeDown is also firing, the collector pipeline
+is the root cause, not necessarily the backend.
+
+**Remediation:**
+1. `railway logs -s cashflow-backend -n 100` — check for crash loops or OOM kills.
+2. If the backend is running but metrics are absent, verify the otel-collector is healthy (check OtelCollectorScrapeDown).
+3. `railway redeploy --service cashflow-backend --yes` if the process is stuck.
+4. Recovery: `cashflow_up` gauge reappears in Prometheus.
+
+**Why a heartbeat gauge (design rationale):** Prometheus scrapes only the
+otel-collector (`up{job="cashflow-otel-collector"}`); the backend *pushes*
+metrics through that collector, so there is no `up{job="cashflow-backend"}`
+series to alert on. The backend could be dead while the collector stays alive
+and nothing would fire. Two alternatives were considered and rejected:
+
+- **(A) `absent(cashflow_http_server_requests_total)`** — cheap (reuses an
+  existing counter) but false-positives during legitimate idle windows
+  (overnight, low traffic): no requests means the series goes stale even
+  though the backend is perfectly healthy. Rejected — a liveness signal must
+  be independent of inbound traffic.
+- **(C) blackbox_exporter probing `/api/health`** — the most faithful check
+  because it actually exercises the HTTP request path end-to-end, but it adds
+  a new service plus a dedicated Prometheus scrape job to operate. Noted as a
+  future upgrade if synthetic HTTP probing becomes worthwhile; out of scope
+  for the heartbeat.
+
+The `cashflow.up` observable gauge (registered in
+`backend/src/observability/metrics.ts`) reports `1` on every 15s export
+interval regardless of traffic, so `absent(cashflow_up)` is true only when the
+backend has actually stopped exporting — traffic-independent by construction.
+
+#### HighHttp5xxRate
+
+**Rule:** `cashflow-high-http-5xx-rate` — fires when the 5xx error rate
+exceeds 2% of total requests over a 5-minute window, sustained for ≥5m.
+
+**What it means:** More than 2% of HTTP requests are returning server errors.
+
+**Remediation:**
+1. Check backend logs for unhandled exceptions or database connectivity errors.
+2. Open the **5xx Error Budget** stat on the API Health dashboard to see how far
+   over the 2% budget you are, and the **Request Rate by Route and Status** panel
+   for which endpoints are failing.
+3. Check downstream dependencies (database, external APIs) for outages.
+4. Recovery: 5xx rate drops below 2%.
+
+#### HighRouteLatencyP99
+
+**Rule:** `cashflow-high-route-latency-p99` — fires when the 99th-percentile
+HTTP response time exceeds 1000ms for ≥5m.
+
+**What it means:** Request latency is significantly degraded. The p99 baseline
+under normal load is ~150ms; the 1000ms threshold gives 6x headroom and
+catches sustained degradation without alerting on transient spikes.
+
+**Remediation:**
+1. Open the **Route Latency p99** panel on the API Health dashboard (the 1000ms
+   alert threshold is drawn on it) to see which routes are over budget.
+2. Look for slow database queries or missing indexes.
+3. Check for external API timeouts or memory pressure causing GC pauses.
+4. Recovery: p99 latency drops below 1000ms.
+
+#### OutboundDependencyFailing
+
+**Rule:** `cashflow-outbound-dependency-failing` — fires when an external
+service returns 5xx errors for ≥5m, identified by `server_address` label.
+
+**What it means:** A third-party dependency (Yahoo Finance API, Plaid, email
+service, etc.) is returning server errors.
+
+**Remediation:**
+1. Check which `server_address` is affected in the alert labels.
+2. Verify whether the provider has a known outage.
+3. If transient, the alert will auto-resolve when the dependency recovers.
+
+#### JobFailing
+
+**Rule:** `cashflow-job-failing` — fires when
+`increase(cashflow_job_runs_total{result="failure"}[15m]) > 0` for ≥5m.
+
+**What it means:** One or more background jobs have failed at least once in
+the last 15 minutes. Recurring failures indicate a persistent error; a single
+failure may be transient.
+
+**Remediation:**
+1. Check the `job` label to identify which job failed.
+2. Review backend logs filtered by job name for error details.
+3. Recovery: job succeeds on next tick.
 ### Verification
 
 Once `restartPolicyType: ALWAYS` is set on tempo, simulate the original
@@ -358,13 +493,45 @@ incident:
 
 Repeat for `loki` and `prometheus`.
 
-### Notification routing (future work)
+### Alert routing: every fire becomes a GitHub issue
 
-The alert rules will fire and show as "Firing" in Grafana → Alerting → Alert
-rules immediately. Routing them to email/Slack/Discord requires a contact
-point + notification policy, which lives outside this repo because it needs
-SMTP/webhook credentials. Add when ready via Grafana → Alerting → Contact
-points.
+A firing alert no longer just shows as "Firing" in the Grafana UI and ages out —
+it becomes a durable, owner-assignable GitHub issue (cashflow issue #386). This
+replaces the old comment-next-to-the-wiring pattern: the alert *is* the ticket.
+
+The path:
+
+1. Grafana provisions a webhook contact point and a notification policy from
+   [`infra/grafana/provisioning/alerting/contactpoints.yaml`](https://github.com/Connor-Adams/cashflow/blob/main/infra/grafana/provisioning/alerting/contactpoints.yaml).
+   The policy routes every alert in the `Cashflow` folder to the
+   `github-issues` contact point.
+2. That contact point POSTs a webhook to GitHub's `repository_dispatch` API
+   (`event_type: grafana-alert`), with the Alertmanager-shaped alert group as
+   the `client_payload`.
+3. [`.github/workflows/grafana-alert-to-issue.yml`](https://github.com/Connor-Adams/cashflow/blob/main/.github/workflows/grafana-alert-to-issue.yml)
+   listens for that dispatch and runs
+   [`scripts/grafana-alert-to-issue.cjs`](https://github.com/Connor-Adams/cashflow/blob/main/scripts/grafana-alert-to-issue.cjs).
+
+Issue lifecycle (keyed by an `alert:<rule-uid>` label, one open issue per rule):
+
+| Alert state | Open issue exists? | Action |
+| :--- | :--- | :--- |
+| firing | no | **create** a `bug` + `incident` issue (`severity:*`, `component:*`, `alert:<uid>` labels; body carries summary, description, `runbook_url`, and the Grafana rule link) |
+| firing | yes | **comment** on it (no duplicate) |
+| resolved | yes | **close** it with a "resolved" comment |
+| resolved | no | noop |
+
+**Required secret:** the contact point authenticates the dispatch POST with a
+fine-scoped PAT exposed to the Grafana service as the `GITHUB_DISPATCH_TOKEN`
+env var (Grafana expands `$GITHUB_DISPATCH_TOKEN` in provisioning). The PAT
+needs only `contents: read` + `repository_dispatch` write on this repo. It is
+**not** committed — set it in the Grafana service environment. The workflow
+itself uses the built-in `GITHUB_TOKEN` with `issues: write`.
+
+To test the path end to end, fire a real alert (stop tempo per the
+[Verification](#verification) steps above) and confirm a `[alert] … on tempo`
+issue appears in the tracker, then bring tempo back and confirm the issue is
+closed.
 
 ## Kill switch
 

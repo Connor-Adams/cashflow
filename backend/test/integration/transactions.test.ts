@@ -14,6 +14,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { seedHousehold } from '../helpers/seedHousehold.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -113,7 +114,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  superAgent = request.agent(app);
+  superAgent = testAgent(app);
   const register = await superAgent.post('/api/auth/register').send({
     email: 'super-txns@example.com',
     displayName: 'Super Txns',
@@ -125,14 +126,14 @@ before(async () => {
   householdAId = a.householdId;
   userAId = a.userId;
   contactAId = a.contactId;
-  agentA = request.agent(app);
+  agentA = testAgent(app);
   agentA.jar.setCookie(`cashflow_session=${a.token}; Path=/`);
 
   const b = await seedHousehold('TxnsB', 'B Partner');
   householdBId = b.householdId;
   userBId = b.userId;
   contactBId = b.contactId;
-  agentB = request.agent(app);
+  agentB = testAgent(app);
   agentB.jar.setCookie(`cashflow_session=${b.token}; Path=/`);
 
   const models = await import('../../src/models');
@@ -535,6 +536,37 @@ test('PATCH /:id: ownershipType=me clears ownershipContactId to null (even when 
   assert.equal(res.status, 200);
   assert.equal(res.body.ownershipType, 'me');
   assert.equal(res.body.ownershipContactId, null, 'contactId must be auto-nulled');
+});
+
+test('PATCH /:id: counterpartyContactId links a household contact', async () => {
+  const id = await createTxn({
+    householdId: householdAId, accountId: accountAId, date: '2026-01-05', amount: -50,
+  });
+  const res = await agentA.patch(`/api/transactions/${id}`).send({
+    counterpartyContactId: contactAId,
+  });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.counterpartyContactId, contactAId);
+});
+
+test('PATCH /:id: counterpartyContactId=null clears the link', async () => {
+  const id = await createTxn({
+    householdId: householdAId, accountId: accountAId, date: '2026-01-05', amount: -50,
+  });
+  await agentA.patch(`/api/transactions/${id}`).send({ counterpartyContactId: contactAId });
+  const res = await agentA.patch(`/api/transactions/${id}`).send({ counterpartyContactId: null });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.counterpartyContactId, null);
+});
+
+test('PATCH /:id: cross-household counterpartyContactId throws 400', async () => {
+  const id = await createTxn({
+    householdId: householdAId, accountId: accountAId, date: '2026-01-05', amount: -50,
+  });
+  const res = await agentA.patch(`/api/transactions/${id}`).send({
+    counterpartyContactId: contactBId,
+  });
+  assert.equal(res.status, 400);
 });
 
 test('PATCH /:id: reviewFlag=false sets reviewedAt to a non-null timestamp', async () => {
@@ -1056,4 +1088,31 @@ test('GET /refund-suggestions: surfaces unreviewed auto-linked refunds', async (
   const ours = rows.find((r) => r.refundId === refundId);
   assert.ok(ours, 'refund should appear in the suggestions queue');
   assert.equal(ours!.linkedOriginal?.id, originalId);
+});
+
+test('PATCH /api/transactions/:id sets and clears taxTreatmentOverride', async () => {
+  const txnId = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-03-01',
+    amount: -100,
+    merchantRaw: 'TaxTreatmentTest',
+  });
+
+  const set = await agentA
+    .patch(`/api/transactions/${txnId}`)
+    .send({ taxTreatmentOverride: 'rrsp_contribution' })
+    .expect(200);
+  assert.equal(set.body.taxTreatmentOverride, 'rrsp_contribution');
+
+  await agentA
+    .patch(`/api/transactions/${txnId}`)
+    .send({ taxTreatmentOverride: 'bogus' })
+    .expect(400);
+
+  const clear = await agentA
+    .patch(`/api/transactions/${txnId}`)
+    .send({ taxTreatmentOverride: null })
+    .expect(200);
+  assert.equal(clear.body.taxTreatmentOverride, null);
 });

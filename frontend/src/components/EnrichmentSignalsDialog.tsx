@@ -1,14 +1,8 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import { Badge } from '@/components/ui/badge'
+import { Button } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
 import { getJson, postJson } from '../lib/api'
 import type {
   EnrichmentSignal,
@@ -40,6 +34,20 @@ const CONFIDENCE_VARIANT: Record<string, 'default' | 'secondary' | 'outline' | '
   high: 'default',
   medium: 'secondary',
   low: 'outline',
+}
+
+// Human-readable chip labels per signal source. `embedding` (#792) is a
+// local semantic match against a previously-categorized merchant, distinct
+// from the exact `memory` match and the `ai` suggestion.
+const SOURCE_LABEL: Record<string, string> = {
+  memory: 'auto (merchant memory)',
+  embedding: 'auto (similar merchant)',
+  ai: 'auto (AI)',
+}
+
+function sourceLabel(source: string | null | undefined): string {
+  if (source == null) return ''
+  return SOURCE_LABEL[source] ?? source
 }
 
 export function EnrichmentSignalsDialog({
@@ -120,11 +128,29 @@ export function EnrichmentSignalsDialog({
   const open = transactionId != null
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogHeader>
-        <DialogTitle>Why this transaction was categorised</DialogTitle>
-      </DialogHeader>
-      <DialogBody>
+    <Dialog
+      open={open}
+      onClose={() => onClose()}
+      title={<>Why this transaction was categorised</>}
+      footer={
+        <>
+          {onReenriched && (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={reenriching || loading}
+              onClick={() => void reenrich()}
+            >
+              <RefreshCw aria-hidden="true" />
+              {reenriching ? 'Re-enriching…' : 'Re-enrich this row'}
+            </Button>
+          )}
+          <Button type="button" variant="outline" onClick={onClose}>
+            Close
+          </Button>
+        </>
+      }
+    >
         {transactionSummary && (
           <div style={{ marginBottom: '0.75rem' }}>
             <div><strong>Raw:</strong> <code>{transactionSummary.merchantRaw}</code></div>
@@ -132,7 +158,7 @@ export function EnrichmentSignalsDialog({
             <div className="row" style={{ gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.35rem' }}>
               <Badge variant="secondary">type: {transactionSummary.txnType}</Badge>
               {transactionSummary.autoSource && (
-                <Badge variant="secondary">source: {transactionSummary.autoSource}</Badge>
+                <Badge variant="secondary">source: {sourceLabel(transactionSummary.autoSource)}</Badge>
               )}
               {transactionSummary.autoConfidence && (
                 <Badge variant={CONFIDENCE_VARIANT[transactionSummary.autoConfidence] ?? 'muted'}>
@@ -166,7 +192,7 @@ export function EnrichmentSignalsDialog({
               {signals.map((s) => (
                 <li key={s.id} style={{ marginBottom: '0.5rem' }}>
                   <div className="row" style={{ gap: '0.35rem', flexWrap: 'wrap' }}>
-                    <Badge variant="secondary">{s.source}</Badge>
+                    <Badge variant="secondary">{sourceLabel(s.source)}</Badge>
                     <Badge variant={CONFIDENCE_VARIANT[s.confidence] ?? 'muted'}>
                       {s.confidence}
                     </Badge>
@@ -185,23 +211,6 @@ export function EnrichmentSignalsDialog({
             </ol>
           </details>
         )}
-      </DialogBody>
-      <DialogFooter>
-        {onReenriched && (
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={reenriching || loading}
-            onClick={() => void reenrich()}
-          >
-            <RefreshCw aria-hidden="true" />
-            {reenriching ? 'Re-enriching…' : 'Re-enrich this row'}
-          </Button>
-        )}
-        <Button type="button" variant="outline" onClick={onClose}>
-          Close
-        </Button>
-      </DialogFooter>
     </Dialog>
   )
 }

@@ -1,6 +1,9 @@
-import { useState, useRef } from 'react'
-import { patchJson } from '../lib/api'
-import type { ReceiptWithItems, ExternalOrderItemView } from '../../../shared/api-types'
+import { useEffect, useState } from 'react'
+import { Button } from '@connor-adams/designsystem'
+import { Alert } from '@connor-adams/designsystem'
+import type { ReceiptWithItems } from '../../../shared/api-types'
+import { formatMoney } from '../lib/formatMoney'
+import { ItemCard } from './items/ItemCard'
 
 type Props = {
   open: boolean
@@ -10,91 +13,25 @@ type Props = {
   onExtract: (receiptId: number) => Promise<void>
 }
 
-type ItemRowProps = {
-  item: ExternalOrderItemView
-  categoryHints: string[]
-}
-
-function ItemRow({ item, categoryHints }: ItemRowProps) {
-  const initialCategory = item.categoryOverride ?? item.inferredCategory ?? ''
-  const initialBusiness = item.businessUseOverride ?? item.businessUsePercent ?? ''
-
-  const lastSavedCategoryRef = useRef<string>(initialCategory)
-  const lastSavedBusinessRef = useRef<string | number>(initialBusiness)
-
-  const [category, setCategory] = useState<string>(initialCategory)
-  const [business, setBusiness] = useState<string | number>(initialBusiness)
-  const [categoryError, setCategoryError] = useState<string | null>(null)
-  const [businessError, setBusinessError] = useState<string | null>(null)
-
-  async function handleCategoryBlur() {
-    if (category === lastSavedCategoryRef.current) return
-    setCategoryError(null)
-    try {
-      await patchJson(`/api/external-order-items/${item.id}`, {
-        categoryOverride: category === '' ? null : category,
-      })
-      lastSavedCategoryRef.current = category
-    } catch (e) {
-      setCategory(lastSavedCategoryRef.current)
-      setCategoryError(e instanceof Error ? e.message : 'Save failed')
-    }
-  }
-
-  async function handleBusinessBlur() {
-    if (business === lastSavedBusinessRef.current) return
-    setBusinessError(null)
-    const val = business === '' ? null : Number(business)
-    try {
-      await patchJson(`/api/external-order-items/${item.id}`, {
-        businessUseOverride: val,
-      })
-      lastSavedBusinessRef.current = business
-    } catch (e) {
-      setBusiness(lastSavedBusinessRef.current)
-      setBusinessError(e instanceof Error ? e.message : 'Save failed')
-    }
-  }
-
-  return (
-    <tr>
-      <td>{item.title}</td>
-      <td>{item.quantity}</td>
-      <td>{item.totalPrice ?? '—'}</td>
-      <td>
-        <select
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          onBlur={() => void handleCategoryBlur()}
-        >
-          <option value="">(uncategorized)</option>
-          {categoryHints.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-        {categoryError && <span role="alert">{categoryError}</span>}
-      </td>
-      <td>
-        <input
-          type="number"
-          min={0}
-          max={100}
-          value={business}
-          onChange={(e) => setBusiness(e.target.value)}
-          onBlur={() => void handleBusinessBlur()}
-        />
-        {businessError && <span role="alert">{businessError}</span>}
-      </td>
-    </tr>
-  )
-}
-
 type ReceiptPanelProps = {
   receipt: ReceiptWithItems
   categoryHints: string[]
   onExtract: (receiptId: number) => Promise<void>
+}
+
+function vendorLabel(vendor: string): string {
+  if (vendor === 'uber') return 'Uber'
+  if (vendor === 'uber_eats') return 'Uber Eats'
+  return vendor
+}
+
+function TotalLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between text-sm text-muted-foreground">
+      <span>{label}</span>
+      <span>{value}</span>
+    </div>
+  )
 }
 
 function ReceiptPanel({ receipt, categoryHints, onExtract }: ReceiptPanelProps) {
@@ -115,78 +52,73 @@ function ReceiptPanel({ receipt, categoryHints, onExtract }: ReceiptPanelProps) 
 
   if (receipt.externalOrderId == null || receipt.order == null) {
     return (
-      <div style={{ marginBottom: '1rem', padding: '0.75rem', border: '1px solid #ddd', borderRadius: '4px' }}>
-        <div style={{ marginBottom: '0.5rem' }}>
-          <strong>{receipt.originalName}</strong>
+      <section className="space-y-2">
+        <div className="text-sm font-medium">{receipt.originalName}</div>
+        {extractError && <Alert variant="error">{extractError}</Alert>}
+        <div className="flex items-center justify-between rounded-md border border-dashed border-border px-3 py-3">
+          <span className="text-sm text-muted-foreground">No items extracted yet</span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={extracting}
+            onClick={() => void handleExtract()}
+          >
+            {extracting ? 'Extracting…' : 'Extract items'}
+          </Button>
         </div>
-        {extractError && (
-          <p role="alert" style={{ color: 'red', marginBottom: '0.5rem' }}>
-            {extractError}
-          </p>
-        )}
-        <button
-          type="button"
-          disabled={extracting}
-          onClick={() => void handleExtract()}
-        >
-          {extracting ? 'Extracting…' : 'Extract items'}
-        </button>
-      </div>
+      </section>
     )
   }
 
   const { order, items } = receipt
 
   return (
-    <div style={{ marginBottom: '1.5rem' }}>
-      <div style={{ marginBottom: '0.5rem' }}>
-        <strong>{order.vendor}</strong>{' '}
-        <span style={{ color: '#666' }}>{receipt.originalName}</span>
+    <section className="space-y-2">
+      <div className="flex items-baseline gap-2">
+        <span className="text-sm font-medium">{vendorLabel(order.vendor)}</span>
+        <span className="truncate text-xs text-muted-foreground">{receipt.originalName}</span>
       </div>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th>Qty</th>
-            <th>Total</th>
-            <th>Category</th>
-            <th>Business %</th>
-          </tr>
-        </thead>
-        <tbody>
+      {order.trip && (
+        <div className="text-sm">
+          <div>
+            {order.trip.pickupAddress ?? '—'} → {order.trip.dropoffAddress ?? '—'}
+          </div>
+          <div className="text-muted-foreground">
+            {order.trip.distance != null && `${order.trip.distance} ${order.trip.distanceUnit ?? ''}`}
+            {order.trip.distance != null && order.trip.durationMinutes != null && ' · '}
+            {order.trip.durationMinutes != null && `${order.trip.durationMinutes} min`}
+          </div>
+        </div>
+      )}
+
+      {items.length > 0 && (
+        <div className="space-y-2">
           {items.map((item) => (
-            <ItemRow key={item.id} item={item} categoryHints={categoryHints} />
+            <ItemCard key={item.id} item={item} categoryHints={categoryHints} currency={order.currency} />
           ))}
-        </tbody>
-        <tfoot>
-          {order.subtotal != null && (
-            <tr>
-              <td colSpan={4}>Subtotal</td>
-              <td>{order.subtotal}</td>
-            </tr>
-          )}
-          {order.tax != null && (
-            <tr>
-              <td colSpan={4}>Tax</td>
-              <td>{order.tax}</td>
-            </tr>
-          )}
-          {order.shipping != null && (
-            <tr>
-              <td colSpan={4}>Shipping</td>
-              <td>{order.shipping}</td>
-            </tr>
-          )}
-          {order.total != null && (
-            <tr>
-              <td colSpan={4}>Total</td>
-              <td>{order.total}</td>
-            </tr>
-          )}
-        </tfoot>
-      </table>
-    </div>
+        </div>
+      )}
+
+      <div className="space-y-1 border-t border-border pt-2">
+        {order.subtotal != null && (
+          <TotalLine label="Subtotal" value={formatMoney(Number(order.subtotal), order.currency)} />
+        )}
+        {order.tax != null && (
+          <TotalLine label="Tax" value={formatMoney(Number(order.tax), order.currency)} />
+        )}
+        {order.shipping != null && (
+          <TotalLine label="Shipping" value={formatMoney(Number(order.shipping), order.currency)} />
+        )}
+        {order.total != null && (
+          <div className="flex items-center justify-between text-sm font-medium">
+            <span>Total</span>
+            <span>{formatMoney(Number(order.total), order.currency)}</span>
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 
@@ -197,25 +129,54 @@ export default function ReceiptItemsDrawer({
   categoryHints,
   onExtract,
 }: Props) {
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
   if (!open) return null
 
-  return (
-    <div className="receiptItemsDrawer" role="dialog" aria-modal="true" aria-labelledby="receipt-items-drawer-title">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <h2 id="receipt-items-drawer-title" style={{ margin: 0 }}>Receipt Items</h2>
-        <button type="button" onClick={onClose}>
-          Close
-        </button>
-      </div>
+  const itemCount = receipts.reduce((n, r) => n + (r.items?.length ?? 0), 0)
 
-      {receipts.map((receipt) => (
-        <ReceiptPanel
-          key={receipt.id}
-          receipt={receipt}
-          categoryHints={categoryHints}
-          onExtract={onExtract}
-        />
-      ))}
-    </div>
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} aria-hidden="true" />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="receipt-items-drawer-title"
+        className="fixed inset-y-0 right-0 z-50 flex w-[440px] max-w-full flex-col border-l border-border bg-card"
+      >
+        <header className="flex items-center justify-between border-b border-border px-4 py-3">
+          <div>
+            <h2 id="receipt-items-drawer-title" className="m-0 text-base font-semibold">
+              Receipt items
+            </h2>
+            <p className="m-0 text-xs text-muted-foreground">
+              {receipts.length} {receipts.length === 1 ? 'receipt' : 'receipts'} · {itemCount}{' '}
+              {itemCount === 1 ? 'item' : 'items'}
+            </p>
+          </div>
+          <Button type="button" variant="secondary" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </header>
+
+        <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
+          {receipts.map((receipt) => (
+            <ReceiptPanel
+              key={receipt.id}
+              receipt={receipt}
+              categoryHints={categoryHints}
+              onExtract={onExtract}
+            />
+          ))}
+        </div>
+      </aside>
+    </>
   )
 }

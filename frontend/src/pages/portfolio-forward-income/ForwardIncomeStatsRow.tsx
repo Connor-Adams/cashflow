@@ -1,4 +1,4 @@
-import { Card } from '@/components/ui/card'
+import { Card } from '@connor-adams/designsystem'
 import { formatMoney } from '../../lib/formatMoney'
 
 export type ForwardIncomeStatsRowProps = {

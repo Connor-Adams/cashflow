@@ -23,6 +23,8 @@
  */
 
 import { num } from '../util/numbers';
+import type { SubscriptionCadence } from '../models/PlannedEvent';
+import { isNonCategorical, isNonSpend } from './classifyTransactionFlow';
 
 /** Transaction row consumed by the aggregator. Mirrors the attribute list
  *  the route requests from Sequelize — kept here so editors get type
@@ -38,6 +40,7 @@ export interface ExplainMonthTxnRow {
   merchantRaw: string | null;
   reviewFlag: boolean;
   receiptCount: number;
+  txnType: string | null;
 }
 
 /** Subscription row consumed by the aggregator. Same shape as
@@ -47,7 +50,7 @@ export interface ExplainMonthSubRow {
   merchantName: string;
   currency: string;
   amount: number;
-  cadence: 'monthly' | 'weekly';
+  cadence: SubscriptionCadence;
   annualizedCost: number;
   status: 'active' | 'cancelled' | 'ignored' | 'unknown';
   priceChangeDetected: boolean;
@@ -184,12 +187,23 @@ interface CurrencyBucket {
  *  amounts are income; negative amounts are spend (recorded as absolute
  *  value). Income includes refunds/rewards — they net against spend at
  *  the byCategory level too, which matches how /summary/monthly treats
- *  them. */
+ *  them. Real income (txnType='income') counts toward the income total
+ *  but is peeled from byCategory (a paycheck is not category data).
+ *  isNonSpend is a SPEND-side filter, so it only gates negative rows;
+ *  the positive side gets its own peel (money-movement legs are not
+ *  income). */
 function tallyByCurrency(rows: ExplainMonthTxnRow[]): Map<string, CurrencyBucket> {
   const out = new Map<string, CurrencyBucket>();
   for (const row of rows) {
     const amount = num(row.amount);
     if (amount == null) continue;
+    if (amount < 0) {
+      if (isNonSpend(row.txnType, null)) continue;
+    } else if (isNonCategorical(row.txnType, null) || row.txnType === 'payment') {
+      // Transfers, brokerage flows, dividends, and the card-side leg of a
+      // statement payment are money movement, not income.
+      continue;
+    }
     const bucket = out.get(row.currency) ?? {
       currency: row.currency,
       spend: 0,
@@ -201,9 +215,11 @@ function tallyByCurrency(rows: ExplainMonthTxnRow[]): Map<string, CurrencyBucket
     } else {
       bucket.income += amount;
     }
-    const cat = row.finalCategory ?? '(uncategorized)';
-    const existing = bucket.byCategory.get(cat) ?? 0;
-    bucket.byCategory.set(cat, existing + amount);
+    if (row.txnType !== 'income') {
+      const cat = row.finalCategory ?? '(uncategorized)';
+      const existing = bucket.byCategory.get(cat) ?? 0;
+      bucket.byCategory.set(cat, existing + amount);
+    }
     out.set(row.currency, bucket);
   }
   return out;

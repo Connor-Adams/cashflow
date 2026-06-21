@@ -22,6 +22,39 @@ export default defineConfig([
     rules: {
       // Data-fetch on mount and controlled row reset are valid; rule is overly strict for these patterns.
       'react-hooks/set-state-in-effect': 'off',
+      'no-restricted-syntax': [
+        'error',
+        {
+          // Raw hex color literals in component code — use a var(--token).
+          selector:
+            "Literal[value=/#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?\\b/]",
+          message:
+            'Off-palette hex color. Use a design token: var(--token) or a token-backed class.',
+        },
+        {
+          // Arbitrary Tailwind color brackets, e.g. bg-[#fff], text-[rgb(...)].
+          selector:
+            "Literal[value=/(?:bg|text|border|ring|fill|stroke|from|to|via|decoration|outline|shadow|divide|accent|caret)-\\[(?:#|rgb|hsl)/]",
+          message:
+            'Arbitrary Tailwind color value. Use a token-backed color class instead.',
+        },
+      ],
     },
+  },
+  {
+    // The palette/hex rule does not apply where literals are legitimate:
+    // test fixtures, the detector script itself, the foreign-page bundles
+    // (extension/bookmarklets) which cannot use app CSS tokens, and the label
+    // color palette (issue #794) — its swatches ARE the canonical hex values,
+    // persisted per-label to the DB and applied as inline chip tints, so they
+    // cannot be expressed as CSS tokens.
+    files: [
+      '**/*.test.{ts,tsx}',
+      'scripts/**',
+      'src/extension/**',
+      'src/bookmarklets/**',
+      'src/lib/labelColors.ts',
+    ],
+    rules: { 'no-restricted-syntax': 'off' },
   },
 ])

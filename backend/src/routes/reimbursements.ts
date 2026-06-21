@@ -34,14 +34,14 @@ import {
 } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { visibleTransactionWhere, householdWhere } from '../auth/scope';
+import { resolveHouseholdToday } from '../time/householdToday';
 import { aiSuggestLimiter } from './aiRateLimit';
 import {
   validateMarkReimbursable,
   validateReimbursementPatch,
   serializeReimbursement,
   summarize,
-  computeEffectiveStatus,
-  todayIso,
+  resolveToday,
   parseIsoOrNull,
   type ReimbursementRow,
 } from '../reimbursements/serialize';
@@ -49,6 +49,7 @@ import {
   rankRepaymentCandidates,
   type CandidateTransaction,
 } from '../reimbursements/matching';
+import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
 import {
   REIMBURSEMENT_STATUSES,
   type ReimbursementStatus,
@@ -164,9 +165,9 @@ router.post('/transactions/:id/reimbursable', async (req, res, next) => {
 //
 // #374: one-click "Promote and use" — given a transaction whose statement-
 // import populated `counterparty_raw` but no Contact link (#372), atomically:
-//   1. promote the raw text into a Contact (creating one in this household
-//      if no exact-name match exists; reusing the match if it does — same
-//      dedup rule as the standalone /counterparty/promote endpoint),
+//   1. promote the raw text into a Contact (find-or-create in this household
+//      by normalized name — same dedup rule as the standalone
+//      /counterparty/promote endpoint),
 //   2. link `transaction.counterparty_contact_id` to that Contact,
 //   3. create the Reimbursement claim using the new contactId (plus any
 //      amount / dueDate / notes the user supplied in the body).
@@ -231,20 +232,11 @@ router.post(
       }
 
       const result = await sequelize.transaction(async (t) => {
-        // Reuse-or-create dedup, scoped to (householdId, name) — same rule as
-        // the standalone /counterparty/promote endpoint on the transactions
-        // route, so a user who promotes via either path lands on the same
-        // Contact row.
-        let contact = await Contact.findOne({
-          where: { householdId: txn.householdId!, name: rawName },
-          transaction: t,
-        });
-        if (!contact) {
-          contact = await Contact.create(
-            { householdId: txn.householdId!, name: rawName, notes: null },
-            { transaction: t },
-          );
-        }
+        // Find-or-create dedup, scoped to (householdId, normalized_name) —
+        // same rule as the standalone /counterparty/promote endpoint on the
+        // transactions route, so a user who promotes via either path lands on
+        // the same Contact row.
+        const contact = await findOrCreateContactByName(txn.householdId!, rawName, { transaction: t });
         txn.counterpartyContactId = contact.id;
         await txn.save({ transaction: t });
         const claim = await Reimbursement.create(
@@ -286,7 +278,13 @@ router.post(
 router.get('/reimbursements', async (req, res, next) => {
   try {
     currentAuth(req);
-    const today = todayIso();
+    // `today` may be the browser's local date so overdue derivation flips at
+    // the user's midnight rather than UTC's (which is hours early in the
+    // Americas). Invalid/missing values fall back to UTC today.
+    const today = resolveToday(
+      req.query.today,
+      resolveHouseholdToday(currentAuth(req).household),
+    );
     const where: WhereOptions = { ...householdWhere(req) };
     const q = req.query;
 
@@ -351,12 +349,16 @@ router.get('/reimbursements', async (req, res, next) => {
 router.get('/reimbursements/summary', async (req, res, next) => {
   try {
     currentAuth(req);
-    const today = todayIso();
+    const today = resolveToday(
+      req.query.today,
+      resolveHouseholdToday(currentAuth(req).household),
+    );
+    // Full INCLUDE (not just contact): summarize() nets a received claim
+    // against its hydrated same-currency repayment transaction so a partial
+    // repayment doesn't credit the full claim face value.
     const rows = await Reimbursement.findAll({
       where: { ...householdWhere(req) },
-      include: [
-        { model: Contact, as: 'contact', attributes: ['id', 'name'], required: false },
-      ],
+      include: INCLUDE,
     });
     const summary = summarize(rows.map(toRow), today);
     res.json({ ...summary, today });
@@ -370,7 +372,10 @@ router.get('/reimbursements/summary', async (req, res, next) => {
 router.get('/reimbursements/overdue', async (req, res, next) => {
   try {
     currentAuth(req);
-    const today = todayIso();
+    const today = resolveToday(
+      req.query.today,
+      resolveHouseholdToday(currentAuth(req).household),
+    );
     // Candidates: open claims with a due date strictly before today, OR claims
     // explicitly pinned to the 'overdue' status.
     const rows = await Reimbursement.findAll({
@@ -551,10 +556,23 @@ router.post('/reimbursements/:id/link-repayment', async (req, res, next) => {
     }
     const repayment = await Transaction.findOne({
       where: { id: txnId, ...visibleTransactionWhere(req) },
-      attributes: ['id'],
+      attributes: ['id', 'amount', 'currency'],
     });
     if (!repayment) {
       res.status(404).json({ error: 'Repayment transaction not found' });
+      return;
+    }
+    // Mirror the match-candidates eligibility filter: a repayment must be an
+    // inflow (positive) in the claim's currency. Without this, linking an
+    // arbitrary visible transaction silently marks the claim received.
+    if (!(Number(repayment.amount) > 0)) {
+      res.status(400).json({ error: 'Repayment must be a positive inflow' });
+      return;
+    }
+    if (repayment.currency !== r.currency) {
+      res.status(400).json({
+        error: `Repayment currency must match the claim (${r.currency})`,
+      });
       return;
     }
     r.repaymentTransactionId = repayment.id;
@@ -622,7 +640,4 @@ function applyStatus(r: Reimbursement, status: ReimbursementStatus): void {
   }
 }
 
-// Re-export for tests that want to assert on the effective-status helper via
-// the route module's surface.
-export { computeEffectiveStatus };
 export default router;

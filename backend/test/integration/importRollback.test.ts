@@ -22,6 +22,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let models: typeof import('../../src/models/index.js');
@@ -43,7 +44,7 @@ before(async () => {
   models = await import('../../src/models/index.js');
   const mod = await import('../../src/app.js');
   app = mod.default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   const register = await authed.post('/api/auth/register').send({
     email: 'rollback@example.com',
     displayName: 'Rollback User',

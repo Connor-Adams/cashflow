@@ -23,6 +23,10 @@ import { rejectDemoAiRequest } from '../demo/aiAccess';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { loadCategoryHints } from '../ai/suggestTransaction';
 import { scheduleInternalBackfill } from '../import/backfillCoordinator';
+import {
+  recomputeTransactionsReviewFromItems,
+  transactionIdsForOrder,
+} from '../import/enrichment/recomputeTransactionReviewFromItems';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -75,6 +79,23 @@ async function loadAmazonCategoryOptions(householdId: number): Promise<string[]>
 router.get('/categories', async (req, res, next) => {
   try {
     res.json({ categories: await loadAmazonCategoryOptions(currentAuth(req).household.id) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/sync-status', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const where = { householdId: household.id, vendor: 'amazon' as const };
+    const [orderCount, latest] = await Promise.all([
+      ExternalOrder.count({ where }),
+      ExternalOrder.max('createdAt', { where }) as Promise<Date | string | null>,
+    ]);
+    res.json({
+      orderCount,
+      lastCapturedAt: latest ? new Date(latest).toISOString() : null,
+    });
   } catch (e) {
     next(e);
   }
@@ -267,6 +288,10 @@ router.post('/categorize/run', aiSuggestLimiter, async (req, res, next) => {
       limit,
     });
     const updated = await applyAmazonItemCategorySuggestions(result.suggestions);
+    // Recompute review flags for any transactions linked to the categorized order.
+    if (orderId != null) {
+      await recomputeTransactionsReviewFromItems(await transactionIdsForOrder(orderId));
+    }
     const audit = await createTrackedSuggestion({
       req,
       kind: 'amazon_item_categories',
@@ -334,6 +359,7 @@ router.post('/links/:id/accept', async (req, res, next) => {
       return;
     }
     await link.update({ status: 'accepted' });
+    await recomputeTransactionsReviewFromItems(await transactionIdsForOrder(Number(link.externalOrderId)));
     res.json(link);
   } catch (e) {
     next(e);
@@ -350,7 +376,9 @@ router.post('/links/:id/reject', async (req, res, next) => {
       res.status(404).json({ error: 'Link not found' });
       return;
     }
+    const rejectedTxnId = txn.id;
     await link.update({ status: 'rejected' });
+    await recomputeTransactionsReviewFromItems([rejectedTxnId]);
     res.json(link);
   } catch (e) {
     next(e);
@@ -384,6 +412,7 @@ router.post('/links/manual', async (req, res, next) => {
     if (link.status !== 'accepted') {
       await link.update({ status: 'accepted', confidence: '100', matchReason: 'manually linked by user' });
     }
+    await recomputeTransactionsReviewFromItems([transactionId]);
     res.status(201).json(link);
   } catch (e) {
     next(e);
@@ -400,7 +429,9 @@ router.delete('/links/:id', async (req, res, next) => {
       res.status(404).json({ error: 'Link not found' });
       return;
     }
+    const unlinkedTxnId = txn.id;
     await link.destroy();
+    await recomputeTransactionsReviewFromItems([unlinkedTxnId]);
     res.status(204).send();
   } catch (e) {
     next(e);

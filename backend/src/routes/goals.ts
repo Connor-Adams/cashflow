@@ -7,9 +7,29 @@ import {
 import { Account } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
-import { projectGoal, type GoalProjection } from '../goals/projection';
+import {
+  projectGoal,
+  projectGoalAgainstForecast,
+  type GoalProjection,
+} from '../goals/projection';
+import {
+  assembleForecast,
+  monthlyFreeCashFromOccurrences,
+} from '../forecast/assembleForecast';
 
 const router = Router();
+
+// Forecast window used to derive a goal's monthly free cash. 90 days captures
+// multiple income/charge cycles so the per-month figure is stable, unlike the
+// chart's shorter 30-day default. Normalized back to a monthly number.
+const GOAL_FORECAST_WINDOW_DAYS = 90;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function addDaysIso(iso: string, days: number): string {
+  const [y, m, d] = iso.split('-').map((p) => parseInt(p, 10));
+  const ms = Date.UTC(y, m - 1, d) + days * MS_PER_DAY;
+  return new Date(ms).toISOString().slice(0, 10);
+}
 
 type NormalizedFinancialGoalInput = {
   name: string;
@@ -454,10 +474,39 @@ router.get('/:id/projection', async (req, res, next) => {
       today,
     });
 
+    // Forecast-grounded validation (#653): derive the household's real
+    // forecasted free cash per month and classify the goal against it,
+    // instead of trusting the self-reported monthlyContribution. The forecast
+    // resolves a SINGLE currency (the household's largest-balance cash
+    // currency) — we do NOT force it to the goal's currency. When the goal's
+    // currency differs from that forecast currency we surface "can't validate"
+    // rather than faking an FX conversion.
+    const dateTo = addDaysIso(today, GOAL_FORECAST_WINDOW_DAYS);
+    const assembled = await assembleForecast({
+      householdId: currentAuth(req).household.id,
+      dateFrom: today,
+      dateTo,
+    });
+    const monthlyFreeCash = monthlyFreeCashFromOccurrences(
+      assembled.occurrences,
+      today,
+      dateTo,
+    );
+    const forecast = projectGoalAgainstForecast({
+      targetAmount: String(row.targetAmount),
+      currentAmount: String(row.currentAmount),
+      targetDate: row.targetDate,
+      today,
+      goalCurrency: row.currency,
+      forecastCurrency: assembled.currency,
+      forecastedMonthlyFreeCash: monthlyFreeCash,
+    });
+
     res.json({
       goalId: row.id,
       today,
       ...projection,
+      forecast,
     });
   } catch (e) {
     next(e);

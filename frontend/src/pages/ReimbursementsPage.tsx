@@ -11,24 +11,21 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Clock, Link2 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyTableRow } from '@/components/ui/empty-state'
+import { useNavigate } from 'react-router-dom'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { Tabs, TabPanel } from '@/components/ui/tabs'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
+import { Tabs } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { getJson, postJson, patchJson } from '../lib/api'
-import { formatMoney } from '../lib/formatMoney'
+import { todayDateInputValue } from '../lib/dateInput'
+import { formatMoneyOr } from '../lib/formatMoney'
+import type { Contact } from '@cashflow/shared'
 import type {
   ReimbursementStatus,
   ReimbursementView,
@@ -38,6 +35,16 @@ import type {
   RepaymentCandidate,
   RepaymentCandidatesResponse,
 } from '../types/reimbursement'
+
+/** Coerce a backend money value (sent as a decimal string) to a number for
+ *  display, returning `null` for nullish/empty/NaN inputs so a missing amount
+ *  renders the `—` placeholder instead of a misleading `$0.00`. A real `0`
+ *  (or `"0"`) is preserved. */
+function toAmount(value: string | number | null | undefined): number | null {
+  if (value == null || value === '') return null
+  const n = Number(value)
+  return Number.isNaN(n) ? null : n
+}
 
 /** Tailwind variant lookup for status badges — literal class names so the JIT
  *  compiler keeps them. */
@@ -79,16 +86,19 @@ export function ReimbursementsPage() {
   const [matching, setMatching] = useState<ReimbursementView | null>(null)
 
   const endpointForTab = useCallback((which: TabKey): string => {
+    // Pass the browser's local calendar day so overdue derivation flips at
+    // the user's midnight, not UTC's (hours early for behind-UTC users).
+    const today = todayDateInputValue()
     switch (which) {
       case 'outstanding':
         // Open claims (expected) — the derived-overdue ones surface here too.
-        return '/api/reimbursements?status=expected'
+        return `/api/reimbursements?status=expected&today=${today}`
       case 'overdue':
-        return '/api/reimbursements/overdue'
+        return `/api/reimbursements/overdue?today=${today}`
       case 'received':
-        return '/api/reimbursements?status=received'
+        return `/api/reimbursements?status=received&today=${today}`
       case 'all':
-        return '/api/reimbursements'
+        return `/api/reimbursements?today=${today}`
     }
   }, [])
 
@@ -98,7 +108,9 @@ export function ReimbursementsPage() {
     try {
       const [list, sum] = await Promise.all([
         getJson<ReimbursementListResponse>(endpointForTab(tab)),
-        getJson<ReimbursementSummaryResponse>('/api/reimbursements/summary'),
+        getJson<ReimbursementSummaryResponse>(
+          `/api/reimbursements/summary?today=${todayDateInputValue()}`,
+        ),
       ])
       setRows(list.data)
       setSummary(sum)
@@ -169,28 +181,25 @@ export function ReimbursementsPage() {
       </div>
 
       {err && (
-        <p className="error" role="alert">
+        <Alert variant="error" className="mb-4">
           {err}
-        </p>
+        </Alert>
       )}
 
-      {(['outstanding', 'overdue', 'received', 'all'] as const).map((key) => (
-        <TabPanel
-          key={key}
-          value={key}
-          active={tab}
-          tabsId="reimbursements-tabs"
-        >
-          <ReimbursementTable
-            rows={rows}
-            loading={loading}
-            emptyTitle={emptyTitleFor(key)}
-            onSetStatus={setStatus}
-            onMatch={setMatching}
-            onUnlink={unlink}
-          />
-        </TabPanel>
-      ))}
+      {(['outstanding', 'overdue', 'received', 'all'] as const).map((key) =>
+        tab === key ? (
+          <div key={key} role="tabpanel">
+            <ReimbursementTable
+              rows={rows}
+              loading={loading}
+              emptyTitle={emptyTitleFor(key)}
+              onSetStatus={setStatus}
+              onMatch={setMatching}
+              onUnlink={unlink}
+            />
+          </div>
+        ) : null,
+      )}
 
       {matching && (
         <MatchDialog
@@ -226,21 +235,21 @@ function SummaryCard({ summary }: { summary: ReimbursementSummaryResponse | null
     <Card className="mb-4 p-4">
       <div className="flex flex-wrap items-center gap-6">
         <div>
-          <div className="muted text-xs uppercase tracking-wide">Outstanding</div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Outstanding</div>
           {currencies.length === 0 ? (
             <div className="text-lg font-semibold">—</div>
           ) : (
             <div className="flex flex-wrap gap-3">
               {currencies.map((cur) => (
                 <span key={cur} className="text-lg font-semibold">
-                  {formatMoney(Number(summary.outstandingByCurrency[cur]) || 0, cur)}
+                  {formatMoneyOr(toAmount(summary.outstandingByCurrency[cur]), cur)}
                 </span>
               ))}
             </div>
           )}
         </div>
         <div>
-          <div className="muted text-xs uppercase tracking-wide">Overdue</div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Overdue</div>
           <div
             className={
               summary.overdueCount > 0
@@ -252,14 +261,14 @@ function SummaryCard({ summary }: { summary: ReimbursementSummaryResponse | null
           </div>
         </div>
         <div>
-          <div className="muted text-xs uppercase tracking-wide">Total claims</div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Total claims</div>
           <div className="text-lg font-semibold">{summary.totalCount}</div>
         </div>
       </div>
 
       {summary.groups.length > 0 && (
         <div className="mt-4">
-          <div className="muted mb-2 text-xs uppercase tracking-wide">
+          <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
             Outstanding by party
           </div>
           <div className="flex flex-col gap-1">
@@ -279,7 +288,7 @@ function SummaryCard({ summary }: { summary: ReimbursementSummaryResponse | null
                     )}
                   </span>
                   <span className="font-medium">
-                    {formatMoney(Number(g.outstanding) || 0, g.currency)}
+                    {formatMoneyOr(toAmount(g.outstanding), g.currency)}
                   </span>
                 </div>
               ))}
@@ -307,7 +316,7 @@ function ReimbursementTable({
 }) {
   return (
     <Card className="overflow-x-auto p-0">
-      <Table className="table">
+      <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Party</TableHead>
@@ -357,15 +366,15 @@ function ReimbursementRow({
   onMatch: (row: ReimbursementView) => void
   onUnlink: (row: ReimbursementView) => void
 }) {
-  const amountNum = Number(row.amount) || 0
+  const amountNum = toAmount(row.amount)
   const overdue = row.effectiveStatus === 'overdue'
   return (
     <TableRow>
       <TableCell>
         <div>{row.partyLabel}</div>
-        {row.contactId != null && <div className="muted text-xs">contact</div>}
+        {row.contactId != null && <div className="text-xs text-muted-foreground">contact</div>}
       </TableCell>
-      <TableCell>{formatMoney(amountNum, row.currency)}</TableCell>
+      <TableCell>{formatMoneyOr(amountNum, row.currency)}</TableCell>
       <TableCell>
         {row.dueDate ? (
           <div className={overdue ? 'text-destructive' : ''}>
@@ -384,7 +393,7 @@ function ReimbursementRow({
             )}
           </div>
         ) : (
-          <span className="muted">—</span>
+          <span className="text-sm text-muted-foreground">—</span>
         )}
       </TableCell>
       <TableCell>
@@ -396,13 +405,13 @@ function ReimbursementRow({
         {row.transaction ? (
           <div className="text-xs">
             <div>{row.transaction.merchant ?? '—'}</div>
-            <div className="muted">{row.transaction.date}</div>
+            <div className="text-muted-foreground">{row.transaction.date}</div>
           </div>
         ) : (
-          <span className="muted">—</span>
+          <span className="text-sm text-muted-foreground">—</span>
         )}
         {row.repaymentTransaction && (
-          <div className="muted text-xs mt-1">
+          <div className="text-xs mt-1 text-muted-foreground">
             <Link2 className="inline-block size-3 align-text-bottom" /> repaid{' '}
             {row.repaymentTransaction.date}
           </div>
@@ -410,17 +419,25 @@ function ReimbursementRow({
       </TableCell>
       <TableCell>
         <div className="flex flex-wrap justify-end gap-1">
-          {row.status !== 'received' && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => onMatch(row)}
-              title="Find and link the repayment transaction"
-            >
-              Match
-            </Button>
-          )}
+          {row.status !== 'received' && (() => {
+            const alreadyMatched = row.repaymentTransaction != null
+            const matchTitle = alreadyMatched
+              ? 'Reimbursement already matched'
+              : 'Find and link the repayment transaction'
+            return (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={alreadyMatched}
+                onClick={() => !alreadyMatched && onMatch(row)}
+                title={matchTitle}
+                aria-disabled={alreadyMatched}
+              >
+                Match
+              </Button>
+            )
+          })()}
           {row.status !== 'received' && (
             <Button
               type="button"
@@ -470,14 +487,39 @@ function MatchDialog({
   onLinked: () => void
 }) {
   const { showToast } = useToast()
+  const navigate = useNavigate()
+  const [contacts, setContacts] = useState<Contact[]>([])
+  const [contactsLoaded, setContactsLoaded] = useState(false)
   const [candidates, setCandidates] = useState<RepaymentCandidate[]>([])
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState<string | null>(null)
   const [linkingId, setLinkingId] = useState<number | null>(null)
+  const [widened, setWidened] = useState(false)
+  const [showAccountHint, setShowAccountHint] = useState(false)
+
+  // Fetch contacts first — if none exist, skip loading candidates
+  useEffect(() => {
+    let cancelled = false
+    void getJson<Contact[]>('/api/contacts').then((c) => {
+      if (!cancelled) {
+        setContacts(c)
+        setContactsLoaded(true)
+      }
+    }).catch(() => {
+      if (!cancelled) setContactsLoaded(true)
+    })
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
+    if (!contactsLoaded || contacts.length === 0) {
+      setLoading(false)
+      return
+    }
     let cancelled = false
     async function load() {
       setLoading(true)
+      setFetchError(null)
       try {
         const res = await getJson<RepaymentCandidatesResponse>(
           `/api/reimbursements/${row.id}/match-candidates`,
@@ -485,20 +527,24 @@ function MatchDialog({
         if (!cancelled) setCandidates(res.data)
       } catch (e) {
         if (!cancelled) {
-          showToast({
-            title: e instanceof Error ? e.message : 'Failed to load candidates',
-            variant: 'destructive',
-          })
+          setFetchError(e instanceof Error ? e.message : 'Failed to load candidates')
         }
       } finally {
         if (!cancelled) setLoading(false)
       }
     }
     void load()
-    return () => {
-      cancelled = true
-    }
-  }, [row.id, showToast])
+    return () => { cancelled = true }
+  }, [row.id, contactsLoaded, contacts.length])
+
+  // Client-side date filter: show candidates within 30 days of outlay date unless widened
+  const outlayDate = row.transaction?.date
+  const visibleCandidates = widened || !outlayDate
+    ? candidates
+    : candidates.filter((c) => {
+        const diff = (new Date(c.date).getTime() - new Date(outlayDate).getTime()) / 86400000
+        return diff <= 30
+      })
 
   async function link(transactionId: number) {
     setLinkingId(transactionId)
@@ -518,6 +564,8 @@ function MatchDialog({
     }
   }
 
+  const isLoading = !contactsLoaded || loading
+
   return (
     <div
       role="dialog"
@@ -530,20 +578,104 @@ function MatchDialog({
     >
       <Card className="w-full max-w-lg p-5">
         <h2 className="mb-1 text-lg font-semibold">Match a repayment</h2>
-        <p className="muted text-sm mb-4">
-          {row.partyLabel} · {formatMoney(Number(row.amount) || 0, row.currency)}
+        <p className="text-sm mb-4 text-muted-foreground">
+          {row.partyLabel} · {formatMoneyOr(toAmount(row.amount), row.currency)}
           {row.dueDate ? ` · due ${row.dueDate}` : ''}
         </p>
-        {loading ? (
-          <p className="muted text-sm">Searching for likely repayments…</p>
-        ) : candidates.length === 0 ? (
-          <p className="muted text-sm">
-            No likely repayment transactions found. The repayment should be an
-            incoming credit in {row.currency} on or after the original charge.
-          </p>
+
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Searching for likely repayments…</p>
+        ) : contacts.length === 0 ? (
+          <div className="text-sm space-y-2">
+            <p className="font-medium">No contacts yet.</p>
+            <p className="text-muted-foreground">Reimbursements track who owes you. Add a contact first.</p>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => { onClose(); navigate('/settings/contacts') }}
+            >
+              Add a contact
+            </Button>
+          </div>
+        ) : fetchError ? (
+          <div className="text-sm space-y-2">
+            <p className="text-destructive">Couldn't load candidates. Retry.</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setFetchError(null)
+                setLoading(true)
+                void getJson<RepaymentCandidatesResponse>(
+                  `/api/reimbursements/${row.id}/match-candidates`,
+                ).then((res) => {
+                  setCandidates(res.data)
+                  setLoading(false)
+                }).catch((e) => {
+                  setFetchError(e instanceof Error ? e.message : 'Failed to load candidates')
+                  setLoading(false)
+                })
+              }}
+            >
+              Retry
+            </Button>
+          </div>
+        ) : visibleCandidates.length === 0 ? (
+          <div className="text-sm space-y-3">
+            <p className="font-medium">No likely repayment transactions found</p>
+            {!row.contactId && (
+              <p className="text-warning text-xs">
+                Set an expected contact on this reimbursement to improve matching.
+              </p>
+            )}
+            <p className="text-muted-foreground">Try one of these:</p>
+            <div className="flex flex-col gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={widened}
+                title={widened ? 'Already at maximum.' : undefined}
+                onClick={() => setWidened(true)}
+              >
+                Widen date range {widened ? '(max)' : '(30 → 90 days)'}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setShowAccountHint((v) => !v)}
+              >
+                Check account selection
+              </Button>
+              {showAccountHint && (
+                <div className="rounded bg-warning-bg border border-warning p-2 text-xs text-warning">
+                  Matching searches all accounts visible to you in {row.currency}.
+                  If the repayment came in via a different currency or account,
+                  it won't appear here.{' '}
+                  <Button
+                    variant="link"
+                    className="inline h-auto p-0"
+                    onClick={() => { onClose(); navigate('/settings') }}
+                  >
+                    Edit in settings
+                  </Button>
+                </div>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={onClose}
+              >
+                Edit reimbursement date
+              </Button>
+            </div>
+          </div>
         ) : (
           <ul className="flex flex-col gap-2">
-            {candidates.map((c) => (
+            {visibleCandidates.map((c) => (
               <li
                 key={c.transactionId}
                 className="flex items-center justify-between rounded-md border border-input p-2"
@@ -551,9 +683,9 @@ function MatchDialog({
                 <div className="text-sm">
                   <div>
                     {c.merchant ?? 'Transaction'} ·{' '}
-                    {formatMoney(Number(c.amount) || 0, c.currency)}
+                    {formatMoneyOr(toAmount(c.amount), c.currency)}
                   </div>
-                  <div className="muted text-xs">
+                  <div className="text-xs text-muted-foreground">
                     {c.date} · match {Math.round(c.score * 100)}%
                   </div>
                 </div>
@@ -569,6 +701,7 @@ function MatchDialog({
             ))}
           </ul>
         )}
+
         <div className="mt-4 flex justify-end">
           <Button type="button" variant="outline" onClick={onClose}>
             Close

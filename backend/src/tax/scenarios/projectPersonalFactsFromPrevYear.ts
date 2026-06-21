@@ -3,6 +3,7 @@ import { D } from '../util/decimal';
 import { Scenario } from '../../models';
 import { computeScenario } from './computeScenario';
 import { resolveScenario } from './resolveScenario';
+import { setPersonalProjector } from './projectionPorts';
 import { rollPersonalCarryforwards } from '../services/rollPersonalCarryforwards';
 import { ratesFor } from '../engine/brackets';
 import type { TaxYearFacts, IncomeItem, RrspContrib } from '../engine/types';
@@ -99,6 +100,7 @@ export async function projectPersonalFactsFromPrevYear(
     instalmentsPaid: instRows.length > 0
       ? instRows.reduce((sum, r) => sum.plus(D(r.amount as unknown as string)), D('0'))
       : D(cfRows.find(c => c.kind === 'instalments_paid')?.amount ?? '0'),
+    fhsaLifetimeContributions: D(cfRows.find(c => c.kind === 'fhsa_lifetime_contribs')?.amount ?? '0'),
   };
 
   return {
@@ -114,8 +116,21 @@ export async function projectPersonalFactsFromPrevYear(
     rrspContribs: scaleRrsp(parentFacts.rrspContribs),
     fhsaContribs: scaleRrsp(parentFacts.fhsaContribs),
     donations: scaleItems(parentFacts.donations, 'donations'),
+    rentalIncome: scaleItems(parentFacts.rentalIncome, 'rental-income'),
+    rentalExpenses: scaleItems(parentFacts.rentalExpenses, 'rental-exp'),
+    medicalExpenses: scaleItems(parentFacts.medicalExpenses, 'medical-exp'),
     slips: [], // future slips don't exist
     carryforwards,
     ageAtYearEnd: parentFacts.ageAtYearEnd + 1,
+    // CPP/OAS benefits carry forward scaled with inflation (both are
+    // CPI-indexed). oasBenefits feeds both the L11300 income line and the
+    // L23500 clawback cap, so the cap tracks the projected year's OAS.
+    cppBenefits: parentFacts.cppBenefits?.times(inflationMult),
+    oasBenefits: parentFacts.oasBenefits?.times(inflationMult),
   };
 }
+
+// Register the projector so resolveScenario can dispatch projection_root roots
+// through the port without importing this module (which imports resolveScenario,
+// and importing back would re-form the cycle).
+setPersonalProjector(projectPersonalFactsFromPrevYear);

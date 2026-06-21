@@ -1,5 +1,7 @@
 import { useReconciliation, type ReconciliationFinding } from '../../hooks/useReconciliation';
 import { useTaxReturn } from '../../hooks/useTaxReturn';
+import { StatCard } from '@connor-adams/designsystem';
+import { Card } from '@connor-adams/designsystem'
 
 export function ReconciliationTab({ year }: { year: number }) {
   const taxReturn = useTaxReturn(year);
@@ -13,25 +15,32 @@ export function ReconciliationTab({ year }: { year: number }) {
   const returnError = taxReturn.error;
 
   const totalReconFindings = report?.findings.length ?? 0;
+  const categoryCount = report
+    ? Object.values(report.counts).filter((c) => c > 0).length
+    : 0;
 
   return (
     <div>
       <h2>Reconciliation — {year}</h2>
 
-      <div className="card" style={{ marginBottom: '1rem' }}>
-        <p>
-          <strong>{engineWarnings.length}</strong>{' '}
-          engine {engineWarnings.length === 1 ? 'warning' : 'warnings'} ·{' '}
-          <strong>{totalReconFindings}</strong> reconciliation{' '}
-          {totalReconFindings === 1 ? 'finding' : 'findings'}
-        </p>
+      <div className="mb-4 grid grid-cols-2 gap-3 max-w-md">
+        <StatCard
+          label="Engine warnings"
+          value={String(engineWarnings.length)}
+          hint={engineWarnings.length === 0 ? 'No issues' : undefined}
+        />
+        <StatCard
+          label="Reconciliation findings"
+          value={String(totalReconFindings)}
+          hint={categoryCount > 0 ? `across ${categoryCount} ${categoryCount === 1 ? 'category' : 'categories'}` : undefined}
+        />
       </div>
 
       {returnError && <p className="error">Engine warnings unavailable: {returnError}</p>}
       {reconError && <p className="error">Reconciliation report unavailable: {reconError}</p>}
 
-      <section style={{ marginBottom: '1.5rem' }}>
-        <h3>Engine warnings</h3>
+      <Card className="mb-6">
+        <h3 className="mb-3 text-base font-semibold">Engine warnings</h3>
         {engineWarnings.length === 0 ? (
           <p className="muted">No engine warnings for {year}.</p>
         ) : (
@@ -41,7 +50,7 @@ export function ReconciliationTab({ year }: { year: number }) {
             ))}
           </ul>
         )}
-      </section>
+      </Card>
 
       {report && (
         <>
@@ -76,8 +85,8 @@ function DetectorSection({
   findings: ReconciliationFinding[];
 }) {
   return (
-    <section style={{ marginBottom: '1.5rem' }}>
-      <h3>
+    <Card className="mb-4">
+      <h3 className="mb-3 text-base font-semibold">
         {title} <span className="muted">({count})</span>
       </h3>
       {findings.length === 0 ? (
@@ -91,6 +100,6 @@ function DetectorSection({
           ))}
         </ul>
       )}
-    </section>
+    </Card>
   );
 }

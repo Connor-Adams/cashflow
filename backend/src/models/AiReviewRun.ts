@@ -14,12 +14,6 @@ import {
  */
 export type AiReviewRunStatus = 'pending' | 'completed' | 'failed';
 
-export const AI_REVIEW_RUN_STATUSES: readonly AiReviewRunStatus[] = [
-  'pending',
-  'completed',
-  'failed',
-] as const;
-
 /**
  * Categories of action items a review can produce. STRING(32) on disk;
  * runtime validation here ensures we surface unknown types as the catch-all
@@ -32,15 +26,6 @@ export type AiReviewActionItemType =
   | 'subscription'
   | 'forecast_warning'
   | 'other';
-
-export const AI_REVIEW_ACTION_ITEM_TYPES: readonly AiReviewActionItemType[] = [
-  'anomaly',
-  'rule_suggestion',
-  'missing_receipt',
-  'subscription',
-  'forecast_warning',
-  'other',
-] as const;
 
 /**
  * Reference target for an action item. 'transaction' | 'event' | 'rule' map

@@ -8,28 +8,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyTableRow } from '@/components/ui/empty-state'
+  CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
 import { MetricStat } from '@/components/ui/metric-stat'
 import { PageHeader } from '@/components/ui/page-header'
-import { StatCard } from '@/components/ui/stat-card'
+import { SectionHeader } from '@/components/ui/section-header'
+import { StatCard } from '@connor-adams/designsystem'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+  TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
+import { TableCard, type TableColumn } from '@/components/ui/table-card'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import { AboutCard } from './portfolio-security/AboutCard'
@@ -45,6 +34,46 @@ import type {
   PortfolioSecurityDetail,
   PortfolioSecurityOverview,
 } from '../types/api'
+
+type HoldingRow = PortfolioSecurityDetail['holdings'][number]
+
+const holdingsColumns: TableColumn<HoldingRow>[] = [
+  { key: 'statementDate', header: 'Statement date', sortable: true },
+  { key: 'accountName', header: 'Account', sortable: true },
+  { key: 'quantity', header: 'Qty', sortable: true, align: 'right' },
+  {
+    key: 'price',
+    header: 'Price',
+    sortable: true,
+    align: 'right',
+    accessor: (h) => h.price ?? null,
+    render: (h) => (h.price != null ? formatMoney(h.price, h.currency) : '—'),
+  },
+  {
+    key: 'marketValue',
+    header: 'Market value',
+    sortable: true,
+    align: 'right',
+    accessor: (h) => h.marketValue ?? null,
+    render: (h) => (h.marketValue != null ? formatMoney(h.marketValue, h.currency) : '—'),
+  },
+  {
+    key: 'costBasis',
+    header: 'Cost basis',
+    sortable: true,
+    align: 'right',
+    accessor: (h) => h.costBasis ?? null,
+    render: (h) => (h.costBasis != null ? formatMoney(h.costBasis, h.currency) : '—'),
+  },
+  {
+    key: 'unrealizedGainLoss',
+    header: 'Unrealized',
+    sortable: true,
+    align: 'right',
+    accessor: (h) => h.unrealizedGainLoss ?? null,
+    render: (h) => (h.unrealizedGainLoss != null ? formatMoney(h.unrealizedGainLoss, h.currency) : '—'),
+  },
+]
 
 export function PortfolioSecurityPage() {
   const { id } = useParams<{ id: string }>()
@@ -203,87 +232,49 @@ export function PortfolioSecurityPage() {
         )}
       </div>
 
-      <Card className="transactionsTableCard mt-4">
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>Activity timeline</h2>
-            <p className="muted">
-              Chronological buys, sells, dividends, interest, and other rows. Running position is per-account.
-            </p>
-          </div>
-        </div>
-        <div className="transactionsTableWrap">
-          <Table className="table transactionsTable">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Account</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Qty</TableHead>
-                <TableHead>Price</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Running</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {activitiesWithRunning.map((a) => (
-                <TableRow key={a.id}>
-                  <TableCell>{a.tradeDate}</TableCell>
-                  <TableCell>{accountById.get(a.accountId) ?? a.accountName}</TableCell>
-                  <TableCell>{a.activityType}</TableCell>
-                  <TableCell>{a.quantity ?? '—'}</TableCell>
-                  <TableCell>{a.price != null ? formatMoney(a.price, a.currency) : '—'}</TableCell>
-                  <TableCell>{a.amount != null ? formatMoney(a.amount, a.currency) : '—'}</TableCell>
-                  <TableCell>{a.runningPosition}</TableCell>
-                </TableRow>
-              ))}
-              {activitiesWithRunning.length === 0 && (
-                <EmptyTableRow colSpan={7} title="No activities." description="No imported trades or income for this security yet." />
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
+      <TableCard
+        className="mt-4"
+        title="Activity timeline"
+        description="Chronological buys, sells, dividends, interest, and other rows. Running position is per-account."
+      >
+        <TableHeader>
+          <TableRow>
+            <TableHead>Date</TableHead>
+            <TableHead>Account</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Qty</TableHead>
+            <TableHead>Price</TableHead>
+            <TableHead>Amount</TableHead>
+            <TableHead>Running</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {activitiesWithRunning.map((a) => (
+            <TableRow key={a.id}>
+              <TableCell>{a.tradeDate}</TableCell>
+              <TableCell>{accountById.get(a.accountId) ?? a.accountName}</TableCell>
+              <TableCell>{a.activityType}</TableCell>
+              <TableCell>{a.quantity ?? '—'}</TableCell>
+              <TableCell>{a.price != null ? formatMoney(a.price, a.currency) : '—'}</TableCell>
+              <TableCell>{a.amount != null ? formatMoney(a.amount, a.currency) : '—'}</TableCell>
+              <TableCell>{a.runningPosition}</TableCell>
+            </TableRow>
+          ))}
+          {activitiesWithRunning.length === 0 && (
+            <EmptyTableRow colSpan={7} title="No activities." description="No imported trades or income for this security yet." />
+          )}
+        </TableBody>
+      </TableCard>
 
-      <Card className="transactionsTableCard mt-4">
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>Historical holdings snapshots</h2>
-            <p className="muted">Every imported snapshot row for this security, newest first.</p>
-          </div>
-        </div>
-        <div className="transactionsTableWrap">
-          <Table className="table transactionsTable">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Statement date</TableHead>
-                <TableHead>Account</TableHead>
-                <TableHead>Qty</TableHead>
-                <TableHead>Price</TableHead>
-                <TableHead>Market value</TableHead>
-                <TableHead>Cost basis</TableHead>
-                <TableHead>Unrealized</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {holdings.map((h) => (
-                <TableRow key={h.id}>
-                  <TableCell>{h.statementDate}</TableCell>
-                  <TableCell>{h.accountName}</TableCell>
-                  <TableCell>{h.quantity}</TableCell>
-                  <TableCell>{h.price != null ? formatMoney(h.price, h.currency) : '—'}</TableCell>
-                  <TableCell>{h.marketValue != null ? formatMoney(h.marketValue, h.currency) : '—'}</TableCell>
-                  <TableCell>{h.costBasis != null ? formatMoney(h.costBasis, h.currency) : '—'}</TableCell>
-                  <TableCell>{h.unrealizedGainLoss != null ? formatMoney(h.unrealizedGainLoss, h.currency) : '—'}</TableCell>
-                </TableRow>
-              ))}
-              {holdings.length === 0 && (
-                <EmptyTableRow colSpan={7} title="No snapshots." description="No historical holdings imported for this security." />
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
+      <TableCard<HoldingRow>
+        className="mt-4"
+        title="Historical holdings snapshots"
+        description="Every imported snapshot row for this security, newest first."
+        columns={holdingsColumns}
+        rows={holdings}
+        getRowKey={(h) => h.id}
+        empty="No snapshots."
+      />
     </div>
   )
 }
@@ -297,16 +288,16 @@ function PerAccountCard({ row }: { row: PortfolioSecurityDetail['perAccount'][nu
   }))
   return (
     <Card>
-      <div className="transactionsPanelHeader">
-        <div>
-          <h2 className="text-base">{row.accountName}</h2>
-          <p className="muted">
+      <SectionHeader
+        title={row.accountName}
+        description={
+          <>
             Qty {row.currentQuantity} · MV {formatMoney(row.currentMarketValue, acbCurrency)} · Cost{' '}
             {formatMoney(row.currentCostBasis, acbCurrency)} · Realized{' '}
             {formatMoney(row.acb.realizedTotal, acbCurrency)}
-          </p>
-        </div>
-      </div>
+          </>
+        }
+      />
       {timeline.length > 0 ? (
         <div style={{ width: '100%', height: 200 }}>
           <ResponsiveContainer>

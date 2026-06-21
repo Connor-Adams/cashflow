@@ -18,6 +18,7 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs/promises';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -90,7 +91,7 @@ before(async () => {
   app = mod.default;
 
   // Bootstrap superadmin via the registration route.
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -102,13 +103,13 @@ before(async () => {
   primaryHouseholdId = primary.householdId;
   primaryAccountId = primary.accountId;
   primaryUserId = primary.userId;
-  primaryAgent = request.agent(app);
+  primaryAgent = testAgent(app);
   primaryAgent.jar.setCookie(`cashflow_session=${primary.token}; Path=/`);
 
   const secondary = await seed('Secondary');
   secondaryHouseholdId = secondary.householdId;
   secondaryAccountId = secondary.accountId;
-  secondaryAgent = request.agent(app);
+  secondaryAgent = testAgent(app);
   secondaryAgent.jar.setCookie(`cashflow_session=${secondary.token}; Path=/`);
 });
 

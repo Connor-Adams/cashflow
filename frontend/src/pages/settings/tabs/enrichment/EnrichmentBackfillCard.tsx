@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Sparkles } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { useConfirm } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
 import type { EnrichmentBackfillProgress } from '../../../../types/api'
 
 type BackfillSummary = Extract<EnrichmentBackfillProgress, { kind: 'summary' }>
@@ -137,7 +137,7 @@ export function EnrichmentBackfillCard({ onComplete }: Props) {
               already-reviewed rows are never touched.
             </p>
           </div>
-          <span className="enrichAdminPill">Admin action</span>
+          <span className="bg-accent text-accent-foreground px-[10px] py-[2px] rounded-full text-[0.7rem] font-semibold tracking-[0.04em] whitespace-nowrap">Admin action</span>
         </div>
         <div className="flex flex-wrap items-center gap-3 mt-3">
           <label className="flex items-center gap-2 text-sm">
@@ -224,18 +224,22 @@ export function EnrichmentBackfillCard({ onComplete }: Props) {
               </details>
             )}
             {backfillFeed.length > 0 && (
-              <div className="enrichBackfillFeed" role="log" aria-live="polite">
+              <div
+                className="mt-2 max-h-[18rem] overflow-y-auto border-t border-border pt-2 text-[0.78rem] leading-[1.3] font-mono"
+                role="log"
+                aria-live="polite"
+              >
                 {backfillFeed.map((row) => (
-                  <div key={row.txnId} className="enrichBackfillFeed__row">
-                    <span className="muted enrichBackfillFeed__id">#{row.txnId}</span>
-                    <span className="enrichBackfillFeed__raw">{row.merchantRaw}</span>
+                  <div key={row.txnId} className="flex gap-2 items-baseline">
+                    <span className="muted w-[4rem] text-right">#{row.txnId}</span>
+                    <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{row.merchantRaw}</span>
                     <span>
                       → <strong>{row.merchantCanonical ?? row.merchantClean}</strong>
                     </span>
-                    <span className="muted enrichBackfillFeed__src">
+                    <span className="muted min-w-[6rem]">
                       {row.autoSource ?? '—'}/{row.autoConfidence ?? '—'}
                     </span>
-                    {row.reviewFlagCleared && <span className="enrichBackfillFeed__cleared">✓ cleared</span>}
+                    {row.reviewFlagCleared && <span className="text-success">✓ cleared</span>}
                   </div>
                 ))}
               </div>

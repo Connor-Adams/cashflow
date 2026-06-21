@@ -18,9 +18,29 @@ import {
   Transaction,
   TransactionOrderLink,
 } from '../models';
+import {
+  recomputeTransactionsReviewFromItems,
+  transactionIdsForOrder,
+} from './enrichment/recomputeTransactionReviewFromItems';
 
 const MATCH_CONFIDENCE_THRESHOLD = 70;
 const DATE_WINDOW_DAYS = 7;
+const AUTO_ACCEPT_THRESHOLD = 85; // exact-amount match baseline is 90 (50 amount + 25 date + 15 vendor)
+const AUTO_ACCEPT_MARGIN = 10;    // best must lead runner-up by MORE than this to be unambiguous
+
+/**
+ * Decide whether the top-scored candidate for a single payment is safe to
+ * auto-accept: high enough confidence AND unambiguous (sole qualifier, or a
+ * clear margin over the runner-up). `sortedConfidences` is the per-payment
+ * candidate confidences, already filtered to >= MATCH_CONFIDENCE_THRESHOLD and
+ * sorted descending. Pure — no DB, no model coupling.
+ */
+export function decideAutoAccept(sortedConfidences: number[]): boolean {
+  if (sortedConfidences.length === 0) return false;
+  if (sortedConfidences[0] < AUTO_ACCEPT_THRESHOLD) return false;
+  if (sortedConfidences.length === 1) return true;
+  return sortedConfidences[0] - sortedConfidences[1] > AUTO_ACCEPT_MARGIN;
+}
 
 export type CandidatePayment = {
   paymentLast4: string | null;
@@ -56,11 +76,13 @@ const VENDOR_MERCHANT_PATTERNS: Record<string, RegExp> = {
   apple: /\b(apple(?:\.com)?|itunes|app\s*store|apple\s*music|apple\s*tv|icloud)\b/i,
   google: /\b(google(?:\s*play)?|googlepay|youtube\s*premium)\b/i,
   costco: /\bcostco\b/i,
+  uber_eats: /\buber\s*\*?\s*eats\b/i,
+  uber: /\buber\b(?!\s*\*?\s*eats\b)/i,
 };
 
 export function txnMatchesVendor(vendor: string, txn: Transaction): boolean {
   const pat = VENDOR_MERCHANT_PATTERNS[vendor];
-  if (!pat) return false;
+  if (!pat) return true;
   return pat.test(`${txn.merchantRaw} ${txn.merchantClean}`);
 }
 
@@ -90,6 +112,11 @@ function scoreDateComponent(txnDate: string, orderDate: string | null): Componen
 }
 
 function scoreVendorComponent(order: ExternalOrder, txn: Transaction): Component {
+  // No pattern for this vendor (e.g. email-scanned receipts defaulting to
+  // 'other') = no merchant evidence. txnMatchesVendor passes those through as
+  // candidates, but the +15 bonus must not be free — it is exactly the margin
+  // that separates 'suggested' (75) from auto-accept (90) on amount+date alone.
+  if (!VENDOR_MERCHANT_PATTERNS[order.vendor]) return { points: 0, reason: null };
   return txnMatchesVendor(order.vendor, txn)
     ? { points: 15, reason: `merchant matches ${order.vendor}` }
     : { points: 0, reason: null };
@@ -105,6 +132,12 @@ function scoreLast4Component(payment: CandidatePayment, txn: Transaction): Compo
     : { points: 0, reason: null };
 }
 
+function scoreCurrencyComponent(txn: Transaction, order: ExternalOrder): Component {
+  if (!order.currency || !txn.currency) return { points: 0, reason: null };
+  if (txn.currency.toUpperCase() === order.currency.toUpperCase()) return { points: 0, reason: null };
+  return { points: -40, reason: `currency mismatch (${txn.currency} vs ${order.currency})` };
+}
+
 export function scoreReceiptMatch(
   txn: Transaction,
   order: ExternalOrder,
@@ -115,6 +148,7 @@ export function scoreReceiptMatch(
     scoreDateComponent(txn.date, order.orderDate),
     scoreVendorComponent(order, txn),
     scoreLast4Component(payment, txn),
+    scoreCurrencyComponent(txn, order),
   ];
   const score = components.reduce((a, c) => a + c.points, 0);
   const reasons = components.map((c) => c.reason).filter((r): r is string => r != null);
@@ -187,6 +221,7 @@ export async function matchReceiptOrderToTransactions(args: {
 
     if (scored.length === 0) continue;
     const best = scored[0];
+    const autoAccept = decideAutoAccept(scored.map((s) => s.confidence));
 
     const [link, isNew] = await TransactionOrderLink.findOrCreate({
       where: { transactionId: best.txn.id, externalOrderId: order.id },
@@ -195,7 +230,7 @@ export async function matchReceiptOrderToTransactions(args: {
         externalOrderId: order.id,
         confidence: String(best.confidence),
         matchReason: best.matchReason,
-        status: 'suggested',
+        status: autoAccept ? 'accepted' : 'suggested',
         linkedAmount: String(payment.amount),
       },
     });
@@ -207,10 +242,16 @@ export async function matchReceiptOrderToTransactions(args: {
         confidence: String(best.confidence),
         matchReason: best.matchReason,
         linkedAmount: String(payment.amount),
+        ...(autoAccept ? { status: 'accepted' as const } : {}),
       });
       updated += 1;
     }
     claimed.add(best.txn.id);
+  }
+
+  // Recompute review flags for newly accepted-linked transactions.
+  if (created > 0 || updated > 0) {
+    await recomputeTransactionsReviewFromItems(await transactionIdsForOrder(args.externalOrderId));
   }
 
   return {
@@ -219,4 +260,46 @@ export async function matchReceiptOrderToTransactions(args: {
     tendersProcessed: payments.length,
     candidatesScanned: candidates.length,
   };
+}
+
+/**
+ * Lightweight "is there a plausible card transaction for this receipt?" probe
+ * used by the discovery pass to decide auto-ingest confidence BEFORE creating
+ * any ExternalOrder. Mirrors the candidate query in
+ * matchReceiptOrderToTransactions but scores against a synthesized single
+ * payment and persists nothing.
+ */
+export async function hasMatchingTransaction(args: {
+  householdId: number;
+  vendor: string;
+  total: number | null;
+  currency: string;
+  orderDate: string | null;
+  paymentLast4: string | null;
+}): Promise<boolean> {
+  if (args.total == null || args.orderDate == null) return false;
+  const from = shiftDate(args.orderDate, -DATE_WINDOW_DAYS);
+  const to = shiftDate(args.orderDate, DATE_WINDOW_DAYS);
+  const candidates = await Transaction.findAll({
+    where: {
+      householdId: args.householdId,
+      date: { [Op.between]: [from, to] },
+    },
+  });
+  // Score against a synthetic ExternalOrder-shaped object; only the fields the
+  // scorers read are needed.
+  const orderLike = {
+    vendor: args.vendor,
+    orderDate: args.orderDate,
+    currency: args.currency,
+    paymentLast4: args.paymentLast4,
+  } as ExternalOrder;
+  const payment: CandidatePayment = {
+    paymentLast4: args.paymentLast4,
+    amount: args.total,
+    tenderId: null,
+  };
+  return candidates
+    .filter((txn) => txnMatchesVendor(args.vendor, txn))
+    .some((txn) => scoreReceiptMatch(txn, orderLike, payment).confidence >= MATCH_CONFIDENCE_THRESHOLD);
 }

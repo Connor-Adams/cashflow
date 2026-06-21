@@ -11,6 +11,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -60,7 +61,7 @@ async function seed(emailPrefix: string, accountType = 'chequing'): Promise<Seed
     tokenHash: hashToken(token),
     expiresAt,
   });
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${token}; Path=/`);
   return {
     token,
@@ -102,7 +103,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -301,9 +302,10 @@ test('financial goal required monthly contribution is subtracted', async () => {
 
   const res = await u.agent.get('/api/forecast/safe-to-spend?asOfDate=2026-06-01');
   assert.equal(res.status, 200);
-  // 5000 - 0 - 300 goal - 0 - 0 = 4700
-  assert.equal(res.body.breakdown.requiredSavingsContributions, 300);
-  assert.equal(res.body.value, 4700);
+  // $300/mo goal contribution prorated to the default 14-day window:
+  // 300 * 14/30 = 140. Then 5000 - 0 - 140 goal - 0 - 0 = 4860.
+  assert.equal(res.body.breakdown.requiredSavingsContributions, 140);
+  assert.equal(res.body.value, 4860);
 });
 
 test('includeGoalContributions=false zeroes the goal deduction', async () => {
@@ -400,7 +402,7 @@ test('rejects bad asOfDate', async () => {
 });
 
 test('unauthenticated request returns 401', async () => {
-  const fresh = request.agent(app);
+  const fresh = testAgent(app);
   const res = await fresh.get('/api/forecast/safe-to-spend');
   assert.equal(res.status, 401);
 });

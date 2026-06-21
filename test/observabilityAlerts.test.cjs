@@ -73,8 +73,67 @@ test('grafana provisions alert rules for tempo, loki, and collector reachability
 
   // Prometheus/collector reachability — covers prometheus down OR collector
   // crash-looping; both cause "no new metrics" with no other signal.
+  //
+  // The expr must query the RAW `up` gauge and let the threshold node decide —
+  // it must NOT self-filter with `== 0`. With noDataState: Alerting, `up == 0`
+  // returns an empty series whenever the collector is healthy (up == 1), which
+  // Grafana reads as NoData and fires permanently. Regression guard for the
+  // 2026-06-17 false-fire.
   assert.match(rules, /title:\s*OtelCollectorScrapeDown\b/);
-  assert.match(rules, /up\{job="cashflow-otel-collector"\}\s*==\s*0/);
+  assert.match(
+    rules,
+    /expr:\s*'up\{job="cashflow-otel-collector"\}'/,
+    'OtelCollectorScrapeDown must query the raw up gauge (no `== 0` self-filter)',
+  );
+  assert.doesNotMatch(
+    rules,
+    /up\{job="cashflow-otel-collector"\}\s*==\s*0/,
+    'OtelCollectorScrapeDown `up == 0` + noDataState:Alerting false-fires while healthy',
+  );
+
+  // Application-level alerts (issues #417, #418).
+  assert.match(rules, /title:\s*BackendDown\b/, 'must include BackendDown alert');
+  assert.match(rules, /absent\(cashflow_up\)/, 'BackendDown must use absent(cashflow_up)');
+  // BackendDown is only meaningful if the backend actually emits cashflow_up —
+  // otherwise absent() is always true and the alert fires forever.
+  const metricsSrc = readFileSync('backend/src/observability/metrics.ts', 'utf8');
+  assert.match(
+    metricsSrc,
+    /createObservableGauge\(\s*'cashflow\.up'/,
+    'backend must emit the cashflow.up heartbeat gauge or BackendDown fires permanently',
+  );
+
+  assert.match(rules, /title:\s*HighHttp5xxRate\b/, 'must include HighHttp5xxRate alert');
+  assert.match(
+    rules,
+    /cashflow_http_server_requests_total\{http_response_status_code=~"5\.\."\}/,
+    'HighHttp5xxRate must query 5xx counter',
+  );
+
+  assert.match(rules, /title:\s*HighRouteLatencyP99\b/, 'must include HighRouteLatencyP99 alert');
+  assert.match(
+    rules,
+    /cashflow_http_server_duration_milliseconds_bucket/,
+    'HighRouteLatencyP99 must use duration histogram',
+  );
+
+  assert.match(
+    rules,
+    /title:\s*OutboundDependencyFailing\b/,
+    'must include OutboundDependencyFailing alert',
+  );
+  assert.match(
+    rules,
+    /http_client_request_duration_seconds_count/,
+    'OutboundDependencyFailing must use HTTP client metric',
+  );
+
+  assert.match(rules, /title:\s*JobFailing\b/, 'must include JobFailing alert');
+  assert.match(
+    rules,
+    /cashflow_job_runs_total\{result="failure"\}/,
+    'JobFailing must use cashflow_job_runs_total metric',
+  );
 
   // Every alert must fire within 5 minutes per the issue SLO.
   // `for: 1m` on top of the [5m] rate window keeps the worst-case alert
@@ -147,6 +206,39 @@ test('each alert has a unique, anchored runbook_url so the on-call lands on the 
       `runbook_url '#${anchor}' does not resolve to a heading in docs/observability.md`,
     );
   }
+});
+
+test('BackendDown runbook documents the rejected alternatives and traffic-independence rationale', () => {
+  // Issue #418 requires recording WHY a heartbeat gauge was chosen over the two
+  // alternatives, so a future maintainer does not "simplify" it back into a
+  // traffic-coupled check that false-fires at idle.
+  const docs = readFileSync('docs/observability.md', 'utf8');
+
+  // Alternative (A): request-rate absent() — rejected for idle false-positives.
+  assert.match(
+    docs,
+    /absent\(cashflow_http_server_requests_total\)/,
+    'must document alternative (A) absent(cashflow_http_server_requests_total)',
+  );
+  assert.match(
+    docs,
+    /idle/i,
+    'must explain (A) false-positives at idle / low traffic',
+  );
+
+  // Alternative (C): blackbox_exporter — noted as a future upgrade.
+  assert.match(
+    docs,
+    /blackbox_exporter/,
+    'must document alternative (C) blackbox_exporter probing /api/health',
+  );
+
+  // The chosen design must be stated as traffic-independent.
+  assert.match(
+    docs,
+    /traffic-independent|independent of (?:inbound )?traffic|regardless of traffic/i,
+    'must state the heartbeat is traffic-independent (the whole point of #418)',
+  );
 });
 
 test('observability docs and comments do not link to tool homepages instead of specific findings', () => {

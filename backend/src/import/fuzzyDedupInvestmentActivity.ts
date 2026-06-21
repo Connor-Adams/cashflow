@@ -12,6 +12,15 @@ export type FuzzyMatchInput = {
   csvDate: string;
   /** Match window in calendar days around csvDate. Defaults to 5. */
   windowDays?: number;
+  /**
+   * Existing-row ids already consumed by earlier rows of the same commit
+   * (matched as duplicates, or inserted by this commit and therefore visible
+   * to this query inside the same SQL transaction). Each existing row may
+   * absorb at most ONE incoming row — without this, two legitimate identical
+   * activities within the window (recurring buys, equal staking rewards)
+   * both match the same candidate and the second one is silently dropped.
+   */
+  excludeIds?: ReadonlySet<number>;
   t?: SequelizeTransaction;
 };
 
@@ -45,9 +54,11 @@ export type PureFuzzyOutcome<T extends DedupCandidate> =
 
 /**
  * Normalize a numeric value to a fixed decimal string for comparison.
- * Returns null if input is null. The fractional precision must match the
- * column scale used by the DB (8 for quantity, 4 for amount) so that
- * round-trip-through-DB does not change the comparison.
+ * Returns null if input is null. Quantity is compared at 8 decimals even
+ * though the column is now DECIMAL(28, 10): legacy rows inserted before the
+ * widening migration (20260527130000) were truncated to 8dp by Postgres and
+ * are never back-expanded, so 8dp remains the safe comparison floor across
+ * the historical/new boundary. Amount stays at the column scale (4).
  */
 function toFixedOrNull(v: number | null, scale: number): string | null {
   if (v == null) return null;
@@ -60,13 +71,14 @@ function toFixedOrNull(v: number | null, scale: number): string | null {
  */
 export function pickFuzzyMatch<T extends DedupCandidate>(
   candidates: T[],
-  input: Pick<FuzzyMatchInput, 'symbol' | 'quantity' | 'amount'>,
+  input: Pick<FuzzyMatchInput, 'symbol' | 'quantity' | 'amount' | 'excludeIds'>,
 ): PureFuzzyOutcome<T> {
   const wantQty = toFixedOrNull(input.quantity, 8);
   const wantAmt = toFixedOrNull(input.amount, 4);
   const wantSym = input.symbol == null ? null : input.symbol.toUpperCase();
 
   const filtered = candidates.filter((c) => {
+    if (input.excludeIds?.has(c.id)) return false;
     if (wantQty != null) {
       const got = c.quantity == null ? null : Number(c.quantity).toFixed(8);
       if (got !== wantQty) return false;
@@ -79,10 +91,11 @@ export function pickFuzzyMatch<T extends DedupCandidate>(
     } else if (c.amount != null) {
       return false;
     }
-    if (wantSym != null) {
-      const sym = c.security?.symbol;
-      if (!sym || sym.toUpperCase() !== wantSym) return false;
-    }
+    // Symbol must be COMPATIBLE: both null, or both populated and equal. A
+    // symbol-less incoming row (e.g. generic Interest/Fee) must not absorb a
+    // symbol-bearing candidate (a real security event), and vice versa.
+    const gotSym = c.security?.symbol == null ? null : c.security.symbol.toUpperCase();
+    if (wantSym !== gotSym) return false;
     return true;
   });
 
@@ -96,6 +109,30 @@ export function pickFuzzyMatch<T extends DedupCandidate>(
     };
   }
   return { kind: 'multi-match', candidates: filtered };
+}
+
+/**
+ * Activity-type equivalence at the cross-source dedup boundary.
+ *
+ * The WS PDF brokerage parser stores directional transfers as `transfer_in` /
+ * `transfer_out` (the portfolio snapshot relies on that direction), while the
+ * WS activities-CSV export classifies the same `SecurityTransfer` event as the
+ * undirected `transfer`. The fuzzy matcher keys candidates on activityType, so
+ * without folding these to one bucket a CSV `transfer` re-import would never
+ * match the existing PDF `transfer_in`/`transfer_out` row → the transfer is
+ * double-counted.
+ *
+ * We normalize ONLY for matching — the stored row keeps its directional type.
+ * Returns the set of stored activityTypes that should be considered the same
+ * event as `activityType` for dedup purposes.
+ */
+const TRANSFER_EQUIVALENTS = ['transfer', 'transfer_in', 'transfer_out'];
+
+export function dedupEquivalentActivityTypes(activityType: string): string[] {
+  if (TRANSFER_EQUIVALENTS.includes(activityType)) {
+    return [...TRANSFER_EQUIVALENTS];
+  }
+  return [activityType];
 }
 
 function shiftDate(iso: string, days: number): string {
@@ -143,11 +180,17 @@ export async function findExistingInvestmentByFuzzyMatch(
   const candidates = await InvestmentActivity.findAll({
     where: {
       accountId: args.accountId,
-      activityType: args.activityType,
+      // Fold directional WS PDF transfers (transfer_in/transfer_out) and the
+      // undirected CSV `transfer` into one bucket so a re-import matches across
+      // sources instead of double-counting. Other types match exactly.
+      activityType: { [Op.in]: dedupEquivalentActivityTypes(args.activityType) },
       currency: wantCcy,
       tradeDate: { [Op.between]: [dateLo, dateHi] },
     },
-    include: args.symbol == null ? undefined : [{ association: 'security', required: false }],
+    // Always eager-load `security` so the symbol-compatibility check can see a
+    // candidate's symbol even when the incoming row has none — otherwise a
+    // symbol-bearing candidate would project as symbol-less and falsely match.
+    include: [{ association: 'security', required: false }],
     transaction: args.t,
   });
 
@@ -157,5 +200,6 @@ export async function findExistingInvestmentByFuzzyMatch(
     symbol: args.symbol,
     quantity: args.quantity,
     amount: args.amount,
+    excludeIds: args.excludeIds,
   });
 }

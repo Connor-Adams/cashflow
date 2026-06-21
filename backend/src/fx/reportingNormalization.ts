@@ -18,6 +18,7 @@
  */
 
 import type { FxLookup } from '../networth/unifyToCad';
+import { toUnits, fromUnits } from '../util/numbers';
 
 export interface ReportingAggregate {
   /** Stable key for the metric (e.g. "totalSpend", "totalCredits"). */
@@ -42,6 +43,7 @@ export interface NormalizedMetric {
   }>;
 }
 
+// Distinct domain shape from networth/unifyToCad.ts FxRateUsed (generic from/to vs to:'CAD'); kept module-local.
 export interface FxRateUsed {
   from: string;
   to: string;
@@ -67,6 +69,8 @@ export interface NormalizationResult {
  * Cuts the work to one FX lookup per non-identity currency regardless of how
  * many metrics share the same currency.
  */
+const round4 = (n: number) => Math.round(n * 10000) / 10000;
+
 async function resolveFxRates(
   currencies: Set<string>,
   reporting: string,
@@ -124,7 +128,11 @@ export async function normalizeToReportingCurrency(
 
   const metrics: NormalizedMetric[] = aggregates.map((agg) => {
     const contributions: NormalizedMetric['contributions'] = [];
-    let normalized = 0;
+    // Accumulate in integer 10000ths so the headline total exactly equals the
+    // sum of the (round4'd) per-currency contributions — a plain float `+=`
+    // drifts (0.1 + 0.2 → 0.30000000000000004) and makes the total disagree
+    // with the contributions a tooltip displays.
+    let normalizedU = 0;
     let partial = false;
     const entries = Object.entries(agg.byCurrency).sort(([a], [b]) =>
       a.localeCompare(b)
@@ -153,8 +161,8 @@ export async function normalizeToReportingCurrency(
         });
         continue;
       }
-      const converted = amount * fx.rate;
-      normalized += converted;
+      const converted = round4(amount * fx.rate);
+      normalizedU += toUnits(converted);
       contributions.push({
         currency: cur,
         native: amount,
@@ -163,7 +171,7 @@ export async function normalizeToReportingCurrency(
         ratedDate: fx.ratedDate,
       });
     }
-    return { key: agg.key, normalized, partial, contributions };
+    return { key: agg.key, normalized: fromUnits(normalizedU), partial, contributions };
   });
 
   // Build the FX rates used (dedup, exclude identity).

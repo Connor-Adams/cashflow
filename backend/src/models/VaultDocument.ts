@@ -42,16 +42,9 @@ export const VAULT_LINKED_ENTITY_TYPES: readonly VaultLinkedEntityType[] = [
 ] as const;
 
 export type VaultStorageKind = 'local' | 's3';
-export const VAULT_STORAGE_KINDS: readonly VaultStorageKind[] = [
-  'local',
-  's3',
-] as const;
 
+// Same literal union also declared in storage/vaultStorage.ts; intentional domain-local copy to avoid a model->storage import.
 export type VaultEncryptionAlgorithm = 'aes-256-gcm' | 'none';
-export const VAULT_ENCRYPTION_ALGORITHMS: readonly VaultEncryptionAlgorithm[] = [
-  'aes-256-gcm',
-  'none',
-] as const;
 
 export type VaultVisibility = 'shared' | 'private';
 export const VAULT_VISIBILITIES: readonly VaultVisibility[] = [

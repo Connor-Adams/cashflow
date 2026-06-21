@@ -3,6 +3,7 @@ import { D } from '../util/decimal';
 import { Scenario } from '../../models';
 import { computeCorpScenario } from './computeCorpScenario';
 import { resolveCorpScenario } from './resolveCorpScenario';
+import { setCorpProjector } from './projectionPorts';
 import { rollCorpCarryforwards } from '../services/rollCorpCarryforwards';
 import type { CorpTaxYearFacts, IncomeItem } from '../engine/types';
 
@@ -120,3 +121,8 @@ export async function projectCorpFactsFromPrevYear(
     carryforwards,
   };
 }
+
+// Register the corp projector so resolveCorpScenario can dispatch projection_root
+// roots through the port without importing this module (which imports
+// resolveCorpScenario; importing back would re-form the cycle).
+setCorpProjector(projectCorpFactsFromPrevYear);

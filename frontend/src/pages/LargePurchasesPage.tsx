@@ -12,25 +12,19 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { CheckCircle2, XCircle } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyTableRow } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { Tabs, TabPanel, type TabItem } from '@/components/ui/tabs'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
+import { Tabs, type TabItem } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { getJson, patchJson } from '../lib/api'
+import { todayDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import type {
   LargePurchaseReviewStatus,
@@ -172,7 +166,7 @@ export function LargePurchasesPage() {
       if (!reviewing) return
       setSaving(true)
       try {
-        const today = new Date().toISOString().slice(0, 10)
+        const today = todayDateInputValue()
         const res = await patchJson<LargePurchaseReviewPatchResponse>(
           `/api/transactions/${reviewing.id}/large-purchase-review`,
           {
@@ -226,32 +220,38 @@ export function LargePurchasesPage() {
           items={TAB_ITEMS}
         />
 
-        <TabPanel value="inbox" active={tab}>
-          <PurchaseTable
-            rows={rows}
-            loading={loading}
-            err={err}
-            onReview={openReview}
-          />
-        </TabPanel>
+        {tab === 'inbox' && (
+          <div role="tabpanel">
+            <PurchaseTable
+              rows={rows}
+              loading={loading}
+              err={err}
+              onReview={openReview}
+            />
+          </div>
+        )}
 
-        <TabPanel value="reviewed" active={tab}>
-          <PurchaseTable
-            rows={rows}
-            loading={loading}
-            err={err}
-            onReview={openReview}
-          />
-        </TabPanel>
+        {tab === 'reviewed' && (
+          <div role="tabpanel">
+            <PurchaseTable
+              rows={rows}
+              loading={loading}
+              err={err}
+              onReview={openReview}
+            />
+          </div>
+        )}
 
-        <TabPanel value="dismissed" active={tab}>
-          <PurchaseTable
-            rows={rows}
-            loading={loading}
-            err={err}
-            onReview={openReview}
-          />
-        </TabPanel>
+        {tab === 'dismissed' && (
+          <div role="tabpanel">
+            <PurchaseTable
+              rows={rows}
+              loading={loading}
+              err={err}
+              onReview={openReview}
+            />
+          </div>
+        )}
       </Card>
 
       {reviewing && form && (
@@ -371,13 +371,14 @@ function ReviewDialog({
               {row.date} &bull; {formatMoney(Number(row.amount), row.currency)}
             </p>
           </div>
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={onClose}
-            className="text-muted-foreground hover:text-foreground"
             aria-label="Close"
           >
             <XCircle className="h-5 w-5" />
-          </button>
+          </Button>
         </div>
 
         <div className="space-y-2">

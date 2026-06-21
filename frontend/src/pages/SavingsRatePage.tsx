@@ -1,11 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { PiggyBank, TrendingDown, TrendingUp } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { NativeSelect } from '@/components/ui/native-select'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Grid } from '@/lib/ds-extras'
 import { PageHeader } from '@/components/ui/page-header'
-import { getJson } from '../lib/api'
+import { SectionHeader } from '@/components/ui/section-header'
+import { StatCard } from '@connor-adams/designsystem'
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { formatMoney } from '../lib/formatMoney'
+import { ReportFilterBar } from './report/ReportFilterBar'
+import { defaultReportMonth, type ScopeOption } from './report/reportFilters'
+import { useReportData } from './report/useReportData'
 import type {
   LifestyleScope,
   SavingsRateCurrencySummary,
@@ -28,21 +36,12 @@ import type {
  * backend/src/summary/savingsRate.ts.
  */
 
-const SCOPE_OPTIONS: { value: LifestyleScope; label: string }[] = [
+const SCOPE_OPTIONS: ScopeOption[] = [
   { value: 'all', label: 'All activity' },
   { value: 'personal', label: 'Personal' },
   { value: 'shared', label: 'Shared' },
   { value: 'business', label: 'Business' },
 ]
-
-const WINDOW_OPTIONS = [6, 12, 18, 24]
-
-/** Default anchor is the current calendar month in the browser's local
- *  timezone. The backend treats YYYY-MM as a pure label. */
-function defaultMonth(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
 
 /** Format a savings-rate percentage (null when there was no income). */
 function formatRate(pct: number | null): string {
@@ -51,15 +50,12 @@ function formatRate(pct: number | null): string {
 }
 
 export function SavingsRatePage() {
-  const [month, setMonth] = useState<string>(defaultMonth())
+  const [month, setMonth] = useState<string>(defaultReportMonth())
   const [months, setMonths] = useState<number>(12)
   const [currency, setCurrency] = useState<string>('')
   const [scope, setScope] = useState<LifestyleScope>('all')
   const [includeInvestments, setIncludeInvestments] = useState<boolean>(true)
   const [includeDebtPrincipal, setIncludeDebtPrincipal] = useState<boolean>(true)
-  const [data, setData] = useState<SavingsRateResponse | null>(null)
-  const [loading, setLoading] = useState<boolean>(true)
-  const [err, setErr] = useState<string | null>(null)
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams()
@@ -72,39 +68,11 @@ export function SavingsRatePage() {
     return params.toString()
   }, [month, months, scope, currency, includeInvestments, includeDebtPrincipal])
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setErr(null)
-    try {
-      const res = await getJson<SavingsRateResponse>(
-        `/api/reports/savings-rate?${queryString}`,
-      )
-      setData(res)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Error')
-    } finally {
-      setLoading(false)
-    }
-  }, [queryString])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  // Currencies present in the loaded data drive the picker so it never
-  // collapses when a filter is applied.
-  const availableCurrencies = useMemo(() => {
-    const set = new Set<string>()
-    for (const s of data?.byCurrency ?? []) set.add(s.currency)
-    if (currency) set.add(currency)
-    return Array.from(set).sort()
-  }, [data, currency])
-
-  const windowLabel = useMemo(() => {
-    const w = data?.windowMonths ?? []
-    if (w.length === 0) return ''
-    return `${w[0]} – ${w[w.length - 1]}`
-  }, [data])
+  const { data, loading, err, reload, availableCurrencies, windowLabel } =
+    useReportData<SavingsRateResponse>(
+      `/api/reports/savings-rate?${queryString}`,
+      currency,
+    )
 
   return (
     <div className="page">
@@ -113,90 +81,25 @@ export function SavingsRatePage() {
         description="Track your true savings rate over time — the share of income you keep as savings, investments, and debt paid down, rather than spend."
       />
 
-      <section className="card">
-        <div
-          style={{
-            display: 'flex',
-            gap: 12,
-            alignItems: 'flex-end',
-            flexWrap: 'wrap',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="savings-month">Through month</label>
-            <input
-              id="savings-month"
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="input"
-              style={{ minWidth: 160 }}
-            />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="savings-window">Window</label>
-            <NativeSelect
-              id="savings-window"
-              value={String(months)}
-              onChange={(e) => setMonths(Number(e.target.value))}
-            >
-              {WINDOW_OPTIONS.map((w) => (
-                <option key={w} value={w}>
-                  {w} months
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="savings-scope">Scope</label>
-            <NativeSelect
-              id="savings-scope"
-              value={scope}
-              onChange={(e) => setScope(e.target.value as LifestyleScope)}
-            >
-              {SCOPE_OPTIONS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="savings-currency">Currency</label>
-            <NativeSelect
-              id="savings-currency"
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
-            >
-              <option value="">All currencies</option>
-              {availableCurrencies.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              void load()
-            }}
-            disabled={loading}
-          >
-            Refresh
-          </Button>
-        </div>
+      <Card className="mb-4">
+        <ReportFilterBar
+          idPrefix="savings"
+          month={month}
+          onMonthChange={setMonth}
+          months={months}
+          onMonthsChange={setMonths}
+          scope={scope}
+          onScopeChange={setScope}
+          scopeOptions={SCOPE_OPTIONS}
+          currency={currency}
+          onCurrencyChange={setCurrency}
+          availableCurrencies={availableCurrencies}
+          loading={loading}
+          onRefresh={reload}
+        />
 
-        <div
-          style={{
-            display: 'flex',
-            gap: 16,
-            flexWrap: 'wrap',
-            marginTop: 12,
-          }}
-        >
-          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <div className="flex flex-wrap gap-4 mt-3">
+          <label className="flex items-center gap-1.5">
             <input
               type="checkbox"
               checked={includeInvestments}
@@ -204,7 +107,7 @@ export function SavingsRatePage() {
             />
             Count investment contributions as savings
           </label>
-          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <label className="flex items-center gap-1.5">
             <input
               type="checkbox"
               checked={includeDebtPrincipal}
@@ -215,11 +118,11 @@ export function SavingsRatePage() {
         </div>
 
         {windowLabel && (
-          <p className="muted" style={{ margin: '8px 0 0' }}>
+          <p className="text-sm leading-6 text-muted-foreground mt-2 mb-0">
             Showing {windowLabel}.
           </p>
         )}
-      </section>
+      </Card>
 
       <FormulaExplainer
         includeInvestments={includeInvestments}
@@ -227,26 +130,21 @@ export function SavingsRatePage() {
       />
 
       {err && (
-        <section className="card">
-          <p className="error" role="alert">
-            {err}
-          </p>
-        </section>
+        <Alert variant="error" className="mb-4">
+          {err}
+        </Alert>
       )}
 
       {loading && !data ? (
-        <section className="card" aria-busy="true">
-          <p className="muted">Building the report…</p>
-        </section>
+        <Card className="mb-4" aria-busy="true">
+          <p className="text-sm leading-6 text-muted-foreground mb-0">Building the report…</p>
+        </Card>
       ) : !data ? null : data.byCurrency.length === 0 ? (
-        <section className="card">
-          <p className="muted">
-            No income or savings activity for {windowLabel || 'this window'}
-            {scope !== 'all' ? ` in the ${scope} scope` : ''}
-            {currency ? ` (${currency})` : ''}. Import transactions or widen the
-            window.
-          </p>
-        </section>
+        <EmptyState
+          className="mb-4"
+          title={`No activity for ${windowLabel || 'this window'}`}
+          description={`No income or savings${scope !== 'all' ? ` in the ${scope} scope` : ''}${currency ? ` (${currency})` : ''}. Import transactions or widen the window.`}
+        />
       ) : (
         data.byCurrency.map((summary) => (
           <CurrencySummaryCard key={summary.currency} summary={summary} />
@@ -273,14 +171,14 @@ function FormulaExplainer({
   if (includeDebtPrincipal) numeratorParts.push('debt principal')
   const numerator = numeratorParts.join(' + ')
   return (
-    <section className="card" aria-label="How the savings rate is calculated">
-      <h2 style={{ margin: '0 0 6px', fontSize: '1rem' }}>How this is calculated</h2>
-      <p style={{ margin: '0 0 8px' }}>
+    <section className="rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm sm:p-5 mb-4" aria-label="How the savings rate is calculated">
+      <h2 className="m-0 mb-1.5 text-base">How this is calculated</h2>
+      <p className="mb-2">
         <code>
           savings rate = ({numerator}) ÷ income
         </code>
       </p>
-      <ul className="muted" style={{ margin: 0, paddingLeft: 18 }}>
+      <ul className="text-sm leading-6 text-muted-foreground m-0 pl-4">
         <li>
           <strong>Income</strong> — money coming into your cash accounts
           (payroll, deposits). Statement payments and internal transfers are
@@ -303,7 +201,7 @@ function FormulaExplainer({
           {includeDebtPrincipal ? ' Counted toward your rate.' : ' Excluded from your rate (toggle above).'}
         </li>
       </ul>
-      <p className="muted" style={{ margin: '8px 0 0' }}>
+      <p className="text-sm leading-6 text-muted-foreground mt-2 mb-0">
         Internal transfers are counted exactly once — the money landing in a
         savings, investment, or loan account is what counts, not the matching
         withdrawal from checking, so nothing is double counted.
@@ -315,36 +213,19 @@ function FormulaExplainer({
 function CurrencySummaryCard({ summary }: { summary: SavingsRateCurrencySummary }) {
   const { totals } = summary
   return (
-    <section className="card" aria-label={`Savings rate — ${summary.currency}`}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 8,
-        }}
-      >
-        <h2 style={{ margin: 0 }}>{summary.currency}</h2>
-        <RateBadge pct={totals.savingsRatePct} />
-      </div>
+    <section className="rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm sm:p-5 mb-4" aria-label={`Savings rate — ${summary.currency}`}>
+      <SectionHeader
+        title={summary.currency}
+        actions={<RateBadge pct={totals.savingsRatePct} />}
+      />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-          gap: 12,
-        }}
-      >
-        <Stat label="Income" value={totals.income} currency={summary.currency} />
-        <Stat label="Spending" value={totals.spending} currency={summary.currency} />
-        <Stat label="Savings" value={totals.savings} currency={summary.currency} />
-        <Stat label="Investments" value={totals.investments} currency={summary.currency} />
-        <Stat
-          label="Debt principal"
-          value={totals.debtPrincipal}
-          currency={summary.currency}
-        />
-      </div>
+      <Grid minItemWidth={150} gap="md">
+        <StatCard label="Income" value={formatMoney(totals.income, summary.currency)} />
+        <StatCard label="Spending" value={formatMoney(totals.spending, summary.currency)} />
+        <StatCard label="Savings" value={formatMoney(totals.savings, summary.currency)} />
+        <StatCard label="Investments" value={formatMoney(totals.investments, summary.currency)} />
+        <StatCard label="Debt principal" value={formatMoney(totals.debtPrincipal, summary.currency)} />
+      </Grid>
 
       <MonthlySeriesTable series={summary.series} currency={summary.currency} />
     </section>
@@ -365,33 +246,6 @@ function RateBadge({ pct }: { pct: number | null }) {
   )
 }
 
-function Stat({
-  label,
-  value,
-  currency,
-}: {
-  label: string
-  value: number
-  currency: string
-}) {
-  return (
-    <div
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 6,
-        padding: 12,
-      }}
-    >
-      <p className="muted" style={{ margin: 0 }}>
-        {label}
-      </p>
-      <p style={{ margin: '4px 0 0', fontSize: '1.25rem', fontWeight: 600 }}>
-        {formatMoney(value, currency)}
-      </p>
-    </div>
-  )
-}
-
 function MonthlySeriesTable({
   series,
   currency,
@@ -401,50 +255,48 @@ function MonthlySeriesTable({
 }) {
   if (series.length === 0) return null
   return (
-    <div style={{ marginTop: 12, overflowX: 'auto' }}>
-      <h3 style={{ margin: '0 0 6px' }}>Monthly detail</h3>
-      <table className="table" style={{ minWidth: 520 }}>
-        <thead>
-          <tr>
-            <th style={{ textAlign: 'left' }}>Month</th>
-            <th style={{ textAlign: 'right' }}>Income</th>
-            <th style={{ textAlign: 'right' }}>Spending</th>
-            <th style={{ textAlign: 'right' }}>Savings</th>
-            <th style={{ textAlign: 'right' }}>Investments</th>
-            <th style={{ textAlign: 'right' }}>Debt principal</th>
-            <th style={{ textAlign: 'right' }}>Savings rate</th>
-          </tr>
-        </thead>
-        <tbody>
+    <div className="mt-3 overflow-x-auto">
+      <h3 className="mb-1.5 mt-0">Monthly detail</h3>
+      <Table className="min-w-[520px]">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Month</TableHead>
+            <TableHead className="text-right">Income</TableHead>
+            <TableHead className="text-right">Spending</TableHead>
+            <TableHead className="text-right">Savings</TableHead>
+            <TableHead className="text-right">Investments</TableHead>
+            <TableHead className="text-right">Debt principal</TableHead>
+            <TableHead className="text-right">Savings rate</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {series.map((m) => (
-            <tr key={m.month}>
-              <td>{m.month}</td>
-              <td style={{ textAlign: 'right' }}>{formatMoney(m.income, currency)}</td>
-              <td style={{ textAlign: 'right' }}>{formatMoney(m.spending, currency)}</td>
-              <td style={{ textAlign: 'right' }}>{formatMoney(m.savings, currency)}</td>
-              <td style={{ textAlign: 'right' }}>
+            <TableRow key={m.month}>
+              <TableCell>{m.month}</TableCell>
+              <TableCell className="text-right">{formatMoney(m.income, currency)}</TableCell>
+              <TableCell className="text-right">{formatMoney(m.spending, currency)}</TableCell>
+              <TableCell className="text-right">{formatMoney(m.savings, currency)}</TableCell>
+              <TableCell className="text-right">
                 {formatMoney(m.investments, currency)}
-              </td>
-              <td style={{ textAlign: 'right' }}>
+              </TableCell>
+              <TableCell className="text-right">
                 {formatMoney(m.debtPrincipal, currency)}
-              </td>
-              <td
-                style={{
-                  textAlign: 'right',
-                  color:
-                    m.savingsRatePct == null
-                      ? 'var(--muted-foreground, inherit)'
-                      : m.savingsRatePct < 0
-                        ? 'var(--danger)'
-                        : undefined,
-                }}
+              </TableCell>
+              <TableCell
+                className={
+                  m.savingsRatePct == null
+                    ? 'text-right text-muted-foreground'
+                    : m.savingsRatePct < 0
+                      ? 'text-right text-danger'
+                      : 'text-right'
+                }
               >
                 {formatRate(m.savingsRatePct)}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   )
 }

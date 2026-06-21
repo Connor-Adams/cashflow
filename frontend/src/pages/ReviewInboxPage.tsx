@@ -1,48 +1,44 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Check,
-  Keyboard,
-  ListChecks,
-  RefreshCw,
-  Search,
-  ShieldCheck,
-  Wand2,
-} from 'lucide-react'
+  Check, Keyboard, ListChecks, RefreshCw, Search, ShieldCheck, Wand2, } from 'lucide-react'
 import type { ImportConfidenceFlagToken } from '@cashflow/shared'
 import { IMPORT_CONFIDENCE_FLAG_TOKENS } from '@cashflow/shared'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyTableRow } from '@/components/ui/empty-state'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
 import { EnrichmentSignalsDialog } from '@/components/EnrichmentSignalsDialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@/components/ui/native-select'
+import { Alert } from '@connor-adams/designsystem'
+import { Grid } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@/components/ui/skeleton'
-import { StatCard } from '@/components/ui/stat-card'
+import { SectionHeader } from '@/components/ui/section-header'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { StatCard } from '@connor-adams/designsystem'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
+import { TxnMerchantCell, TxnMerchantName } from '@/components/ui/txn-merchant-cell'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
+import { ItemRow } from '../components/items/ItemRow'
 import { getJson, patchJson, postJson } from '../lib/api'
+import { resolveCategoryPath } from '../lib/categoriesApi'
+import { useAttachAndAnalyzeReceipt } from '../lib/useAttachAndAnalyzeReceipt'
 import { formatMoney } from '../lib/formatMoney'
 import {
   buildReviewBulkPatch,
   getReviewInboxSummary,
   getSelectedReviewSummary,
 } from '../lib/reviewInbox'
+import { useCategoryPaths } from '../lib/useCategoryPaths'
+import { TAX_TREATMENTS } from '../lib/taxTreatment'
+import { TaxTreatmentSelect } from '../components/TaxTreatmentSelect'
+import type { TaxTreatment } from '../lib/taxTreatment'
+import type { ExternalOrderItemView } from '../../../shared/api-types'
 import type { Paginated, Transaction } from '../types/api'
 
 type CategoryHint = {
@@ -55,6 +51,14 @@ type RuleResponse = {
 }
 
 const PAGE_SIZE = 100
+
+// color-mix tints have no Tailwind token utility, so these surfaces keep inline
+// var(). Centralised here to avoid duplicating the literal across controls.
+const HAIRLINE_BORDER = 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%)'
+const SELECT_SURFACE_STYLE = {
+  borderColor: HAIRLINE_BORDER,
+  background: 'color-mix(in srgb, var(--card) 94%, transparent)',
+} as const
 
 const SHORTCUT_HELP: Array<{ keys: string; action: string }> = [
   { keys: 'j', action: 'Move cursor down' },
@@ -95,6 +99,9 @@ function buildRevertPatch(
       case 'businessOverride':
         revert.businessOverride = row.businessOverride
         break
+      case 'taxTreatmentOverride':
+        revert.taxTreatmentOverride = row.taxTreatmentOverride
+        break
       case 'splitOverride':
         revert.splitOverride = row.splitOverride
         break
@@ -131,15 +138,38 @@ const CONFIDENCE_FLAG_CHIPS: Array<{
   }),
 )
 
+/** Keyboard shortcut key badge — styled kbd element used in the shortcuts hint bar. */
+function KbdKey({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="inline-flex min-w-5 items-center justify-center rounded border border-border bg-muted px-1 py-0.5 font-mono text-[0.7rem] text-foreground">
+      {children}
+    </kbd>
+  )
+}
+
+/** An item is a straggler (needs review) when no category has been resolved at sufficient confidence.
+ * Mirrors the backend ENRICHMENT_ITEM_CLEAR_CONFIDENCE threshold (>=80). */
+function isItemStraggler(item: ExternalOrderItemView): boolean {
+  if (item.categoryOverride != null && item.categoryOverride !== '') return false;
+  const conf = item.confidence != null ? Number(item.confidence) : NaN;
+  return !(item.inferredCategory != null && item.inferredCategory !== '' && Number.isFinite(conf) && conf >= 80);
+}
+
 export function ReviewInboxPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [rows, setRows] = useState<Transaction[]>([])
   const [total, setTotal] = useState(0)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(() => new Set())
+  const [itemsByTxn, setItemsByTxn] = useState<Map<number, ExternalOrderItemView[]>>(
+    () => new Map()
+  )
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [category, setCategory] = useState('')
   const [business, setBusiness] = useState('')
   const [splitType, setSplitType] = useState('')
+  const [taxTreatment, setTaxTreatment] = useState<TaxTreatment | ''>('')
+  const { paths: categoryPaths } = useCategoryPaths()
   const [merchantFilter, setMerchantFilter] = useState('')
   const [batchFilter, setBatchFilter] = useState('')
   const confidenceFlag =
@@ -169,7 +199,9 @@ export function ReviewInboxPage() {
   const { showToast } = useToast()
   const categoryPickerRef = useRef<HTMLDivElement>(null)
   const tableWrapRef = useRef<HTMLDivElement>(null)
-
+  const receiptInputRef = useRef<HTMLInputElement>(null)
+  const [receiptTargetTxnId, setReceiptTargetTxnId] = useState<number | null>(null)
+  const [lastAnalyzedTxnId, setLastAnalyzedTxnId] = useState<number | null>(null)
   const load = useCallback(async () => {
     setLoading(true)
     setErr(null)
@@ -191,6 +223,38 @@ export function ReviewInboxPage() {
       setLoading(false)
     }
   }, [confidenceFlag])
+
+  const onReceiptDone = useCallback(async () => { await load() }, [load])
+  const { attachAndAnalyze, busyTxnId, lastItemCount, error: attachErr } =
+    useAttachAndAnalyzeReceipt(onReceiptDone)
+
+  const toggleExpanded = useCallback(
+    async (id: number) => {
+      const isCurrentlyExpanded = expandedIds.has(id)
+      setExpandedIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(id)) {
+          next.delete(id)
+        } else {
+          next.add(id)
+        }
+        return next
+      })
+      // Lazy-load items on first expand only
+      if (!isCurrentlyExpanded && !itemsByTxn.has(id)) {
+        try {
+          const receipts = await getJson<Array<{ items: ExternalOrderItemView[] }>>(
+            `/api/transactions/${id}/receipts`
+          )
+          const allItems = receipts.flatMap((r) => r.items)
+          setItemsByTxn((prev) => new Map(prev).set(id, allItems))
+        } catch {
+          // Silently ignore load errors; items will just be empty
+        }
+      }
+    },
+    [expandedIds, itemsByTxn]
+  )
 
   useEffect(() => {
     void load()
@@ -239,9 +303,10 @@ export function ReviewInboxPage() {
         category,
         business,
         splitType,
+        taxTreatment,
         markReviewed: true,
       }),
-    [business, category, splitType]
+    [business, category, splitType, taxTreatment]
   )
 
   const canApply = selectedIds.size > 0 && Object.keys(patch).length > 0
@@ -450,14 +515,31 @@ export function ReviewInboxPage() {
     }))
     const appliedCount = selectedIds.size
     try {
+      // Resolve the chosen category path → id so the patch uses categoryOverrideId
+      // (id-authoritative write path from C1). Fall back to null when no category set.
+      let categoryOverrideId: number | null = null
+      const trimmedCategory = category.trim()
+      if (trimmedCategory) {
+        const resolved = await resolveCategoryPath(trimmedCategory)
+        categoryOverrideId = resolved.id
+      }
+      const actualPatch = buildReviewBulkPatch({
+        category,
+        categoryOverrideId,
+        business,
+        splitType,
+        taxTreatment,
+        markReviewed: true,
+      })
       await postJson('/api/transactions/bulk-patch', {
         ids: selectedIdsList,
-        patch,
+        patch: actualPatch,
       })
       setMessage(`Reviewed ${appliedCount} transaction(s).`)
       setCategory('')
       setBusiness('')
       setSplitType('')
+      setTaxTreatment('')
       await load()
 
       // Per-row PATCH reverts are required: bulk-patch applies one patch to
@@ -517,6 +599,7 @@ export function ReviewInboxPage() {
       setCategory('')
       setBusiness('')
       setSplitType('')
+      setTaxTreatment('')
       await load()
     } catch (error) {
       setErr(error instanceof Error ? error.message : 'Could not create rule')
@@ -525,8 +608,28 @@ export function ReviewInboxPage() {
     }
   }
 
+  async function handleReceiptFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || receiptTargetTxnId == null) return
+    // Reset the input so the same file can be re-picked if needed
+    e.target.value = ''
+    const txnId = receiptTargetTxnId
+    setLastAnalyzedTxnId(txnId)
+    await attachAndAnalyze(file, txnId)
+  }
+
   return (
     <div className="page reviewInboxPage">
+      {/* Hidden file input shared across all rows for camera/photo capture */}
+      <input
+        ref={receiptInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        capture="environment"
+        className="hidden"
+        data-testid="receipt-file-input"
+        onChange={(e) => void handleReceiptFileChange(e)}
+      />
       <PageHeader
         title="Review Inbox"
         description="Clear imported transactions by selecting similar rows and applying one decision."
@@ -538,7 +641,13 @@ export function ReviewInboxPage() {
         }
       />
 
-      <section className="reviewInboxStats" aria-label="Review progress">
+      <Grid
+        aria-label="Review progress"
+        role="group"
+        minItemWidth={160}
+        gap="md"
+        className="mb-4"
+      >
         <StatCard
           label="Unreviewed"
           value={summary.unreviewed}
@@ -557,13 +666,13 @@ export function ReviewInboxPage() {
             selectedSummary.currency ?? 'CAD'
           )}
         />
-      </section>
+      </Grid>
 
-      <section className="reviewInboxLayout">
-        <Card className="reviewInboxTableCard">
-          <div className="reviewInboxToolbar">
-            <Label>
-              <Search aria-hidden="true" />
+      <section className="grid gap-4 [grid-template-columns:minmax(0,_1fr)_minmax(280px,_360px)] max-[720px]:[grid-template-columns:1fr]">
+        <Card className="mb-0">
+          <div className="mb-3 flex flex-wrap items-end gap-3">
+            <Label className="min-w-[220px]">
+              <Search aria-hidden="true" className="mr-1 inline size-4" />
               Merchant
               <Input
                 value={merchantFilter}
@@ -576,16 +685,17 @@ export function ReviewInboxPage() {
               <NativeSelect
                 value={batchFilter}
                 onChange={(e) => setBatchFilter(e.target.value)}
+                style={SELECT_SURFACE_STYLE}
               >
-                <NativeSelectOption value="">All batches</NativeSelectOption>
+                <option value="">All batches</option>
                 {uniqueBatches.map((batch) => (
-                  <NativeSelectOption key={batch} value={batch}>
+                  <option key={batch} value={batch}>
                     {batch}
-                  </NativeSelectOption>
+                  </option>
                 ))}
               </NativeSelect>
             </Label>
-            <div className="reviewInboxBatchPills">
+            <div className="flex flex-wrap gap-2">
               {summary.batches.slice(0, 4).map((batch) => (
                 <Badge key={batch.name} variant="outline">
                   {batch.name}: {batch.unreviewed}
@@ -629,48 +739,69 @@ export function ReviewInboxPage() {
             {CONFIDENCE_FLAG_CHIPS.map((chip) => {
               const active = confidenceFlag === chip.token
               return (
-                <button
+                <Button
                   key={chip.token}
                   type="button"
+                  variant={active ? 'default' : 'outline'}
+                  size="sm"
                   onClick={() =>
                     setConfidenceFlag(active ? null : chip.token)
                   }
                   className={
                     active
-                      ? 'rounded-full border border-foreground bg-foreground px-2.5 py-0.5 text-xs font-semibold text-background'
-                      : 'rounded-full border border-border bg-background px-2.5 py-0.5 text-xs font-medium text-muted-foreground hover:text-foreground'
+                      ? 'rounded-full px-2.5 py-0.5 text-xs font-semibold'
+                      : 'rounded-full px-2.5 py-0.5 text-xs font-medium text-muted-foreground hover:text-foreground'
                   }
                   aria-pressed={active}
                   data-testid={`confidence-chip-${chip.token}`}
                 >
                   {chip.label}
-                </button>
+                </Button>
               )
             })}
             {confidenceFlag ? (
-              <button
+              <Button
                 type="button"
+                variant="link"
+                size="sm"
                 onClick={() => setConfidenceFlag(null)}
-                className="text-xs text-muted-foreground underline hover:text-foreground"
+                className="text-xs text-muted-foreground"
               >
                 Clear
-              </button>
+              </Button>
             ) : null}
           </div>
 
-          <p className="reviewInboxShortcutsHint" aria-hidden="true">
-            <kbd>j</kbd>/<kbd>k</kbd> navigate · <kbd>space</kbd> select ·{' '}
-            <kbd>c</kbd> category · <kbd>Enter</kbd> apply · <kbd>?</kbd> help
+          <p className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-hidden="true">
+            <KbdKey>j</KbdKey>/<KbdKey>k</KbdKey> navigate · <KbdKey>space</KbdKey> select ·{' '}
+            <KbdKey>c</KbdKey> category · <KbdKey>Enter</KbdKey> apply · <KbdKey>?</KbdKey> help
           </p>
 
-          {err && <span className="error">{err}</span>}
-          {message && <span className="reviewInboxMessage">{message}</span>}
+          {err && <Alert variant="error">{err}</Alert>}
+          {message && (
+            <span
+              className="mb-3 inline-flex rounded-lg border px-3 py-2 text-sm font-semibold text-positive"
+              // color-mix tints have no Tailwind utility — keep inline var().
+              style={{
+                borderColor: 'color-mix(in srgb, var(--positive) 45%, var(--border))',
+                background: 'color-mix(in srgb, var(--positive) 10%, transparent)',
+              }}
+            >
+              {message}
+            </span>
+          )}
 
-          <div className="reviewInboxTableWrap" ref={tableWrapRef}>
-            <Table className="reviewInboxTable">
+          <div
+            className="overflow-auto rounded-lg border"
+            style={{ maxHeight: '70vh', borderColor: HAIRLINE_BORDER }}
+            ref={tableWrapRef}
+          >
+            <Table
+              className="[&_thead_th]:bg-[color-mix(in_srgb,var(--muted)_88%,transparent)] [&_tr[data-cursor='true']]:shadow-[inset_4px_0_0_0_var(--primary)] [&_tr[data-cursor='true']]:bg-[color-mix(in_oklch,var(--primary)_10%,transparent)]"
+            >
               <TableHeader>
                 <TableRow>
-                  <TableHead className="narrowCol">
+                  <TableHead className="w-9 text-center">
                     <input
                       type="checkbox"
                       checked={
@@ -693,9 +824,17 @@ export function ReviewInboxPage() {
               <TableBody>
                 {visibleRows.map((row) => {
                   const isCursor = row.id === cursorRowId
+                  const isExpanded = expandedIds.has(row.id)
+                  const txnItems = itemsByTxn.get(row.id)
+                  const sortedItems = txnItems
+                    ? [
+                        ...txnItems.filter(isItemStraggler),
+                        ...txnItems.filter((it) => !isItemStraggler(it)),
+                      ]
+                    : null
                   return (
+                  <React.Fragment key={row.id}>
                   <TableRow
-                    key={row.id}
                     data-row-id={row.id}
                     data-cursor={isCursor ? 'true' : undefined}
                     data-state={selectedIds.has(row.id) ? 'selected' : undefined}
@@ -711,21 +850,65 @@ export function ReviewInboxPage() {
                     </TableCell>
                     <TableCell>{row.date}</TableCell>
                     <TableCell>
-                      <span className="txnMerchantCell">
-                        <span className="txnMerchantName">{row.merchantClean}</span>
+                      <TxnMerchantCell>
+                        <TxnMerchantName>{row.merchantClean}</TxnMerchantName>
                         {row.appliedRuleId ? (
-                          <span className="reviewInboxHint">Rule #{row.appliedRuleId}</span>
+                          <span className="text-xs text-muted-foreground">Rule #{row.appliedRuleId}</span>
                         ) : (
-                          <span className="reviewInboxHint">No rule</span>
+                          <span className="text-xs text-muted-foreground">No rule</span>
                         )}
-                        <button
+                        <Button
                           type="button"
-                          className="reviewInboxHintLink"
+                          variant="link"
+                          size="sm"
+                          className="p-0 text-xs text-muted-foreground underline hover:text-primary focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
                           onClick={() => setSignalsDialogTxnId(row.id)}
                         >
                           Why?
-                        </button>
-                      </span>
+                        </Button>
+                        {row.itemized != null ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            aria-label={`${row.itemized.itemCount} items${row.itemized.stragglerCount > 0 ? `, ${row.itemized.stragglerCount} need review` : ''}`}
+                            aria-expanded={isExpanded}
+                            onClick={() => void toggleExpanded(row.id)}
+                            className="text-xs font-medium text-muted-foreground hover:text-foreground"
+                          >
+                            <span>🧾 {row.itemized.itemCount} items</span>
+                            {row.itemized.stragglerCount > 0 && (
+                              <span className="text-warning">
+                                {' · '}
+                                {row.itemized.stragglerCount} need review
+                              </span>
+                            )}
+                          </Button>
+                        ) : busyTxnId === row.id ? (
+                          <span className="text-xs text-muted-foreground italic">Analyzing…</span>
+                        ) : (
+                          <>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              aria-label="Add receipt"
+                              onClick={() => {
+                                setReceiptTargetTxnId(row.id)
+                                receiptInputRef.current?.click()
+                              }}
+                              className="text-xs font-medium text-muted-foreground hover:text-foreground"
+                            >
+                              📷 Add receipt
+                            </Button>
+                            {lastAnalyzedTxnId === row.id && lastItemCount === 0 && attachErr == null && (
+                              <span className="text-xs text-warning">
+                                {"Couldn't read items — try another photo."}
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </TxnMerchantCell>
                     </TableCell>
                     <TableCell>{formatMoney(row.amount, row.currency)}</TableCell>
                     <TableCell>
@@ -738,6 +921,43 @@ export function ReviewInboxPage() {
                     <TableCell>{row.finalBusiness ? 'Yes' : 'No'}</TableCell>
                     <TableCell>{row.importBatch}</TableCell>
                   </TableRow>
+                  {isExpanded && (
+                    <TableRow>
+                      <TableCell colSpan={8} className="p-0">
+                        <div className="px-4 py-2">
+                          {sortedItems == null ? (
+                            <p className="text-xs text-muted-foreground">Loading items…</p>
+                          ) : sortedItems.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">No items found.</p>
+                          ) : (
+                            <Table>
+                              <TableHeader>
+                                <TableRow className="text-xs text-muted-foreground">
+                                  <TableHead className="h-auto px-3 pb-1 font-medium normal-case">Item</TableHead>
+                                  <TableHead className="h-auto px-3 pb-1 font-medium normal-case">Qty</TableHead>
+                                  <TableHead className="h-auto px-3 pb-1 font-medium normal-case">Total</TableHead>
+                                  <TableHead className="h-auto px-3 pb-1 font-medium normal-case">Category</TableHead>
+                                  <TableHead className="h-auto px-3 pb-1 font-medium normal-case">Business %</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {sortedItems.map((item) => (
+                                  <ItemRow
+                                    key={item.id}
+                                    item={item}
+                                    categoryHints={categoryHints.map((h) => h.label)}
+                                    currency={row.currency}
+                                    onSaved={() => void load()}
+                                  />
+                                ))}
+                              </TableBody>
+                            </Table>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </React.Fragment>
                   )
                 })}
                 {!loading && visibleRows.length === 0 && (
@@ -757,74 +977,96 @@ export function ReviewInboxPage() {
           </div>
         </Card>
 
-        <Card className="reviewInboxDecisionCard">
-          <div className="transactionsPanelHeader">
-            <div>
-              <h2>Decision</h2>
-              <p className="muted">
-                {selectedSummary.commonMerchant
-                  ? selectedSummary.commonMerchant
-                  : 'Select matching rows to create a rule.'}
-              </p>
-            </div>
-            <Badge variant={selectedSummary.count ? 'default' : 'outline'}>
-              <ListChecks aria-hidden="true" />
-              {selectedSummary.count}
-            </Badge>
-          </div>
+        <Card className="mb-0 bg-card max-[720px]:order-[-1]">
+          <SectionHeader
+            title="Decision"
+            description={
+              selectedSummary.commonMerchant
+                ? selectedSummary.commonMerchant
+                : 'Select matching rows to create a rule.'
+            }
+            actions={
+              <Badge variant={selectedSummary.count ? 'default' : 'outline'}>
+                <ListChecks aria-hidden="true" />
+                {selectedSummary.count}
+              </Badge>
+            }
+          />
 
-          <div className="reviewInboxDecisionFields">
+          <div className="grid gap-3">
             <Label>
               Category
               <div ref={categoryPickerRef}>
                 <CategoryCloudPicker
                   value={category}
                   onChange={(value) => setCategory(value)}
-                  options={categoryHints.map((hint) => hint.label)}
+                  options={categoryPaths.length > 0 ? categoryPaths : categoryHints.map((hint) => hint.label)}
                   placeholder="Dining, Transport..."
                 />
               </div>
             </Label>
             <Label>
               Split
-              <NativeSelect value={splitType} onChange={(e) => setSplitType(e.target.value)}>
-                <NativeSelectOption value="">Keep current</NativeSelectOption>
-                <NativeSelectOption value="me">Me</NativeSelectOption>
-                <NativeSelectOption value="partner">Partner</NativeSelectOption>
-                <NativeSelectOption value="shared">Shared</NativeSelectOption>
+              <NativeSelect
+                value={splitType}
+                onChange={(e) => setSplitType(e.target.value)}
+                style={SELECT_SURFACE_STYLE}
+              >
+                <option value="">Keep current</option>
+                <option value="me">Me</option>
+                <option value="partner">Partner</option>
+                <option value="shared">Shared</option>
               </NativeSelect>
             </Label>
             <Label>
               Business
-              <NativeSelect value={business} onChange={(e) => setBusiness(e.target.value)}>
-                <NativeSelectOption value="">Keep current</NativeSelectOption>
-                <NativeSelectOption value="false">Personal</NativeSelectOption>
-                <NativeSelectOption value="true">Business</NativeSelectOption>
+              <NativeSelect
+                value={business}
+                onChange={(e) => setBusiness(e.target.value)}
+                style={SELECT_SURFACE_STYLE}
+              >
+                <option value="">Keep current</option>
+                <option value="false">Personal</option>
+                <option value="true">Business</option>
               </NativeSelect>
+            </Label>
+            <Label>
+              Tax treatment
+              <TaxTreatmentSelect
+                value={taxTreatment || null}
+                options={TAX_TREATMENTS.filter((tt) => tt !== 'none')}
+                emptyLabel="Keep current"
+                onChange={(t) => setTaxTreatment(t ?? '')}
+                className="min-h-9 rounded-md border px-3 text-sm text-foreground"
+                style={SELECT_SURFACE_STYLE}
+              />
             </Label>
           </div>
 
-          <div className="reviewInboxPreview">
-            <div>
-              <strong>{selectedSummary.count}</strong>
-              <span>selected</span>
-            </div>
-            <div>
-              <strong>
-                {formatMoney(
-                  selectedSummary.absoluteSpend,
-                  selectedSummary.currency ?? 'CAD'
-                )}
-              </strong>
-              <span>absolute spend</span>
-            </div>
-            <div>
-              <strong>{selectedRows.filter((row) => !row.appliedRuleId).length}</strong>
-              <span>without rules</span>
-            </div>
+          <div
+            className="my-4 grid gap-3"
+            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))' }}
+          >
+            {([
+              { value: selectedSummary.count, label: 'selected' },
+              { value: formatMoney(selectedSummary.absoluteSpend, selectedSummary.currency ?? 'CAD'), label: 'absolute spend' },
+              { value: selectedRows.filter((row) => !row.appliedRuleId).length, label: 'without rules' },
+            ] as { value: React.ReactNode; label: string }[]).map(({ value: val, label }) => (
+              <div
+                key={label}
+                className="rounded-lg border p-3"
+                style={{
+                  borderColor: HAIRLINE_BORDER,
+                  background: 'color-mix(in srgb, var(--muted) 46%, transparent)',
+                }}
+              >
+                <strong className="block">{val}</strong>
+                <span className="mt-1 block text-xs text-muted-foreground">{label}</span>
+              </div>
+            ))}
           </div>
 
-          <div className="reviewInboxActions">
+          <div className="flex flex-col gap-2">
             <Button
               type="button"
               disabled={!canApply || applying}
@@ -844,8 +1086,15 @@ export function ReviewInboxPage() {
             </Button>
           </div>
 
-          <div className="reviewInboxGuardrail">
-            <ShieldCheck aria-hidden="true" />
+          <div
+            className="mt-4 flex gap-2 rounded-lg border px-3 py-2 text-xs leading-5 text-muted-foreground"
+            // color-mix tints have no Tailwind utility — keep inline var().
+            style={{
+              borderColor: 'color-mix(in srgb, var(--primary) 18%, var(--border))',
+              background: 'color-mix(in srgb, var(--muted) 42%, transparent)',
+            }}
+          >
+            <ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
             <span>
               This only updates selected rows. Rule creation is available when all
               selected rows share one merchant.

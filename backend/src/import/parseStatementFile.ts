@@ -3,7 +3,7 @@ import { Op } from 'sequelize';
 import { Account, HoldingSnapshot, InvestmentActivity, Transaction } from '../models';
 import * as env from '../config/env';
 import { parseCsvRecords } from './csvParse';
-import { mapCsvRow } from './mapRow';
+import { inferCsvDateOrdering, mapCsvRow } from './mapRow';
 import { resolveProfileIdForImport } from './inferProfile';
 import { normalizeMerchant } from './normalizeMerchant';
 import { parseDateFlexible } from './parseDateFlexible';
@@ -371,6 +371,34 @@ function parseOfx(
   return { transactions, investmentActivities, holdings, warnings };
 }
 
+type TxnDupKeyFields = { date: string; amount: number | string; currency: string; merchantRaw: string };
+
+/**
+ * Dup-detection map key. The amount MUST be coerced through Number():
+ * incoming preview rows carry a JS number ('-123.45') while existing rows
+ * carry the Transaction.amount model attribute, a DECIMAL(14,4) declared as
+ * string — Postgres returns it padded to the typmod scale ('-123.4500').
+ * Without the coercion the two representations never collide in the Map and
+ * every preview row reads as non-duplicate in production (SQLite's numeric
+ * affinity returns a plain number, which is why tests passed).
+ *
+ * Exported for tests.
+ */
+export function txnDupKey(r: TxnDupKeyFields): string {
+  return `${r.date}|${Number(r.amount)}|${r.currency}|${r.merchantRaw}`;
+}
+
+function normalizeSourceRef(v: string | null | undefined): string | null {
+  return v == null || v === '' ? null : v;
+}
+
+function isTxnDuplicate(newRef: string | null, existingRefs: Array<string | null>): boolean {
+  if (existingRefs.length === 0) return false;
+  if (existingRefs.includes(newRef)) return true;
+  if (newRef == null) return existingRefs.some((er) => er != null);
+  return existingRefs.some((er) => er == null);
+}
+
 async function markDuplicates(preview: Omit<StatementPreview, 'previewToken'>): Promise<void> {
   const txnKeys = preview.transactions.map((r) => ({
     date: r.date,
@@ -389,23 +417,14 @@ async function markDuplicates(preview: Omit<StatementPreview, 'previewToken'>): 
     : [];
   const txnIndex = new Map<string, Array<string | null>>();
   for (const e of existingTxns) {
-    const k = `${e.date}|${String(e.amount)}|${e.currency}|${e.merchantRaw}`;
+    const k = txnDupKey(e);
     const list = txnIndex.get(k) ?? [];
     list.push(e.sourceReference ?? null);
     txnIndex.set(k, list);
   }
   preview.transactions.forEach((r) => {
-    const key = `${r.date}|${String(r.amount)}|${r.currency}|${r.merchantRaw}`;
-    const existingRefs = txnIndex.get(key);
-    if (!existingRefs || existingRefs.length === 0) {
-      r.duplicate = false;
-      return;
-    }
-    const newRef = r.sourceReference == null || r.sourceReference === '' ? null : r.sourceReference;
-    if (existingRefs.some((er) => er === newRef)) { r.duplicate = true; return; }
-    if (newRef == null && existingRefs.some((er) => er != null)) { r.duplicate = true; return; }
-    if (newRef != null && existingRefs.some((er) => er == null)) { r.duplicate = true; return; }
-    r.duplicate = false;
+    const existingRefs = txnIndex.get(txnDupKey(r)) ?? [];
+    r.duplicate = isTxnDuplicate(normalizeSourceRef(r.sourceReference), existingRefs);
   });
 
   const [acts, holds] = await Promise.all([
@@ -463,6 +482,9 @@ export async function parseStatementFile(opts: {
    * (Save for business, Corporate investing).
    */
   overrideBusiness?: boolean;
+  /** Pre-extracted pdfjs lines. When set, the .pdf branch skips extractPdfLines
+   *  (avoids a second pdfjs pass when the caller already extracted). */
+  preExtractedLines?: import('./pdf/types').PdfLine[];
 }): Promise<StatementPreview | { ok: false; error: string }> {
   const account = await Account.findOne({
     where: {
@@ -588,6 +610,9 @@ export async function parseStatementFile(opts: {
     }
 
     const wsMonthly = isWsMonthlyHeaders(headers);
+    // One day/month ordering for the whole file: unambiguous rows ('15/03')
+    // decide how ambiguous ones ('03/04') parse instead of per-row fallback.
+    const dateOrdering = inferCsvDateOrdering(records, headers, resolved.profileId);
     const previewRows: NonNullable<StatementPreview['rows']> = [];
     let zeroValueNonCadFiltered = 0;
     records.forEach((row, index) => {
@@ -609,7 +634,7 @@ export async function parseStatementFile(opts: {
           return;
         }
       }
-      const mapped = mapCsvRow(row, headers, resolved.profileId, defaultCurrency);
+      const mapped = mapCsvRow(row, headers, resolved.profileId, defaultCurrency, dateOrdering);
       if ('error' in mapped) {
         previewRows.push({ rowIndex: index + 1, ok: false, error: mapped.error });
         base.parseErrors.push({ rowIndex: index + 1, message: mapped.error });
@@ -634,11 +659,14 @@ export async function parseStatementFile(opts: {
         const overrideTxnType = wsMonthly
           ? wsTxCodeToTxnType(String(row['transaction'] ?? row['Transaction'] ?? ''))
           : null;
-        base.transactions.push({
-          ...v,
-          sourceRowFingerprint: fp,
-          ...(overrideTxnType ? { overrideTxnType } : {}),
-        });
+        const isInvestment = String(account.accountType) === 'investment';
+        if (!(isInvestment && v.amount === 0)) {
+          base.transactions.push({
+            ...v,
+            sourceRowFingerprint: fp,
+            ...(overrideTxnType ? { overrideTxnType } : {}),
+          });
+        }
         previewRows.push({
           rowIndex: index + 1,
           ok: true,
@@ -734,10 +762,14 @@ export async function parseStatementFile(opts: {
     // Guard is idempotent — safe to call here so registration only runs for PDF uploads.
     registerBuiltInPdfParsers();
     let lines;
-    try {
-      lines = await extractPdfLines(opts.buffer);
-    } catch (err) {
-      return { ok: false, error: `Could not read PDF: ${(err as Error).message}` };
+    if (opts.preExtractedLines) {
+      lines = opts.preExtractedLines;
+    } else {
+      try {
+        lines = await extractPdfLines(opts.buffer);
+      } catch (err) {
+        return { ok: false, error: `Could not read PDF: ${(err as Error).message}` };
+      }
     }
     const parser = findPdfParser(lines);
     if (!parser) {
@@ -754,6 +786,10 @@ export async function parseStatementFile(opts: {
       amount: v.amount,
       currency: v.currency,
       sourceReference: v.sourceReference,
+      // Authoritative txnType from the parser (WS code / CC TYPE column) — wins
+      // over enrichment's narrative guess in the commit pipeline. undefined for
+      // parsers/rows that carry no such signal.
+      overrideTxnType: v.overrideTxnType,
       sourceRowFingerprint: rowFingerprint({
         accountId: account.id,
         date: v.date,
@@ -780,19 +816,29 @@ export async function parseStatementFile(opts: {
     }));
     const holdings: NormalizedHoldingSnapshot[] = (out.holdings ?? []).map((h) => ({
       ...h,
-      sourceRowFingerprint: stableFingerprint({
-        kind: 'holding',
-        accountId: account.id,
-        statementDate: h.statementDate,
-        symbol: h.security.symbol,
-        quantity: h.quantity,
-        marketValue: h.marketValue,
-      }),
+      sourceRowFingerprint:
+        parser.holdingFingerprint === 'ws_holding'
+          ? stableFingerprint({
+              kind: 'ws_holding',
+              accountId: account.id,
+              statementDate: h.statementDate,
+              symbol: h.security.symbol.toUpperCase(),
+              currency: h.currency,
+            })
+          : stableFingerprint({
+              kind: 'holding',
+              accountId: account.id,
+              statementDate: h.statementDate,
+              symbol: h.security.symbol,
+              quantity: h.quantity,
+              marketValue: h.marketValue,
+            }),
     }));
     const preview = {
       ...base,
       usedParser: 'pdf' as const,
       usedProfileId: parser.id,
+      ...(parser.crossSourceDedup ? { crossSourceDedup: parser.crossSourceDedup } : {}),
       transactions,
       investmentActivities,
       holdings,

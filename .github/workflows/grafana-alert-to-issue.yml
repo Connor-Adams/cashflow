@@ -1,0 +1,48 @@
+name: Grafana alert to issue
+
+# Issue #386 — a Grafana alert fires → a GitHub `bug`/`incident` issue is created
+# (or commented on, or closed) so reliability signals become durable, owner-
+# assignable work instead of aging out in the Grafana UI.
+#
+# Flow:
+#   Grafana alert rule fires
+#     → contact point (infra/grafana/provisioning/alerting/contactpoints.yaml)
+#       POSTs a webhook to GitHub's repository_dispatch API with
+#       event_type: grafana-alert and the Alertmanager body as client_payload
+#     → this workflow runs scripts/grafana-alert-to-issue.cjs, which dedups on
+#       the `alert:<rule-uid>` label: create / comment / close.
+#
+# The dispatch POST is authenticated with a fine-scoped PAT stored as the
+# GRAFANA_DISPATCH_TOKEN Grafana secret (issues + repository_dispatch). This
+# workflow itself only needs the built-in GITHUB_TOKEN with issues: write.
+
+on:
+  repository_dispatch:
+    types: [grafana-alert]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  alert-to-issue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Create / comment / close issue from alert
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          # The Grafana webhook body is delivered as the dispatch client_payload.
+          GRAFANA_ALERT_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+        # No node_modules needed — the script uses only Node built-ins (https).
+        run: node scripts/grafana-alert-to-issue.cjs

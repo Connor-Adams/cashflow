@@ -3,31 +3,64 @@
   "entry": [
     "backend/src/server.ts",
     "backend/src/migrations/**/*.js",
+    "backend/src/**/*.test.ts",
     "backend/test/**/*.test.ts",
     "backend/test/setup.ts",
+    "backend/test/list-unit-tests.mjs",
     "backend/scripts/**/*.{ts,cjs,js}",
     "backend/sequelize.config.cjs",
     "frontend/src/bookmarklets/amazon.ts",
     "frontend/src/bookmarklets/apple.ts",
+    "frontend/src/extension/background.ts",
+    "frontend/src/extension/content.ts",
+    "frontend/src/extension/options.ts",
+    "frontend/public/sw.js",
     "frontend/src/**/*.test.{ts,tsx}",
     "frontend/test/**/*.test.{ts,tsx}",
+    "packages/ui/src/index.ts",
+    "packages/ui/src/**/*.test.{ts,tsx}",
     "scripts/**/*.cjs",
-    "test/**/*.test.cjs"
+    "test/**/*.test.cjs",
+    "shared/*.test.ts",
+    "shared/**/*.test.ts"
   ],
   "ignorePatterns": [
     "**/dist/**",
     "**/build/**",
     "**/coverage/**",
-    "**/.next/**"
+    "**/.next/**",
+    "packages/ui/src/styles/build.css"
   ],
   "ignoreDependencies": [
     "@aws-sdk/client-s3",
     "@cashflow/shared",
     "@radix-ui/react-slot",
+    "pino-pretty",
     "react-is"
   ],
   "ignoreExportsUsedInFile": true,
   "usedClassMembers": [
-    { "extends": "Model", "members": ["*"] }
-  ]
+    { "extends": "Model", "members": ["*"] },
+    { "implements": "SpanProcessor", "members": ["*"] }
+  ],
+  "ignoreExports": [
+    { "file": "backend/src/fx/reportingNormalization.ts", "exports": ["FxRateUsed"] },
+    { "file": "backend/src/networth/unifyToCad.ts", "exports": ["FxRateUsed"] },
+    { "file": "backend/src/models/Label.ts", "exports": ["Label"] },
+    { "file": "frontend/src/components/ui/label.tsx", "exports": ["Label"] },
+    { "file": "backend/src/models/VaultDocument.ts", "exports": ["VaultEncryptionAlgorithm"] },
+    { "file": "backend/src/storage/vaultStorage.ts", "exports": ["VaultEncryptionAlgorithm"] }
+  ],
+  "rules": {
+    "unused-files": "error",
+    "unused-exports": "error",
+    "unused-types": "error",
+    "unused-enum-members": "error",
+    "unused-class-members": "error",
+    "unused-dependencies": "error",
+    "unlisted-dependencies": "error",
+    "unresolved-imports": "error",
+    "duplicate-exports": "error",
+    "circular-dependencies": "error"
+  }
 }

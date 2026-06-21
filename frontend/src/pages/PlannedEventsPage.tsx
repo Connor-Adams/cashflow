@@ -1,22 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Calendar, Edit3, Plus, Trash2 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { useConfirm } from '@/components/ui/dialog'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Label } from '@/components/ui/label'
-import { NativeSelect } from '@/components/ui/native-select'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { PlannedEventFormFields } from '@/components/planned-events/PlannedEventFormFields'
 import {
@@ -88,6 +84,14 @@ export function PlannedEventsPage() {
   const [editSaving, setEditSaving] = useState(false)
   const [statusFilter, setStatusFilter] = useState<PlannedEventStatus | ''>('')
 
+  // Deep-link focus: /planned?focus=<id> (e.g. from the forecast shortfall
+  // drilldown) scrolls the matching row into view and applies a ring
+  // highlight that fades via CSS animation. Unknown ids are a silent no-op.
+  const [searchParams] = useSearchParams()
+  const focusParam = searchParams.get('focus')
+  const focusId = focusParam != null ? Number(focusParam) : null
+  const focusRowRef = useRef<HTMLTableRowElement | null>(null)
+
   const loadEvents = useCallback(async () => {
     try {
       const path = statusFilter
@@ -109,6 +113,21 @@ export function PlannedEventsPage() {
       .then((rows) => setAccounts(rows))
       .catch(() => setAccounts([]))
   }, [])
+
+  // The id (if any) of the loaded row to highlight. Persistent class — the
+  // CSS animation (.plannedRow.isFocused) handles the visual fade, so there
+  // is no JS timer to race component tests.
+  const highlightId =
+    focusId != null && !Number.isNaN(focusId) && events.some((e) => e.id === focusId)
+      ? focusId
+      : null
+
+  // Scroll the focused row into view once it is in the DOM.
+  useEffect(() => {
+    if (highlightId == null) return
+    // scrollIntoView is undefined in jsdom; guard so tests don't throw.
+    focusRowRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+  }, [highlightId, events])
 
   const accountOptions = useMemo(() => {
     return accounts
@@ -228,20 +247,20 @@ export function PlannedEventsPage() {
         title="Planned events"
         description="Future income, expenses, transfers, and goal contributions. Powers forecast, calendar, and safe-to-spend."
       />
-      <Card className="accountsFormCard">
-        <div className="accountsCardHeader">
-          <div>
-            <h2 className="flex items-center gap-2">
+      <Card>
+        <SectionHeader
+          title={
+            <span className="flex items-center gap-2">
               <Calendar aria-hidden="true" className="h-5 w-5" />
               Upcoming
-            </h2>
-            <p className="muted">
-              {events.length === 0
-                ? 'Add a planned event below to start projecting your cashflow.'
-                : `${events.length} event${events.length === 1 ? '' : 's'} on file.`}
-            </p>
-          </div>
-          <div>
+            </span>
+          }
+          description={
+            events.length === 0
+              ? 'Add a planned event below to start projecting your cashflow.'
+              : `${events.length} event${events.length === 1 ? '' : 's'} on file.`
+          }
+          actions={
             <Label htmlFor="planned-events-status-filter" className="text-sm">
               Status
               <NativeSelect
@@ -259,16 +278,15 @@ export function PlannedEventsPage() {
                 ))}
               </NativeSelect>
             </Label>
-          </div>
-        </div>
+          }
+        />
         {events.length === 0 ? (
           <EmptyState
             title="No planned events yet."
             description="Add a future income or expense to start your forecast."
           />
         ) : (
-          <div className="tableWrap">
-            <Table className="table">
+          <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
@@ -295,7 +313,7 @@ export function PlannedEventsPage() {
                               idPrefix={`planned-event-edit-${row.id}`}
                               showStatus
                             />
-                            <div className="row">
+                            <div className="mb-3 flex flex-wrap items-center gap-3">
                               <Button
                                 type="submit"
                                 size="sm"
@@ -319,13 +337,24 @@ export function PlannedEventsPage() {
                     )
                   }
                   const tone = TYPE_TONE[row.type]
+                  const isFocused = highlightId === row.id
                   return (
-                    <TableRow key={row.id}>
+                    <tr
+                      key={row.id}
+                      ref={isFocused ? focusRowRef : undefined}
+                      className={
+                        isFocused
+                          ? 'border-b border-border transition-colors hover:bg-muted/45 plannedRow isFocused ring-2 ring-warning'
+                          : 'border-b border-border transition-colors hover:bg-muted/45'
+                      }
+                    >
                       <TableCell>{row.expectedDate}</TableCell>
                       <TableCell>
                         <div className="font-medium">{row.name}</div>
                         {row.notes ? (
-                          <div className="muted text-xs">{row.notes}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {row.notes}
+                          </div>
                         ) : null}
                       </TableCell>
                       <TableCell>
@@ -348,7 +377,9 @@ export function PlannedEventsPage() {
                             {row.recurrenceRule}
                           </span>
                         ) : (
-                          <span className="muted text-xs">One-off</span>
+                          <span className="text-xs text-muted-foreground">
+                            One-off
+                          </span>
                         )}
                       </TableCell>
                       <TableCell>
@@ -357,7 +388,7 @@ export function PlannedEventsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <div className="row">
+                        <div className="mb-3 flex flex-wrap items-center gap-3">
                           <Button
                             type="button"
                             size="sm"
@@ -376,14 +407,18 @@ export function PlannedEventsPage() {
                             <Trash2 aria-hidden="true" />
                             Delete
                           </Button>
+                          <Link to={`/forecast?date=${row.expectedDate}`}>
+                            <Button size="sm" variant="ghost">
+                              Forecast →
+                            </Button>
+                          </Link>
                         </div>
                       </TableCell>
-                    </TableRow>
+                    </tr>
                   )
                 })}
               </TableBody>
             </Table>
-          </div>
         )}
 
         <form onSubmit={createEvent}>

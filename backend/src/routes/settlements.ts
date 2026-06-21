@@ -198,7 +198,7 @@ router.get('/', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
+    const { household, user } = currentAuth(req);
     const body = (req.body ?? {}) as Record<string, unknown>;
     const result = validateSettlementInput(body);
     if (!result.ok) {
@@ -219,6 +219,7 @@ router.post('/', async (req, res, next) => {
 
     const row = await PartnerSettlement.create({
       householdId: household.id,
+      recordedByUserId: user.id,
       contactId: contact.id,
       direction: result.value.direction,
       currency: result.value.currency,

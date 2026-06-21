@@ -1,27 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Edit3, Plus, Target, Trash2 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { useConfirm } from '@/components/ui/dialog'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { NativeSelect } from '@/components/ui/native-select'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Grid } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { Textarea } from '@/components/ui/textarea'
+import { SectionHeader } from '@/components/ui/section-header'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
+import { Textarea } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
+import { useNavigate } from 'react-router-dom'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { safeNum } from '../lib/num'
 import type {
   Account,
   FinancialGoal,
@@ -29,8 +27,8 @@ import type {
   FinancialGoalPatch,
   FinancialGoalsResponse,
   FinancialGoalStatus,
+  GoalForecastStatus,
   GoalProjectionResponse,
-  GoalProjectionStatus,
 } from '../types/api'
 
 const DEFAULT_CURRENCY = 'CAD'
@@ -78,27 +76,30 @@ const GOAL_STATUS_OPTIONS: Array<{ value: FinancialGoalStatus; label: string }> 
 // Look up colour classes per status via tables instead of building strings
 // dynamically so the bundler keeps them.
 const STATUS_BADGE: Record<FinancialGoalStatus, string> = {
-  active: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100',
-  paused: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100',
-  completed: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
+  active: 'bg-info-bg text-info-foreground',
+  paused: 'bg-warning-bg text-warning-foreground',
+  completed: 'bg-success-bg text-success-foreground',
 }
 
-const PROJECTION_BADGE: Record<GoalProjectionStatus, string> = {
-  completed: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
-  on_track: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
-  ahead: 'bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-100',
-  behind: 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-100',
-  unfunded: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100',
-  active: 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100',
+// Forecast-grounded badge (#653). Literal class strings per status — Tailwind
+// v4 JIT needs literals, no dynamic string building. Mirrors the semantic
+// design-system tokens the rest of the page uses.
+const FORECAST_BADGE: Record<GoalForecastStatus, string> = {
+  completed: 'bg-success-bg text-success-foreground',
+  on_track: 'bg-success-bg text-success-foreground',
+  at_risk: 'bg-warning-bg text-warning-foreground',
+  off_track: 'bg-danger-bg text-danger',
+  no_deadline: 'bg-muted text-muted-foreground',
+  cant_validate: 'bg-muted text-muted-foreground',
 }
 
-const PROJECTION_LABEL: Record<GoalProjectionStatus, string> = {
+const FORECAST_LABEL: Record<GoalForecastStatus, string> = {
   completed: 'Completed',
   on_track: 'On track',
-  ahead: 'Ahead',
-  behind: 'Behind',
-  unfunded: 'No contribution',
-  active: 'Active',
+  at_risk: 'At risk',
+  off_track: 'Off track',
+  no_deadline: 'No deadline',
+  cant_validate: "Can't validate",
 }
 
 function statusLabel(status: FinancialGoalStatus): string {
@@ -149,6 +150,17 @@ function rowToForm(row: FinancialGoal): FormState {
     status: row.status,
     notes: row.notes ?? '',
   }
+}
+
+const NEGATIVE_AMOUNT_ERROR = "Amount can't be negative."
+
+/** Returns the inline error for a money field whose raw input is negative, else
+ *  empty. Empty input and a real `0` are not errors here (the positive-amount
+ *  requirement is enforced separately by buildInput). */
+function negativeAmountError(raw: string): string {
+  if (raw.trim() === '') return ''
+  const n = Number(raw)
+  return Number.isFinite(n) && n < 0 ? NEGATIVE_AMOUNT_ERROR : ''
 }
 
 function buildInput(form: FormState): FinancialGoalInput | null {
@@ -208,18 +220,23 @@ function buildPatch(form: FormState): FinancialGoalPatch | null {
 export function GoalsPage() {
   const { showToast } = useToast()
   const confirm = useConfirm()
+  const navigate = useNavigate()
 
   const [goals, setGoals] = useState<FinancialGoal[]>([])
   const [projections, setProjections] = useState<Record<number, GoalProjectionResponse>>({})
   const [accounts, setAccounts] = useState<Account[]>([])
   const [form, setForm] = useState<FormState>(emptyForm())
   const [submitting, setSubmitting] = useState(false)
+  const [createAttempted, setCreateAttempted] = useState(false)
   const [editId, setEditId] = useState<number | null>(null)
   const [editForm, setEditForm] = useState<FormState>(emptyForm())
   const [editSaving, setEditSaving] = useState(false)
+  const [editAttempted, setEditAttempted] = useState(false)
   const [statusFilter, setStatusFilter] = useState<FinancialGoalStatus | ''>('active')
+  const [loading, setLoading] = useState(true)
 
   const loadGoals = useCallback(async () => {
+    setLoading(true)
     try {
       const path = statusFilter
         ? `/api/goals?status=${encodeURIComponent(statusFilter)}`
@@ -246,6 +263,8 @@ export function GoalsPage() {
       setProjections(map)
     } catch {
       // Surfaced via toast in handlers
+    } finally {
+      setLoading(false)
     }
   }, [statusFilter])
 
@@ -273,6 +292,7 @@ export function GoalsPage() {
 
   async function createGoal(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    setCreateAttempted(true)
     const input = buildInput(form)
     if (!input) {
       showToast({
@@ -292,6 +312,7 @@ export function GoalsPage() {
         title: 'Goal added',
         description: `${input.name} — target ${formatMoney(input.targetAmount, input.currency)}`,
         variant: 'success',
+        action: { label: 'See in forecast →', onClick: () => navigate('/forecast') },
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not add goal'
@@ -319,6 +340,7 @@ export function GoalsPage() {
   async function saveEdit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (editId == null) return
+    setEditAttempted(true)
     const patch = buildPatch(editForm)
     if (!patch) {
       showToast({
@@ -334,7 +356,7 @@ export function GoalsPage() {
       await putGoal(editId, patch)
       cancelEdit()
       await loadGoals()
-      showToast({ title: 'Goal updated', variant: 'success' })
+      showToast({ title: 'Goal updated', variant: 'success', action: { label: 'See in forecast →', onClick: () => navigate('/forecast') } })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not save goal'
       showToast({
@@ -389,20 +411,20 @@ export function GoalsPage() {
         title="Goals"
         description="Savings targets, sinking funds, and recurring expense reserves (emergency fund, vacation, taxes, annual insurance)."
       />
-      <Card className="accountsFormCard">
-        <div className="accountsCardHeader">
-          <div>
-            <h2 className="flex items-center gap-2">
+      <Card className="mb-4">
+        <SectionHeader
+          title={
+            <span className="flex items-center gap-2">
               <Target aria-hidden="true" className="h-5 w-5" />
               Your goals
-            </h2>
-            <p className="muted">
-              {goals.length === 0
-                ? 'Add a goal below to start tracking progress.'
-                : `${goals.length} goal${goals.length === 1 ? '' : 's'} shown.`}
-            </p>
-          </div>
-          <div>
+            </span>
+          }
+          description={
+            goals.length === 0
+              ? 'Add a goal below to start tracking progress.'
+              : `${goals.length} goal${goals.length === 1 ? '' : 's'} shown.`
+          }
+          actions={
             <Label htmlFor="goals-status-filter" className="text-sm">
               Status
               <NativeSelect
@@ -420,16 +442,15 @@ export function GoalsPage() {
                 ))}
               </NativeSelect>
             </Label>
-          </div>
-        </div>
-        {goals.length === 0 ? (
+          }
+        />
+        {!loading && goals.length === 0 ? (
           <EmptyState
             title="No goals yet."
             description="Add a target below — emergency fund, sinking fund, or upcoming expense."
           />
         ) : (
-          <div className="tableWrap">
-            <Table className="table">
+          <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
@@ -444,7 +465,11 @@ export function GoalsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {goals.map((row) => {
+                {loading
+                  ? Array.from({ length: 6 }).map((_, i) => (
+                      <SkeletonRow key={`goals-skeleton-${i}`} cols={9} />
+                    ))
+                  : goals.map((row) => {
                   if (editId === row.id) {
                     return (
                       <TableRow key={row.id}>
@@ -456,8 +481,9 @@ export function GoalsPage() {
                               accountOptions={accountOptions}
                               idPrefix={`goal-edit-${row.id}`}
                               showStatus
+                              showErrors={editAttempted}
                             />
-                            <div className="row">
+                            <div className="mb-3 flex flex-wrap items-center gap-3">
                               <Button
                                 type="submit"
                                 size="sm"
@@ -482,19 +508,20 @@ export function GoalsPage() {
                   }
                   const projection = projections[row.id]
                   const progress = projection?.progressPercent ?? 0
-                  const projStatus = projection?.status ?? 'active'
+                  const forecast = projection?.forecast
+                  const forecastStatus = forecast?.status
                   return (
                     <TableRow key={row.id}>
                       <TableCell>
                         <div className="font-medium">{row.name}</div>
                         {row.notes ? (
-                          <div className="muted text-xs">{row.notes}</div>
+                          <div className="text-xs text-muted-foreground">{row.notes}</div>
                         ) : null}
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col gap-1">
                           <div
-                            className="h-2 w-32 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700"
+                            className="h-2 w-32 overflow-hidden rounded-full bg-muted"
                             role="progressbar"
                             aria-valuenow={Math.round(progress)}
                             aria-valuemin={0}
@@ -502,54 +529,72 @@ export function GoalsPage() {
                             aria-label={`Progress for ${row.name}`}
                           >
                             <div
-                              className="h-full bg-emerald-500 dark:bg-emerald-400"
+                              className="h-full bg-success"
                               style={{ width: `${progress}%` }}
                             />
                           </div>
-                          <div className="muted text-xs">
-                            {formatMoney(Number(row.currentAmount), row.currency)}
+                          <div className="text-xs text-muted-foreground">
+                            {safeNum(row.currentAmount) !== null
+                              ? formatMoney(safeNum(row.currentAmount)!, row.currency)
+                              : <em className="text-muted-foreground">(unset)</em>}
                             {' / '}
-                            {formatMoney(Number(row.targetAmount), row.currency)}
+                            {safeNum(row.targetAmount) !== null
+                              ? formatMoney(safeNum(row.targetAmount)!, row.currency)
+                              : <em className="text-muted-foreground">(unset)</em>}
                             {' '}
                             ({progress.toFixed(0)}%)
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        {formatMoney(Number(row.targetAmount), row.currency)}
+                        {safeNum(row.targetAmount) !== null
+                          ? formatMoney(safeNum(row.targetAmount)!, row.currency)
+                          : <em className="text-muted-foreground">(unset)</em>}
                       </TableCell>
                       <TableCell>{row.targetDate ?? '—'}</TableCell>
                       <TableCell>
                         {row.monthlyContribution == null
                           ? '—'
-                          : formatMoney(
-                              Number(row.monthlyContribution),
-                              row.currency,
-                            )}
+                          : safeNum(row.monthlyContribution) !== null
+                            ? formatMoney(safeNum(row.monthlyContribution)!, row.currency)
+                            : <em className="text-muted-foreground">(unset)</em>}
                       </TableCell>
                       <TableCell>
-                        {projection?.requiredMonthlyContribution ? (
+                        {/* Forecast-grounded (#653): "Need $X/mo to stay on
+                            track" derives from the real forecast, not the typed
+                            contribution. Falls back to "—" when the projection
+                            fetch failed (no projection on this row). */}
+                        {forecast?.currencyMismatch ? (
+                          <div className="text-xs text-muted-foreground">
+                            Goal currency ({row.currency}) differs from forecast (
+                            {forecast.currency}).
+                          </div>
+                        ) : forecast?.requiredMonthlyContribution ? (
                           <div className="text-xs">
                             <div>
                               Need{' '}
-                              {formatMoney(
-                                Number(projection.requiredMonthlyContribution),
-                                row.currency,
-                              )}
+                              {safeNum(forecast.requiredMonthlyContribution) !== null
+                                ? formatMoney(safeNum(forecast.requiredMonthlyContribution)!, row.currency)
+                                : <em className="text-muted-foreground">(unset)</em>}
                               /mo
+                              {forecastStatus === 'off_track'
+                                ? safeNum(forecast.monthlyFreeCash) !== null
+                                  ? ` — forecast covers ${formatMoney(safeNum(forecast.monthlyFreeCash)!, forecast.currency)}/mo`
+                                  : null
+                                : ' to stay on track'}
                             </div>
-                            {projection.projectedCompletionDate ? (
-                              <div className="muted">
-                                Finish ~{projection.projectedCompletionDate}
+                            {forecast.projectedCompletionDate ? (
+                              <div className="text-sm leading-6 text-muted-foreground">
+                                Finish ~{forecast.projectedCompletionDate}
                               </div>
                             ) : null}
                           </div>
-                        ) : projection?.projectedCompletionDate ? (
-                          <div className="muted text-xs">
-                            Finish ~{projection.projectedCompletionDate}
+                        ) : forecast?.projectedCompletionDate ? (
+                          <div className="text-xs text-muted-foreground">
+                            Finish ~{forecast.projectedCompletionDate}
                           </div>
                         ) : (
-                          <span className="muted text-xs">—</span>
+                          <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </TableCell>
                       <TableCell>
@@ -563,15 +608,19 @@ export function GoalsPage() {
                           <Badge className={STATUS_BADGE[row.status]}>
                             {statusLabel(row.status)}
                           </Badge>
-                          {row.status === 'active' && projection ? (
-                            <Badge className={PROJECTION_BADGE[projStatus]}>
-                              {PROJECTION_LABEL[projStatus]}
+                          {/* Forecast-grounded badge (#653): exactly one badge
+                              from the literal-class FORECAST_BADGE table. When
+                              the projection fetch failed (no `forecast`), only
+                              the status badge above renders. */}
+                          {row.status === 'active' && forecastStatus ? (
+                            <Badge className={FORECAST_BADGE[forecastStatus]}>
+                              {FORECAST_LABEL[forecastStatus]}
                             </Badge>
                           ) : null}
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="row">
+                        <div className="mb-3 flex flex-wrap items-center gap-3">
                           <Button
                             type="button"
                             size="sm"
@@ -605,10 +654,9 @@ export function GoalsPage() {
                       </TableCell>
                     </TableRow>
                   )
-                })}
+                  })}
               </TableBody>
             </Table>
-          </div>
         )}
 
         <form onSubmit={createGoal}>
@@ -619,6 +667,7 @@ export function GoalsPage() {
             accountOptions={accountOptions}
             idPrefix="goal-new"
             showStatus={false}
+            showErrors={createAttempted}
           />
           <Button type="submit" disabled={submitting}>
             <Plus aria-hidden="true" />
@@ -637,6 +686,8 @@ type GoalFormFieldsProps = {
   accountOptions: Account[]
   idPrefix: string
   showStatus: boolean
+  /** When true, surface inline validation errors (set after a submit attempt). */
+  showErrors?: boolean
 }
 
 function GoalFormFields({
@@ -645,9 +696,16 @@ function GoalFormFields({
   accountOptions,
   idPrefix,
   showStatus,
+  showErrors = false,
 }: GoalFormFieldsProps) {
+  const targetAmountError = showErrors
+    ? negativeAmountError(form.targetAmount)
+    : ''
+  const contributionError = showErrors
+    ? negativeAmountError(form.monthlyContribution)
+    : ''
   return (
-    <div className="formGrid">
+    <Grid minItemWidth={180} gap="md" fill className="mb-3">
       <Label htmlFor={`${idPrefix}-name`}>
         Name
         <Input
@@ -674,7 +732,19 @@ function GoalFormFields({
           }
           required
           placeholder="5000.00"
+          aria-invalid={targetAmountError ? 'true' : undefined}
+          aria-describedby={
+            targetAmountError ? `${idPrefix}-target-amount-error` : undefined
+          }
         />
+        {targetAmountError && (
+          <p
+            id={`${idPrefix}-target-amount-error`}
+            className="text-sm text-destructive mt-1"
+          >
+            {targetAmountError}
+          </p>
+        )}
       </Label>
       <Label htmlFor={`${idPrefix}-current-amount`}>
         Current amount
@@ -732,7 +802,21 @@ function GoalFormFields({
             }))
           }
           placeholder="0"
+          aria-invalid={contributionError ? 'true' : undefined}
+          aria-describedby={
+            contributionError
+              ? `${idPrefix}-monthly-contribution-error`
+              : undefined
+          }
         />
+        {contributionError && (
+          <p
+            id={`${idPrefix}-monthly-contribution-error`}
+            className="text-sm text-destructive mt-1"
+          >
+            {contributionError}
+          </p>
+        )}
       </Label>
       <Label htmlFor={`${idPrefix}-account`}>
         Linked account (optional)
@@ -797,6 +881,6 @@ function GoalFormFields({
           maxLength={4096}
         />
       </Label>
-    </div>
+    </Grid>
   )
 }

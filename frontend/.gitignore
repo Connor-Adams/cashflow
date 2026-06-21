@@ -17,6 +17,9 @@ dist-ssr
 # never commit them.
 public/bookmarklets
 
+# Extension build output — load unpacked from this dir in Chrome; do not commit.
+dist-extension/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

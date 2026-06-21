@@ -15,25 +15,56 @@
  * inputs. Result always returns the full breakdown — the UI shows it on
  * click and we want clients to render without a follow-up request.
  */
-import { Op, type WhereOptions } from 'sequelize';
-
-import { Account, FinancialGoal, CashflowSettings } from '../models';
+import { Account, Entity, FinancialGoal, CashflowSettings } from '../models';
 import { CASHFLOW_SETTINGS_DEFAULTS } from '../models/CashflowSettings';
-import { PlannedEvent } from '../models/PlannedEvent';
 import { balanceAtDate } from '../networth/balanceAtDate';
+import { loadLiabilities, toDebtInputs } from '../debt/loadLiabilities';
 import {
-  expandRecurrence,
-  type PlannedEventLike,
-} from '../forecast/expandRecurrence';
+  composeSurplus,
+  selectTopGoal,
+  DEFAULT_ASSUMED_ANNUAL_RETURN_RATE,
+  DEFAULT_SURPLUS_HORIZON_YEARS,
+  type Surplus,
+} from './surplus';
+import {
+  gatherPlannedOccurrences,
+  resolveForecastCurrency,
+} from '../forecast/gatherOccurrences';
 import { projectGoal } from '../goals/projection';
+import { toUnits, fromUnits } from '../util/numbers';
 
 /** Cash-bearing account types — match the forecast engine's exclusion list. */
-const CASH_EXCLUDED_TYPES = new Set(['investment', 'credit_card']);
+const CASH_EXCLUDED_TYPES = new Set(['investment', 'credit_card', 'loan']);
 
 /** Credit-card account types — used to size the expected-payments deduction. */
 const CREDIT_CARD_TYPES = new Set(['credit_card']);
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Safe-to-spend is a PERSONAL liquidity figure: corporate-entity accounts hold
+ * business money the user can't personally spend. Returns the set of `corp`-kind
+ * tax-entity ids for the household so the cash/CC/currency steps can drop any
+ * account tagged to one. Accounts with a null `entityId` are treated as personal
+ * (the Account create-hook defaults new accounts to the personal entity).
+ */
+export async function getCorpEntityIds(
+  householdId: number,
+): Promise<Set<number>> {
+  const corps = await Entity.findAll({
+    where: { householdId, kind: 'corp' },
+    attributes: ['id'],
+  });
+  return new Set(corps.map((e) => e.id));
+}
+
+/** True when an account belongs to a corporate tax entity (so: not personal). */
+function isCorpAccount(
+  account: Account,
+  corpEntityIds: ReadonlySet<number>,
+): boolean {
+  return account.entityId != null && corpEntityIds.has(account.entityId);
+}
 
 export type SafeToSpendBreakdown = {
   currentCash: number;
@@ -124,6 +155,26 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/** Nominal days per month used to prorate monthly amounts to the window. */
+const DAYS_PER_MONTH = 30;
+
+/**
+ * Prorate a per-MONTH amount down to the safe-to-spend window. A 14-day
+ * window reserves ~14/30 of the monthly figure, matching how upcoming
+ * expenses only reflect their in-window occurrences — otherwise a short
+ * window would still subtract a full month of goal contributions and
+ * understate safe-to-spend. Exported for unit coverage. Non-positive
+ * windows clamp to 0.
+ */
+export function proRateMonthlyToWindow(
+  monthlyAmount: number,
+  windowDays: number,
+): number {
+  if (!Number.isFinite(monthlyAmount) || !Number.isFinite(windowDays)) return 0;
+  if (windowDays <= 0) return 0;
+  return (monthlyAmount * windowDays) / DAYS_PER_MONTH;
+}
+
 function addDaysIso(iso: string, days: number): string {
   const [y, m, d] = iso.split('-').map((p) => parseInt(p, 10));
   const ms = Date.UTC(y, m - 1, d) + days * MS_PER_DAY;
@@ -133,39 +184,24 @@ function addDaysIso(iso: string, days: number): string {
 /**
  * Resolve which currency to compute against when the caller omits one.
  * Picks the currency with the largest absolute cash balance across the
- * household's eligible (non-investment, non-credit-card) accounts. Falls
- * back to CAD when the household has no cash on hand yet.
+ * household's eligible (non-investment, non-credit-card, non-loan) accounts.
+ * Falls back to CAD when the household has no cash on hand yet.
+ *
+ * Delegates the largest-abs/CAD-tiebreak algorithm to the shared
+ * `resolveForecastCurrency` (#404); the only safe-to-spend-specific input is
+ * the cash exclusion set, which is wider than the forecast route's.
  */
 export async function resolveDefaultCurrency(
   householdId: number,
   asOfDate: string,
 ): Promise<string> {
-  const accounts = await Account.findAll({ where: { householdId } });
-  const eligible = accounts.filter((a) => {
-    if (CASH_EXCLUDED_TYPES.has(a.accountType)) return false;
-    if (a.closedAt && a.closedAt <= asOfDate) return false;
-    return true;
-  });
-  const totals = new Map<string, number>();
-  for (const acc of eligible) {
-    const bal = await balanceAtDate(acc, asOfDate);
-    for (const { currency, amount } of bal) {
-      totals.set(currency, (totals.get(currency) ?? 0) + amount);
-    }
-  }
-  let best: { currency: string; absAmount: number } | null = null;
-  for (const [ccy, amt] of totals) {
-    const abs = Math.abs(amt);
-    // Prefer CAD on ties — Cashflow's primary currency.
-    if (
-      !best ||
-      abs > best.absAmount ||
-      (ccy === 'CAD' && abs === best.absAmount)
-    ) {
-      best = { currency: ccy, absAmount: abs };
-    }
-  }
-  return best?.currency ?? 'CAD';
+  const corpEntityIds = await getCorpEntityIds(householdId);
+  return resolveForecastCurrency(
+    householdId,
+    asOfDate,
+    CASH_EXCLUDED_TYPES,
+    corpEntityIds,
+  );
 }
 
 /**
@@ -177,18 +213,20 @@ export async function getCurrentCash(
   householdId: number,
   currency: string,
   asOfDate: string,
+  corpEntityIds: ReadonlySet<number> = new Set(),
 ): Promise<number> {
   const accounts = await Account.findAll({ where: { householdId } });
-  let total = 0;
+  let totalU = 0;
   for (const acc of accounts) {
     if (CASH_EXCLUDED_TYPES.has(acc.accountType)) continue;
+    if (isCorpAccount(acc, corpEntityIds)) continue;
     if (acc.closedAt && acc.closedAt <= asOfDate) continue;
     const bal = await balanceAtDate(acc, asOfDate);
     for (const { currency: ccy, amount } of bal) {
-      if (ccy === currency) total += amount;
+      if (ccy === currency) totalU += toUnits(amount);
     }
   }
-  return total;
+  return fromUnits(totalU);
 }
 
 /**
@@ -196,6 +234,11 @@ export async function getCurrentCash(
  * [asOfDate, windowEndDate], in the requested currency, scoped to the
  * household. `debt_payment` is handled separately by the credit-card branch
  * (`expectedCreditCardPayments`) so we don't double-count.
+ *
+ * Both ordinary planned events and subscription-kind expectations count.
+ * Subscriptions carry a `cadence` + `nextExpectedDate` instead of a
+ * recurrenceRule, so we synthesize a rule for them — mirrors the forecast
+ * route (routes/forecast.ts), which fixed the same exclusion for the chart.
  *
  * The amount of each row is multiplied by the number of occurrences that
  * fall inside the window (per `expandRecurrence`) — a weekly subscription
@@ -207,28 +250,23 @@ export async function getUpcomingRequiredExpenses(
   asOfDate: string,
   windowEndDate: string,
 ): Promise<number> {
-  const where: WhereOptions = {
+  // Shared occurrence pipeline (#404): the PlannedEvent query +
+  // subscription-RRULE synth + expandRecurrence loop lives in one place.
+  // Each expense row contributes amount × (its in-window occurrence count).
+  const occurrences = await gatherPlannedOccurrences({
     householdId,
     currency,
-    status: 'planned',
-    expectedDate: { [Op.lte]: windowEndDate },
-    type: 'expense',
-  };
-  const rows = await PlannedEvent.findAll({ where });
-  let total = 0;
-  for (const row of rows) {
-    const eventLike: PlannedEventLike = {
-      id: row.id,
-      expectedDate: row.expectedDate,
-      recurrenceRule: row.recurrenceRule,
-      status: row.status,
-    };
-    const occs = expandRecurrence(eventLike, asOfDate, windowEndDate);
+    from: asOfDate,
+    to: windowEndDate,
+    typeFilter: 'expense',
+  });
+  let totalU = 0;
+  for (const { row } of occurrences) {
     const amount = Number(row.amount);
     if (!Number.isFinite(amount)) continue;
-    total += amount * occs.length;
+    totalU += toUnits(amount);
   }
-  return total;
+  return fromUnits(totalU);
 }
 
 /**
@@ -238,16 +276,21 @@ export async function getUpcomingRequiredExpenses(
  * `monthlyContribution` if the projection didn't compute one (e.g. no
  * targetDate). Goals without either are skipped — they're treated as
  * passive savings, not forced expenses.
+ *
+ * The summed monthly figure is prorated to `windowDays` so it lines up with
+ * the window-scoped upcoming-expenses total — a 14-day window only reserves
+ * ~14/30 of a month of contributions, not a whole month.
  */
 export async function getRequiredSavingsContributions(
   householdId: number,
   currency: string,
   asOfDate: string,
+  windowDays: number,
 ): Promise<number> {
   const rows = await FinancialGoal.findAll({
     where: { householdId, status: 'active', currency },
   });
-  let total = 0;
+  let totalU = 0;
   for (const row of rows) {
     const projection = projectGoal({
       targetAmount: String(row.targetAmount),
@@ -259,17 +302,17 @@ export async function getRequiredSavingsContributions(
     });
     const required = projection.requiredMonthlyContribution;
     if (required != null) {
-      total += Number(required);
+      totalU += toUnits(Number(required));
       continue;
     }
     // No projection (no targetDate). Fall back to the user-declared
     // monthly contribution as the floor.
     if (row.monthlyContribution != null) {
       const n = Number(row.monthlyContribution);
-      if (Number.isFinite(n) && n > 0) total += n;
+      if (Number.isFinite(n) && n > 0) totalU += toUnits(n);
     }
   }
-  return total;
+  return proRateMonthlyToWindow(fromUnits(totalU), windowDays);
 }
 
 /**
@@ -284,19 +327,21 @@ export async function getExpectedCreditCardPayments(
   householdId: number,
   currency: string,
   asOfDate: string,
+  corpEntityIds: ReadonlySet<number> = new Set(),
 ): Promise<number> {
   const accounts = await Account.findAll({ where: { householdId } });
-  let total = 0;
+  let totalU = 0;
   for (const acc of accounts) {
     if (!CREDIT_CARD_TYPES.has(acc.accountType)) continue;
+    if (isCorpAccount(acc, corpEntityIds)) continue;
     if (acc.closedAt && acc.closedAt <= asOfDate) continue;
     const bal = await balanceAtDate(acc, asOfDate);
     for (const { currency: ccy, amount } of bal) {
       if (ccy !== currency) continue;
-      if (amount < 0) total += -amount;
+      if (amount < 0) totalU += toUnits(-amount);
     }
   }
-  return total;
+  return fromUnits(totalU);
 }
 
 /** Lazy-load (or default) the user's settings row. */
@@ -333,13 +378,17 @@ export async function computeSafeToSpend(params: {
   const windowDays = settings.safeToSpendWindowDays;
   const windowEndDate = addDaysIso(params.asOfDate, windowDays);
 
+  // Safe-to-spend is personal liquidity: drop corporate-entity accounts from
+  // the cash + credit-card legs. Computed once and shared across both.
+  const corpEntityIds = await getCorpEntityIds(params.householdId);
+
   const [
     currentCash,
     upcomingRequiredExpenses,
     requiredSavingsContributions,
     expectedCreditCardPayments,
   ] = await Promise.all([
-    getCurrentCash(params.householdId, currency, params.asOfDate),
+    getCurrentCash(params.householdId, currency, params.asOfDate, corpEntityIds),
     getUpcomingRequiredExpenses(
       params.householdId,
       currency,
@@ -350,11 +399,13 @@ export async function computeSafeToSpend(params: {
       params.householdId,
       currency,
       params.asOfDate,
+      windowDays,
     ),
     getExpectedCreditCardPayments(
       params.householdId,
       currency,
       params.asOfDate,
+      corpEntityIds,
     ),
   ]);
 
@@ -369,5 +420,70 @@ export async function computeSafeToSpend(params: {
     expectedCreditCardPayments,
     minimumBuffer: Number(settings.minimumCashBuffer),
     settings,
+  });
+}
+
+/**
+ * Read the user's assumed annual return rate (#654), falling back to the
+ * default when no settings row exists or the value is non-finite/out-of-range.
+ * Returned as a decimal (0.05 == 5%).
+ */
+export async function loadAssumedAnnualReturnRate(
+  userId: number,
+): Promise<number> {
+  const row = await CashflowSettings.findOne({ where: { userId } });
+  const raw =
+    row != null
+      ? Number(row.assumedAnnualReturnRate)
+      : Number(CASHFLOW_SETTINGS_DEFAULTS.assumedAnnualReturnRate);
+  if (!Number.isFinite(raw)) return DEFAULT_ASSUMED_ANNUAL_RETURN_RATE;
+  return raw;
+}
+
+/**
+ * Surplus decision hub (#654). Given an already-computed safe-to-spend result,
+ * derive the investable surplus, the top active goal in the same currency, and
+ * the payoff-vs-invest comparison against the household's in-currency debts.
+ *
+ * DB-aware orchestrator: loads goals + liabilities + the assumed-return setting,
+ * then defers to the pure `composeSurplus`. Records nothing and moves no money.
+ */
+export async function computeSurplus(params: {
+  userId: number;
+  householdId: number;
+  asOfDate: string;
+  result: SafeToSpendResult;
+}): Promise<Surplus> {
+  const currency = params.result.currency;
+
+  const [goals, liabilities, assumedAnnualReturnRate] = await Promise.all([
+    FinancialGoal.findAll({
+      where: { householdId: params.householdId, status: 'active', currency },
+    }),
+    loadLiabilities(params.householdId, params.asOfDate),
+    loadAssumedAnnualReturnRate(params.userId),
+  ]);
+
+  const topGoal = selectTopGoal(
+    goals.map((g) => ({
+      id: g.id,
+      name: g.name,
+      currency: g.currency,
+      priority: g.priority,
+      targetDate: g.targetDate,
+    })),
+  );
+
+  // Scope debts to the surplus currency — other currencies don't contribute.
+  const debts = toDebtInputs(liabilities.filter((l) => l.currency === currency));
+
+  return composeSurplus({
+    safeToSpendValue: params.result.value,
+    buffer: params.result.breakdown.minimumBuffer,
+    currency,
+    topGoal,
+    debts,
+    assumedAnnualReturnRate,
+    horizonYears: DEFAULT_SURPLUS_HORIZON_YEARS,
   });
 }

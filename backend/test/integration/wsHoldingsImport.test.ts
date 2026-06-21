@@ -14,6 +14,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -59,7 +60,7 @@ before(async () => {
 
   const mod = await import('../../src/app.js');
   app = mod.default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   const register = await authed.post('/api/auth/register').send({
     email: 'ws-holdings@example.com',
     displayName: 'WS Holdings User',

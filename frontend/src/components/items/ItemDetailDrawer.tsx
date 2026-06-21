@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@connor-adams/designsystem'
 import { patchJson } from '@/lib/api'
 import { useItemAllocation } from '@/hooks/useItems'
+import { formatMoney } from '../../lib/formatMoney'
 import type { ItemRow } from '@cashflow/shared'
 
 type Props = {
@@ -109,9 +110,9 @@ export function ItemDetailDrawer({ itemId, item, onClose, onPatched }: Props) {
           <dt>Quantity</dt>
           <dd>{item.qty}</dd>
           <dt>Unit price</dt>
-          <dd>{item.unitPrice != null ? `$${item.unitPrice.toFixed(2)}` : '—'}</dd>
+          <dd>{item.unitPrice != null ? formatMoney(item.unitPrice, item.currency) : '—'}</dd>
           <dt>Total price</dt>
-          <dd>{item.totalPrice != null ? `$${item.totalPrice.toFixed(2)}` : '—'}</dd>
+          <dd>{item.totalPrice != null ? formatMoney(item.totalPrice, item.currency) : '—'}</dd>
         </dl>
 
         <section className="mt-6">

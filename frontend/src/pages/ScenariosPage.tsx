@@ -25,25 +25,20 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { GitCompare, Pencil, Plus, RefreshCw, Trash2, TrendingDown, TrendingUp } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { NativeSelect } from '@/components/ui/native-select'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
+import { todayDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import type {
   AssumptionRecurrence,
@@ -72,7 +67,7 @@ const RECURRENCE_LABELS: Record<AssumptionRecurrence, string> = {
 }
 
 // Tailwind variant lookup tables (literal class names — JIT must see them).
-const DELTA_POSITIVE_CLASS = 'text-green-600 dark:text-green-400'
+const DELTA_POSITIVE_CLASS = 'text-positive'
 const DELTA_NEGATIVE_CLASS = 'text-destructive'
 const DELTA_NEUTRAL_CLASS = 'text-muted-foreground'
 
@@ -97,7 +92,7 @@ type SparklineProps = {
 
 function Sparkline({
   points,
-  color = '#6366f1',
+  color = 'var(--chart-scenario)',
   width = 120,
   height = 36,
   'aria-label': ariaLabel,
@@ -132,7 +127,7 @@ function emptyAssumption(): ScenarioAssumption {
     label: '',
     type: 'expense',
     amount: 0,
-    startDate: new Date().toISOString().slice(0, 10),
+    startDate: todayDateInputValue(),
     endDate: null,
     recurrence: null,
     direction: 'out',
@@ -395,7 +390,7 @@ function ScenarioEditor({ scenario, onClose, onSaved }: EditorProps) {
               </Button>
             </div>
             {overrides.length === 0 ? (
-              <p className="muted text-sm text-center py-4">
+              <p className="text-sm text-center py-4 text-muted-foreground">
                 No assumptions yet — add one to model a hypothetical change.
               </p>
             ) : (
@@ -511,7 +506,7 @@ function ComparisonPanel({
 
       {!rj ? (
         <Card className="p-4">
-          <p className="muted text-sm text-center">
+          <p className="text-sm text-center text-muted-foreground">
             No results yet — click Recompute to run the forecast.
           </p>
         </Card>
@@ -519,26 +514,26 @@ function ComparisonPanel({
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {/* Baseline card */}
           <Card className="p-4">
-            <div className="muted mb-2 text-xs uppercase tracking-wide">Baseline</div>
+            <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Baseline</div>
             <div className="mb-3">
-              <div className="muted text-xs">Projected closing</div>
+              <div className="text-xs text-muted-foreground">Projected closing</div>
               <div className="text-xl font-bold">
                 {formatMoney(rj.baseline.closing, currency)}
               </div>
             </div>
             <div className="mb-3">
-              <div className="muted text-xs">Lowest balance</div>
+              <div className="text-xs text-muted-foreground">Lowest balance</div>
               <div className="text-sm font-medium">
                 {formatMoney(rj.baseline.lowest, currency)}
                 {rj.baseline.lowestDate && (
-                  <span className="muted ml-1 text-xs">on {rj.baseline.lowestDate}</span>
+                  <span className="ml-1 text-xs text-muted-foreground">on {rj.baseline.lowestDate}</span>
                 )}
               </div>
             </div>
             {rj.baseline.dailyPoints.length > 1 && (
               <Sparkline
                 points={rj.baseline.dailyPoints}
-                color="#6366f1"
+                color="var(--chart-scenario)"
                 aria-label={`${scenario.name} baseline forecast sparkline`}
               />
             )}
@@ -546,9 +541,9 @@ function ComparisonPanel({
 
           {/* Scenario card */}
           <Card className="p-4">
-            <div className="muted mb-2 text-xs uppercase tracking-wide">Scenario</div>
+            <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Scenario</div>
             <div className="mb-3">
-              <div className="muted text-xs">Projected closing</div>
+              <div className="text-xs text-muted-foreground">Projected closing</div>
               <div className="flex items-center gap-2">
                 <span className="text-xl font-bold">
                   {formatMoney(rj.scenario.closing, currency)}
@@ -557,12 +552,12 @@ function ComparisonPanel({
               </div>
             </div>
             <div className="mb-3">
-              <div className="muted text-xs">Lowest balance</div>
+              <div className="text-xs text-muted-foreground">Lowest balance</div>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">
                   {formatMoney(rj.scenario.lowest, currency)}
                   {rj.scenario.lowestDate && (
-                    <span className="muted ml-1 text-xs">on {rj.scenario.lowestDate}</span>
+                    <span className="ml-1 text-xs text-muted-foreground">on {rj.scenario.lowestDate}</span>
                   )}
                 </span>
                 <DeltaBadge delta={rj.deltas.lowest} currency={currency} />
@@ -571,7 +566,7 @@ function ComparisonPanel({
             {rj.scenario.dailyPoints.length > 1 && (
               <Sparkline
                 points={rj.scenario.dailyPoints}
-                color={rj.deltas.closing >= 0 ? '#16a34a' : '#dc2626'}
+                color={rj.deltas.closing >= 0 ? 'var(--chart-scenario-pos)' : 'var(--chart-scenario-neg)'}
                 aria-label={`${scenario.name} scenario forecast sparkline`}
               />
             )}
@@ -582,7 +577,7 @@ function ComparisonPanel({
       {/* Assumptions summary */}
       {scenario.assumptionsJson.overrides.length > 0 && (
         <Card className="mt-4 p-4">
-          <div className="muted mb-2 text-xs uppercase tracking-wide">Assumptions</div>
+          <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Assumptions</div>
           <ul className="flex flex-col gap-1 text-sm">
             {scenario.assumptionsJson.overrides.map((o, i) => (
               <li key={i} className="flex items-center gap-2">
@@ -592,7 +587,7 @@ function ComparisonPanel({
                 <span className="flex-1">{o.label}</span>
                 <span className="font-medium">{formatMoney(o.amount, currency)}</span>
                 {o.recurrence && (
-                  <span className="muted text-xs">{RECURRENCE_LABELS[o.recurrence]}</span>
+                  <span className="text-xs text-muted-foreground">{RECURRENCE_LABELS[o.recurrence]}</span>
                 )}
               </li>
             ))}
@@ -684,14 +679,10 @@ export function ScenariosPage() {
         }
       />
 
-      {err && (
-        <p className="error" role="alert">
-          {err}
-        </p>
-      )}
+      {err && <Alert variant="error">{err}</Alert>}
 
       <Card className="overflow-x-auto p-0">
-        <Table className="table">
+        <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
@@ -726,13 +717,14 @@ export function ScenariosPage() {
                     className={isExpanded ? 'bg-muted/40' : ''}
                   >
                     <TableCell>
-                      <button
+                      <Button
                         type="button"
-                        className="text-left font-medium hover:underline focus:outline-none"
+                        variant="link"
+                        className="text-left font-medium"
                         onClick={() => setExpanded(isExpanded ? null : s.id)}
                       >
                         {s.name}
-                      </button>
+                      </Button>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {s.assumptionsJson.baselineDays ?? 30}d
@@ -741,7 +733,7 @@ export function ScenariosPage() {
                       {rj ? (
                         <DeltaBadge delta={rj.deltas.closing} currency={currency} />
                       ) : (
-                        <span className="muted text-xs">—</span>
+                        <span className="text-xs text-muted-foreground">—</span>
                       )}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">

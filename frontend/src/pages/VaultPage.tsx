@@ -9,24 +9,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { Download, Lock, ShieldAlert, Trash2, Upload as UploadIcon } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { useConfirm } from '@/components/ui/dialog'
-import { EmptyTableRow } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { NativeSelect } from '@/components/ui/native-select'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { EmptyTableRow } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postFormData } from '../lib/api'
 
@@ -166,9 +159,9 @@ export function VaultPage() {
       />
 
       {!encryptionConfigured ? (
-        <Card className="border-amber-300/40 bg-amber-50 dark:bg-amber-950/30 p-4">
+        <Card className="border-warning bg-warning-bg p-4">
           <div className="flex gap-3">
-            <ShieldAlert className="text-amber-600" aria-hidden="true" />
+            <ShieldAlert className="text-warning" aria-hidden="true" />
             <div className="text-sm">
               <p className="font-medium">Vault encryption is not configured.</p>
               <p className="text-muted-foreground">
@@ -326,7 +319,7 @@ function UploadCard({ onUpload }: { onUpload: (form: VaultUploadForm) => Promise
       <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div className="md:col-span-2">
           <Label htmlFor="vault-file">File</Label>
-          <Input
+          <input
             id="vault-file"
             ref={fileInputRef}
             type="file"

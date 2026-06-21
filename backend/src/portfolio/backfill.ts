@@ -51,10 +51,14 @@ const DIVIDENDS_STALE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const DAILY_HISTORY_PERIOD1_MS = 5 * 365 * 24 * 60 * 60 * 1000; // 5 years
 
 /** Test seam — replaces the Yahoo client with a stub. */
+// Consumed by backfill.test.ts via dynamic import; fallow's static resolver can't follow it.
+// fallow-ignore-next-line unused-export
 export function __setYahooFetchers(stub: YahooFetchers): void {
   yahoo = stub;
 }
 /** Test seam — clears in-flight map + restores default client. */
+// Consumed by backfill.test.ts via dynamic import; fallow's static resolver can't follow it.
+// fallow-ignore-next-line unused-export
 export function __resetForTests(): void {
   inFlight.clear();
   yahoo = defaultYahoo;

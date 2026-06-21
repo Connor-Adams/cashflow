@@ -1,12 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, TrendingDown, TrendingUp } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { NativeSelect } from '@/components/ui/native-select'
+import { AlertTriangle, CheckCircle2, TrendingUp } from 'lucide-react'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Grid } from '@/lib/ds-extras'
 import { PageHeader } from '@/components/ui/page-header'
-import { getJson } from '../lib/api'
+import { SectionHeader } from '@/components/ui/section-header'
+import { StatCard } from '@connor-adams/designsystem'
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { formatMoney } from '../lib/formatMoney'
+import { ReportFilterBar } from './report/ReportFilterBar'
+import { defaultReportMonth, type ScopeOption } from './report/reportFilters'
+import { useReportData } from './report/useReportData'
 import type {
   LifestyleCategoryDriver,
   LifestyleCurrencyTrend,
@@ -37,21 +45,12 @@ const SEVERITY_BADGE: Record<
   low: 'secondary',
 }
 
-const SCOPE_OPTIONS: { value: LifestyleScope; label: string }[] = [
+const SCOPE_OPTIONS: ScopeOption[] = [
   { value: 'all', label: 'All spend' },
   { value: 'personal', label: 'Personal' },
   { value: 'shared', label: 'Shared' },
   { value: 'business', label: 'Business' },
 ]
-
-const WINDOW_OPTIONS = [6, 12, 18, 24]
-
-/** Default anchor is the current calendar month in the browser's local
- *  timezone. The backend treats YYYY-MM as a pure label. */
-function defaultMonth(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
 
 /** Format a percentage-change value (may be null when there's no baseline). */
 function formatPct(pct: number | null): string {
@@ -61,13 +60,10 @@ function formatPct(pct: number | null): string {
 }
 
 export function LifestyleInflationPage() {
-  const [month, setMonth] = useState<string>(defaultMonth())
+  const [month, setMonth] = useState<string>(defaultReportMonth())
   const [months, setMonths] = useState<number>(12)
   const [currency, setCurrency] = useState<string>('')
   const [scope, setScope] = useState<LifestyleScope>('all')
-  const [data, setData] = useState<LifestyleInflationResponse | null>(null)
-  const [loading, setLoading] = useState<boolean>(true)
-  const [err, setErr] = useState<string | null>(null)
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams()
@@ -78,39 +74,11 @@ export function LifestyleInflationPage() {
     return params.toString()
   }, [month, months, scope, currency])
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setErr(null)
-    try {
-      const res = await getJson<LifestyleInflationResponse>(
-        `/api/reports/lifestyle-inflation?${queryString}`,
-      )
-      setData(res)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Error')
-    } finally {
-      setLoading(false)
-    }
-  }, [queryString])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  // Currencies present in the loaded data drive the picker so it never
-  // collapses when a filter is applied.
-  const availableCurrencies = useMemo(() => {
-    const set = new Set<string>()
-    for (const t of data?.byCurrency ?? []) set.add(t.currency)
-    if (currency) set.add(currency)
-    return Array.from(set).sort()
-  }, [data, currency])
-
-  const windowLabel = useMemo(() => {
-    const w = data?.windowMonths ?? []
-    if (w.length === 0) return ''
-    return `${w[0]} – ${w[w.length - 1]}`
-  }, [data])
+  const { data, loading, err, reload, availableCurrencies, windowLabel } =
+    useReportData<LifestyleInflationResponse>(
+      `/api/reports/lifestyle-inflation?${queryString}`,
+      currency,
+    )
 
   return (
     <div className="page">
@@ -119,108 +87,45 @@ export function LifestyleInflationPage() {
         description="Track whether your spending is creeping up faster than your income. Compares the first half of the window to the most recent half."
       />
 
-      <section className="card">
-        <div
-          style={{
-            display: 'flex',
-            gap: 12,
-            alignItems: 'flex-end',
-            flexWrap: 'wrap',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="lifestyle-month">Through month</label>
-            <input
-              id="lifestyle-month"
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="input"
-              style={{ minWidth: 160 }}
-            />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="lifestyle-window">Window</label>
-            <NativeSelect
-              id="lifestyle-window"
-              value={String(months)}
-              onChange={(e) => setMonths(Number(e.target.value))}
-            >
-              {WINDOW_OPTIONS.map((w) => (
-                <option key={w} value={w}>
-                  {w} months
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="lifestyle-scope">Scope</label>
-            <NativeSelect
-              id="lifestyle-scope"
-              value={scope}
-              onChange={(e) => setScope(e.target.value as LifestyleScope)}
-            >
-              {SCOPE_OPTIONS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="lifestyle-currency">Currency</label>
-            <NativeSelect
-              id="lifestyle-currency"
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
-            >
-              <option value="">All currencies</option>
-              {availableCurrencies.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              void load()
-            }}
-            disabled={loading}
-          >
-            Refresh
-          </Button>
-        </div>
+      <Card className="mb-4">
+        <ReportFilterBar
+          idPrefix="lifestyle"
+          month={month}
+          onMonthChange={setMonth}
+          months={months}
+          onMonthsChange={setMonths}
+          scope={scope}
+          onScopeChange={setScope}
+          scopeOptions={SCOPE_OPTIONS}
+          currency={currency}
+          onCurrencyChange={setCurrency}
+          availableCurrencies={availableCurrencies}
+          loading={loading}
+          onRefresh={reload}
+        />
         {windowLabel && (
-          <p className="muted" style={{ margin: '8px 0 0' }}>
+          <p className="text-sm leading-6 text-muted-foreground mt-2 mb-0">
             Showing {windowLabel}.
           </p>
         )}
-      </section>
+      </Card>
 
       {err && (
-        <section className="card">
-          <p className="error" role="alert">
-            {err}
-          </p>
-        </section>
+        <Alert variant="error" className="mb-4">
+          {err}
+        </Alert>
       )}
 
       {loading && !data ? (
-        <section className="card" aria-busy="true">
-          <p className="muted">Building the report…</p>
-        </section>
+        <Card className="mb-4" aria-busy="true">
+          <p className="text-sm leading-6 text-muted-foreground mb-0">Building the report…</p>
+        </Card>
       ) : !data ? null : data.byCurrency.length === 0 ? (
-        <section className="card">
-          <p className="muted">
-            No spending data for {windowLabel || 'this window'}
-            {scope !== 'all' ? ` in the ${scope} scope` : ''}
-            {currency ? ` (${currency})` : ''}. Import transactions or widen the
-            window.
-          </p>
-        </section>
+        <EmptyState
+          className="mb-4"
+          title={`No spending data for ${windowLabel || 'this window'}`}
+          description={`No transactions${scope !== 'all' ? ` in the ${scope} scope` : ''}${currency ? ` (${currency})` : ''}. Import transactions or widen the window.`}
+        />
       ) : (
         data.byCurrency.map((trend) => (
           <CurrencyTrendCard key={trend.currency} trend={trend} />
@@ -232,52 +137,29 @@ export function LifestyleInflationPage() {
 
 function CurrencyTrendCard({ trend }: { trend: LifestyleCurrencyTrend }) {
   return (
-    <section className="card" aria-label={`Lifestyle inflation — ${trend.currency}`}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 8,
-        }}
-      >
-        <h2 style={{ margin: 0 }}>{trend.currency}</h2>
-        <OutpacingBadge outpacing={trend.spendOutpacingIncome} />
-      </div>
+    <section className="rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm sm:p-5 mb-4" aria-label={`Lifestyle inflation — ${trend.currency}`}>
+      <SectionHeader
+        title={trend.currency}
+        actions={<OutpacingBadge outpacing={trend.spendOutpacingIncome} />}
+      />
 
       {trend.insight && (
-        <div
-          role="alert"
-          style={{
-            display: 'flex',
-            gap: 8,
-            alignItems: 'flex-start',
-            border: '1px solid var(--border)',
-            borderRadius: 6,
-            padding: 12,
-            marginBottom: 12,
-          }}
+        <Alert
+          variant={trend.spendOutpacingIncome ? 'warning' : 'info'}
+          className="mb-3"
         >
-          <AlertTriangle size={18} aria-hidden="true" />
-          <div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <Badge variant={SEVERITY_BADGE[trend.insight.severity]}>
-                {trend.insight.severity}
-              </Badge>
-              <strong>{trend.insight.title}</strong>
-            </div>
-            <p style={{ margin: '4px 0 0' }}>{trend.insight.summary}</p>
+          <div className="flex gap-2 items-center mb-1">
+            <AlertTriangle size={18} aria-hidden="true" />
+            <Badge variant={SEVERITY_BADGE[trend.insight.severity]}>
+              {trend.insight.severity}
+            </Badge>
+            <strong>{trend.insight.title}</strong>
           </div>
-        </div>
+          <p className="m-0">{trend.insight.summary}</p>
+        </Alert>
       )}
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 12,
-        }}
-      >
+      <Grid minItemWidth={180} gap="md" className="mb-3">
         <GrowthStat
           label="Avg monthly spend"
           firstHalf={trend.spendGrowth.firstHalfAvg}
@@ -301,7 +183,7 @@ function CurrencyTrendCard({ trend }: { trend: LifestyleCurrencyTrend }) {
           pct={trend.savingsGrowthPct}
           currency={trend.currency}
         />
-      </div>
+      </Grid>
 
       <CategoryDrivers drivers={trend.categoryDrivers} currency={trend.currency} />
 
@@ -341,36 +223,18 @@ function GrowthStat({
   /** When true, an increase is rendered as concerning (red), e.g. spend. */
   invert?: boolean
 }) {
-  const delta = secondHalf - firstHalf
-  const rising = delta > 0
-  // For spend, rising is bad (red). For income/savings, rising is good (green).
-  const good = invert ? !rising : rising
-  const color =
-    delta === 0
-      ? 'var(--muted-foreground, inherit)'
-      : good
-        ? 'var(--accent-green)'
-        : 'var(--danger)'
-  const TrendIcon = rising ? TrendingUp : TrendingDown
+  // For spend, rising is bad (red): metricKind="spend" inverts the tone so an
+  // up move colors the DS delta badge red. For income/savings, rising is good
+  // (green) → metricKind="gain". The DS StatCard parses the sign from the
+  // signed percent string and resolves the tone via these semantics.
   return (
-    <div
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 6,
-        padding: 12,
-      }}
-    >
-      <p className="muted" style={{ margin: 0 }}>
-        {label}
-      </p>
-      <p style={{ margin: '4px 0 0', fontSize: '1.25rem', fontWeight: 600 }}>
-        {formatMoney(secondHalf, currency)}
-      </p>
-      <p style={{ margin: '2px 0 0', color }}>
-        <TrendIcon size={14} aria-hidden="true" /> {formatPct(pct)}{' '}
-        <span className="muted">from {formatMoney(firstHalf, currency)}</span>
-      </p>
-    </div>
+    <StatCard
+      label={label}
+      value={formatMoney(secondHalf, currency)}
+      hint={`from ${formatMoney(firstHalf, currency)}`}
+      delta={pct == null ? undefined : formatPct(pct)}
+      metricKind={invert ? 'spend' : 'gain'}
+    />
   )
 }
 
@@ -384,31 +248,24 @@ function CategoryDrivers({
   const risers = drivers.filter((d) => d.delta > 0)
   if (risers.length === 0) return null
   return (
-    <div style={{ marginTop: 12 }}>
-      <h3 style={{ margin: '0 0 6px' }}>What's driving the growth</h3>
-      <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+    <div className="mt-3">
+      <h3 className="m-0 mb-1.5">What's driving the growth</h3>
+      <ul className="m-0 p-0 list-none">
         {risers.map((d) => (
           <li
             key={d.category}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr auto auto',
-              gap: 12,
-              alignItems: 'center',
-              padding: '8px 0',
-              borderBottom: '1px solid var(--border)',
-            }}
+            className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-border py-2"
           >
             <Link
               to={`/transactions?category=${encodeURIComponent(d.category)}&currency=${currency}`}
-              className="muted"
+              className="text-sm leading-6 text-muted-foreground"
             >
               {d.category}
             </Link>
-            <span style={{ color: 'var(--danger)' }}>
+            <span className="text-danger">
               +{formatMoney(d.delta, currency)}/mo
             </span>
-            <span className="muted">{formatPct(d.deltaPct)}</span>
+            <span className="text-sm leading-6 text-muted-foreground">{formatPct(d.deltaPct)}</span>
           </li>
         ))}
       </ul>
@@ -425,39 +282,34 @@ function MonthlySeriesTable({
 }) {
   if (series.length === 0) return null
   return (
-    <div style={{ marginTop: 12, overflowX: 'auto' }}>
-      <h3 style={{ margin: '0 0 6px' }}>Monthly detail</h3>
-      <table className="table" style={{ minWidth: 360 }}>
-        <thead>
-          <tr>
-            <th style={{ textAlign: 'left' }}>Month</th>
-            <th style={{ textAlign: 'right' }}>Income</th>
-            <th style={{ textAlign: 'right' }}>Spend</th>
-            <th style={{ textAlign: 'right' }}>Savings</th>
-          </tr>
-        </thead>
-        <tbody>
+    <div className="mt-3 overflow-x-auto">
+      <h3 className="m-0 mb-1.5">Monthly detail</h3>
+      <Table className="min-w-[360px]">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Month</TableHead>
+            <TableHead className="text-right">Income</TableHead>
+            <TableHead className="text-right">Spend</TableHead>
+            <TableHead className="text-right">Savings</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {series.map((m) => (
-            <tr key={m.month}>
-              <td>{m.month}</td>
-              <td style={{ textAlign: 'right' }}>
+            <TableRow key={m.month}>
+              <TableCell>{m.month}</TableCell>
+              <TableCell className="text-right">
                 {formatMoney(m.income, currency)}
-              </td>
-              <td style={{ textAlign: 'right' }}>
+              </TableCell>
+              <TableCell className="text-right">
                 {formatMoney(m.spend, currency)}
-              </td>
-              <td
-                style={{
-                  textAlign: 'right',
-                  color: m.savings < 0 ? 'var(--danger)' : undefined,
-                }}
-              >
+              </TableCell>
+              <TableCell className={m.savings < 0 ? 'text-right text-danger' : 'text-right'}>
                 {formatMoney(m.savings, currency)}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   )
 }

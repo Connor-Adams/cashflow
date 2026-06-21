@@ -13,17 +13,31 @@ concurrency:
 jobs:
   install:
     runs-on: ubuntu-latest
+    # packages: read lets GITHUB_TOKEN pull @connor-adams/* from GitHub Packages.
+    # NOTE: those packages are published from the cashflow-design-system repo; if
+    # this token 403s, grant this repo read access to the package (package
+    # settings → Manage Actions access) or swap in a PAT secret with read:packages.
+    permissions:
+      contents: read
+      packages: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'yarn'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@connor-adams'
 
       - name: Install
-        run: yarn install --frozen-lockfile
+        run: yarn install --immutable
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Archive node_modules
         run: |
@@ -34,7 +48,7 @@ jobs:
           tar -cf node_modules.tar "${paths[@]}"
 
       - name: Upload node_modules artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: node_modules
           path: node_modules.tar
@@ -45,15 +59,18 @@ jobs:
     needs: install
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Download node_modules artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: node_modules
 
@@ -63,79 +80,133 @@ jobs:
       - name: Run workflow tests
         run: yarn test:workflows
 
-  backend-test:
+  # Sharded matrix. The required branch-protection check is the `backend-test`
+  # GATE job below, not these per-shard jobs (whose names carry a `(n)` suffix).
+  backend-test-shard:
     needs: install
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # node:test --test-shard splits the 360+ unit files across runners.
+        # Keep this list and TEST_SHARD's denominator below in sync.
+        shard: [1, 2, 3]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Download node_modules artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: node_modules
 
       - name: Extract node_modules
         run: tar -xf node_modules.tar
 
-      - name: Run backend unit tests
+      # Shared contract tests are tiny and dialect-agnostic; run them once on
+      # shard 1 rather than redundantly on every shard.
+      - name: Run shared contract tests
+        if: matrix.shard == 1
+        run: yarn workspace @cashflow/shared run test
+
+      - name: Run backend unit tests (shard ${{ matrix.shard }}/3)
+        env:
+          TEST_SHARD: ${{ matrix.shard }}/3
         run: yarn workspace cashflow-backend run test
 
-  backend-test-integration:
+  # Gate job that carries the required `backend-test` status check. Always runs
+  # so the context reports even on shard failure; passes only if every shard did.
+  backend-test:
+    needs: backend-test-shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all unit-test shards passed
+        run: |
+          result='${{ needs.backend-test-shard.result }}'
+          if [ "$result" != "success" ]; then
+            echo "backend-test-shard matrix result: $result" >&2
+            exit 1
+          fi
+
+  # Sharded matrix. The required branch-protection check is the
+  # `backend-test-integration` GATE job below, not these per-shard jobs.
+  backend-test-integration-shard:
     needs: install
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    strategy:
+      fail-fast: false
+      matrix:
+        # 140+ Postgres-backed files; --test-shard splits them across runners.
+        shard: [1, 2, 3]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Download node_modules artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: node_modules
 
       - name: Extract node_modules
         run: tar -xf node_modules.tar
 
-      - name: Run backend integration tests
+      - name: Start PostgreSQL
+        run: |
+          sudo systemctl start postgresql.service
+          pg_isready
+          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+
+      - name: Run backend integration tests (shard ${{ matrix.shard }}/3)
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+          TEST_SHARD: ${{ matrix.shard }}/3
         run: yarn workspace cashflow-backend run test:integration
+
+  # Gate job carrying the required `backend-test-integration` status check.
+  backend-test-integration:
+    needs: backend-test-integration-shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all integration-test shards passed
+        run: |
+          result='${{ needs.backend-test-integration-shard.result }}'
+          if [ "$result" != "success" ]; then
+            echo "backend-test-integration-shard matrix result: $result" >&2
+            exit 1
+          fi
 
   backend-build:
     needs: install
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Download node_modules artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: node_modules
 
@@ -143,7 +214,7 @@ jobs:
         run: tar -xf node_modules.tar
 
       - name: Cache TS build state
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: backend/dist/.tsbuildinfo
           key: ${{ runner.os }}-backend-tsbuild-${{ github.sha }}
@@ -153,19 +224,156 @@ jobs:
       - name: Build backend
         run: yarn workspace cashflow-backend run build
 
-  frontend-test:
+  code-audit:
     needs: install
     runs-on: ubuntu-latest
+    # Surfaces dead code + complexity (fallow) and duplication (jscpd), posts a
+    # whole-repo snapshot as a sticky PR comment, and RATCHETS the baseline: the
+    # final "Enforce audit baseline" step fails the job if any zeroable dead-code
+    # category regresses above 0 or duplication rises above the ceiling (issue
+    # #469). Complexity stays informational — it never blocks. Make this job a
+    # required check on `main` so the line holds. See CONTRIBUTING.md › Code
+    # health and scripts/audit-gate.cjs.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          # fallow health derives churn/hotspots from git history.
+          fetch-depth: 0
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Download node_modules artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
+        with:
+          name: node_modules
+
+      - name: Extract node_modules
+        run: tar -xf node_modules.tar
+
+      - name: Dead code & complexity (fallow)
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          # fallow exits non-zero when it finds issues; don't let that (under
+          # bash -e) abort the step before the second command runs. Invoke the
+          # binary directly (not `yarn fallow`) so nothing from the package
+          # manager can leak into the JSON on stdout — Yarn 4 dropped the
+          # `yarn --silent` flag this script used to rely on.
+          ./node_modules/.bin/fallow dead-code --format json > reports/fallow-deadcode.json || true
+          ./node_modules/.bin/fallow health --format json > reports/fallow-health.json || true
+
+      - name: Duplicate code (jscpd)
+        continue-on-error: true
+        run: yarn jscpd --reporters console,json,html
+
+      - name: Build audit summary
+        if: always()
+        run: node scripts/audit-summary.cjs > reports/audit-comment.md
+
+      - name: Upload jscpd report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jscpd-report
+          path: reports/jscpd
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Post audit summary comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('reports/audit-comment.md', 'utf8');
+            const marker = '<!-- code-audit-summary -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner, repo, issue_number, per_page: 100,
+            });
+            // Our rendered summary replaces fallow's native report comment
+            // (disabled via comment:false in fallow.yml). Clean up any leftover.
+            const stale = comments.find(
+              (c) => c.body && c.body.includes('<!-- fallow-id: fallow-results -->'),
+            );
+            if (stale) {
+              await github.rest.issues.deleteComment({ owner, repo, comment_id: stale.id });
+            }
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number, body,
+              });
+            }
+
+      # The baseline ratchet. Runs LAST so the snapshot comment is always posted
+      # first (reviewers see the numbers even on failure). `if: always()` keeps
+      # it from being skipped by an earlier continue-on-error step. This is the
+      # step that decides the job's pass/fail — it reads the same reports the
+      # summary renders and fails on any zeroable-category regression or
+      # duplication above the ceiling. Complexity is never consulted here.
+      - name: Enforce audit baseline (ratchet)
+        if: always()
+        run: node scripts/audit-gate.cjs
+
+  frontend-lint:
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Download node_modules artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: node_modules
+
+      - name: Extract node_modules
+        run: tar -xf node_modules.tar
+
+      - name: ESLint
+        run: yarn workspace frontend run lint
+
+      - name: Palette check
+        run: yarn workspace frontend run lint:palette
+
+  frontend-test:
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Download node_modules artifact
+        uses: actions/download-artifact@v8
         with:
           name: node_modules
 
@@ -179,15 +387,18 @@ jobs:
     needs: install
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Download node_modules artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: node_modules
 
@@ -195,7 +406,7 @@ jobs:
         run: tar -xf node_modules.tar
 
       - name: Cache vite build state
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             frontend/node_modules/.tmp

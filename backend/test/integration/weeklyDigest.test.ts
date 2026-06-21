@@ -30,6 +30,10 @@ let NoopMailerDriver: any;
 
 before(async () => {
   process.env.NODE_ENV = 'test';
+  // VAPID must be configured for fanOutWebPush to proceed past its guard
+  // (#651/#796). The injected sender below stands in for the real transport.
+  process.env.VAPID_PUBLIC_KEY = 'integration-public-key';
+  process.env.VAPID_PRIVATE_KEY = 'integration-private-key';
   testDb = await setupPgTestDb('weekly_digest');
   models = await import('../../src/models');
   const orch = await import('../../src/notifications/runWeeklyDigest');
@@ -277,6 +281,248 @@ test('runWeeklyDigest: per-user error does not block other users (AC #9)', async
   const u2After = await models.User.findByPk(u2.id);
   assert.equal(u1After.lastDigestSentAt, null, 'u1 should not be marked sent');
   assert.ok(u2After.lastDigestSentAt, 'u2 should be marked sent');
+});
+
+// ---- #796: enrichment + web-push delivery + day-of-week --------------------
+
+async function seedSubscription(userId: number, endpoint: string): Promise<void> {
+  await models.PushSubscription.create({
+    userId,
+    endpoint,
+    p256dh: 'pkey',
+    auth: 'akey',
+    userAgent: null,
+  });
+}
+
+test('#796 AC1-4: persists netChange, full categoryDeltas, insight rollup, upcoming expectations', async () => {
+  const { user, accountId, householdId } = await makeUser({
+    email: 'enrich@example.com',
+    displayName: 'Enrich User',
+  });
+  // Reporting week Mon 2026-05-25 .. Sun 2026-05-31 (asOf = Mon 2026-06-01).
+  await seedTxn(accountId, householdId, '2026-05-26', '-100.00', 'Groceries', 'Mart');
+  await seedTxn(accountId, householdId, '2026-05-28', '-40.00', 'Dining', 'Diner');
+  await seedTxn(accountId, householdId, '2026-05-27', '500.00', 'Pay', 'Employer', {
+    txnType: 'income',
+  });
+  // Prior week: Groceries higher so delta is negative.
+  await seedTxn(accountId, householdId, '2026-05-20', '-150.00', 'Groceries', 'Mart');
+
+  // Open insights for the household (top-3 cap + count).
+  for (let i = 0; i < 4; i += 1) {
+    await models.Insight.create({
+      householdId,
+      userId: user.id,
+      type: 'merchant_spend_spike',
+      severity: i === 0 ? 'critical' : 'warning',
+      title: `Insight ${i}`,
+      description: null,
+      status: 'open',
+      fingerprint: `fp-${i}`,
+      metadata: {},
+      detectedAt: new Date(`2026-05-${20 + i}T00:00:00Z`),
+    });
+  }
+  // A resolved insight must NOT count.
+  await models.Insight.create({
+    householdId,
+    userId: user.id,
+    type: 'missing_receipt',
+    severity: 'info',
+    title: 'Resolved',
+    description: null,
+    status: 'resolved',
+    fingerprint: 'fp-resolved',
+    metadata: {},
+    detectedAt: new Date('2026-05-30T00:00:00Z'),
+  });
+
+  // Expectation due in 5 days (in window); one due in 20 days (out of window).
+  await models.PlannedEvent.create({
+    userId: user.id,
+    householdId,
+    type: 'expense',
+    name: 'Rent',
+    amount: '2200.0000',
+    currency: 'CAD',
+    expectedDate: '2026-06-06',
+    status: 'planned',
+    kind: 'planned',
+  });
+  await models.PlannedEvent.create({
+    userId: user.id,
+    householdId,
+    type: 'expense',
+    name: 'Far Future',
+    amount: '50.0000',
+    currency: 'CAD',
+    expectedDate: '2026-06-21',
+    status: 'planned',
+    kind: 'planned',
+  });
+
+  setMailerDriverForTest(new NoopMailerDriver());
+  const result = await runWeeklyDigest([user], thisMondayUTC());
+  assert.equal(result.processed, 1);
+
+  const notif = await models.Notification.findOne({
+    where: { userId: user.id, type: 'digest.weekly' },
+  });
+  assert.ok(notif, 'in-app row written');
+  const dj = notif.dataJson as Record<string, unknown>;
+
+  // AC1: netChange = income 500 - spend 140 = 360.
+  assert.equal(dj.netChange, 360);
+
+  // AC2: full categoryDeltas with delta = total - priorTotal.
+  const deltas = dj.categoryDeltas as Array<{
+    category: string;
+    total: number;
+    priorTotal: number;
+    delta: number;
+  }>;
+  assert.ok(Array.isArray(deltas));
+  const groceries = deltas.find((d) => d.category === 'Groceries');
+  assert.equal(groceries?.delta, groceries!.total - groceries!.priorTotal);
+  assert.equal(groceries?.delta, -50);
+
+  // AC3: open-insight rollup count + top-3 cap, critical first.
+  assert.equal(dj.openInsightCount, 4);
+  const top = dj.topInsights as Array<{ severity: string }>;
+  assert.equal(top.length, 3);
+  assert.equal(top[0].severity, 'critical');
+
+  // AC4: only the in-window expectation.
+  const upcoming = dj.upcomingExpectations as Array<{ name: string; dueDate: string }>;
+  assert.equal(upcoming.length, 1);
+  assert.equal(upcoming[0].name, 'Rent');
+  assert.equal(upcoming[0].dueDate, '2026-06-06');
+});
+
+test('#796 AC6/AC7: push fired when channelPush=true + subscription; not when false', async () => {
+  // Push enabled + subscription → push transport invoked.
+  const a = await makeUser({ email: 'pushon@example.com', displayName: 'Push On' });
+  await seedTxn(a.accountId, a.householdId, '2026-05-26', '-60.00', 'Groceries', 'Mart');
+  await seedSubscription(a.user.id, 'https://push.example/pushon');
+  await models.NotificationPreference.create({
+    userId: a.user.id,
+    type: 'digest.weekly',
+    channelInApp: true,
+    channelEmail: false,
+    channelPush: true,
+  });
+
+  // Push disabled → no transport call even with a subscription.
+  const b = await makeUser({ email: 'pushoff@example.com', displayName: 'Push Off' });
+  await seedTxn(b.accountId, b.householdId, '2026-05-26', '-60.00', 'Groceries', 'Mart');
+  await seedSubscription(b.user.id, 'https://push.example/pushoff');
+  await models.NotificationPreference.create({
+    userId: b.user.id,
+    type: 'digest.weekly',
+    channelInApp: true,
+    channelEmail: false,
+    channelPush: false,
+  });
+
+  const calls: string[] = [];
+  const sender = async (target: { endpoint: string }) => {
+    calls.push(target.endpoint);
+    return 'sent' as const;
+  };
+
+  setMailerDriverForTest(new NoopMailerDriver());
+  const result = await runWeeklyDigest([a.user, b.user], thisMondayUTC(), { pushSender: sender });
+
+  assert.equal(result.sentPush, 1, 'exactly one user got push');
+  assert.deepEqual(calls, ['https://push.example/pushon'], 'only push-on endpoint hit');
+});
+
+test('#796 AC7: all channels off → skippedMuted, no Notification row', async () => {
+  const { user, accountId, householdId } = await makeUser({
+    email: 'allmute@example.com',
+    displayName: 'All Mute',
+  });
+  await seedTxn(accountId, householdId, '2026-05-26', '-60.00', 'Groceries', 'Mart');
+  await models.NotificationPreference.create({
+    userId: user.id,
+    type: 'digest.weekly',
+    channelInApp: false,
+    channelEmail: false,
+    channelPush: false,
+  });
+  setMailerDriverForTest(new NoopMailerDriver());
+  const result = await runWeeklyDigest([user], thisMondayUTC());
+  assert.equal(result.skippedMuted, 1);
+  const notif = await models.Notification.findOne({
+    where: { userId: user.id, type: 'digest.weekly' },
+  });
+  assert.equal(notif, null, 'no row written for fully-muted user');
+});
+
+test('#796 AC8: day-of-week skips on a non-matching tick, processes on a matching one', async () => {
+  const { user, accountId, householdId } = await makeUser({
+    email: 'wednesday@example.com',
+    displayName: 'Wednesday User',
+  });
+  await seedTxn(accountId, householdId, '2026-05-26', '-60.00', 'Groceries', 'Mart');
+  // Prefer Wednesday (3).
+  await models.NotificationPreference.create({
+    userId: user.id,
+    type: 'digest.weekly',
+    channelInApp: true,
+    channelEmail: false,
+    channelPush: false,
+    digestDayOfWeek: 3,
+  });
+  setMailerDriverForTest(new NoopMailerDriver());
+
+  // Monday tick → skipped, last_digest_sent_at untouched.
+  const monday = await runWeeklyDigest([user], new Date('2026-06-01T09:00:00Z'));
+  assert.equal(monday.skippedWrongDay, 1);
+  assert.equal(monday.processed, 0);
+  let after = await models.User.findByPk(user.id);
+  assert.equal(after.lastDigestSentAt, null);
+
+  // Wednesday tick → processed. (2026-06-03 is a Wednesday; reporting week is
+  // Mon 2026-05-25 .. Sun 2026-05-31, still containing the seeded txn.)
+  const wednesday = await runWeeklyDigest([user], new Date('2026-06-03T09:00:00Z'));
+  assert.equal(wednesday.processed, 1);
+  assert.equal(wednesday.wroteInApp, 1);
+  after = await models.User.findByPk(user.id);
+  assert.ok(after.lastDigestSentAt);
+});
+
+test('#796 AC10: a push-send failure is isolated and never blocks other users', async () => {
+  const a = await makeUser({ email: 'pfail@example.com', displayName: 'Push Fail' });
+  await seedTxn(a.accountId, a.householdId, '2026-05-26', '-60.00', 'Groceries', 'Mart');
+  await seedSubscription(a.user.id, 'https://push.example/pfail');
+  await models.NotificationPreference.create({
+    userId: a.user.id,
+    type: 'digest.weekly',
+    channelInApp: true,
+    channelEmail: false,
+    channelPush: true,
+  });
+
+  const b = await makeUser({ email: 'pok@example.com', displayName: 'Push OK' });
+  await seedTxn(b.accountId, b.householdId, '2026-05-27', '-70.00', 'Groceries', 'Mart');
+
+  // Sender throws for the failing user's endpoint; throws-from-sender is
+  // treated as a transient failure by fanOutWebPush (kept, counted), so the
+  // run must continue. We assert user B still gets their in-app row.
+  const sender = async (target: { endpoint: string }) => {
+    if (target.endpoint.includes('pfail')) throw new Error('push transport down');
+    return 'sent' as const;
+  };
+
+  setMailerDriverForTest(new NoopMailerDriver());
+  const result = await runWeeklyDigest([a.user, b.user], thisMondayUTC(), { pushSender: sender });
+
+  // A's in-app still written (push failure is independent); B processed too.
+  assert.equal(result.wroteInApp, 2);
+  assert.equal(result.processed, 2);
+  assert.equal(result.errors, 0, 'push failure is not a per-user error abort');
 });
 
 test('runWeeklyDigest: idempotent — second run when not due is a no-op', async () => {

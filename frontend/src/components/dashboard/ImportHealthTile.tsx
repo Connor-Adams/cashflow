@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { BentoTile } from './BentoTile'
+import { Button } from '@connor-adams/designsystem'
 import { useImportHealth } from '@/hooks/useImportHealth'
 import type { ImportConfidenceFlagToken } from '@cashflow/shared'
 
@@ -120,13 +121,9 @@ export function ImportHealthTile({ currency = 'CAD' }: Props) {
             </div>
           ) : null}
 
-          <div className="flex flex-wrap gap-3 text-xs">
-            <Link to="/review" className="font-semibold text-foreground underline">
-              Open Review Inbox
-            </Link>
-            <Link to="/import" className="text-muted-foreground hover:underline">
-              See recent imports
-            </Link>
+          <div className="flex flex-wrap gap-3">
+            <Link to="/review"><Button size="sm">Open Review Inbox</Button></Link>
+            <Link to="/import"><Button size="sm" variant="outline">See recent imports</Button></Link>
           </div>
 
           {unknown > 0 ? (

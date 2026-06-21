@@ -4,11 +4,16 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { NetWorthPage } from './NetWorthPage'
-import { updateOpeningBalance } from '@/hooks/useNetWorth'
+import {
+  updateOpeningBalance,
+  useNetWorthCurrent,
+  useNetWorthSeries,
+} from '@/hooks/useNetWorth'
 
-vi.mock('@/hooks/useNetWorth', () => ({
-  useNetWorthCurrent: () => ({
-    data: {
+// Back the hook mocks with vi.fn so individual tests can override the return
+// value (e.g. the loading-skeleton test) and restore the loaded default after.
+const loadedCurrent = () => ({
+  data: {
       asOf: '2026-05-24',
       baseCurrency: 'CAD',
       total: 152340.12,
@@ -42,16 +47,21 @@ vi.mock('@/hooks/useNetWorth', () => ({
       partial: false,
       gaps: [],
     },
-    loading: false,
-    error: null,
-    refresh: () => {},
-  }),
-  useNetWorthSeries: () => ({
-    data: { baseCurrency: 'CAD', granularity: 'monthly', points: [], partial: false, gaps: [] },
-    loading: false,
-    error: null,
-    refresh: () => {},
-  }),
+  loading: false,
+  error: null,
+  refresh: () => {},
+})
+
+const loadedSeries = () => ({
+  data: { baseCurrency: 'CAD', granularity: 'monthly', points: [], partial: false, gaps: [] },
+  loading: false,
+  error: null,
+  refresh: () => {},
+})
+
+vi.mock('@/hooks/useNetWorth', () => ({
+  useNetWorthCurrent: vi.fn(() => loadedCurrent()),
+  useNetWorthSeries: vi.fn(() => loadedSeries()),
   updateOpeningBalance: vi.fn(),
 }))
 
@@ -85,6 +95,58 @@ describe('NetWorthPage', () => {
     expect(screen.getByRole('button', { name: '3M' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '1Y' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'All' })).toBeInTheDocument()
+  })
+
+  it('renders skeletons while loading', () => {
+    // NetWorthPage shows its skeleton when current.loading && !current.data.
+    // Override the hook for this test, then restore the loaded default so the
+    // sibling tests above/below keep seeing real data.
+    vi.mocked(useNetWorthCurrent).mockReturnValue({
+      data: null,
+      loading: true,
+      error: null,
+      refresh: () => {},
+    })
+    vi.mocked(useNetWorthSeries).mockReturnValue({
+      data: null,
+      loading: true,
+      error: null,
+      refresh: () => {},
+    })
+    try {
+      const { container } = render(
+        <MemoryRouter>
+          <NetWorthPage />
+        </MemoryRouter>,
+      )
+      expect(
+        container.querySelectorAll('[data-slot="skeleton"]').length,
+      ).toBeGreaterThan(0)
+    } finally {
+      vi.mocked(useNetWorthCurrent).mockImplementation(() => loadedCurrent())
+      vi.mocked(useNetWorthSeries).mockImplementation(() => loadedSeries())
+    }
+  })
+
+  it('shows the "No accounts yet" EmptyState with an Add an account CTA when there is no data (#799)', () => {
+    vi.mocked(useNetWorthCurrent).mockReturnValue({
+      data: null,
+      loading: false,
+      error: null,
+      refresh: () => {},
+    })
+    try {
+      render(
+        <MemoryRouter>
+          <NetWorthPage />
+        </MemoryRouter>,
+      )
+      expect(screen.getByText('No accounts yet')).toBeInTheDocument()
+      const cta = screen.getByRole('link', { name: /add an account/i })
+      expect(cta).toHaveAttribute('href', '/settings/accounts')
+    } finally {
+      vi.mocked(useNetWorthCurrent).mockImplementation(() => loadedCurrent())
+    }
   })
 
   it('opening-balance editor PATCHes the new value on save', async () => {

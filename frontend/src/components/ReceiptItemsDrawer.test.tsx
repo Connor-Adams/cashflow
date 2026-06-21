@@ -71,6 +71,37 @@ const RECEIPT_NO_ORDER: ReceiptWithItems = {
   items: [],
 }
 
+const RECEIPT_UBER_TRIP: ReceiptWithItems = {
+  id: 3,
+  transactionId: 12,
+  originalName: 'uber_trip_abc.pdf',
+  mimeType: 'application/pdf',
+  sizeBytes: 800,
+  extractedNote: null,
+  createdAt: '2024-01-03T00:00:00Z',
+  externalOrderId: 100,
+  order: {
+    id: 100,
+    vendor: 'uber',
+    subtotal: null,
+    tax: null,
+    shipping: null,
+    total: '23.45',
+    currency: 'CAD',
+    trip: {
+      pickupAddress: '123 Main St',
+      dropoffAddress: '456 King St W',
+      distance: 12.3,
+      distanceUnit: 'km',
+      durationMinutes: 27,
+      requestedAt: null,
+      driver: null,
+      surgeMultiplier: null,
+    },
+  },
+  items: [],
+}
+
 describe('ReceiptItemsDrawer', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', makeFetchOk())
@@ -93,6 +124,42 @@ describe('ReceiptItemsDrawer', () => {
     expect(screen.getByText('Tax')).toBeInTheDocument()
     // 'Total' appears as both a column header and a footer row label — both are correct
     expect(screen.getAllByText('Total').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('shows the AI-expanded displayName with the raw receipt title as secondary text', () => {
+    const receipt: ReceiptWithItems = {
+      ...RECEIPT_WITH_ORDER,
+      order: { ...RECEIPT_WITH_ORDER.order!, vendor: 'costco' },
+      items: [
+        {
+          id: 201,
+          externalOrderId: 99,
+          title: 'KS ORG PNT BTR',
+          displayName: 'Kirkland Signature Organic Peanut Butter',
+          quantity: 1,
+          unitPrice: '9.99',
+          totalPrice: '9.99',
+          inferredCategory: null,
+          categoryOverride: null,
+          businessUsePercent: null,
+          businessUseOverride: null,
+        },
+      ],
+    }
+
+    render(
+      <ReceiptItemsDrawer
+        open={true}
+        onClose={vi.fn()}
+        receipts={[receipt]}
+        categoryHints={CATEGORY_HINTS}
+        onExtract={vi.fn()}
+      />,
+    )
+
+    // Readable name is shown, and the raw receipt text remains visible as secondary.
+    expect(screen.getByText('Kirkland Signature Organic Peanut Butter')).toBeInTheDocument()
+    expect(screen.getByText('KS ORG PNT BTR')).toBeInTheDocument()
   })
 
   it('shows Extract items button and fires onExtract when no externalOrderId', async () => {
@@ -196,6 +263,31 @@ describe('ReceiptItemsDrawer', () => {
       const body = JSON.parse((patchCall![1] as RequestInit).body as string)
       expect(body).toHaveProperty('businessUseOverride', 50)
     })
+  })
+
+  it('renders Uber trip detail (route and distance) when order.trip is set', () => {
+    render(
+      <ReceiptItemsDrawer
+        open={true}
+        onClose={vi.fn()}
+        receipts={[RECEIPT_UBER_TRIP]}
+        categoryHints={CATEGORY_HINTS}
+        onExtract={vi.fn()}
+      />,
+    )
+
+    // Vendor label should be human-friendly
+    expect(screen.getByText('Uber')).toBeInTheDocument()
+
+    // Route addresses
+    expect(screen.getByText(/123 Main St/)).toBeInTheDocument()
+    expect(screen.getByText(/456 King St W/)).toBeInTheDocument()
+
+    // Distance
+    expect(screen.getByText(/12\.3\s*km/)).toBeInTheDocument()
+
+    // Duration
+    expect(screen.getByText(/27\s*min/)).toBeInTheDocument()
   })
 
   it('does not render anything when open is false', () => {

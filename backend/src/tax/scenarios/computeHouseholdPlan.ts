@@ -1,9 +1,10 @@
 // backend/src/tax/scenarios/computeHouseholdPlan.ts
 import { Entity, HouseholdPlan, Scenario } from '../../models';
-import { D, type Decimal } from '../util/decimal';
+import { D, sumD, type Decimal } from '../util/decimal';
 import { computeCorpScenario, type ComputeCorpScenarioResult } from './computeCorpScenario';
 import { computeGroupAaii } from './computeGroupAaii';
 import { computeScenario, type ComputeScenarioResult } from './computeScenario';
+import { synthesizeScenarioReturn } from './computeScenarioReturn';
 import {
   integrationRouter,
   type OwnerCompPlan,
@@ -121,10 +122,13 @@ function ownerCompPlansForCorp(
 
 // Build the router inputs by walking computed corp results: one
 // CorpReturnSummary per corp (for GRIP / CDA caps) and N OwnerCompPlan rows.
-function buildRouterInputs(corp: CorpResult[]): {
-  ownerCompPlans: OwnerCompPlan[];
-  corpReturns: CorpReturnSummary[];
-} {
+// Also derives a plan from the corp's actual dividend ledger when an owner is
+// linked and no manual ownerComp plan already covers that shareholder.
+function buildRouterInputs(
+  corp: CorpResult[],
+  corpBaseFactsByScenarioId: Map<number, CorpTaxYearFacts>,
+  entityById: Map<number, Entity>,
+): { ownerCompPlans: OwnerCompPlan[]; corpReturns: CorpReturnSummary[] } {
   const ownerCompPlans: OwnerCompPlan[] = [];
   const corpReturns: CorpReturnSummary[] = [];
   for (const { scenario, computed } of corp) {
@@ -138,50 +142,69 @@ function buildRouterInputs(corp: CorpResult[]): {
       // the plan's "risks / out of scope" section.
       retainedEarningsAfter: D('0'),
     });
-    ownerCompPlans.push(
-      ...ownerCompPlansForCorp(scenario, scenario.overrides as Record<string, unknown>),
-    );
+    const manualPlans = ownerCompPlansForCorp(scenario, scenario.overrides as Record<string, unknown>);
+    ownerCompPlans.push(...manualPlans);
+
+    // Derive a plan from the corp's actual dividend ledger when an owner is
+    // linked and no manual ownerComp plan already covers that shareholder.
+    const ownerId = entityById.get(scenario.entityId)?.ownerEntityId ?? null;
+    if (ownerId != null && !manualPlans.some((p) => p.shareholderEntityId === ownerId)) {
+      const facts = corpBaseFactsByScenarioId.get(scenario.id);
+      if (facts) {
+        const eligibleDividend = sumD(
+          facts.dividendsPaid.filter((d) => d.kind === 'eligible').map((d) => d.amount),
+        );
+        const nonEligibleDividend = sumD(
+          facts.dividendsPaid.filter((d) => d.kind === 'non_eligible').map((d) => d.amount),
+        );
+        if (eligibleDividend.greaterThan(0) || nonEligibleDividend.greaterThan(0)) {
+          ownerCompPlans.push({
+            corpScenarioId: scenario.id,
+            shareholderEntityId: ownerId,
+            salary: D(0),
+            bonus: D(0),
+            eligibleDividend,
+            nonEligibleDividend,
+            capitalDividend: D(0),
+          });
+        }
+      }
+    }
   }
   return { ownerCompPlans, corpReturns };
 }
 
-// Merge an `IncomeItem`-shaped row into one of the personal facts arrays. The
-// router emits a single per-source aggregate per addition kind, so we append
-// at most one row per call. Optionally folds in spouseRouter shifts: a positive
-// IncomeItem for `pensionSplitTransferIn` and a negative IncomeItem for
-// `pensionSplitTransferOut` (negative `cadAmount` subtracts via sum in
-// `buildT1`'s computed-employment path on L10100).
+// Merge router output into the personal facts. The router emits a single
+// per-source aggregate per addition kind, so we append at most one row per
+// call. Routed salary rides `employmentIncomeAdditions` (NOT a plain
+// `employmentIncome` row) so buildT1 adds it on top of L10100 even when T4
+// slips exist — the slip-preference dedup would otherwise silently discard it.
+// spouseRouter pension-split shifts fold into `pensionIncome`: a split is
+// pension income (L11600 in / L21000 out), not employment — routing it through
+// L10100 manufactured phantom CPP/EI (and negative EI on large transfer-outs).
 function applyAdditionsAndShifts(
   baseFacts: TaxYearFacts,
   additions: PersonalAdditions | null,
   shift: SpouseShift | null,
 ): TaxYearFacts {
   const factsPlus: TaxYearFacts = { ...baseFacts };
-  const employmentExtras = [...factsPlus.employmentIncome];
 
   if (additions && additions.employmentIncome.greaterThan(0)) {
-    employmentExtras.push({
-      source: 'integration:routed-salary',
-      amount: additions.employmentIncome,
-      cadAmount: additions.employmentIncome,
-    });
+    factsPlus.employmentIncomeAdditions = [
+      ...(factsPlus.employmentIncomeAdditions ?? []),
+      {
+        source: 'integration:routed-salary',
+        amount: additions.employmentIncome,
+        cadAmount: additions.employmentIncome,
+      },
+    ];
   }
-  if (shift && shift.pensionSplitTransferIn.greaterThan(0)) {
-    employmentExtras.push({
-      source: 'spouseRouter:pensionSplit.transferIn',
-      amount: shift.pensionSplitTransferIn,
-      cadAmount: shift.pensionSplitTransferIn,
-    });
+  if (shift) {
+    const net = shift.pensionSplitTransferIn.minus(shift.pensionSplitTransferOut);
+    if (!net.isZero()) {
+      factsPlus.pensionIncome = (baseFacts.pensionIncome ?? D('0')).plus(net);
+    }
   }
-  if (shift && shift.pensionSplitTransferOut.greaterThan(0)) {
-    const out = shift.pensionSplitTransferOut.negated();
-    employmentExtras.push({
-      source: 'spouseRouter:pensionSplit.transferOut',
-      amount: out,
-      cadAmount: out,
-    });
-  }
-  factsPlus.employmentIncome = employmentExtras;
 
   if (additions) {
     if (additions.eligibleDividends.greaterThan(0)) {
@@ -219,16 +242,8 @@ function computeIntegratedPersonalFromFacts(
   factsPlus: TaxYearFacts,
 ): ComputeScenarioResult {
   const engineReturn = buildT1(factsPlus, ratesFor(scenario.year));
-  return {
-    scenarioId: scenario.id,
-    // Sentinel hash — integrated result is plan-scoped, not cached.
-    factsHash: 'household-integrated',
-    computedAt: new Date().toISOString(),
-    lines: JSON.parse(JSON.stringify(engineReturn.lines)) as unknown[],
-    totals: JSON.parse(JSON.stringify(engineReturn.totals)) as Record<string, unknown>,
-    warnings: engineReturn.warnings,
-    cached: false,
-  };
+  // Sentinel hash — integrated result is plan-scoped, not cached.
+  return synthesizeScenarioReturn(scenario.id, engineReturn, 'household-integrated');
 }
 
 // Inject intercorpRouter-emitted received-dividend IncomeItems and/or
@@ -296,15 +311,7 @@ function computeIntegratedCorp(
     factsPlus,
     ratesFor(Number(factsPlus.fiscalYear.startDate.slice(0, 4))),
   );
-  return {
-    scenarioId: scenario.id,
-    factsHash: 'household-intercorp',
-    computedAt: new Date().toISOString(),
-    lines: JSON.parse(JSON.stringify(engineReturn.lines)) as unknown[],
-    totals: JSON.parse(JSON.stringify(engineReturn.totals)) as Record<string, unknown>,
-    warnings: engineReturn.warnings,
-    cached: false,
-  };
+  return synthesizeScenarioReturn(scenario.id, engineReturn, 'household-intercorp');
 }
 
 /**
@@ -455,7 +462,9 @@ export async function computeHouseholdPlan(
 
   // 4. Run the integration router over the corp outputs to derive per-
   //    shareholder additions + GRIP / CDA cap warnings.
-  const integration = integrationRouter(buildRouterInputs(corp));
+  const integration = integrationRouter(
+    buildRouterInputs(corp, corpBaseFactsByScenarioId, entityById),
+  );
 
   // 5. Pre-resolve facts for every personal scenario (one resolve per scenario;
   //    reused by both the spouseRouter input + the T1 build below).

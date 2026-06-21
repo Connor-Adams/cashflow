@@ -19,14 +19,24 @@ export function toIso(year: number, monthZeroBased: number, day: number): string
   return `${year}-${m}-${d}`;
 }
 
-/** Parse "January 12, 2026" → ISO. Returns null on failure. */
+/**
+ * Parse a long-form date in either ordering → ISO. Returns null on failure.
+ *   month-first: "January 12, 2026"  (RBC/CIBC/Questrade statements)
+ *   day-first:   "12 January 2026"   (Wise Canada statements)
+ */
 export function parseLongDate(s: string): string | null {
-  const m = /(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})/.exec(s);
-  if (!m) return null;
-  const monthName = m[1].slice(0, 3);
-  const month = MONTHS_SHORT[monthName];
-  if (month === undefined) return null;
-  return toIso(Number(m[3]), month, Number(m[2]));
+  const NAME = 'January|February|March|April|May|June|July|August|September|October|November|December';
+  const monthFirst = new RegExp(`(${NAME})\\s+(\\d{1,2}),\\s+(\\d{4})`).exec(s);
+  if (monthFirst) {
+    const month = MONTHS_SHORT[monthFirst[1].slice(0, 3)];
+    if (month !== undefined) return toIso(Number(monthFirst[3]), month, Number(monthFirst[2]));
+  }
+  const dayFirst = new RegExp(`(\\d{1,2})\\s+(${NAME})\\s+(\\d{4})`).exec(s);
+  if (dayFirst) {
+    const month = MONTHS_SHORT[dayFirst[2].slice(0, 3)];
+    if (month !== undefined) return toIso(Number(dayFirst[3]), month, Number(dayFirst[1]));
+  }
+  return null;
 }
 
 /**
@@ -67,6 +77,13 @@ export function parsePeriod(s: string): Period | null {
  * (period-start or period-end) whose calendar makes the date land inside the
  * statement window with a small slack (trans date can precede period start
  * by a few days; post date sits inside).
+ *
+ * TRANSACTION dates (vs post dates — Amex resolves both here) can precede the
+ * statement opening by weeks (delayed merchant postings: hotels, transit
+ * aggregation, foreign merchants), including crossing into the prior calendar
+ * year ("Dec 31" on a Jan 15-Feb 14 statement). When the tight window finds no
+ * year, retry with a wide early window and startYear-1 as a candidate rather
+ * than dropping the row.
  */
 export function inferYearForMonthDay(monthDay: string, period: Period): number {
   const m = /([A-Z][a-z]{2})\s+(\d{1,2})/.exec(monthDay);
@@ -85,6 +102,14 @@ export function inferYearForMonthDay(monthDay: string, period: Period): number {
   for (const year of candidates) {
     const ms = Date.UTC(year, month, day);
     if (ms >= startMs - slackMs && ms <= endMs + slackMs) return year;
+  }
+  // Fallback for early trans dates. Tried only after the tight window fails,
+  // so in-period dates (incl. annual statements, where any month-day fits the
+  // first pass) are never re-resolved into the prior year.
+  const earlySlackMs = 45 * 24 * 60 * 60 * 1000;
+  for (const year of [startYear - 1, ...candidates]) {
+    const ms = Date.UTC(year, month, day);
+    if (ms >= startMs - earlySlackMs && ms <= endMs + slackMs) return year;
   }
   throw new Error(
     `Month-day ${monthDay} does not fit statement period ${period.start}…${period.end}`,

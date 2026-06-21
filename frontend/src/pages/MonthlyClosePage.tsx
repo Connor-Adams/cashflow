@@ -19,11 +19,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, Circle, Lock, Unlock } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Label } from '@/components/ui/label'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { useToast } from '@/components/ui/toast'
 import { getJson, patchJson, postJson } from '@/lib/api'
@@ -453,7 +453,7 @@ export function MonthlyClosePage() {
 
           {/* Critical items panel */}
           {detail?.critical.hasCritical ? (
-            <Card className="p-4 border-amber-500/60 bg-amber-50/30">
+            <Card className="p-4 border-warning bg-warning-bg/30">
               <h3 className="text-sm font-semibold">Unresolved critical items</h3>
               <ul className="mt-2 list-disc pl-6 text-sm">
                 {detail.critical.counts.unreviewedTransactions > 0 ? (
@@ -501,8 +501,9 @@ export function MonthlyClosePage() {
                     key={task.id}
                     className="flex flex-wrap items-center gap-3 p-3"
                   >
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
                       aria-label={
                         task.isComplete
                           ? `Mark ${meta?.title ?? task.taskKey} incomplete`
@@ -515,7 +516,7 @@ export function MonthlyClosePage() {
                       {task.isComplete ? (
                         <CheckCircle2
                           size={22}
-                          className="text-emerald-600"
+                          className="text-positive"
                           aria-hidden="true"
                         />
                       ) : (
@@ -525,7 +526,7 @@ export function MonthlyClosePage() {
                           aria-hidden="true"
                         />
                       )}
-                    </button>
+                    </Button>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium">
                         {meta?.title ?? task.taskKey}
@@ -557,13 +558,14 @@ export function MonthlyClosePage() {
           <ul className="space-y-2">
             {history.map((row) => (
               <li key={row.id} className="flex items-center gap-3 text-sm">
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   className="underline underline-offset-2"
                   onClick={() => setPeriodMonth(row.periodMonth)}
                 >
                   {formatMonthLabel(row.periodMonth)}
-                </button>
+                </Button>
                 <Badge variant={row.status === 'closed' ? 'secondary' : 'outline'}>
                   {row.status}
                 </Badge>

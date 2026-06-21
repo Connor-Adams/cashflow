@@ -1,30 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Check,
-  LinkIcon,
-  RefreshCw,
-  Search,
-  Sparkles,
-  Trash2,
-  Upload,
-  X,
-} from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { useConfirm } from '@/components/ui/dialog'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+  Check, LinkIcon, RefreshCw, Search, Sparkles, Trash2, Upload, X, } from 'lucide-react'
+import { Alert } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Grid } from '@/lib/ds-extras'
+import { StatCard } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { deleteReq, getJson, patchJson, postFormData, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { formatSyncAge } from '../lib/formatSyncAge'
 
 type AmazonItem = {
   id: number
@@ -125,7 +115,7 @@ function categoryPreview(order?: AmazonOrder): string {
     : '—'
 }
 
-export function AmazonPage() {
+export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
   const fileRef = useRef<HTMLInputElement>(null)
   const confirm = useConfirm()
   const [orders, setOrders] = useState<AmazonOrder[]>([])
@@ -141,16 +131,19 @@ export function AmazonPage() {
   const [selectedOrder, setSelectedOrder] = useState<AmazonOrder | null>(null)
   const [manualOrderByTxn, setManualOrderByTxn] = useState<Record<number, string>>({})
   const [itemPriceErrors, setItemPriceErrors] = useState<Record<number, string>>({})
+  const [syncStatus, setSyncStatus] = useState<{ orderCount: number; lastCapturedAt: string | null } | null>(null)
 
   const refresh = useCallback(async () => {
-    const [orderRows, txnRows, categoryRows] = await Promise.all([
+    const [orderRows, txnRows, categoryRows, sync] = await Promise.all([
       getJson<AmazonOrder[]>('/api/amazon/orders?limit=50'),
       getJson<AmazonTransaction[]>('/api/amazon/review-transactions'),
       getJson<{ categories: string[] }>('/api/amazon/categories'),
+      getJson<{ orderCount: number; lastCapturedAt: string | null }>('/api/amazon/sync-status'),
     ])
     setOrders(orderRows)
     setTxns(txnRows)
     setCategories(categoryRows.categories)
+    setSyncStatus(sync)
   }, [])
 
   useEffect(() => {
@@ -331,14 +324,21 @@ export function AmazonPage() {
   }
 
   return (
-    <div className="page amazonPage">
+    <div className={embedded ? 'amazonPage' : 'page amazonPage'}>
       {confirm.dialog}
-      <div className="amazonHeader">
-        <div>
-          <h1>Amazon Enrichment</h1>
-          <p className="muted">Import Amazon order reports, match them to card charges, and review item-level categories.</p>
-        </div>
-        <div className="amazonActionRow">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {!embedded && (
+          <div>
+            <h1>Amazon Enrichment</h1>
+            <p className="text-sm leading-6 text-muted-foreground">Import Amazon order reports, match them to card charges, and review item-level categories.</p>
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-3">
+          {syncStatus && (
+            <span className="text-sm leading-6 text-muted-foreground" title={syncStatus.lastCapturedAt ?? 'No Amazon orders captured yet'}>
+              {formatSyncAge(syncStatus.lastCapturedAt)} · {syncStatus.orderCount} order{syncStatus.orderCount === 1 ? '' : 's'}
+            </span>
+          )}
           <Button type="button" variant="secondary" onClick={runMatching} disabled={loading}>
             <RefreshCw aria-hidden="true" />
             Run matching
@@ -360,50 +360,59 @@ export function AmazonPage() {
         </div>
       </div>
 
-      {message && <p className="error">{message}</p>}
+      {message && <Alert variant="error" className="mb-4">{message}</Alert>}
 
-      <form className="card amazonImportPanel" onSubmit={onUpload}>
-        <div>
-          <h2>Amazon Import</h2>
-          <p className="muted">Upload an Amazon report CSV. Re-uploading the same rows is safe.</p>
-        </div>
-        <Label htmlFor="amazonImportFile">
-          CSV file
-          <Input
-            ref={fileRef}
-            id="amazonImportFile"
-            type="file"
-            accept=".csv,text/csv"
-          />
-        </Label>
-        <Button type="submit" disabled={loading}>
-          <Upload aria-hidden="true" />
-          Upload CSV
-        </Button>
-      </form>
-
-      {summary && (
-        <section className="amazonSummaryGrid mb-4">
-          <article className="card"><strong>{summary.created}</strong><span>Orders created</span></article>
-          <article className="card"><strong>{summary.skipped}</strong><span>Skipped</span></article>
-          <article className="card"><strong>{summary.importedItems}</strong><span>Items imported</span></article>
-          <article className="card"><strong>{summary.failed}</strong><span>Failed rows</span></article>
-        </section>
+      {syncStatus?.orderCount === 0 && txns.length === 0 && (
+        <EmptyState
+          title="No Amazon data yet"
+          description="Install the Cashflow Amazon Capture extension, paste a capture token from Settings → Imports, then open Amazon → Your Orders. Captured orders appear here automatically and match to your card charges."
+        />
       )}
 
-      <section className="card">
+      <Card className="flex flex-wrap items-center justify-between gap-3">
+        <form onSubmit={onUpload} className="contents">
+          <div>
+            <h2>Amazon Import</h2>
+            <p className="text-sm leading-6 text-muted-foreground">Upload an Amazon report CSV. Re-uploading the same rows is safe.</p>
+          </div>
+          <Label htmlFor="amazonImportFile">
+            CSV file
+            <input
+              ref={fileRef}
+              id="amazonImportFile"
+              type="file"
+              accept=".csv,text/csv"
+            />
+          </Label>
+          <Button type="submit" disabled={loading}>
+            <Upload aria-hidden="true" />
+            Upload CSV
+          </Button>
+        </form>
+      </Card>
+
+      {summary && (
+        <Grid minItemWidth={160} className="mb-4">
+          <StatCard label="Orders created" value={summary.created} />
+          <StatCard label="Skipped" value={summary.skipped} />
+          <StatCard label="Items imported" value={summary.importedItems} />
+          <StatCard label="Failed rows" value={summary.failed} />
+        </Grid>
+      )}
+
+      <Card>
         <h2>Amazon Review</h2>
-        <div className="amazonReviewList">
+        <div className="grid gap-3">
           {txns.map((txn) => (
-            <article key={txn.id} className="amazonReviewRow">
+            <article key={txn.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3" style={{ borderColor: 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 4%)', background: 'color-mix(in srgb, var(--bg) 74%, transparent)' }}>
               <div>
                 <strong>{txn.merchantClean}</strong>
-                <div className="muted">{txn.date} · {formatMoney(Number(txn.amount), txn.currency)}</div>
+                <div className="text-sm leading-6 text-muted-foreground">{txn.date} · {formatMoney(Number(txn.amount), txn.currency)}</div>
               </div>
-              <div className="amazonLinks">
+              <div className="grid gap-3 min-w-[min(100%,34rem)] flex-1">
                 {(txn.orderLinks ?? []).map((link) => (
-                  <div key={link.id} className="amazonSuggestedLink">
-                    <div>
+                  <div key={link.id} className="grid gap-3 rounded-lg border p-3" style={{ borderColor: 'color-mix(in srgb, var(--border) 84%, var(--zinc-50) 4%)', background: 'color-mix(in srgb, var(--bg2) 70%, transparent)' }}>
+                    <div className="grid gap-1">
                       {(() => {
                         const pct = Math.round(Number(link.confidence))
                         const valid = Number.isFinite(pct)
@@ -413,11 +422,11 @@ export function AmazonPage() {
                           </strong>
                         )
                       })()}
-                      <span className="muted">{link.status} · {link.matchReason}</span>
+                      <span className="text-sm leading-6 text-muted-foreground">{link.status} · {link.matchReason}</span>
                       <span>{itemPreview(link.order)}</span>
-                      <span className="muted">{categoryPreview(link.order)}</span>
+                      <span className="text-sm leading-6 text-muted-foreground">{categoryPreview(link.order)}</span>
                     </div>
-                    <div className="amazonActionRow">
+                    <div className="flex flex-wrap items-center gap-3">
                       <Button type="button" onClick={() => void linkAction(`/api/amazon/links/${link.id}/accept`)} disabled={loading}>
                         <Check aria-hidden="true" />
                         Accept
@@ -437,17 +446,17 @@ export function AmazonPage() {
                     </div>
                   </div>
                 ))}
-                <div className="amazonManualLink">
+                <div className="flex flex-wrap items-center justify-end gap-3">
                   <NativeSelect
                     aria-label={`Manually link order to ${txn.merchantClean}`}
                     value={manualOrderByTxn[txn.id] ?? ''}
                     onChange={(event) => setManualOrderByTxn((prev) => ({ ...prev, [txn.id]: event.target.value }))}
                   >
-                    <NativeSelectOption value="">Manually link order...</NativeSelectOption>
+                    <option value="">Manually link order...</option>
                     {orders.map((order) => (
-                      <NativeSelectOption key={order.id} value={order.id}>
+                      <option key={order.id} value={order.id}>
                         #{order.id} {order.orderDate ?? order.shipmentDate ?? 'No date'} {order.total ? formatMoney(Number(order.total), order.currency) : ''}
-                      </NativeSelectOption>
+                      </option>
                     ))}
                   </NativeSelect>
                   <Button type="button" onClick={() => void manualLink(txn.id)} disabled={loading || !manualOrderByTxn[txn.id]}>
@@ -458,45 +467,43 @@ export function AmazonPage() {
               </div>
             </article>
           ))}
-          {txns.length === 0 && (
+          {txns.length === 0 && syncStatus?.orderCount !== 0 && (
             <EmptyState title="No Amazon-like transactions found." />
           )}
         </div>
-      </section>
+      </Card>
 
-      <section className="card">
+      <Card>
         <h2>Recent Imported Orders</h2>
-        <div className="tableWrap">
-          <Table className="table">
-            <TableHeader>
-              <TableRow><TableHead>Order</TableHead><TableHead>Date</TableHead><TableHead>Total</TableHead><TableHead>Categories</TableHead><TableHead>Items</TableHead><TableHead></TableHead></TableRow>
-            </TableHeader>
-            <TableBody>
-              {orders.map((order) => (
-                <TableRow key={order.id}>
-                  <TableCell>{order.vendorOrderId ?? `#${order.id}`}</TableCell>
-                  <TableCell>{order.orderDate ?? order.shipmentDate ?? '—'}</TableCell>
-                  <TableCell>{order.total ? formatMoney(Number(order.total), order.currency) : '—'}</TableCell>
-                  <TableCell>{categoryPreview(order)}</TableCell>
-                  <TableCell>{itemPreview(order)}</TableCell>
-                  <TableCell>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedOrderId(order.id)}>
-                      View/Edit
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </section>
+        <Table>
+          <TableHeader>
+            <TableRow><TableHead>Order</TableHead><TableHead>Date</TableHead><TableHead>Total</TableHead><TableHead>Categories</TableHead><TableHead>Items</TableHead><TableHead></TableHead></TableRow>
+          </TableHeader>
+          <TableBody>
+            {orders.map((order) => (
+              <TableRow key={order.id}>
+                <TableCell>{order.vendorOrderId ?? `#${order.id}`}</TableCell>
+                <TableCell>{order.orderDate ?? order.shipmentDate ?? '—'}</TableCell>
+                <TableCell>{order.total ? formatMoney(Number(order.total), order.currency) : '—'}</TableCell>
+                <TableCell>{categoryPreview(order)}</TableCell>
+                <TableCell>{itemPreview(order)}</TableCell>
+                <TableCell>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedOrderId(order.id)}>
+                    View/Edit
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Card>
 
       {selectedOrder && (
-        <section className="card amazonOrderEditor">
-          <div className="amazonHeader">
+        <Card className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2>Order Detail/Edit</h2>
-              <p className="muted">
+              <p className="text-sm leading-6 text-muted-foreground">
                 {selectedOrder.vendorOrderId ?? `Order #${selectedOrder.id}`} · {selectedOrder.orderDate ?? selectedOrder.shipmentDate ?? 'No date'}
               </p>
             </div>
@@ -515,81 +522,79 @@ export function AmazonPage() {
               {aiCategorizing ? 'Categorizing...' : 'AI categorize order'}
             </Button>
           </div>
-          <div className="tableWrap">
-            <Table className="table">
-              <TableHeader>
-                <TableRow><TableHead>Title</TableHead><TableHead>Category</TableHead><TableHead>Business %</TableHead><TableHead>Amount</TableHead><TableHead>Confidence</TableHead></TableRow>
-              </TableHeader>
-              <TableBody>
-                {(selectedOrder.items ?? []).map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell>
-                      <Input
-                        aria-label="Item title"
-                        value={item.title}
-                        onChange={(event) => void updateItem(item, { title: event.target.value })}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <NativeSelect
-                        aria-label="Item category"
-                        value={item.inferredCategory ?? 'Uncategorized'}
-                        onChange={(event) => void updateItem(item, { inferredCategory: event.target.value })}
+          <Table>
+            <TableHeader>
+              <TableRow><TableHead>Title</TableHead><TableHead>Category</TableHead><TableHead>Business %</TableHead><TableHead>Amount</TableHead><TableHead>Confidence</TableHead></TableRow>
+            </TableHeader>
+            <TableBody>
+              {(selectedOrder.items ?? []).map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell>
+                    <Input
+                      aria-label="Item title"
+                      value={item.title}
+                      onChange={(event) => void updateItem(item, { title: event.target.value })}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <NativeSelect
+                      aria-label="Item category"
+                      value={item.inferredCategory ?? 'Uncategorized'}
+                      onChange={(event) => void updateItem(item, { inferredCategory: event.target.value })}
+                    >
+                      {categories.map((cat) => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </NativeSelect>
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      aria-label="Business use percent"
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={item.businessUsePercent ?? ''}
+                      onChange={(event) => void updateItem(item, { businessUsePercent: event.target.value })}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      aria-label="Item total price"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={item.totalPrice ?? ''}
+                      aria-invalid={itemPriceErrors[item.id] ? true : undefined}
+                      aria-describedby={itemPriceErrors[item.id] ? `item-price-error-${item.id}` : undefined}
+                      onChange={(event) => void updateItem(item, { totalPrice: event.target.value })}
+                    />
+                    {itemPriceErrors[item.id] && (
+                      <span
+                        id={`item-price-error-${item.id}`}
+                        className="text-danger"
+                        role="alert"
                       >
-                        {categories.map((cat) => (
-                          <NativeSelectOption key={cat} value={cat}>{cat}</NativeSelectOption>
-                        ))}
-                      </NativeSelect>
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        aria-label="Business use percent"
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={item.businessUsePercent ?? ''}
-                        onChange={(event) => void updateItem(item, { businessUsePercent: event.target.value })}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        aria-label="Item total price"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={item.totalPrice ?? ''}
-                        aria-invalid={itemPriceErrors[item.id] ? true : undefined}
-                        aria-describedby={itemPriceErrors[item.id] ? `item-price-error-${item.id}` : undefined}
-                        onChange={(event) => void updateItem(item, { totalPrice: event.target.value })}
-                      />
-                      {itemPriceErrors[item.id] && (
-                        <span
-                          id={`item-price-error-${item.id}`}
-                          className="error"
-                          role="alert"
-                        >
-                          {itemPriceErrors[item.id]}
+                        {itemPriceErrors[item.id]}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {(() => {
+                      if (item.confidence == null || item.confidence === '') return '—'
+                      const pct = Math.round(Number(item.confidence))
+                      if (!Number.isFinite(pct)) return '—'
+                      return (
+                        <span style={{ color: confidenceColor(pct) }}>
+                          {pct}% ({confidenceLabel(pct)})
                         </span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {(() => {
-                        if (item.confidence == null || item.confidence === '') return '—'
-                        const pct = Math.round(Number(item.confidence))
-                        if (!Number.isFinite(pct)) return '—'
-                        return (
-                          <span style={{ color: confidenceColor(pct) }}>
-                            {pct}% ({confidenceLabel(pct)})
-                          </span>
-                        )
-                      })()}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </section>
+                      )
+                    })()}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
       )}
     </div>
   )

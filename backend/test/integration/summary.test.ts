@@ -20,6 +20,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { seedHousehold } from '../helpers/seedHousehold.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -118,7 +119,7 @@ before(async () => {
   app = mod.default;
 
   // Bootstrap superadmin (first registration auto-promotes).
-  superAgent = request.agent(app);
+  superAgent = testAgent(app);
   const register = await superAgent.post('/api/auth/register').send({
     email: 'super-summary@example.com',
     displayName: 'Super Summary',
@@ -130,12 +131,12 @@ before(async () => {
   householdAId = a.householdId;
   userAId = a.userId;
   contactAId = a.contactId;
-  agentA = request.agent(app);
+  agentA = testAgent(app);
   agentA.jar.setCookie(`cashflow_session=${a.token}; Path=/`);
 
   const b = await seedHousehold('SummaryB', 'B Partner');
   householdBId = b.householdId;
-  agentB = request.agent(app);
+  agentB = testAgent(app);
   agentB.jar.setCookie(`cashflow_session=${b.token}; Path=/`);
 
   // Accounts (created directly so we can set accountType freely).

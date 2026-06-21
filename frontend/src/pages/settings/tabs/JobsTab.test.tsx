@@ -51,7 +51,9 @@ describe('JobsTab', () => {
     })
     renderTab()
     await waitFor(() => expect(screen.getByText('daily_snapshot')).toBeInTheDocument())
-    expect(screen.getByText('0 3 * * *')).toBeInTheDocument()
+    const schedule = screen.getByText('Daily at 3:00 AM')
+    expect(schedule).toBeInTheDocument()
+    expect(schedule).toHaveAttribute('title', '0 3 * * *')
     expect(screen.getByText('Success')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /show runs for daily_snapshot/i }))

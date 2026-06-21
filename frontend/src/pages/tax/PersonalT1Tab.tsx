@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
 import {
-  useScenarios,
-  useScenarioDetail,
-  type Scenario,
-  type ScenarioWithComputed,
-} from '../../hooks/useScenarios';
+  useScenarios, useScenarioDetail, type ScenarioWithComputed, } from '../../hooks/useScenarios';
 import { useScenarioChain } from '../../hooks/useScenarioChain';
 import { type TaxLineDto } from '../../hooks/useTaxReturn';
 import { ScenarioTree } from './scenarios/ScenarioTree';
@@ -14,6 +10,16 @@ import { ComparisonView } from './scenarios/ComparisonView';
 import { YearStripNav } from './scenarios/YearStripNav';
 import { AssumptionsEditor } from './scenarios/AssumptionsEditor';
 import { RrifMinCalc } from './scenarios/RrifMinCalc';
+import { fmtCurrency } from './util/format';
+import { labelForTotal } from './util/labels';
+import { TaxLineBreakdownTable } from './components/TaxLineBreakdownTable';
+import { ScenarioCompareBar } from './components/ScenarioCompareBar';
+import { Button } from '@connor-adams/designsystem'
+import { StatCard } from '@connor-adams/designsystem';
+import { Card } from '@connor-adams/designsystem'
+import { CollapsibleCard } from '@/components/ui/collapsible-card';
+import { Alert } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 
 export function PersonalT1Tab({ year }: { year: number }) {
   const { entities, error: entitiesError } = useTaxEntities();
@@ -24,9 +30,10 @@ export function PersonalT1Tab({ year }: { year: number }) {
   const personalEntity = entities.find((e) => e.kind === 'personal');
   if (!personalEntity) {
     return (
-      <p className="muted">
-        No personal entity for this household. Create one first (POST /api/tax/entities).
-      </p>
+      <EmptyState
+        title="No personal entity yet"
+        description="Add a personal entity for this household to start modelling your T1 return."
+      />
     );
   }
 
@@ -192,7 +199,7 @@ function PersonalT1ScenarioWorkspace({ year: yearProp, entityId }: WorkspaceProp
 
   return (
     <div>
-      <header style={{ marginBottom: '0.75rem' }}>
+      <header className="mb-3">
         <h2>Personal T1 — {selectedYear}</h2>
         <p className="muted">
           Each scenario layers overrides on top of actuals. Edit overrides on the
@@ -211,7 +218,7 @@ function PersonalT1ScenarioWorkspace({ year: yearProp, entityId }: WorkspaceProp
           isProjecting={isProjecting}
         />
         {chain.error && (
-          <p className="error" style={{ marginTop: '0.25rem' }}>
+          <p className="error mt-1">
             Failed to load year chain: {chain.error}
           </p>
         )}
@@ -243,7 +250,7 @@ function PersonalT1ScenarioWorkspace({ year: yearProp, entityId }: WorkspaceProp
             />
           ) : null}
           {compareIds.length > 0 && (
-            <CompareBar
+            <ScenarioCompareBar
               ids={compareIds}
               scenarios={scenarios}
               onRemove={toggleCompare}
@@ -282,17 +289,17 @@ function ActiveScenarioPanel({
   const isProjection = scenario.kind === 'projection_root';
   return (
     <div>
-      <header style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem' }}>
-        <h3 style={{ margin: 0 }}>{scenario.name}</h3>
+      <header className="mb-3 flex items-baseline gap-3">
+        <h3 className="m-0">{scenario.name}</h3>
         <span className="muted">
           {scenario.kind === 'baseline' ? 'baseline (actuals)' : scenario.kind}
         </span>
-        <button onClick={onAddToCompare} style={{ marginLeft: 'auto' }}>
+        <Button variant="secondary" size="sm" onClick={onAddToCompare} className="ml-auto">
           {inCompare ? '✓ In compare' : '+ Add to compare'}
-        </button>
+        </Button>
       </header>
       {isProjection && (
-        <div style={{ marginBottom: '0.75rem' }}>
+        <div className="mb-3">
           <AssumptionsEditor
             assumptions={scenario.assumptions as { inflation?: number; investmentReturn?: number }}
             onChange={onAssumptionsChange}
@@ -300,8 +307,8 @@ function ActiveScenarioPanel({
         </div>
       )}
       {isProjection && (
-        <details className="mb-3 rounded-md border border-gray-200 bg-white">
-          <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-gray-800">
+        <details className="mb-3 rounded-md border bg-card">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-foreground">
             RRIF minimum withdrawal calculator
           </summary>
           <div className="px-3 pb-3">
@@ -310,134 +317,43 @@ function ActiveScenarioPanel({
         </details>
       )}
       <OverrideEditor overrides={scenario.overrides} onChange={onOverridesChange} />
-      <section style={{ marginTop: '1rem' }}>
-        <h4>Computed totals</h4>
-        <ul>
+
+      {/* Headline */}
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard label="Total payable" value={fmtCurrency(computed.totals.totalPayable)} />
+        <StatCard label="Refund / owing" value={fmtCurrency(computed.totals.refundOrOwing)} />
+        <StatCard label="Total income" value={fmtCurrency(computed.totals.totalIncome)} />
+        <StatCard label="Taxable income" value={fmtCurrency(computed.totals.taxableIncome)} />
+      </div>
+
+      {/* All totals, humanized */}
+      <Card className="mb-4">
+        <h4 className="mb-2 text-sm font-semibold">Computed totals</h4>
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
           {Object.entries(computed.totals).map(([k, v]) => (
-            <li key={k}>
-              <strong>{k}</strong>: {String(v)}
-            </li>
+            <div key={k} className="flex justify-between">
+              <dt className="text-muted-foreground">{labelForTotal(k)}</dt>
+              <dd className="tabular-nums">{fmtCurrency(v as string)}</dd>
+            </div>
           ))}
-        </ul>
-        <p className="muted">
+        </dl>
+        <p className="muted mt-2 text-xs">
           {computed.cached ? 'Cached snapshot' : 'Freshly computed'} at{' '}
           {new Date(computed.computedAt).toLocaleString()}
         </p>
-      </section>
+      </Card>
+
       {computed.warnings.length > 0 && (
-        <section style={{ marginTop: '1rem' }}>
-          <h4>Warnings</h4>
-          <ul>
-            {computed.warnings.map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
+        <Alert variant="warning" title="Warnings" className="mb-4">
+          <ul className="m-0 list-disc pl-5">
+            {computed.warnings.map((w, i) => <li key={i}>{w}</li>)}
           </ul>
-        </section>
+        </Alert>
       )}
-      <section style={{ marginTop: '1rem' }}>
-        <h4>Line breakdown</h4>
-        <LineBreakdownTable lines={lines} />
-      </section>
-    </div>
-  );
-}
 
-function LineBreakdownTable({ lines }: { lines: TaxLineDto[] }) {
-  const [expanded, setExpanded] = useState<string | null>(null);
-  if (lines.length === 0) return <p className="muted">No lines to display.</p>;
-  return (
-    <table>
-      <thead>
-        <tr>
-          <th>Line</th>
-          <th>Label</th>
-          <th>Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        {lines.map((l) => (
-          <LineRow
-            key={l.code}
-            line={l}
-            expanded={expanded === l.code}
-            onClick={() => setExpanded(expanded === l.code ? null : l.code)}
-          />
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function LineRow({
-  line,
-  expanded,
-  onClick,
-}: {
-  line: TaxLineDto;
-  expanded: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <>
-      <tr onClick={onClick} style={{ cursor: 'pointer' }}>
-        <td>{line.code}</td>
-        <td>{line.label}</td>
-        <td>${line.amount}</td>
-      </tr>
-      {expanded && (
-        <tr>
-          <td colSpan={3}>
-            {line.formula && <p className="muted">Formula: {line.formula}</p>}
-            <ul>
-              {line.inputs.map((i, idx) => (
-                <li key={idx}>
-                  {i.source}: ${i.amount}
-                </li>
-              ))}
-            </ul>
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
-
-interface CompareBarProps {
-  ids: number[];
-  scenarios: Scenario[];
-  onRemove: (id: number) => void;
-  onClear: () => void;
-}
-
-function CompareBar({ ids, scenarios, onRemove, onClear }: CompareBarProps) {
-  const byId = new Map(scenarios.map((s) => [s.id, s]));
-  return (
-    <div
-      style={{
-        marginTop: '1rem',
-        padding: '0.5rem',
-        border: '1px solid rgba(255,255,255,0.12)',
-        borderRadius: '4px',
-      }}
-    >
-      <strong>Compare ({ids.length}):</strong>{' '}
-      {ids.map((id) => (
-        <button
-          key={id}
-          onClick={() => onRemove(id)}
-          style={{ marginRight: '0.25rem' }}
-        >
-          {byId.get(id)?.name ?? `#${id}`} ×
-        </button>
-      ))}
-      {ids.length > 0 && (
-        <button onClick={onClear} style={{ marginLeft: '0.5rem' }}>
-          Clear
-        </button>
-      )}
-      {ids.length < 2 && (
-        <span className="muted"> Add at least 2 to see the diff.</span>
-      )}
+      <CollapsibleCard title="Return detail (T1 lines)" defaultOpen={false}>
+        <TaxLineBreakdownTable lines={lines} />
+      </CollapsibleCard>
     </div>
   );
 }

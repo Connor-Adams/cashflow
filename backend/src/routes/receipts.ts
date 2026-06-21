@@ -3,10 +3,14 @@ import path from 'path';
 import crypto from 'crypto';
 import multer from 'multer';
 import { Op } from 'sequelize';
-import { Transaction, Receipt, ExternalOrder, ExternalOrderItem, TransactionOrderLink } from '../models';
+import { Transaction, Receipt, ExternalOrder, ExternalOrderItem, TransactionOrderLink, CostcoProduct } from '../models';
 import { extractReceiptFromImage } from '../ai/extractReceiptItems';
 import { persistExtractedOrder } from './externalOrders';
-import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
+import { anchorReceiptOrderToTransaction } from '../import/receiptOrderAnchor';
+import {
+  EXPANSION_VENDORS,
+  maybeExpandItemNamesForOrder,
+} from '../import/enrichment/expandItemNames';
 import { currentAuth } from '../auth/middleware';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
@@ -18,6 +22,10 @@ import {
   recordAudit,
 } from '../audit/log';
 import {
+  transactionIdsForOrder,
+  recomputeTransactionsReviewFromItems,
+} from '../import/enrichment/recomputeTransactionReviewFromItems';
+import {
   deleteReceiptObject,
   readReceiptObject,
   saveReceiptObject,
@@ -28,6 +36,12 @@ import {
   parseFilter,
   RECEIPT_COMPLETENESS_FILTERS,
 } from '../summary/receiptCompleteness';
+import type { TripDetailView } from '@cashflow/shared';
+
+export function orderTrip(order: Pick<ExternalOrder, 'rawPayload'>): TripDetailView | null {
+  const raw = order.rawPayload as { trip?: TripDetailView | null } | null;
+  return raw?.trip ?? null;
+}
 
 const router = Router();
 
@@ -228,6 +242,11 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
       list.push(it);
       itemsByOrder.set(it.externalOrderId, list);
     }
+    const itemNumbers = [...new Set(items.map((it) => it.itemNumber?.trim()).filter((x): x is string => x != null && x !== ''))];
+    const products = itemNumbers.length
+      ? await CostcoProduct.findAll({ where: { itemNumber: { [Op.in]: itemNumbers }, status: 'resolved' } })
+      : [];
+    const productByNumber = new Map(products.map((p) => [p.itemNumber, p]));
     res.json(
       receipts.map((r) => {
         const order = r.externalOrderId != null ? ordersById.get(r.externalOrderId) : null;
@@ -249,6 +268,7 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
                 shipping: order.shipping,
                 total: order.total,
                 currency: order.currency,
+                trip: orderTrip(order),
               }
             : null,
           items: (r.externalOrderId != null ? (itemsByOrder.get(r.externalOrderId) ?? []) : []).map(
@@ -256,6 +276,8 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
               id: it.id,
               externalOrderId: it.externalOrderId,
               title: it.title,
+              displayName: it.displayName,
+              itemNumber: it.itemNumber,
               quantity: it.quantity,
               unitPrice: it.unitPrice,
               totalPrice: it.totalPrice,
@@ -263,6 +285,10 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
               categoryOverride: it.categoryOverride,
               businessUsePercent: it.businessUsePercent,
               businessUseOverride: it.businessUseOverride,
+              confidence: it.confidence,
+              imageUrl: it.itemNumber ? (productByNumber.get(it.itemNumber.trim())?.imageUrl ?? null) : null,
+              costcoUrl: it.itemNumber ? (productByNumber.get(it.itemNumber.trim())?.costcoUrl ?? null) : null,
+              imageVerified: it.itemNumber ? (productByNumber.get(it.itemNumber.trim())?.verified ?? true) : true,
             }),
           ),
         };
@@ -405,13 +431,27 @@ router.post(
           where: { externalOrderId: previousExternalOrderId, status: 'suggested' },
         });
       }
+      let itemCount = 0;
       if (auth.household.id != null) {
-        await matchReceiptOrderToTransactions({
-          externalOrderId: order.id,
+        // The receipt is attached to row.transactionId; anchor the extracted
+        // order directly to it (photo is authoritative), categorize, recompute.
+        const anchored = await anchorReceiptOrderToTransaction({
+          orderId: order.id,
+          transactionId: row.transactionId,
           householdId: auth.household.id,
         });
+        itemCount = anchored.itemCount;
+        // Best-effort: expand abbreviated item titles into readable names for
+        // allowlisted vendors (Costco). No-ops/silently fails so a flaky
+        // OpenAI call can't break receipt analysis.
+        if ((EXPANSION_VENDORS as readonly string[]).includes(order.vendor)) {
+          await maybeExpandItemNamesForOrder({
+            householdId: auth.household.id,
+            orderId: order.id,
+          });
+        }
       }
-      res.json({ receipt: row.toJSON(), order: order.toJSON(), extracted });
+      res.json({ receipt: row.toJSON(), order: order.toJSON(), extracted, itemCount });
     } catch (e) {
       next(e);
     }
@@ -475,6 +515,8 @@ router.patch('/external-order-items/:id', async (req, res, next) => {
       }
     }
     await item.update(patch);
+    const affected = await transactionIdsForOrder(item.externalOrderId);
+    await recomputeTransactionsReviewFromItems(affected);
     res.json(item.toJSON());
   } catch (e) {
     next(e);

@@ -1,6 +1,12 @@
+// Intentional frontend API-type barrel: a complete mirror of @cashflow/shared (imported by 100+ files).
+// Not every re-exported type has a frontend consumer yet, and names like Label also exist as the
+// backend model / UI component, so cross-package overlap is expected for this barrel.
+// fallow-ignore-file unused-type
+// fallow-ignore-file duplicate-export
 export type {
   Account,
   AccountType,
+  AccountMergeResult,
   AcbRealizedEvent,
   AcbResult,
   AcbTimelineState,
@@ -11,8 +17,13 @@ export type {
   BySecurityAccountBreakdown,
   BySecurityRow,
   Category,
+  CategoryTreeNode,
+  ResolvedCategoryPath,
+  Label,
+  TransactionLabelRef,
   Contact,
   EnrichmentBackfillProgress,
+  EnrichmentCoverage,
   EnrichmentSignal,
   EnrichmentStats,
   ExplanationSource,
@@ -68,7 +79,9 @@ export type {
   RealizedSecurityRow,
   RealizedTotalsRow,
   Rule,
+  RuleAction,
   Paginated,
+  RollupRow,
   Security,
   SecurityPrice,
   StatementPreview,
@@ -77,6 +90,7 @@ export type {
   StatementTransaction,
   StatementDetailResponse,
   StatementListResponse,
+  ItemizedSummary,
   Transaction,
   TransactionStatus,
   TransferPurpose,
@@ -91,6 +105,21 @@ export type {
   DebtOverview,
   DebtPayoffScenario,
   DebtScenarioResponse,
+  DividendReconciliationStatus,
+  DividendReconciliationRow,
+  DividendUpcomingRow,
+  DividendListResponse,
+  DividendCandidate,
+  DividendCandidatesResponse,
+  CardPaymentStrategy,
+  CardAutopayType,
+  CreditCard,
+  CreditCardsOverview,
+  CreditCardProfile,
+  CreditUtilizationByCurrency,
+  CardPaymentPlannedEvent,
+  CardSafeToSpendImpact,
+  CreditCardPaymentResponse,
 } from '@cashflow/shared'
 
 /** Response item from GET /api/recurring — one detected recurring merchant. */
@@ -120,6 +149,14 @@ export type SubscriptionStatus =
   | 'ignored'
   | 'unknown'
 
+/** Billing cadence of a subscription (Cashflow #291 — user-editable). */
+export type SubscriptionCadence =
+  | 'weekly'
+  | 'monthly'
+  | 'quarterly'
+  | 'semiannual'
+  | 'annual'
+
 /** One row of the /api/subscriptions response. */
 export type Subscription = {
   id: number
@@ -128,13 +165,20 @@ export type Subscription = {
   normalizedName: string
   amount: string
   currency: string
-  cadence: 'monthly' | 'weekly'
+  cadence: SubscriptionCadence
   lastChargeDate: string
   nextExpectedDate: string | null
   status: SubscriptionStatus
   category: string | null
   annualizedCost: string
   priceChangeDetected: boolean
+  pendingPriceChange: {
+    id: number
+    prevCents: number
+    newCents: number
+    pctChange: string
+    detectedOn: string
+  } | null
   cancellationUrl: string | null
   notes: string | null
   createdAt: string
@@ -149,8 +193,24 @@ export type SubscriptionsResponse = {
 /** PATCH /api/subscriptions/:id request body — only user-curated fields. */
 export type SubscriptionPatch = {
   status?: SubscriptionStatus
+  cadence?: SubscriptionCadence
   cancellationUrl?: string | null
   notes?: string | null
+}
+
+/** Allowed cancel-impact forecast horizons (months). */
+export type CancelImpactHorizon = 6 | 12 | 24
+
+/** Response shape for GET /api/subscriptions/:id/cancel-impact. */
+export type CancelImpact = {
+  /** Projected total spend over the horizon (== potential savings). */
+  amount: number
+  currency: string
+  /** Number of expected occurrences inside the horizon. Fractional when a
+   *  cadence period only partially fits the horizon (annual over 6 months
+   *  → 0.5 expected renewals). */
+  count: number
+  horizonMonths: number
 }
 
 /** Response shape for GET /api/subscriptions/summary. */
@@ -493,6 +553,8 @@ export type PartnerFairnessByCurrency = {
    * non-partner Contact (friend repaying lunch, side gig, family gift).
    */
   nonPartnerInflows: number
+  /** Direct partner transfers folded into balance (in = partner sent you, out = you sent partner). */
+  partnerTransfers: { in: number; out: number }
   balance: number
   direction: 'partner_owes_me' | 'i_owe_partner' | 'even'
   paidMore: { youCovered: number; partnerCovered: number }
@@ -956,21 +1018,21 @@ export type CalendarEventsResponse = {
  * key (`emerald`); we map it to ready-to-use class strings here.
  */
 export const CALENDAR_EVENT_BG_CLASS: Record<PlannedEventType, string> = {
-  income: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
-  expense: 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-100',
-  transfer: 'bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-100',
-  settlement: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100',
-  debt_payment: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100',
-  savings: 'bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-100',
+  income: 'bg-success-bg text-success-foreground',
+  expense: 'bg-danger-bg text-danger',
+  transfer: 'bg-info-bg text-info-foreground',
+  settlement: 'bg-warning-bg text-warning-foreground',
+  debt_payment: 'bg-danger-bg text-danger',
+  savings: 'bg-success-bg text-success',
 }
 
 export const CALENDAR_EVENT_DOT_CLASS: Record<PlannedEventType, string> = {
-  income: 'bg-emerald-500',
-  expense: 'bg-rose-500',
-  transfer: 'bg-sky-500',
-  settlement: 'bg-amber-500',
-  debt_payment: 'bg-orange-500',
-  savings: 'bg-violet-500',
+  income: 'bg-positive',
+  expense: 'bg-danger',
+  transfer: 'bg-info',
+  settlement: 'bg-warning',
+  debt_payment: 'bg-danger',
+  savings: 'bg-positive',
 }
 
 /**
@@ -1043,6 +1105,38 @@ export type GoalProjectionStatus =
   | 'unfunded'
   | 'active'
 
+/**
+ * Forecast-grounded goal status (#653). Classifies a dated goal against the
+ * household's *real forecasted free cash*, not the self-reported
+ * monthlyContribution. See {@link GoalForecastProjection}.
+ */
+export type GoalForecastStatus =
+  | 'completed'
+  | 'on_track'
+  | 'at_risk'
+  | 'off_track'
+  | 'no_deadline'
+  | 'cant_validate'
+
+/**
+ * Forecast block on GET /api/goals/:id/projection (#653). Grounds the on-track
+ * classification in forecasted free cash. `requiredMonthlyContribution` and
+ * `projectedCompletionDate` are null when there's no classification to drive
+ * (no deadline, completed, or currency mismatch).
+ */
+export type GoalForecastProjection = {
+  /** Forecast currency the classification was computed in. */
+  currency: string
+  /** Forecasted free cash per month, 4-decimal string. */
+  monthlyFreeCash: string
+  status: GoalForecastStatus
+  requiredMonthlyContribution: string | null
+  /** Derived from forecasted free cash, NOT the typed contribution. */
+  projectedCompletionDate: string | null
+  /** True when the goal currency differs from the forecast currency. */
+  currencyMismatch: boolean
+}
+
 export type GoalProjectionResponse = {
   goalId: number
   /** YYYY-MM-DD — the date the projection was computed against. */
@@ -1053,6 +1147,8 @@ export type GoalProjectionResponse = {
   requiredMonthlyContribution: string | null
   projectedCompletionDate: string | null
   status: GoalProjectionStatus
+  /** Forecast-grounded validation (#653). */
+  forecast: GoalForecastProjection
 }
 
 /**
@@ -1105,6 +1201,9 @@ export type ForecastResponse = {
 export type AppConfig = {
   logoDevToken: string | null;
   quoteProviderConfigured: boolean;
+  /** Web-push VAPID public key (issue #651), or null when push is unconfigured
+   *  server-side — the client then hides the "Enable browser alerts" control. */
+  vapidPublicKey: string | null;
 };
 
 export type BackfillStatus = {
@@ -1364,6 +1463,20 @@ export type CashflowSettings = {
    * times in the trailing 90 days. Default 3, bounded 2..50.
    */
   counterpartyPromotionThreshold: number;
+  /** #375 — Partner Fairness "exclude non-partner inflows" toggle. */
+  excludeNonPartnerInflows: boolean;
+  /**
+   * #654 — assumed annual return rate (decimal string, e.g. "0.0500" for 5%)
+   * used by the safe-to-spend surplus "pay off debt vs. invest it" calc.
+   * Optional so older clients/responses without it still type-check.
+   */
+  assumedAnnualReturnRate?: string;
+  /**
+   * #259 — ISO8601 timestamp the user dismissed/completed first-run
+   * onboarding, or null if they never did. The onboarding gate reads this
+   * (with the active-account count) to decide whether to show the wizard.
+   */
+  onboardingDismissedAt: string | null;
 };
 
 export type SafeToSpendBreakdown = {
@@ -1372,6 +1485,39 @@ export type SafeToSpendBreakdown = {
   requiredSavingsContributions: number;
   expectedCreditCardPayments: number;
   minimumBuffer: number;
+};
+
+/** #654 — the top active goal the surplus could be put toward, or null. */
+export type SurplusTopGoal = {
+  id: number;
+  name: string;
+  currency: string;
+};
+
+/** #654 — recommendation from the payoff-vs-invest comparison. */
+export type SurplusRecommendation = 'payoff' | 'invest' | 'tie';
+
+/** #654 — static "pay off debt vs. invest the surplus" comparison. */
+export type SurplusPayoffVsInvest = {
+  /** Interest avoided by throwing the surplus at debt (from the payoff engine). */
+  interestSaved: number;
+  /** Growth from investing the surplus one-time over the horizon. */
+  investGain: number;
+  assumedAnnualReturnRate: number;
+  horizonYears: number;
+  recommendation: SurplusRecommendation;
+};
+
+/**
+ * #654 — the actionable surplus block. Safe-to-spend is already net of the
+ * minimum buffer, so `amount` (max(0, value)) is genuinely spendable beyond it.
+ */
+export type Surplus = {
+  amount: number;
+  buffer: number;
+  topGoal: SurplusTopGoal | null;
+  /** null when the household has no debt in the surplus currency. */
+  payoffVsInvest: SurplusPayoffVsInvest | null;
 };
 
 /** Response shape for GET /api/forecast/safe-to-spend. */
@@ -1384,6 +1530,8 @@ export type SafeToSpendResponse = {
   isNegative: boolean;
   breakdown: SafeToSpendBreakdown;
   settings: CashflowSettings;
+  /** #654 — surplus decision hub. Present on the safe-to-spend response. */
+  surplus: Surplus;
 };
 
 // --- FX & currency intelligence (issue #221) -------------------------------
@@ -1493,10 +1641,59 @@ export type NotificationPreference = {
   type: string;
   channelInApp: boolean;
   channelEmail: boolean;
+  /** Web-push channel (issue #651). */
+  channelPush: boolean;
+  /** 0=Sun … 6=Sat; only meaningful for `digest.weekly` (issue #796). */
+  digestDayOfWeek: number;
 };
 
 export type NotificationPreferencesListResponse = {
   data: NotificationPreference[];
+};
+
+// ---- Weekly digest payload (issue #796) ---------------------------------
+// Shape of `Notification.dataJson` for `type='digest.weekly'`. Every field is
+// optional on read so a digest persisted before #796 degrades to the headline
+// without throwing.
+
+export type DigestCategoryDelta = {
+  category: string;
+  currency: string;
+  total: number;
+  priorTotal: number;
+  delta: number;
+};
+
+export type DigestInsight = {
+  id: number;
+  type: string;
+  severity: string;
+  title: string;
+};
+
+export type DigestUpcomingExpectation = {
+  id: number;
+  name: string;
+  dueDate: string;
+  amount: number;
+  currency: string;
+};
+
+export type WeeklyDigestPayload = {
+  weekStart?: string;
+  weekEnd?: string;
+  currency?: string;
+  totalSpend?: number;
+  priorTotalSpend?: number;
+  totalIncome?: number;
+  priorTotalIncome?: number;
+  netChange?: number;
+  topCategory?: string | null;
+  categoryDeltas?: DigestCategoryDelta[];
+  openInsightCount?: number;
+  topInsights?: DigestInsight[];
+  upcomingExpectations?: DigestUpcomingExpectation[];
+  link?: string;
 };
 
 /** Local-first encrypted sync foundation (#239). */

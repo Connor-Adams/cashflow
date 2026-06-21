@@ -9,6 +9,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -74,7 +75,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -85,13 +86,13 @@ before(async () => {
   const primary = await seed('Primary', { openingBalance: 5000 });
   primaryHouseholdId = primary.householdId;
   primaryAccountId = primary.accountId;
-  primaryAgent = request.agent(app);
+  primaryAgent = testAgent(app);
   primaryAgent.jar.setCookie(`cashflow_session=${primary.token}; Path=/`);
 
   const other = await seed('Other', { openingBalance: 2000 });
   otherHouseholdId = other.householdId;
   otherAccountId = other.accountId;
-  otherAgent = request.agent(app);
+  otherAgent = testAgent(app);
   otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
 });
 
@@ -392,4 +393,200 @@ test('GET /api/forecast 404s for unknown account', async () => {
 
 test('households are isolated: otherHouseholdId is distinct', () => {
   assert.notEqual(primaryHouseholdId, otherHouseholdId);
+});
+
+// ---------------------------------------------------------------------------
+// Auto-detected recurring INCOME (the "never earn another dollar" fix).
+// The forecast already auto-projects recurring expenses from transaction
+// history; these tests pin that it now also projects recurring income that is
+// identifiable by a direct-deposit / payroll signal — without sweeping in
+// internal transfers.
+// ---------------------------------------------------------------------------
+
+let txnFingerprintCounter = 0;
+async function seedTxn(opts: {
+  accountId: number;
+  householdId: number;
+  date: string;
+  amount: number;
+  merchant: string;
+  txnType?: string;
+  currency?: string;
+}): Promise<void> {
+  const models = await import('../../src/models');
+  txnFingerprintCounter += 1;
+  const fp = `fp-${Date.now()}-${txnFingerprintCounter}-${Math.random().toString(16).slice(2)}`;
+  await models.Transaction.create({
+    accountId: opts.accountId,
+    householdId: opts.householdId,
+    importBatch: 'forecast-test',
+    date: opts.date,
+    merchantRaw: opts.merchant,
+    merchantClean: opts.merchant,
+    amount: String(opts.amount),
+    currency: opts.currency ?? 'CAD',
+    txnType: opts.txnType ?? 'unknown',
+    sourceRowFingerprint: fp,
+    sourceIdentityFingerprint: fp,
+    reviewFlag: false,
+  });
+}
+
+test('GET /api/forecast auto-projects recurring direct-deposit income', async () => {
+  const h = await seed('Income', { openingBalance: 1000 });
+  const agent = testAgent(app);
+  agent.jar.setCookie(`cashflow_session=${h.token}; Path=/`);
+
+  // Two monthly payroll deposits, tagged 'transfer' (as real banks do), before
+  // the forecast window. The direct-deposit description is the income signal.
+  await seedTxn({
+    accountId: h.accountId,
+    householdId: h.householdId,
+    date: '2026-04-15',
+    amount: 5000,
+    merchant: 'Direct deposit from CDG LABS INC',
+    txnType: 'transfer',
+  });
+  await seedTxn({
+    accountId: h.accountId,
+    householdId: h.householdId,
+    date: '2026-05-15',
+    amount: 5000,
+    merchant: 'Direct deposit from CDG LABS INC',
+    txnType: 'transfer',
+  });
+
+  const res = await agent
+    .get('/api/forecast')
+    .query({ dateFrom: '2026-06-01', dateTo: '2026-06-30', currency: 'CAD' });
+  assert.equal(res.status, 200);
+  const events = res.body.events as Array<{
+    sourceName: string;
+    direction: string;
+    date: string;
+    amount: number;
+  }>;
+  const income = events.filter((e) => e.direction === 'in');
+  assert.equal(income.length, 1, `expected one projected income event, got ${income.length}`);
+  assert.match(income[0].sourceName, /CDG LABS INC/i);
+  assert.equal(income[0].date, '2026-06-15');
+  assert.equal(income[0].amount, 5000);
+  // Income lifts the projection above the opening balance.
+  assert.equal(
+    res.body.projectedClosingBalance - res.body.openingBalance,
+    5000,
+  );
+});
+
+test('GET /api/forecast does NOT project internal transfers as income', async () => {
+  const h = await seed('NoPhantom', { openingBalance: 1000 });
+  const agent = testAgent(app);
+  agent.jar.setCookie(`cashflow_session=${h.token}; Path=/`);
+
+  // Recurring positive inflows that are really self-transfers, not income.
+  for (const date of ['2026-04-04', '2026-05-04']) {
+    await seedTxn({
+      accountId: h.accountId,
+      householdId: h.householdId,
+      date,
+      amount: 2120,
+      merchant: 'From chequing account',
+      txnType: 'transfer',
+    });
+  }
+
+  const res = await agent
+    .get('/api/forecast')
+    .query({ dateFrom: '2026-06-01', dateTo: '2026-06-30', currency: 'CAD' });
+  assert.equal(res.status, 200);
+  const events = res.body.events as Array<{ direction: string }>;
+  assert.equal(events.filter((e) => e.direction === 'in').length, 0);
+});
+
+test('GET /api/forecast projects detected monthly recurring charges on calendar months', async () => {
+  const h = await seed('CalMonth', { openingBalance: 1000 });
+  const agent = testAgent(app);
+  agent.jar.setCookie(`cashflow_session=${h.token}; Path=/`);
+
+  // Three monthly Netflix charges before the window (gaps 31/30 days → the
+  // detector classifies the stream as monthly, nextExpected 2026-06-08).
+  for (const date of ['2026-03-09', '2026-04-09', '2026-05-09']) {
+    await seedTxn({
+      accountId: h.accountId,
+      householdId: h.householdId,
+      date,
+      amount: -15,
+      merchant: 'Netflix',
+    });
+  }
+
+  // 90-day window starting exactly on nextExpected. A fixed 30-day step
+  // would emit FOUR charges (Jun 8, Jul 8, Aug 7, Sep 6 — the last landing
+  // exactly on dateTo); a true calendar-month schedule emits THREE
+  // (Jun 8, Jul 8, Aug 8).
+  const res = await agent
+    .get('/api/forecast')
+    .query({ dateFrom: '2026-06-08', dateTo: '2026-09-06', currency: 'CAD' });
+  assert.equal(res.status, 200);
+  const events = res.body.events as Array<{
+    sourceType: string;
+    sourceName: string;
+    direction: string;
+    date: string;
+  }>;
+  const netflix = events.filter(
+    (e) => e.sourceType === 'recurring_detection' && e.sourceName === 'Netflix',
+  );
+  assert.deepEqual(
+    netflix.map((e) => e.date),
+    ['2026-06-08', '2026-07-08', '2026-08-08'],
+  );
+  for (const e of netflix) assert.equal(e.direction, 'out');
+});
+
+test('GET /api/forecast projects a subscription-kind expectation as an outflow', async () => {
+  const h = await seed('Subs', { openingBalance: 1000 });
+  const agent = testAgent(app);
+  agent.jar.setCookie(`cashflow_session=${h.token}; Path=/`);
+
+  // Subscriptions store a cadence + a (possibly past) seed date and a null
+  // recurrenceRule. They were previously excluded from the forecast entirely.
+  const models = await import('../../src/models');
+  await models.PlannedEvent.create({
+    userId: h.userId,
+    householdId: h.householdId,
+    accountId: h.accountId,
+    type: 'expense',
+    name: 'Spotify',
+    amount: '20',
+    currency: 'CAD',
+    expectedDate: '2026-03-08',
+    nextExpectedDate: '2026-03-08',
+    kind: 'subscription',
+    cadence: 'monthly',
+    source: 'recurring_detection',
+    status: 'planned',
+  });
+
+  const res = await agent
+    .get('/api/forecast')
+    .query({
+      dateFrom: '2026-06-01',
+      dateTo: '2026-06-30',
+      currency: 'CAD',
+      includeRecurring: 'false',
+    });
+  assert.equal(res.status, 200);
+  const events = res.body.events as Array<{
+    sourceName: string;
+    direction: string;
+    date: string;
+    amount: number;
+  }>;
+  const spotify = events.filter((e) => e.sourceName === 'Spotify');
+  assert.equal(spotify.length, 1, `expected one Spotify occurrence, got ${spotify.length}`);
+  assert.equal(spotify[0].direction, 'out');
+  assert.equal(spotify[0].date, '2026-06-08');
+  assert.equal(spotify[0].amount, 20);
+  assert.equal(res.body.projectedClosingBalance, 980);
 });

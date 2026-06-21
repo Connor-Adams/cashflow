@@ -29,246 +29,122 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name }}
       REPO: ${{ github.repository }}
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
     steps:
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      # Check out the released commit so we can recompute each service's content
+      # hash exactly as build-images.yml did. `ref: <tag>` resolves annotated
+      # tags to their commit transparently.
+      - name: Check out release commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve release tag to source commit
-        id: resolve
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Railway CLI
+        # Pinned: @railway/cli 4.66.1 (2026-06-03) sends a GraphQL query with a
+        # `deletedAt` field on VolumeInstance that Railway's API rejects, crashing
+        # `railway redeploy` ("Cannot query field deletedAt on type VolumeInstance").
+        # 4.66.0 is the last version that promotes cleanly. Bump deliberately after
+        # verifying redeploy works against the live API.
+        run: npm install -g @railway/cli@4.66.0
+
+      # Resolve each service by its content hash (:tree-<hash>), stamp every
+      # service with the release version tag, and re-tag :production + redeploy
+      # ONLY the services whose image actually differs from what's live. Images
+      # are NOT rebuilt here — build-images.yml already pushed :tree-<hash>.
+      # Design: docs/superpowers/specs/2026-06-02-skip-unchanged-image-builds-design.md
+      - name: Promote, version-tag, and redeploy changed services
         run: |
           set -euo pipefail
-          REPO_LC=$(echo "$REPO" | tr '[:upper:]' '[:lower:]')
 
-          REF=$(gh api "/repos/$REPO/git/ref/tags/$RELEASE_TAG")
-          OBJ_TYPE=$(echo "$REF" | jq -r .object.type)
-          OBJ_SHA=$(echo "$REF" | jq -r .object.sha)
-          if [ "$OBJ_TYPE" = "tag" ]; then
-            COMMIT_SHA=$(gh api "/repos/$REPO/git/tags/$OBJ_SHA" --jq .object.sha)
-          else
-            COMMIT_SHA=$OBJ_SHA
+          if [ -z "${RAILWAY_TOKEN}" ]; then
+            echo "RAILWAY_TOKEN secret is not set" >&2
+            exit 1
           fi
-          SHA_SHORT=$(echo "$COMMIT_SHA" | cut -c1-7)
 
-          echo "sha_short=$SHA_SHORT" >> "$GITHUB_OUTPUT"
-          echo "backend=ghcr.io/${REPO_LC}-backend" >> "$GITHUB_OUTPUT"
-          echo "frontend=ghcr.io/${REPO_LC}-frontend" >> "$GITHUB_OUTPUT"
-          echo "otel_collector=ghcr.io/${REPO_LC}-otel-collector" >> "$GITHUB_OUTPUT"
-          echo "loki=ghcr.io/${REPO_LC}-loki" >> "$GITHUB_OUTPUT"
-          echo "prometheus=ghcr.io/${REPO_LC}-prometheus" >> "$GITHUB_OUTPUT"
-          echo "grafana=ghcr.io/${REPO_LC}-grafana" >> "$GITHUB_OUTPUT"
-          echo "tempo=ghcr.io/${REPO_LC}-tempo" >> "$GITHUB_OUTPUT"
-          echo "Released tag $RELEASE_TAG -> commit $COMMIT_SHA (short $SHA_SHORT)"
+          REPO_LC=$(echo "$REPO" | tr '[:upper:]' '[:lower:]')
+          RELEASE_SHA=$(git rev-parse HEAD)
+          echo "Promoting release $RELEASE_TAG (commit $RELEASE_SHA)"
 
-      - name: Verify source images exist for this commit
-        env:
-          BACKEND: ${{ steps.resolve.outputs.backend }}
-          FRONTEND: ${{ steps.resolve.outputs.frontend }}
-          OTEL_COLLECTOR: ${{ steps.resolve.outputs.otel_collector }}
-          LOKI: ${{ steps.resolve.outputs.loki }}
-          PROMETHEUS: ${{ steps.resolve.outputs.prometheus }}
-          GRAFANA: ${{ steps.resolve.outputs.grafana }}
-          TEMPO: ${{ steps.resolve.outputs.tempo }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
-        run: |
-          set -euo pipefail
-          echo "Inspecting source images at :sha-$SHA_SHORT"
-          for attempt in $(seq 1 "$IMAGE_WAIT_ATTEMPTS"); do
-            if docker buildx imagetools inspect "$BACKEND:sha-$SHA_SHORT" > /dev/null 2>&1 && \
-              docker buildx imagetools inspect "$FRONTEND:sha-$SHA_SHORT" > /dev/null 2>&1 && \
-              docker buildx imagetools inspect "$OTEL_COLLECTOR:sha-$SHA_SHORT" > /dev/null 2>&1 && \
-              docker buildx imagetools inspect "$LOKI:sha-$SHA_SHORT" > /dev/null 2>&1 && \
-              docker buildx imagetools inspect "$PROMETHEUS:sha-$SHA_SHORT" > /dev/null 2>&1 && \
-              docker buildx imagetools inspect "$GRAFANA:sha-$SHA_SHORT" > /dev/null 2>&1 && \
-              docker buildx imagetools inspect "$TEMPO:sha-$SHA_SHORT" > /dev/null 2>&1; then
-              echo "Source images are available."
-              exit 0
+          # name|railway-service-id
+          SERVICES=(
+            "backend|$RAILWAY_BACKEND_SERVICE_ID"
+            "frontend|$RAILWAY_FRONTEND_SERVICE_ID"
+            "otel-collector|$RAILWAY_OTEL_COLLECTOR_SERVICE_ID"
+            "loki|$RAILWAY_LOKI_SERVICE_ID"
+            "prometheus|$RAILWAY_PROMETHEUS_SERVICE_ID"
+            "grafana|$RAILWAY_GRAFANA_SERVICE_ID"
+            "tempo|$RAILWAY_TEMPO_SERVICE_ID"
+          )
+
+          # Manifest digest a tag resolves to, or empty if the tag doesn't exist.
+          digest() {
+            docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$1" 2>/dev/null || true
+          }
+
+          for entry in "${SERVICES[@]}"; do
+            IFS='|' read -r name service_id <<< "$entry"
+            image="ghcr.io/${REPO_LC}-${name}"
+            hash=$(node scripts/service-content-hash.cjs "$name" "$RELEASE_SHA")
+            src="${image}:tree-${hash}"
+
+            # Wait for the source image — covers a release racing a still-running build.
+            ready=""
+            for attempt in $(seq 1 "$IMAGE_WAIT_ATTEMPTS"); do
+              if docker buildx imagetools inspect "$src" > /dev/null 2>&1; then
+                ready=1
+                break
+              fi
+              if [ "$attempt" -lt "$IMAGE_WAIT_ATTEMPTS" ]; then
+                echo "  $name: $src not ready (attempt $attempt/$IMAGE_WAIT_ATTEMPTS); waiting ${IMAGE_WAIT_SECONDS}s..."
+                sleep "$IMAGE_WAIT_SECONDS"
+              fi
+            done
+            if [ -z "$ready" ]; then
+              echo "Source image not available after $(( IMAGE_WAIT_ATTEMPTS * IMAGE_WAIT_SECONDS )) seconds: $src" >&2
+              exit 1
             fi
 
-            if [ "$attempt" -lt "$IMAGE_WAIT_ATTEMPTS" ]; then
-              echo "Source images not ready yet (attempt $attempt/$IMAGE_WAIT_ATTEMPTS). Waiting ${IMAGE_WAIT_SECONDS}s..."
-              sleep "$IMAGE_WAIT_SECONDS"
+            # Version snapshot for ALL services (cheap registry manifest copy) so
+            # the release tag labels a complete per-service image set for rollback.
+            docker buildx imagetools create --tag "${image}:${RELEASE_TAG}" "$src"
+
+            # Redeploy only when this release's image differs from production.
+            # `imagetools create` wraps a single manifest in an OCI index, so
+            # :production's own digest won't equal the :tree-<hash> manifest
+            # digest. Treat it as unchanged if the source digest matches
+            # production's own digest OR any of its child manifest digests.
+            src_digest=$(digest "$src")
+            prod_self=$(digest "${image}:production")
+            prod_children=$(docker buildx imagetools inspect --raw "${image}:production" 2>/dev/null \
+              | jq -r '.manifests[]?.digest' 2>/dev/null || true)
+            unchanged=""
+            if [ -n "$src_digest" ]; then
+              if [ "$src_digest" = "$prod_self" ]; then
+                unchanged=1
+              else
+                for d in $prod_children; do
+                  if [ "$d" = "$src_digest" ]; then unchanged=1; break; fi
+                done
+              fi
+            fi
+            if [ -n "$unchanged" ]; then
+              echo "  $name: unchanged (production already serves $src_digest); skipping redeploy"
+              continue
+            fi
+
+            echo "  $name: changed; re-tagging :production and redeploying"
+            docker buildx imagetools create --tag "${image}:production" "$src"
+            if [ -n "$service_id" ]; then
+              railway redeploy --service "$service_id" -y
+            else
+              echo "  $name: no Railway service id set; skipped redeploy"
             fi
           done
-
-          echo "Source images are not available after $(( IMAGE_WAIT_ATTEMPTS * IMAGE_WAIT_SECONDS )) seconds:" >&2
-          echo "  $BACKEND:sha-$SHA_SHORT" >&2
-          echo "  $FRONTEND:sha-$SHA_SHORT" >&2
-          echo "  $OTEL_COLLECTOR:sha-$SHA_SHORT" >&2
-          echo "  $LOKI:sha-$SHA_SHORT" >&2
-          echo "  $PROMETHEUS:sha-$SHA_SHORT" >&2
-          echo "  $GRAFANA:sha-$SHA_SHORT" >&2
-          echo "  $TEMPO:sha-$SHA_SHORT" >&2
-          exit 1
-
-      - name: Re-tag backend image as release version and :production
-        env:
-          BACKEND: ${{ steps.resolve.outputs.backend }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
-        run: |
-          set -euo pipefail
-          docker buildx imagetools create \
-            --tag "$BACKEND:$RELEASE_TAG" \
-            --tag "$BACKEND:production" \
-            "$BACKEND:sha-$SHA_SHORT"
-
-      - name: Re-tag frontend image as release version and :production
-        env:
-          FRONTEND: ${{ steps.resolve.outputs.frontend }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
-        run: |
-          set -euo pipefail
-          docker buildx imagetools create \
-            --tag "$FRONTEND:$RELEASE_TAG" \
-            --tag "$FRONTEND:production" \
-            "$FRONTEND:sha-$SHA_SHORT"
-
-      - name: Re-tag otel-collector image as release version and :production
-        env:
-          OTEL_COLLECTOR: ${{ steps.resolve.outputs.otel_collector }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
-        run: |
-          set -euo pipefail
-          docker buildx imagetools create \
-            --tag "$OTEL_COLLECTOR:$RELEASE_TAG" \
-            --tag "$OTEL_COLLECTOR:production" \
-            "$OTEL_COLLECTOR:sha-$SHA_SHORT"
-
-      - name: Re-tag loki image as release version and :production
-        env:
-          LOKI: ${{ steps.resolve.outputs.loki }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
-        run: |
-          set -euo pipefail
-          docker buildx imagetools create \
-            --tag "$LOKI:$RELEASE_TAG" \
-            --tag "$LOKI:production" \
-            "$LOKI:sha-$SHA_SHORT"
-
-      - name: Re-tag prometheus image as release version and :production
-        env:
-          PROMETHEUS: ${{ steps.resolve.outputs.prometheus }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
-        run: |
-          set -euo pipefail
-          docker buildx imagetools create \
-            --tag "$PROMETHEUS:$RELEASE_TAG" \
-            --tag "$PROMETHEUS:production" \
-            "$PROMETHEUS:sha-$SHA_SHORT"
-
-      - name: Re-tag grafana image as release version and :production
-        env:
-          GRAFANA: ${{ steps.resolve.outputs.grafana }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
-        run: |
-          set -euo pipefail
-          docker buildx imagetools create \
-            --tag "$GRAFANA:$RELEASE_TAG" \
-            --tag "$GRAFANA:production" \
-            "$GRAFANA:sha-$SHA_SHORT"
-
-      - name: Re-tag tempo image as release version and :production
-        env:
-          TEMPO: ${{ steps.resolve.outputs.tempo }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
-        run: |
-          set -euo pipefail
-          docker buildx imagetools create \
-            --tag "$TEMPO:$RELEASE_TAG" \
-            --tag "$TEMPO:production" \
-            "$TEMPO:sha-$SHA_SHORT"
-
-      - name: Install Railway CLI
-        run: |
-          set -euo pipefail
-          npm install -g @railway/cli
-
-      - name: Trigger Railway backend redeploy
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${RAILWAY_TOKEN}" ]; then
-            echo "RAILWAY_TOKEN secret is not set" >&2
-            exit 1
-          fi
-          railway redeploy --service "$RAILWAY_BACKEND_SERVICE_ID" -y
-
-      - name: Trigger Railway frontend redeploy
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${RAILWAY_TOKEN}" ]; then
-            echo "RAILWAY_TOKEN secret is not set" >&2
-            exit 1
-          fi
-          railway redeploy --service "$RAILWAY_FRONTEND_SERVICE_ID" -y
-
-      - name: Trigger Railway otel-collector redeploy
-        if: env.RAILWAY_OTEL_COLLECTOR_SERVICE_ID != ''
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${RAILWAY_TOKEN}" ]; then
-            echo "RAILWAY_TOKEN secret is not set" >&2
-            exit 1
-          fi
-          railway redeploy --service "$RAILWAY_OTEL_COLLECTOR_SERVICE_ID" -y
-
-      - name: Trigger Railway loki redeploy
-        if: env.RAILWAY_LOKI_SERVICE_ID != ''
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${RAILWAY_TOKEN}" ]; then
-            echo "RAILWAY_TOKEN secret is not set" >&2
-            exit 1
-          fi
-          railway redeploy --service "$RAILWAY_LOKI_SERVICE_ID" -y
-
-      - name: Trigger Railway prometheus redeploy
-        if: env.RAILWAY_PROMETHEUS_SERVICE_ID != ''
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${RAILWAY_TOKEN}" ]; then
-            echo "RAILWAY_TOKEN secret is not set" >&2
-            exit 1
-          fi
-          railway redeploy --service "$RAILWAY_PROMETHEUS_SERVICE_ID" -y
-
-      - name: Trigger Railway grafana redeploy
-        if: env.RAILWAY_GRAFANA_SERVICE_ID != ''
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${RAILWAY_TOKEN}" ]; then
-            echo "RAILWAY_TOKEN secret is not set" >&2
-            exit 1
-          fi
-          railway redeploy --service "$RAILWAY_GRAFANA_SERVICE_ID" -y
-
-      - name: Trigger Railway tempo redeploy
-        if: env.RAILWAY_TEMPO_SERVICE_ID != ''
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${RAILWAY_TOKEN}" ]; then
-            echo "RAILWAY_TOKEN secret is not set" >&2
-            exit 1
-          fi
-          railway redeploy --service "$RAILWAY_TEMPO_SERVICE_ID" -y

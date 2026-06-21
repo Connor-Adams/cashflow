@@ -1,8 +1,20 @@
 import { Router } from 'express';
 import { Op, QueryTypes } from 'sequelize';
-import { Transaction, Account, Contact, TransactionRevision, sequelize } from '../models';
+import {
+  Transaction,
+  Account,
+  Category,
+  Contact,
+  TransactionRevision,
+  Label,
+  TransactionLabel,
+  AiSuggestion,
+  ProviderJobLog,
+  sequelize,
+} from '../models';
 import { recomputeTransactionAmounts } from '../import/calculateShares';
 import { serializeTransaction } from '../util/serializeTransaction';
+import { enrichmentItemClearConfidence } from '../config/env';
 import { computeReceiptWarnings } from '../util/receiptWarnings';
 import {
   loadCategoryHints,
@@ -28,7 +40,7 @@ import {
   recordFinanceEvent,
 } from '../events/financeEvents';
 import { currentAuth } from '../auth/middleware';
-import { isSuperadmin, visibleTransactionWhere } from '../auth/scope';
+import { householdWhere, isSuperadmin, visibleTransactionWhere } from '../auth/scope';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
 import { logger } from '../observability/logger';
 import { runBackfill } from '../import/runEnrichmentBackfill';
@@ -44,6 +56,11 @@ import {
   runCounterpartyBackfill,
 } from '../import/counterpartyBackfill';
 import {
+  isInteracSyncRunning,
+  runInteracCounterpartySync,
+  INTERAC_SYNC_PROVIDER,
+} from '../integrations/interacCounterparty';
+import {
   parseRevisionChanges,
   RESTORABLE_FIELDS,
   withRevisionContext,
@@ -51,6 +68,8 @@ import {
 } from '../util/transactionRevisions';
 import { isTransactionStatus } from '../transactions/types';
 import { streamCsvExport } from '../services/transactionsExport';
+import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
+import { isTaxTreatment } from '@cashflow/shared';
 
 const router = Router();
 
@@ -119,7 +138,8 @@ export function buildTransactionFilterWhere(
     where.currency = String(source.currency).toUpperCase().slice(0, 3);
   }
   if (source.category) {
-    where.finalCategory = String(source.category);
+    const c = String(source.category);
+    where.finalCategory = c === '(none)' ? { [Op.is]: null } : c;
   }
   if (source.importBatch) {
     where.importBatch = String(source.importBatch);
@@ -177,6 +197,50 @@ export function buildTransactionFilterWhere(
       (where as Record<string, unknown>).id = reimbursableCond;
     }
   }
+  // labels=1,2,3 (issue #270): any-of semantics — match transactions tagged
+  // with ANY of the given label ids (AC #7). Implemented with an id IN
+  // subquery over transaction_labels, composed with any existing id predicate
+  // via Op.and so it stacks with ?ids= / ?reimbursable= rather than clobbering.
+  if (typeof source.labels === 'string' && source.labels.length > 0) {
+    const labelIds = source.labels
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0);
+    if (labelIds.length > 0) {
+      const idClause = sequelize.literal(
+        `(SELECT transaction_id FROM transaction_labels WHERE label_id IN (${labelIds.join(',')}))`,
+      );
+      const labelCond = { [Op.in]: idClause };
+      if ('id' in where || (where as Record<symbol, unknown>)[Op.and]) {
+        const existing = (where as Record<string | symbol, unknown>)[Op.and];
+        const existingId = (where as Record<string | symbol, unknown>).id;
+        delete (where as Record<string | symbol, unknown>).id;
+        const andArr = Array.isArray(existing) ? [...existing] : [];
+        if (existingId !== undefined) andArr.push({ id: existingId });
+        andArr.push({ id: labelCond });
+        (where as Record<symbol, unknown>)[Op.and] = andArr;
+      } else {
+        (where as Record<string, unknown>).id = labelCond;
+      }
+    } else {
+      // All entries invalid → match nothing, consistent with ?ids= behaviour.
+      (where as Record<string, unknown>).id = -1;
+    }
+  }
+  // Enrichment deep-link filters (enrichment settings tab). Each bucket value is
+  // matched exactly; the stats endpoint keys null buckets as '(none)', so that
+  // sentinel maps to IS NULL to round-trip the link.
+  for (const [param, column] of [
+    ['autoSource', 'autoSource'],
+    ['autoConfidence', 'autoConfidence'],
+    ['txnType', 'txnType'],
+    ['merchantCanonical', 'merchantCanonical'],
+  ] as const) {
+    const raw = source[param];
+    if (typeof raw === 'string' && raw.length > 0) {
+      where[column] = raw === '(none)' ? { [Op.is]: null } : raw;
+    }
+  }
   return where;
 }
 
@@ -185,6 +249,121 @@ function logTransactionEvent(
   details: Record<string, string | number | boolean | null | undefined>
 ): void {
   logger.info(details, `transactions_${event}`);
+}
+
+type ItemizedSummary = { itemCount: number; stragglerCount: number };
+
+/**
+ * Loads per-transaction itemized receipt summaries in a single grouped query.
+ * Returns a Map from transactionId → { itemCount, stragglerCount } for every
+ * transaction that has at least one ACCEPTED order link. Transactions without
+ * an accepted order link are not present in the map (callers should ?? null).
+ *
+ * An item is considered DONE when:
+ *   - categoryOverride is non-null/non-empty, OR
+ *   - inferredCategory is non-null/non-empty AND confidence >= threshold
+ * Otherwise it is a straggler.
+ *
+ * confidence is a DECIMAL(5,2) column, so it is compared numerically. We must
+ * NOT compare it to '' (Postgres coerces '' -> numeric and throws "invalid input
+ * syntax for type numeric"); the IS NOT NULL guard is sufficient.
+ */
+export async function itemizedSummaries(
+  txnIds: number[],
+): Promise<Map<number, ItemizedSummary>> {
+  if (txnIds.length === 0) return new Map();
+  const rows = await sequelize.query<{
+    transactionId: number;
+    itemCount: number;
+    stragglerCount: number;
+  }>(
+    `SELECT tol.transaction_id AS "transactionId",
+            COUNT(i.id) AS "itemCount",
+            SUM(CASE WHEN (i.category_override IS NOT NULL AND i.category_override <> '')
+                       OR (i.inferred_category IS NOT NULL AND i.inferred_category <> ''
+                           AND i.confidence IS NOT NULL
+                           AND i.confidence >= :threshold)
+                     THEN 0 ELSE 1 END) AS "stragglerCount"
+       FROM transaction_order_links tol
+       JOIN external_order_items i ON i.external_order_id = tol.external_order_id
+      WHERE tol.status = 'accepted' AND tol.transaction_id IN (:ids)
+      GROUP BY tol.transaction_id`,
+    {
+      type: QueryTypes.SELECT,
+      replacements: { ids: txnIds, threshold: enrichmentItemClearConfidence },
+    },
+  );
+  const map = new Map<number, ItemizedSummary>();
+  for (const r of rows) {
+    map.set(Number(r.transactionId), {
+      itemCount: Number(r.itemCount),
+      stragglerCount: Number(r.stragglerCount),
+    });
+  }
+  return map;
+}
+
+/**
+ * Loads the labels (issue #270) for a page of transactions in a single query,
+ * keyed by transaction id. Each value is the list of `{id, name}` labels
+ * applied to that transaction, sorted by name. Returns an empty map when there
+ * are no transactions so callers can `?? []` per row.
+ */
+export async function loadLabelsForTransactions(
+  txnIds: number[]
+): Promise<Record<number, Array<{ id: number; name: string; color: string | null }>>> {
+  if (txnIds.length === 0) return {};
+  const rows = (await TransactionLabel.findAll({
+    where: { transactionId: { [Op.in]: txnIds } },
+    include: [{ model: Label, as: 'label', attributes: ['id', 'name', 'color'] }],
+    order: [[{ model: Label, as: 'label' }, 'name', 'ASC']],
+  })) as Array<
+    TransactionLabel & { label?: { id: number; name: string; color: string | null } }
+  >;
+  const map: Record<number, Array<{ id: number; name: string; color: string | null }>> = {};
+  for (const row of rows) {
+    if (!row.label) continue;
+    (map[row.transactionId] ??= []).push({
+      id: row.label.id,
+      name: row.label.name,
+      color: row.label.color ?? null,
+    });
+  }
+  return map;
+}
+
+/**
+ * Validates a `labelIds` array from a request body: every entry must be a
+ * positive integer AND belong to the caller's household. Returns the unique,
+ * household-scoped id set on success, or an error describing the first problem.
+ * `findHouseholdLabelIds` does the DB scoping check.
+ */
+export async function resolveHouseholdLabelIds(
+  req: import('express').Request,
+  rawIds: unknown
+): Promise<{ ok: true; ids: number[] } | { ok: false; error: string }> {
+  if (!Array.isArray(rawIds)) {
+    return { ok: false, error: 'labelIds must be an array' };
+  }
+  const ids = Array.from(
+    new Set(
+      rawIds
+        .map((v) => Number(v))
+        .filter((n) => Number.isInteger(n) && n > 0)
+    )
+  );
+  if (ids.length !== rawIds.length && rawIds.length > 0 && ids.length === 0) {
+    return { ok: false, error: 'labelIds must be positive integers' };
+  }
+  if (ids.length === 0) return { ok: true, ids: [] };
+  const owned = await Label.findAll({
+    where: { id: { [Op.in]: ids }, ...householdWhere(req) },
+    attributes: ['id'],
+  });
+  if (owned.length !== ids.length) {
+    return { ok: false, error: 'one or more labelIds do not belong to this household' };
+  }
+  return { ok: true, ids };
 }
 
 export interface MemorySnapshot {
@@ -249,7 +428,9 @@ function scheduleMemoryFanoutIfNeeded(
 
 const PATCHABLE_KEYS = [
   'categoryOverride',
+  'categoryOverrideId',
   'businessOverride',
+  'taxTreatmentOverride',
   'splitOverride',
   'pctMeOverride',
   'pctPartnerOverride',
@@ -257,6 +438,7 @@ const PATCHABLE_KEYS = [
   'visibility',
   'ownershipType',
   'ownershipContactId',
+  'counterpartyContactId',
   'status',
 ] as const;
 
@@ -316,6 +498,23 @@ export async function applyPatchBody(
           }
           txn.set('ownershipContactId', contact.id);
         }
+      } else if (k === 'counterpartyContactId') {
+        if (b[k] == null || b[k] === '') {
+          txn.set('counterpartyContactId', null);
+        } else {
+          const contactId = Number(b[k]);
+          const contact = await Contact.findOne({
+            where: { id: contactId, householdId: household.id },
+          });
+          if (!contact) {
+            const err = new Error(
+              'counterpartyContactId must reference a household contact',
+            ) as Error & { status?: number };
+            err.status = 400;
+            throw err;
+          }
+          txn.set('counterpartyContactId', contact.id);
+        }
       } else if (k === 'status') {
         if (!isTransactionStatus(b[k])) {
           const err = new Error('INVALID_STATUS') as Error & { status?: number };
@@ -323,6 +522,46 @@ export async function applyPatchBody(
           throw err;
         }
         txn.set('status', b[k]);
+      } else if (k === 'categoryOverrideId') {
+        if (b[k] == null) {
+          txn.set('categoryOverrideId', null);
+          // finalCategoryId is maintained imperatively here (the model has no
+          // automatic override ?? auto invariant for the id columns), so fall
+          // back to autoCategoryId rather than hard-nulling the rollup key.
+          txn.set('finalCategoryId', (txn.get('autoCategoryId') as number | null) ?? null);
+        } else {
+          const catId = Number(b[k]);
+          if (!Number.isInteger(catId)) {
+            const err = new Error('categoryOverrideId must reference a household category') as Error & { status?: number };
+            err.status = 400;
+            throw err;
+          }
+          const cat = await Category.findOne({ where: { id: catId, householdId: household.id } });
+          if (!cat) {
+            const err = new Error('categoryOverrideId must reference a household category') as Error & { status?: number };
+            err.status = 400;
+            throw err;
+          }
+          txn.set('categoryOverrideId', cat.id);
+          txn.set('finalCategoryId', cat.id); // override wins for the final reporting category
+        }
+      } else if (k === 'pctMeOverride' || k === 'pctPartnerOverride') {
+        // Fractions (0–1) stored as DECIMAL(5,4): percent-scale values like 50
+        // overflow on Postgres but store fine on SQLite, so validate here
+        // before the dialects can diverge.
+        if (b[k] == null || b[k] === '') {
+          txn.set(k, null);
+        } else {
+          const v = Number(b[k]);
+          if (!Number.isFinite(v) || v < 0 || v > 1) {
+            const err = new Error(
+              `${k} must be a fraction between 0 and 1`,
+            ) as Error & { status?: number };
+            err.status = 400;
+            throw err;
+          }
+          txn.set(k, v as never);
+        }
       } else {
         txn.set(k, b[k] as never);
       }
@@ -340,6 +579,44 @@ export async function applyPatchBody(
       txn.set('reviewedAt', new Date());
     }
   }
+}
+
+/**
+ * Keep a linked transfer pair's tax treatment in sync.
+ *
+ * The per-leg tax fact builders (buildPersonalFacts / buildCorpFacts /
+ * shareholderLoanBalance) read `taxTreatmentOverride` from each leg
+ * independently and never follow `linkedTransactionId`. Setting a treatment on
+ * only ONE leg of a corp↔personal transfer pair therefore desyncs the pair and
+ * yields inconsistent T1/T2. Whenever a patch touches `taxTreatmentOverride` on
+ * a row that is one leg of a linked pair, mirror the (already-applied) value —
+ * including `null` = cleared — onto the sibling leg, so every transactions
+ * write path stays consistent with PATCH /api/transfers/:id/tax-treatment.
+ *
+ * Mirrors ONLY the tax treatment; review state and every other field are left
+ * alone (syncing those is the dedicated transfers endpoint's job). Idempotent:
+ * no-ops when the patch doesn't touch the treatment, when the row is unlinked,
+ * when the sibling is not visible, or when it already matches. Must run inside
+ * the same transaction as the primary save so the pair can never half-commit.
+ */
+async function syncLinkedLegTaxTreatment(
+  req: import('express').Request,
+  txn: InstanceType<typeof Transaction>,
+  patch: Record<string, unknown>,
+  t: import('sequelize').Transaction,
+): Promise<void> {
+  if (!Object.prototype.hasOwnProperty.call(patch, 'taxTreatmentOverride')) return;
+  const siblingId = txn.linkedTransactionId;
+  if (siblingId == null) return;
+  const sibling = await Transaction.findOne({
+    where: { id: siblingId, ...visibleTransactionWhere(req) },
+    transaction: t,
+  });
+  if (!sibling) return;
+  const value = txn.get('taxTreatmentOverride');
+  if (sibling.get('taxTreatmentOverride') === value) return;
+  sibling.set('taxTreatmentOverride', value);
+  await sibling.save({ transaction: t });
 }
 
 router.post('/bulk-ai-suggest', aiSuggestLimiter, async (req, res, next) => {
@@ -458,6 +735,7 @@ router.post('/bulk-patch', async (req, res, next) => {
             await applyPatchBody(req, txn, patch);
             recomputeTransactionAmounts(txn);
             await txn.save({ transaction: t });
+            await syncLinkedLegTaxTreatment(req, txn, patch, t);
             fanoutTargets.push({ snap, txn });
           }
         }),
@@ -550,6 +828,7 @@ router.post('/bulk-patch-filter', async (req, res, next) => {
             await applyPatchBody(req, txn, patch);
             recomputeTransactionAmounts(txn);
             await txn.save({ transaction: t });
+            await syncLinkedLegTaxTreatment(req, txn, patch, t);
             updatedIds.push(txn.id);
             fanoutTargets.push({ snap, txn });
           }
@@ -576,6 +855,93 @@ router.post('/bulk-patch-filter', async (req, res, next) => {
       });
     }
     res.json({ updated: updatedIds.length, ids: updatedIds });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/transactions/bulk/labels — apply or remove one label across many
+ * transactions (issue #270, AC #6). Body: { transactionIds, labelId, op }.
+ *
+ * - op='apply': idempotently add the label to each transaction. Rows that
+ *   already have the (txn,label) pair are skipped (composite PK), so applying
+ *   to a partially-labelled set is a no-op for the already-labelled rows and
+ *   never errors or duplicates.
+ * - op='remove': delete the (txn,label) rows that exist; missing ones are
+ *   silently ignored.
+ *
+ * Registered BEFORE the dynamic `/:id/...` routes so the literal `bulk` path
+ * segment is not captured as an `:id`.
+ *
+ * All transactionIds and the labelId must belong to the caller's household.
+ */
+router.post('/bulk/labels', async (req, res, next) => {
+  try {
+    const b = (req.body || {}) as Record<string, unknown>;
+    const op = b.op === 'apply' || b.op === 'remove' ? b.op : null;
+    if (!op) {
+      res.status(400).json({ error: "op must be 'apply' or 'remove'" });
+      return;
+    }
+    const labelId = Number(b.labelId);
+    if (!Number.isInteger(labelId) || labelId <= 0) {
+      res.status(400).json({ error: 'labelId must be a positive integer' });
+      return;
+    }
+    const labelOwned = await Label.findOne({
+      where: { id: labelId, ...householdWhere(req) },
+    });
+    if (!labelOwned) {
+      res.status(404).json({ error: 'Label not found' });
+      return;
+    }
+    const rawTxnIds = Array.isArray(b.transactionIds) ? b.transactionIds : null;
+    if (!rawTxnIds) {
+      res.status(400).json({ error: 'transactionIds must be an array' });
+      return;
+    }
+    const txnIds = Array.from(
+      new Set(
+        rawTxnIds.map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0)
+      )
+    );
+    if (txnIds.length === 0) {
+      res.json({ affected: 0 });
+      return;
+    }
+    // Scope: only operate on transactions visible to this household.
+    const visibleTxns = await Transaction.findAll({
+      where: { id: { [Op.in]: txnIds }, ...visibleTransactionWhere(req) },
+      attributes: ['id'],
+    });
+    const scopedIds = visibleTxns.map((t) => t.id);
+    if (scopedIds.length === 0) {
+      res.json({ affected: 0 });
+      return;
+    }
+
+    let affected = 0;
+    if (op === 'apply') {
+      const existing = await TransactionLabel.findAll({
+        where: { labelId, transactionId: { [Op.in]: scopedIds } },
+        attributes: ['transactionId'],
+      });
+      const have = new Set(existing.map((r) => r.transactionId));
+      const toCreate = scopedIds
+        .filter((id) => !have.has(id))
+        .map((transactionId) => ({ transactionId, labelId }));
+      if (toCreate.length > 0) {
+        await TransactionLabel.bulkCreate(toCreate, { ignoreDuplicates: true });
+      }
+      affected = toCreate.length;
+    } else {
+      affected = await TransactionLabel.destroy({
+        where: { labelId, transactionId: { [Op.in]: scopedIds } },
+      });
+    }
+    logTransactionEvent('bulk_labels', { op, labelId, requested: txnIds.length, affected });
+    res.json({ affected });
   } catch (e) {
     next(e);
   }
@@ -764,11 +1130,16 @@ router.get('/', async (req, res, next) => {
       }
     }
 
+    const labelsMap = await loadLabelsForTransactions(txnIds);
+    const summariesMap = await itemizedSummaries(txnIds);
+
     res.json({
       data: rows.map((row) => ({
         ...serializeTransaction(row),
         receiptCount: receiptCountMap[row.id] ?? 0,
         receiptWarnings: receiptWarningMap[row.id] ?? [],
+        labels: labelsMap[row.id] ?? [],
+        itemized: summariesMap.get(row.id) ?? null,
       })),
       page,
       pageSize,
@@ -818,6 +1189,65 @@ router.post('/:id/ai-suggest', aiSuggestLimiter, async (req, res, next) => {
   }
 });
 
+/**
+ * POST /api/transactions/:id/labels { labelIds: number[] } — set the FULL label
+ * set for one transaction (issue #270, AC #5). PUT-style replace semantics:
+ * labels in the list that aren't yet applied are added; labels currently
+ * applied but not in the list are removed. Idempotent. All labelIds must belong
+ * to the caller's household; the transaction must be visible to it.
+ *
+ * Returns the resulting `{ id, name }[]` so the client can reconcile its
+ * optimistic state.
+ */
+router.post('/:id/labels', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const txn = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!txn) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const b = (req.body || {}) as Record<string, unknown>;
+    const resolved = await resolveHouseholdLabelIds(req, b.labelIds);
+    if (!resolved.ok) {
+      res.status(400).json({ error: resolved.error });
+      return;
+    }
+    const desired = new Set(resolved.ids);
+    await sequelize.transaction(async (t) => {
+      const current = await TransactionLabel.findAll({
+        where: { transactionId: id },
+        transaction: t,
+      });
+      const have = new Set(current.map((r) => r.labelId));
+      const toRemove = [...have].filter((lid) => !desired.has(lid));
+      const toAdd = [...desired].filter((lid) => !have.has(lid));
+      if (toRemove.length > 0) {
+        await TransactionLabel.destroy({
+          where: { transactionId: id, labelId: { [Op.in]: toRemove } },
+          transaction: t,
+        });
+      }
+      if (toAdd.length > 0) {
+        await TransactionLabel.bulkCreate(
+          toAdd.map((labelId) => ({ transactionId: id, labelId })),
+          { ignoreDuplicates: true, transaction: t },
+        );
+      }
+    });
+    const labelsMap = await loadLabelsForTransactions([id]);
+    res.json({ labels: labelsMap[id] ?? [] });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.patch('/:id', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -829,6 +1259,15 @@ router.patch('/:id', async (req, res, next) => {
     const txn = await Transaction.findOne({ where: { id, ...visibleTransactionWhere(req) } });
     if (!txn) {
       res.status(404).json({ error: 'Not found' });
+      return;
+    }
+
+    if (
+      'taxTreatmentOverride' in b &&
+      b.taxTreatmentOverride !== null &&
+      !isTaxTreatment(b.taxTreatmentOverride)
+    ) {
+      res.status(400).json({ error: 'unknown tax treatment' });
       return;
     }
 
@@ -849,7 +1288,11 @@ router.patch('/:id', async (req, res, next) => {
         source: hasAiSuggestion ? 'ai_suggestion' : 'user_edit',
         aiSuggestionId: hasAiSuggestion ? aiSuggestionId : null,
       },
-      () => txn.save(),
+      () =>
+        sequelize.transaction(async (t) => {
+          await txn.save({ transaction: t });
+          await syncLinkedLegTaxTreatment(req, txn, b, t);
+        }),
     );
     scheduleMemoryFanoutIfNeeded(memSnap, txn);
     if (hasAiSuggestion) {
@@ -1519,6 +1962,9 @@ router.get('/enrichment/stats', async (req, res, next) => {
       byTxnType,
       topMerchants,
       topRules,
+      uncategorizedRow,
+      missingCanonicalRow,
+      deadRulesRows,
     ] = await Promise.all([
       sequelize.query<{ n: number }>(
         `SELECT COUNT(*) AS n FROM transactions t ${hhClause}`,
@@ -1567,6 +2013,24 @@ router.get('/enrichment/stats', async (req, res, next) => {
          ORDER BY n DESC LIMIT 15`,
         { replacements: reps, type: QueryTypes.SELECT },
       ),
+      sequelize.query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} final_category IS NULL`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      ),
+      sequelize.query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} merchant_canonical IS NULL`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      ),
+      sequelize.query<{ ruleId: number; pattern: string; category: string | null }>(
+        `SELECT r.id AS "ruleId", r.merchant_pattern AS pattern, r.category AS category
+         FROM rules r
+         ${householdId == null ? '' : 'WHERE r.household_id = ?'}
+         ${householdId == null ? 'WHERE' : 'AND'} r.id NOT IN (
+           SELECT applied_rule_id FROM transactions WHERE applied_rule_id IS NOT NULL ${householdId == null ? '' : 'AND household_id = ?'}
+         )
+         ORDER BY r.id DESC LIMIT 15`,
+        { replacements: householdId == null ? [] : [householdId, householdId], type: QueryTypes.SELECT },
+      ),
     ]);
 
     res.json({
@@ -1590,6 +2054,74 @@ router.get('/enrichment/stats', async (req, res, next) => {
         category: r.category,
         count: Number(r.n),
       })),
+      uncategorizedCount: Number(uncategorizedRow[0]?.n ?? 0),
+      merchantsMissingCanonical: Number(missingCanonicalRow[0]?.n ?? 0),
+      deadRules: deadRulesRows.map((r) => ({
+        ruleId: r.ruleId,
+        pattern: r.pattern,
+        category: r.category,
+      })),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/transactions/enrichment/coverage?bucket=month|week
+ *
+ * Enrichment coverage bucketed by SPEND DATE (transactions.date). There is no
+ * enrichment-event timestamp, so this answers "is recent spend better enriched
+ * than old spend?" — not "when did enrichment run". Newest 12 buckets, ascending.
+ */
+router.get('/enrichment/coverage', async (req, res, next) => {
+  try {
+    const bucket: 'month' | 'week' = req.query.bucket === 'week' ? 'week' : 'month';
+    const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
+    const hhClause = householdId == null ? '' : 'WHERE t.household_id = ?';
+    const reps = householdId == null ? [] : [householdId];
+
+    const isPg = sequelize.getDialect() === 'postgres';
+    const periodExpr = isPg
+      ? bucket === 'week'
+        ? `to_char(t.date, 'IYYY-"W"IW')`
+        : `to_char(t.date, 'YYYY-MM')`
+      : bucket === 'week'
+        ? `strftime('%Y-W%W', t.date)`
+        : `strftime('%Y-%m', t.date)`;
+
+    const clearedExpr = isPg
+      ? 'SUM(CASE WHEN NOT t.review_flag THEN 1 ELSE 0 END)'
+      : 'SUM(CASE WHEN t.review_flag = 0 THEN 1 ELSE 0 END)';
+
+    const rows = await sequelize.query<{
+      period: string;
+      total: number;
+      cleared: number;
+      withCanonical: number;
+    }>(
+      `SELECT ${periodExpr} AS period,
+              COUNT(*) AS total,
+              ${clearedExpr} AS cleared,
+              SUM(CASE WHEN t.merchant_canonical IS NOT NULL THEN 1 ELSE 0 END) AS "withCanonical"
+       FROM transactions t
+       ${hhClause}
+       GROUP BY period
+       ORDER BY period DESC
+       LIMIT 12`,
+      { replacements: reps, type: QueryTypes.SELECT },
+    );
+
+    res.json({
+      bucket,
+      series: rows
+        .map((r) => ({
+          period: r.period,
+          total: Number(r.total),
+          cleared: Number(r.cleared),
+          withCanonical: Number(r.withCanonical),
+        }))
+        .reverse(), // ascending for the chart x-axis
     });
   } catch (e) {
     next(e);
@@ -1636,6 +2168,10 @@ router.post('/enrichment/backfill', async (req, res, next) => {
       batchSize: 100,
       dateFrom,
       dateTo,
+      // The manual "Run backfill" button should apply AI to rows the
+      // deterministic pipeline leaves cold. runBackfill still gates this off on
+      // dry-run, so a dry-run preview never calls OpenAI.
+      ai: true,
     };
 
     // Content negotiation: NDJSON streaming only when the client explicitly
@@ -1730,7 +2266,7 @@ interface CounterpartyBackfillStatus {
   running: boolean;
   lastRunAt: string | null;
   nextAllowedAt: string | null;
-  lastSummary: { processed: number; extracted: number; elapsedMs: number } | null;
+  lastSummary: { processed: number; extracted: number; linked: number; elapsedMs: number } | null;
   rateLimitMs: number;
 }
 
@@ -1878,6 +2414,163 @@ router.post('/counterparty/backfill', async (req, res, next) => {
       }
       next(err);
     }
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Interac e-Transfer counterparty sync (Task 5 of Interac feature).
+//
+// Three routes:
+//   POST /interac-counterparty/sync    — run (or dry-run) the sync job
+//   GET  /interac-counterparty/status  — last run + running flag
+//   POST /:id/interac-counterparty/accept — accept a review suggestion
+//
+// The two literal-path routes are registered BEFORE the /:id wildcard block
+// so Express matches them before capturing the path segment as an id.
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/transactions/interac-counterparty/sync
+ *
+ * Runs `runInteracCounterpartySync` for the caller's household.
+ * Body: { dryRun?: boolean }
+ *
+ * Returns the InteracSyncResult on success (200).
+ * Returns 409 if a sync is already in flight for this household.
+ */
+router.post('/interac-counterparty/sync', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    if (isInteracSyncRunning(household.id)) {
+      res.status(409).json({ error: 'Interac sync already running for this household' });
+      return;
+    }
+    const dryRun = Boolean((req.body ?? {}).dryRun);
+    try {
+      const result = await runInteracCounterpartySync({
+        householdId: household.id,
+        userId: user.id,
+        dryRun,
+      });
+      res.json(result);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.toLowerCase().includes('already running')) {
+        res.status(409).json({ error: msg });
+        return;
+      }
+      next(e);
+    }
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/transactions/interac-counterparty/status
+ *
+ * Returns:
+ *   { running: boolean, lastRunAt: string|null, lastSummary: object|null }
+ *
+ * `lastSummary` is the JSON-encoded summary from the most recent
+ * ProviderJobLog row, or null when no run has completed yet.
+ */
+router.get('/interac-counterparty/status', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const row = await ProviderJobLog.findOne({
+      where: {
+        provider: INTERAC_SYNC_PROVIDER,
+        symbol: String(household.id),
+      },
+      order: [
+        ['fetchedAt', 'DESC'],
+        ['id', 'DESC'],
+      ],
+    });
+    let lastSummary: unknown = null;
+    if (row?.errorMessage) {
+      try {
+        lastSummary = JSON.parse(row.errorMessage) as unknown;
+      } catch {
+        // Malformed log row — surface null so the UI still renders.
+      }
+    }
+    res.json({
+      running: isInteracSyncRunning(household.id),
+      lastRunAt: row ? row.fetchedAt.toISOString() : null,
+      lastSummary,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/transactions/:id/interac-counterparty/accept
+ *
+ * Accepts a `counterparty_email_match` AiSuggestion for the given transaction.
+ * Body: { suggestionId: number }
+ *
+ * - Sets `counterpartyRaw` to the suggestion's output.name on the transaction.
+ * - If `!output.isSelf`, find-or-creates a Contact and links it.
+ * - Marks the suggestion as 'accepted'.
+ * - Returns { transaction: serialized, suggestionId }.
+ */
+router.post('/:id/interac-counterparty/accept', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const { household } = currentAuth(req);
+    const body = (req.body || {}) as { suggestionId?: unknown };
+    const suggestionId = Number(body.suggestionId);
+    if (!Number.isInteger(suggestionId) || suggestionId <= 0) {
+      res.status(400).json({ error: 'suggestionId must be a positive integer' });
+      return;
+    }
+    const suggestion = await AiSuggestion.findOne({
+      where: {
+        id: suggestionId,
+        householdId: household.id,
+        kind: 'counterparty_email_match',
+        status: 'suggested',
+      },
+    });
+    if (!suggestion) {
+      res.status(404).json({ error: 'Suggestion not found' });
+      return;
+    }
+    const txn = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!txn) {
+      res.status(404).json({ error: 'Transaction not found' });
+      return;
+    }
+    if (suggestion.transactionId !== id) {
+      res.status(400).json({ error: 'Suggestion does not belong to this transaction' });
+      return;
+    }
+    const output = suggestion.output as { name: string; isSelf: boolean };
+    const name = typeof output?.name === 'string' ? output.name.trim() : '';
+    if (!name) {
+      res.status(400).json({ error: 'Suggestion has no usable counterparty name' });
+      return;
+    }
+    txn.counterpartyRaw = name;
+    if (!output.isSelf) {
+      const contact = await findOrCreateContactByName(household.id, name);
+      txn.counterpartyContactId = contact.id;
+    }
+    await txn.save();
+    suggestion.status = 'accepted';
+    await suggestion.save();
+    res.json({ transaction: serializeTransaction(txn), suggestionId });
   } catch (e) {
     next(e);
   }
@@ -2067,13 +2760,13 @@ router.post('/:id/revisions/:rid/restore', aiSuggestLimiter, async (req, res, ne
  *
  *  - `{ contactId: <existing> }` — link to an existing Contact owned by
  *    the user's household. 404 if the Contact does not belong here.
- *  - `{}` (no contactId) — auto-create a Contact from `counterparty_raw`
- *    if no Contact in this household already has that name; otherwise
- *    reuse the existing match. Requires `counterparty_raw` to be set.
+ *  - `{}` (no contactId) — find-or-create a Contact from `counterparty_raw`
+ *    by its normalized name (reusing an existing match if present).
+ *    Requires `counterparty_raw` to be set.
  *
- * Contact dedup key is `(householdId, name)`. The match is case-sensitive
- * and exact-string to keep promotion deterministic; a future "suggest
- * promote" job (#373) will handle fuzzy/normalized deduplication.
+ * Contact dedup key is `(householdId, normalized_name)` (lowercase +
+ * whitespace-collapsed) via `findOrCreateContactByName`, so `'Jane Doe'`
+ * and `'JANE DOE'` collapse to one Contact.
  */
 router.post('/:id/counterparty/promote', async (req, res, next) => {
   try {
@@ -2113,16 +2806,7 @@ router.post('/:id/counterparty/promote', async (req, res, next) => {
         });
         return;
       }
-      contact = await Contact.findOne({
-        where: { householdId: household.id, name: raw },
-      });
-      if (!contact) {
-        contact = await Contact.create({
-          householdId: household.id,
-          name: raw,
-          notes: null,
-        });
-      }
+      contact = await findOrCreateContactByName(household.id, raw);
     }
     txn.counterpartyContactId = contact.id;
     await txn.save();
@@ -2235,16 +2919,7 @@ router.post('/counterparty/promote-bulk', async (req, res, next) => {
           return null;
         }
         const rawName = (newest.counterpartyRaw ?? '').trim();
-        contact = await Contact.findOne({
-          where: { householdId: household.id, name: rawName },
-          transaction: t,
-        });
-        if (!contact) {
-          contact = await Contact.create(
-            { householdId: household.id, name: rawName, notes: null },
-            { transaction: t },
-          );
-        }
+        contact = await findOrCreateContactByName(household.id, rawName, { transaction: t });
       }
 
       // Link every matching txn. Iterate so per-row save triggers

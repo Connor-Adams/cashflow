@@ -9,7 +9,7 @@
 
 import type { Response } from 'express';
 import { Op } from 'sequelize';
-import { Transaction, Account, sequelize } from '../models';
+import { Transaction, Account } from '../models';
 
 /**
  * Fixed CSV column headers for the v1 export.
@@ -187,6 +187,3 @@ export async function streamCsvExport(
   res.end();
   return rowCount;
 }
-
-// Re-export sequelize for use in the route without a separate import.
-export { sequelize };

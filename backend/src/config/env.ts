@@ -7,6 +7,7 @@ const backendRoot = path.join(__dirname, '..', '..');
 
 export type EnvConfig = {
   csvUploadDir: string;
+  changelogDir: string;
   databaseUrl: string | null;
   databasePath: string;
   port: number;
@@ -30,6 +31,10 @@ export type EnvConfig = {
   weeklyDigestCron: string;
   budgetBreachCheckEnabled: boolean;
   budgetBreachCheckCron: string;
+  dividendMatchEnabled: boolean;
+  dividendMatchCron: string;
+  subscriptionPriceDetectEnabled: boolean;
+  subscriptionPriceDetectCron: string;
 };
 
 export function parsePort(raw: string | undefined): number {
@@ -105,6 +110,8 @@ export function loadEnvConfig(
 ): EnvConfig {
   const csvUploadDir =
     e.CSV_UPLOAD_DIR || path.join(backendRoot, 'uploads', 'csv');
+  const changelogDir =
+    e.CHANGELOG_DIR || path.join(backendRoot, '..', 'docs', 'changelog');
 
   const databaseUrl = assertDatabaseUrl(e.DATABASE_URL);
   const databasePath = assertDatabasePath(e.DATABASE_PATH, backendRoot);
@@ -138,15 +145,30 @@ export function loadEnvConfig(
     e.WEEKLY_DIGEST_ENABLED,
     nodeEnv,
   );
-  const weeklyDigestCron = e.WEEKLY_DIGEST_CRON?.trim() || '0 9 * * 1';
+  // Daily 09:00 UTC tick (#796): the orchestrator routes each user to their
+  // chosen `digestDayOfWeek` and the `lastDigestSentAt` 6-day eligibility guard
+  // keeps it to at most one digest per ~week. A Monday-only cron (the #267
+  // default) could never serve users who pick another weekday.
+  const weeklyDigestCron = e.WEEKLY_DIGEST_CRON?.trim() || '0 9 * * *';
   const budgetBreachCheckEnabled = parseBudgetBreachCheckEnabled(
     e.BUDGET_BREACH_CHECK_ENABLED,
     nodeEnv,
   );
   const budgetBreachCheckCron = e.BUDGET_BREACH_CHECK_CRON?.trim() || '0 8 * * *';
+  const dividendMatchEnabled = parseDividendMatchEnabled(
+    e.DIVIDEND_MATCH_ENABLED,
+    nodeEnv,
+  );
+  const dividendMatchCron = e.DIVIDEND_MATCH_CRON?.trim() || '30 3 * * *';
+  const subscriptionPriceDetectEnabled = parseSubscriptionPriceDetectEnabled(
+    e.SUBSCRIPTION_PRICE_DETECT_ENABLED,
+    nodeEnv,
+  );
+  const subscriptionPriceDetectCron = e.SUBSCRIPTION_PRICE_DETECT_CRON?.trim() || '0 2 * * *';
 
   return {
     csvUploadDir,
+    changelogDir,
     databaseUrl,
     databasePath,
     port,
@@ -170,6 +192,10 @@ export function loadEnvConfig(
     weeklyDigestCron,
     budgetBreachCheckEnabled,
     budgetBreachCheckCron,
+    dividendMatchEnabled,
+    dividendMatchCron,
+    subscriptionPriceDetectEnabled,
+    subscriptionPriceDetectCron,
   };
 }
 
@@ -268,6 +294,37 @@ export function parseBudgetBreachCheckEnabled(
   return true;
 }
 
+/**
+ * Daily dividend-reconciliation matcher (#305). Defaults on outside tests so
+ * the matcher runs in dev/prod; tests invoke the handler directly.
+ */
+export function parseDividendMatchEnabled(
+  raw: string | undefined,
+  nodeEnv: string,
+): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
+  if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
+  if (nodeEnv === 'test') return false;
+  return true;
+}
+
+/**
+ * Default-off in test so the subscription price-detect cron doesn't
+ * auto-schedule during the integration-test suite. Production / dev
+ * defaults on.
+ */
+export function parseSubscriptionPriceDetectEnabled(
+  raw: string | undefined,
+  nodeEnv: string,
+): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
+  if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
+  if (nodeEnv === 'test') return false;
+  return true;
+}
+
 export function parseDividendDedupDays(raw: string | undefined): number {
   if (raw == null || raw.trim() === '') return 5;
   const n = Number(raw);
@@ -282,6 +339,7 @@ export function parseDividendDedupDays(raw: string | undefined): number {
 const resolved = loadEnvConfig(process.env as Record<string, string | undefined>);
 
 export const csvUploadDir = resolved.csvUploadDir;
+export const changelogDir = resolved.changelogDir;
 export const databaseUrl = resolved.databaseUrl;
 export const databasePath = resolved.databasePath;
 export const port = resolved.port;
@@ -305,12 +363,30 @@ export const weeklyDigestEnabled = resolved.weeklyDigestEnabled;
 export const weeklyDigestCron = resolved.weeklyDigestCron;
 export const budgetBreachCheckEnabled = resolved.budgetBreachCheckEnabled;
 export const budgetBreachCheckCron = resolved.budgetBreachCheckCron;
+export const dividendMatchEnabled = resolved.dividendMatchEnabled;
+export const dividendMatchCron = resolved.dividendMatchCron;
+export const subscriptionPriceDetectEnabled = resolved.subscriptionPriceDetectEnabled;
+export const subscriptionPriceDetectCron = resolved.subscriptionPriceDetectCron;
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw == null || raw.trim() === '') return fallback;
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+export function parseFloatEnv(
+  name: string,
+  fallback: number,
+  bounds?: { min?: number; max?: number },
+): number {
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  if (bounds?.min != null && n < bounds.min) return fallback;
+  if (bounds?.max != null && n > bounds.max) return fallback;
+  return n;
 }
 
 export const enrichmentRecurringMinSupport = parseIntEnv(
@@ -353,6 +429,50 @@ export const enrichmentAiPerRowConcurrency = parseIntEnv(
   'ENRICHMENT_AI_PER_ROW_CONCURRENCY',
   4,
 );
+/** Per-item confidence (0-100) at/above which an AI-inferred item category is
+ *  trusted enough to count toward auto-clearing a transaction's review flag. */
+export const enrichmentItemClearConfidence = parseIntEnv(
+  'ENRICHMENT_ITEM_CLEAR_CONFIDENCE',
+  80,
+);
+/**
+ * Stage 5.5 embedding-match (#792): local, offline-capable semantic match of a
+ * cold row's merchant against the household's previously-categorized merchants,
+ * run BEFORE the OpenAI batch. Enabled by default (no network/key needed); it
+ * self-skips when a household has no reviewed priors.
+ */
+export const enrichmentEmbeddingEnabled = parseBoolEnv(
+  'ENRICHMENT_EMBEDDING_ENABLED',
+  true,
+);
+/**
+ * Cosine-similarity threshold (inclusive, `>=`) above which an embedding match
+ * is trusted enough to auto-categorize a cold row. Default ~0.85. Clamped to
+ * [0, 1]; out-of-range / unparseable values fall back to the default.
+ */
+export const enrichmentEmbeddingThreshold = parseFloatEnv(
+  'ENRICHMENT_EMBEDDING_THRESHOLD',
+  0.85,
+  { min: 0, max: 1 },
+);
+
+/** Costco product-image enrichment: enabled only when true AND a scraper key is set. */
+export const costcoEnrichmentEnabled = parseBoolEnv('COSTCO_ENRICHMENT_ENABLED', false);
+/** Max distinct item numbers the resolver will attempt per invocation (budget guard). */
+export const costcoEnrichmentMaxItemsPerRun = parseIntEnv('COSTCO_ENRICHMENT_MAX_ITEMS_PER_RUN', 50);
+
+/**
+ * Web-push VAPID keypair (issue #651). When both public+private keys are
+ * configured, the notification dispatch path fans web-push out to a user's
+ * active subscriptions; the public key is also surfaced via GET /api/config
+ * so the browser can `pushManager.subscribe`. When unset, push is disabled
+ * end-to-end (config returns `vapidPublicKey: null`, the client hides the
+ * "Enable browser alerts" control, and the send wrapper no-ops).
+ */
+export const vapidPublicKey = process.env.VAPID_PUBLIC_KEY?.trim() || null;
+export const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY?.trim() || null;
+export const vapidSubject =
+  process.env.VAPID_SUBJECT?.trim() || 'mailto:admin@cashflow.local';
 
 export const googleOauthClientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || null;
 export const googleOauthClientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || null;

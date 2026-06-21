@@ -1,17 +1,10 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Check, Copy } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogBody,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { Button } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { postJson } from '@/lib/api'
 import { buildInviteUrl, type CreatedInvite } from './inviteLink'
@@ -82,19 +75,19 @@ export function InviteModal({ open, onOpenChange, onCreated }: InviteModalProps)
   if (!open) return null
 
   return (
-    <Dialog open onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
-      <DialogHeader>
-        <DialogTitle>Invite a member</DialogTitle>
-        {!created && (
-          <DialogDescription>
-            Invite a partner, spouse, or accountant to collaborate on this household.
-          </DialogDescription>
-        )}
-      </DialogHeader>
-
+    <Dialog
+      open
+      onClose={close}
+      title={<>Invite a member</>}
+      description={
+        !created ? (
+          <>Invite a partner, spouse, or accountant to collaborate on this household.</>
+        ) : undefined
+      }
+    >
       {created ? (
         <>
-          <DialogBody>
+          <div>
             <p className="mb-3">Send this link to your invitee. It works one time.</p>
             <div className="flex items-center gap-2">
               <Input
@@ -114,16 +107,16 @@ export function InviteModal({ open, onOpenChange, onCreated }: InviteModalProps)
                 {err}
               </p>
             )}
-          </DialogBody>
-          <DialogFooter>
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={close}>
               Done
             </Button>
-          </DialogFooter>
+          </div>
         </>
       ) : (
         <form onSubmit={submit}>
-          <DialogBody>
+          <div>
             <Label htmlFor="invite-email">
               Email (for your records)
               <Input
@@ -140,15 +133,15 @@ export function InviteModal({ open, onOpenChange, onCreated }: InviteModalProps)
                 {err}
               </p>
             )}
-          </DialogBody>
-          <DialogFooter>
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={close}>
               Cancel
             </Button>
             <Button type="submit" disabled={submitting}>
               Generate invite link
             </Button>
-          </DialogFooter>
+          </div>
         </form>
       )}
     </Dialog>

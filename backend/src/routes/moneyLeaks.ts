@@ -14,20 +14,26 @@
  *   - An aggregated 90-day delivery-spend rollup computed from
  *     transactions whose merchant matches the delivery pattern.
  *
- * Only DISMISSALS are persisted (one table: money_leak_dismissals). A leak
- * is dismissed by its `(leakType, identityKey)` pair; the detector strips
- * matching rows from its output on the next read.
+ * Only DISMISSALS are persisted. A leak is dismissed by its
+ * `(leakType, identityKey)` pair; the detector strips matching rows from its
+ * output on the next read.
+ *
+ * Dismissals live on the Observation primitive (#639): each is an `Insight`
+ * row with `status='dismissed'`, `entityType='money_leak'`, `type=leakType`,
+ * and `fingerprint=`${leakType}|${identityKey}``. The standalone
+ * `money_leak_dismissals` table was folded away — MoneyLeak is fully derived,
+ * with dismissal state carried as a dismissed Observation.
  */
 
 import { Router } from 'express';
 import { Op } from 'sequelize';
 import {
-  MoneyLeakDismissal,
   MONEY_LEAK_TYPES,
   type MoneyLeakType,
-} from '../models/MoneyLeakDismissal';
-import { Subscription } from '../models/Subscription';
-import { Transaction } from '../models';
+} from '../money_leaks/detect';
+import { Insight, PlannedEvent, Transaction } from '../models';
+import type { InsightType } from '../models/Insight';
+import { serializeSubscription } from '../expectations/subscriptionMapper';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 import { num } from '../util/numbers';
@@ -131,29 +137,96 @@ function parseCurrency(raw: unknown): string | null {
   return s;
 }
 
+/**
+ * Marker stored in `Insight.entityType` for dismissed-leak Observations.
+ * Scopes the dismissal-as-Insight query so it never collides with other
+ * Insight types that happen to share a `type` value.
+ */
+const LEAK_ENTITY_TYPE = 'money_leak';
+
+/**
+ * Stable per-dismissal fingerprint = `${leakType}|${identityKey}`. Unique per
+ * household via the `insights_household_type_fingerprint` index — mirrors the
+ * old `money_leak_dismissals (household, leak_type, identity_key)` unique
+ * constraint. The migration that drops the table reconstructs the exact same
+ * string, so dismissals survive the fold.
+ */
+function leakFingerprint(leakType: MoneyLeakType, identityKey: string): string {
+  return `${leakType}|${identityKey}`;
+}
+
+/**
+ * The DTO returned by POST/GET dismiss endpoints. Reconstructed from an
+ * Insight row so the response stays byte-stable with the pre-#639 shape
+ * (id/leakType/identityKey/snapshot/createdAt/updatedAt). identityKey is the
+ * fingerprint tail after `${leakType}|`; snapshot is the Insight's metadata.
+ */
+function serializeDismissal(row: Insight): {
+  id: number;
+  leakType: MoneyLeakType;
+  identityKey: string;
+  snapshot: unknown;
+  createdAt: string;
+  updatedAt: string;
+} {
+  const prefix = `${row.type}|`;
+  const identityKey = row.fingerprint.startsWith(prefix)
+    ? row.fingerprint.slice(prefix.length)
+    : row.fingerprint;
+  return {
+    id: row.id,
+    leakType: row.type as MoneyLeakType,
+    identityKey,
+    snapshot: row.metadata ?? null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const auth = currentAuth(req);
     const currency = parseCurrency(req.query.currency);
 
-    // 1. Active subscriptions for this household.
-    const subRows = await Subscription.findAll({
-      where: { ...householdWhere(req) },
+    // 1. Subscriptions for this household — now folded into planned_events as
+    //    kind='subscription' (Expectation merge). serializeSubscription maps a
+    //    merged row back to the legacy Subscription DTO the detector expects.
+    const subRows = await PlannedEvent.findAll({
+      where: { ...householdWhere(req), kind: 'subscription' },
     });
-    const subscriptions: LeakSubscription[] = subRows.map((row) => ({
-      id: row.id,
-      merchantName: row.merchantName,
-      normalizedName: row.normalizedName,
-      currency: row.currency,
-      amount: Number(row.amount),
-      cadence: row.cadence,
-      annualizedCost: Number(row.annualizedCost),
-      status: row.status,
-      priceChangeDetected: Boolean(row.priceChangeDetected),
-      category: row.category,
-      lastChargeDate: row.lastChargeDate,
-      nextExpectedDate: row.nextExpectedDate,
-    }));
+    // The price-increase signal now lives in an open Insight
+    // (type='subscription_price_increase', entityId=PlannedEvent.id), not the
+    // retired planned_events.price_change_detected column. Build the set of
+    // subscriptions with an OPEN price-increase Insight; dismissing/resolving
+    // the Insight clears the leak on the next read.
+    const priceInsights = await Insight.findAll({
+      where: {
+        ...householdWhere(req),
+        type: 'subscription_price_increase',
+        status: 'open',
+      },
+      attributes: ['entityId'],
+      raw: true,
+    });
+    const priceUp = new Set<number>(
+      priceInsights.map((i) => i.entityId).filter((x): x is number => x != null),
+    );
+    const subscriptions: LeakSubscription[] = subRows
+      .map(serializeSubscription)
+      .map((row) => ({
+        id: row.id,
+        merchantName: row.merchantName,
+        normalizedName: row.normalizedName,
+        currency: row.currency,
+        amount: Number(row.amount),
+        cadence: row.cadence,
+        annualizedCost: Number(row.annualizedCost),
+        status: row.status,
+        priceChangeDetected: priceUp.has(row.id),
+        category: row.category,
+        lastChargeDate: row.lastChargeDate,
+        nextExpectedDate: row.nextExpectedDate,
+      }));
 
     // 2. Recurring transaction groups (180d window) — for recurring_fee.
     const sinceRecurring = new Date(
@@ -250,14 +323,21 @@ router.get('/', async (req, res, next) => {
       }>,
     );
 
-    // 4. Dismissals for this household.
-    const dismissalRows = await MoneyLeakDismissal.findAll({
-      where: { householdId: auth.household.id },
-      attributes: ['leakType', 'identityKey'],
+    // 4. Dismissals for this household — dismissed-leak Observations (#639).
+    const dismissalRows = await Insight.findAll({
+      where: {
+        householdId: auth.household.id,
+        entityType: LEAK_ENTITY_TYPE,
+        status: 'dismissed',
+        type: { [Op.in]: MONEY_LEAK_TYPES as readonly string[] },
+      },
+      attributes: ['fingerprint'],
       raw: true,
     });
+    // fingerprint already IS `${leakType}|${identityKey}`, which is exactly the
+    // dismissed-key the detector checks against.
     const dismissals = new Set<string>(
-      dismissalRows.map((row) => `${row.leakType}|${row.identityKey}`),
+      dismissalRows.map((row) => row.fingerprint),
     );
 
     // 5. Run detection.
@@ -278,19 +358,17 @@ router.get('/', async (req, res, next) => {
 router.get('/dismissed', async (req, res, next) => {
   try {
     const auth = currentAuth(req);
-    const rows = await MoneyLeakDismissal.findAll({
-      where: { householdId: auth.household.id },
+    const rows = await Insight.findAll({
+      where: {
+        householdId: auth.household.id,
+        entityType: LEAK_ENTITY_TYPE,
+        status: 'dismissed',
+        type: { [Op.in]: MONEY_LEAK_TYPES as readonly string[] },
+      },
       order: [['updatedAt', 'DESC']],
     });
     res.json({
-      items: rows.map((row) => ({
-        id: row.id,
-        leakType: row.leakType,
-        identityKey: row.identityKey,
-        snapshot: row.snapshot,
-        createdAt: row.createdAt.toISOString(),
-        updatedAt: row.updatedAt.toISOString(),
-      })),
+      items: rows.map(serializeDismissal),
     });
   } catch (e) {
     next(e);
@@ -316,51 +394,49 @@ router.post('/dismiss', async (req, res, next) => {
       return;
     }
     // Snapshot is optional and free-form. Trim to reasonable size — we want
-    // it for audit/undo, not as a full transaction log.
+    // it for audit/undo, not as a full transaction log. Stored as the
+    // dismissed Observation's metadata.
     const snapshot =
       body.snapshot && typeof body.snapshot === 'object' ? body.snapshot : null;
 
-    // Idempotent upsert: if a dismissal already exists for this household +
-    // (leakType, identityKey), bump updated_at and return it. We avoid the
-    // ON CONFLICT route here to keep cross-dialect SQL clean.
-    const existing = await MoneyLeakDismissal.findOne({
+    const fingerprint = leakFingerprint(leakType, identityKey);
+
+    // Idempotent upsert: if a dismissed-leak Observation already exists for
+    // this household + (leakType, identityKey), bump updated_at and return it.
+    // We avoid ON CONFLICT to keep cross-dialect SQL clean.
+    const existing = await Insight.findOne({
       where: {
         householdId: auth.household.id,
-        leakType,
-        identityKey,
+        entityType: LEAK_ENTITY_TYPE,
+        type: leakType,
+        fingerprint,
       },
     });
     if (existing) {
       if (snapshot !== null) {
-        existing.set('snapshot', snapshot);
+        existing.set('metadata', snapshot);
       }
-      existing.set('dismissedByUserId', auth.user.id);
+      existing.set('userId', auth.user.id);
+      existing.set('status', 'dismissed');
       await existing.save();
-      res.json({
-        id: existing.id,
-        leakType: existing.leakType,
-        identityKey: existing.identityKey,
-        snapshot: existing.snapshot,
-        createdAt: existing.createdAt.toISOString(),
-        updatedAt: existing.updatedAt.toISOString(),
-      });
+      res.json(serializeDismissal(existing));
       return;
     }
-    const row = await MoneyLeakDismissal.create({
+    const row = await Insight.create({
       householdId: auth.household.id,
-      leakType,
-      identityKey,
-      snapshot,
-      dismissedByUserId: auth.user.id,
+      userId: auth.user.id,
+      type: leakType as InsightType,
+      severity: 'info',
+      title: `Dismissed money leak: ${leakType}`,
+      description: null,
+      entityType: LEAK_ENTITY_TYPE,
+      entityId: null,
+      status: 'dismissed',
+      fingerprint,
+      metadata: snapshot,
+      detectedAt: new Date(),
     });
-    res.status(201).json({
-      id: row.id,
-      leakType: row.leakType,
-      identityKey: row.identityKey,
-      snapshot: row.snapshot,
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString(),
-    });
+    res.status(201).json(serializeDismissal(row));
   } catch (e) {
     next(e);
   }
@@ -373,8 +449,14 @@ router.delete('/dismiss/:id', async (req, res, next) => {
       res.status(400).json({ error: 'Invalid id' });
       return;
     }
-    const row = await MoneyLeakDismissal.findOne({
-      where: { id, ...householdWhere(req) },
+    const row = await Insight.findOne({
+      where: {
+        id,
+        ...householdWhere(req),
+        entityType: LEAK_ENTITY_TYPE,
+        status: 'dismissed',
+        type: { [Op.in]: MONEY_LEAK_TYPES as readonly string[] },
+      },
     });
     if (!row) {
       res.status(404).json({ error: 'Not found' });

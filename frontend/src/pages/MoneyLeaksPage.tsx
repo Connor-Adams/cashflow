@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AlertTriangle, Droplet, Repeat, Truck, Users, X } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Grid } from '@/lib/ds-extras'
+import { StatCard } from '@connor-adams/designsystem'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
-import { NativeSelect } from '@/components/ui/native-select'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postJson } from '../lib/api'
@@ -178,8 +183,8 @@ export function MoneyLeaksPage() {
         loading={loading}
       />
 
-      <section className="card">
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+      <Card className="mb-4">
+        <div className="flex gap-3 items-center">
           <label htmlFor="money-leaks-currency-filter">Currency</label>
           <NativeSelect
             id="money-leaks-currency-filter"
@@ -194,25 +199,24 @@ export function MoneyLeaksPage() {
             ))}
           </NativeSelect>
         </div>
-      </section>
+      </Card>
 
       {err && (
-        <p className="error" role="alert">
+        <Alert variant="error" className="mb-4">
           {err}
-        </p>
+        </Alert>
       )}
 
       {loading && !data ? (
-        <section className="card" aria-busy="true">
-          <p className="muted">Looking for leaks…</p>
-        </section>
+        <Card className="mb-4" aria-busy="true">
+          <p className="text-sm leading-6 text-muted-foreground">Looking for leaks…</p>
+        </Card>
       ) : visibleItems.length === 0 ? (
-        <section className="card">
-          <p className="muted">
-            No leaks detected. Either your spending is dialled in or there
-            isn't enough recent history to flag anything yet.
-          </p>
-        </section>
+        <EmptyState
+          className="mb-4"
+          title="No leaks detected"
+          description="Either your spending is dialled in or there isn't enough recent history to flag anything yet."
+        />
       ) : (
         TYPE_ORDER.filter((t) => grouped.has(t)).map((leakType) => (
           <LeakGroup
@@ -231,17 +235,11 @@ export function MoneyLeaksPage() {
           description="Restore one to make it visible again."
           defaultOpen={false}
         >
-          <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+          <ul className="m-0 p-0 list-none">
             {dismissed.items.map((d) => (
               <li
                 key={d.id}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '6px 0',
-                  borderBottom: '1px solid var(--border)',
-                }}
+                className="flex justify-between items-center py-1.5 border-b border-border"
               >
                 <span>
                   <Badge variant="outline">{TYPE_LABEL[d.leakType]}</Badge>{' '}
@@ -277,9 +275,9 @@ function LeakTotals({
 }) {
   if (loading && !data) {
     return (
-      <section className="card" aria-busy="true">
-        <p className="muted">Loading totals…</p>
-      </section>
+      <Card className="mb-4" aria-busy="true">
+        <p className="text-sm leading-6 text-muted-foreground">Loading totals…</p>
+      </Card>
     )
   }
   if (!data) return null
@@ -288,67 +286,33 @@ function LeakTotals({
   // Combined per-currency summary stats. We never collapse currencies — a
   // CAD + USD mix would be misleading if simply summed.
   return (
-    <section className="card" aria-label="Money-leak totals">
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 12,
-        }}
-      >
-        <SummaryStat
-          label="Leaks detected"
-          value={String(data.items.length)}
-        />
-        {byCurrency.length === 0 && data.items.length === 0 ? null : (
-          <>
-            {byCurrency.map((c) => (
-              <SummaryStat
-                key={`monthly-${c.currency}`}
-                label={`Monthly (${c.currency})`}
-                value={formatMoney(c.monthlyImpact, c.currency)}
-                tone="warn"
-              />
-            ))}
-            {byCurrency.map((c) => (
-              <SummaryStat
-                key={`annual-${c.currency}`}
-                label={`Annual (${c.currency})`}
-                value={formatMoney(c.annualImpact, c.currency)}
-                tone="warn"
-              />
-            ))}
-          </>
-        )}
-      </div>
-    </section>
-  )
-}
-
-function SummaryStat({
-  label,
-  value,
-  tone,
-}: {
-  label: string
-  value: string
-  tone?: 'warn'
-}) {
-  return (
-    <Card style={{ padding: 12 }}>
-      <div className="muted" style={{ fontSize: 12 }}>
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 20,
-          fontWeight: 600,
-          color: tone === 'warn' ? 'var(--accent-warm, #b45309)' : undefined,
-        }}
-      >
-        {value}
-      </div>
-    </Card>
+    <Grid minItemWidth={180} gap="md" className="mb-4" aria-label="Money-leak totals">
+      <StatCard
+        label="Leaks detected"
+        value={String(data.items.length)}
+        metricKind="neutral"
+      />
+      {byCurrency.length === 0 && data.items.length === 0 ? null : (
+        <>
+          {byCurrency.map((c) => (
+            <StatCard
+              key={`monthly-${c.currency}`}
+              label={`Monthly (${c.currency})`}
+              value={<span className="text-[var(--accent-warm)]">{formatMoney(c.monthlyImpact, c.currency)}</span>}
+              metricKind="neutral"
+            />
+          ))}
+          {byCurrency.map((c) => (
+            <StatCard
+              key={`annual-${c.currency}`}
+              label={`Annual (${c.currency})`}
+              value={<span className="text-[var(--accent-warm)]">{formatMoney(c.annualImpact, c.currency)}</span>}
+              metricKind="neutral"
+            />
+          ))}
+        </>
+      )}
+    </Grid>
   )
 }
 
@@ -370,41 +334,45 @@ function LeakGroup({
       title={TYPE_LABEL[leakType]}
       description={`${items.length} ${items.length === 1 ? 'leak' : 'leaks'} • ${groupCurrencies.length === 1 ? `${groupAnnual.toFixed(2)} ${groupCurrencies[0]}/year` : `${groupCurrencies.length} currencies`}`}
     >
-      <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+      <ul className="m-0 p-0 list-none">
         {items.map((item) => (
           <li
             key={`${item.leakType}|${item.identityKey}`}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'auto 1fr auto',
-              gap: 12,
-              alignItems: 'start',
-              padding: '12px 0',
-              borderBottom: '1px solid var(--border)',
-            }}
+            className="grid grid-cols-[auto_1fr_auto] gap-3 items-start py-3 border-b border-border"
           >
-            <Icon aria-hidden="true" size={20} style={{ marginTop: 2 }} />
+            <Icon aria-hidden="true" size={20} className="mt-0.5" />
             <div>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  fontWeight: 600,
-                }}
-              >
+              <div className="flex items-center gap-1.5 font-semibold">
                 {item.title}
                 <Badge variant={SEVERITY_BADGE_VARIANT[item.severity]}>
                   {item.severity}
                 </Badge>
               </div>
-              <div className="muted" style={{ fontSize: 14, marginTop: 4 }}>
+              <div className="text-sm leading-6 text-muted-foreground mt-1">
                 {item.description}
               </div>
-              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              <div className="text-xs leading-6 text-muted-foreground mt-1">
                 {formatMoney(item.monthlyImpact, item.currency)}/mo •{' '}
                 {formatMoney(item.annualImpact, item.currency)}/yr
               </div>
+              {(item.leakType === 'subscription_price_increase' ||
+                item.leakType === 'small_subscription' ||
+                item.leakType === 'duplicate_service') && (
+                <Link
+                  to="/subscriptions"
+                  className="text-xs leading-6 text-muted-foreground underline mt-1 inline-block"
+                >
+                  View source →
+                </Link>
+              )}
+              {item.leakType === 'recurring_fee' && (
+                <Link
+                  to="/recurring"
+                  className="text-xs leading-6 text-muted-foreground underline mt-1 inline-block"
+                >
+                  View source →
+                </Link>
+              )}
             </div>
             <Button
               type="button"

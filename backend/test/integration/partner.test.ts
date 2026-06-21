@@ -13,6 +13,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { seedHousehold } from '../helpers/seedHousehold.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -108,7 +109,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'super-partner@example.com',
     displayName: 'Super Partner',
@@ -120,12 +121,12 @@ before(async () => {
   householdAId = a.householdId;
   userAId = a.userId;
   contactAId = a.contactId;
-  agentA = request.agent(app);
+  agentA = testAgent(app);
   agentA.jar.setCookie(`cashflow_session=${a.token}; Path=/`);
 
   const b = await seedHousehold('PartnerB', 'B Partner');
   householdBId = b.householdId;
-  agentB = request.agent(app);
+  agentB = testAgent(app);
   agentB.jar.setCookie(`cashflow_session=${b.token}; Path=/`);
 
   const models = await import('../../src/models');
@@ -212,8 +213,8 @@ test('/fairness: settlements applied → balance shifts', async () => {
     partnerShareTotal: number;
   }>).find((r) => r.currency === 'CAD');
   assert.ok(cad);
-  // partnerShareTotal=-100, settlement: iPaid=0, partnerPaid=30 → balance = -100 + (0-30) = -130
-  assert.equal(cad.balance, -130);
+  // partnerShareTotal=-100, settlement: iPaid=0, partnerPaid=30 → balance = -(-100) + (0-30) = 100-30 = 70
+  assert.equal(cad.balance, 70);
 });
 
 test('/fairness: AC1 currentMonthSharedSpend computed from today', async () => {
@@ -395,9 +396,9 @@ test('/monthly: AC6 returns per-month points with cumulativeBalance running tota
   assert.ok(jan, `expected 2028-01 point: ${JSON.stringify(pts)}`);
   assert.ok(feb);
   assert.equal(jan.partnerShare, -100);
-  assert.equal(jan.cumulativeBalance, -100);
+  assert.equal(jan.cumulativeBalance, 100);
   assert.equal(feb.partnerShare, -200);
-  assert.equal(feb.cumulativeBalance, -300);
+  assert.equal(feb.cumulativeBalance, 300);
 });
 
 test('/monthly: rows with partnerShare=0 do not produce monthly points', async () => {
@@ -424,10 +425,10 @@ test('/monthly: rows with partnerShare=0 do not produce monthly points', async (
 
 // ---------------- GET /api/partner/settlement-recommendation ----------------
 
-test('/settlement-recommendation: AC4 negative balance → you_pay_partner', async () => {
+test('/settlement-recommendation: AC4 positive balance → partner_pays_you', async () => {
   // Use a tight date window: only the May 2027 rows are in scope, with
   // no settlements in the window. partnerShareTotal=-230, no settlement →
-  // balance=-230, recommendation: you_pay_partner 230.
+  // balance=230, recommendation: partner_pays_you 230.
   const res = await agentA
     .get('/api/partner/settlement-recommendation')
     .query({ currency: 'CAD', dateFrom: '2027-05-01', dateTo: '2027-05-31' });
@@ -440,14 +441,14 @@ test('/settlement-recommendation: AC4 negative balance → you_pay_partner', asy
   }>;
   const cad = recs.find((r) => r.currency === 'CAD');
   assert.ok(cad);
-  assert.equal(cad.direction, 'you_pay_partner');
+  assert.equal(cad.direction, 'partner_pays_you');
   assert.equal(cad.amount, 230);
-  assert.equal(cad.outstandingBalance, -230);
+  assert.equal(cad.outstandingBalance, 230);
 });
 
 test('/settlement-recommendation: positive balance → partner_pays_you', async () => {
   // New unique date window with a settlement large enough to flip balance positive.
-  // Seed: -50 shared → settle 200 i_paid_partner → balance = -50 + 200 = +150.
+  // Seed: partnerShare=-50 → settle 200 i_paid_partner → balance = -(-50) + 200 = 250.
   await createTxn({
     householdId: householdAId,
     accountId: accountAId,
@@ -481,7 +482,7 @@ test('/settlement-recommendation: positive balance → partner_pays_you', async 
   }>).find((r) => r.currency === 'CAD');
   assert.ok(cad);
   assert.equal(cad.direction, 'partner_pays_you');
-  assert.equal(cad.amount, 150);
+  assert.equal(cad.amount, 250);
 });
 
 test('/settlement-recommendation: zero balance → direction none', async () => {
@@ -649,14 +650,14 @@ test('/fairness: #375 AC4 excludeNonPartnerInflows=true drops non-partner inflow
   assert.equal(cadOn.sharedTransactionCount, 1);
   // partnerShareTotal = 250 only (15 and 50 dropped).
   assert.equal(cadOn.partnerShareTotal, 250);
-  // balance reflects cleaned set: 250 + 0 settlements = 250.
-  assert.equal(cadOn.balance, 250);
+  // balance reflects cleaned set: -250 + 0 settlements = -250.
+  assert.equal(cadOn.balance, -250);
 });
 
 test('/settlement-recommendation: #375 toggle ON flips the recommendation total', async () => {
   // Reuse the same 2031-02 seeds. Toggle ON: partnerShareTotal=250, no
-  // settlements → recommendation amount=250 partner_pays_you. Toggle OFF:
-  // partnerShareTotal=315 → recommendation amount=315.
+  // settlements → balance=-250, recommendation amount=250 you_pay_partner. Toggle OFF:
+  // partnerShareTotal=315 → balance=-315, recommendation amount=315 you_pay_partner.
   const on = await agentA
     .get('/api/partner/settlement-recommendation')
     .query({
@@ -672,7 +673,7 @@ test('/settlement-recommendation: #375 toggle ON flips the recommendation total'
     direction: string;
   }>).find((r) => r.currency === 'CAD');
   assert.ok(onCad);
-  assert.equal(onCad.direction, 'partner_pays_you');
+  assert.equal(onCad.direction, 'you_pay_partner');
   assert.equal(onCad.amount, 250);
 
   const off = await agentA
@@ -690,7 +691,7 @@ test('/settlement-recommendation: #375 toggle ON flips the recommendation total'
     direction: string;
   }>).find((r) => r.currency === 'CAD');
   assert.ok(offCad);
-  assert.equal(offCad.direction, 'partner_pays_you');
+  assert.equal(offCad.direction, 'you_pay_partner');
   assert.equal(offCad.amount, 315);
 });
 
@@ -724,6 +725,35 @@ test('/fairness: #375 toggle default falls back to CashflowSettings (defaults tr
     .query({ currency: 'CAD', dateFrom: '2031-02-01', dateTo: '2031-02-28' });
   assert.equal(res.status, 200);
   assert.equal(res.body.excludeNonPartnerInflows, true);
+});
+
+test('partner direct transfer nets into fairness balance (period-scoped)', async () => {
+  const models = await import('../../src/models');
+  const partner = await models.Contact.create({
+    householdId: householdAId,
+    name: 'Fairness Partner',
+    isPartner: true,
+  });
+  // Partner sent me 2000 in an isolated window; pure transfer (split 'me', partnerShare 0).
+  await createTxn({
+    householdId: householdAId, accountId: accountAId, date: '2027-03-10',
+    amount: 2000, currency: 'CAD', merchantRaw: 'Cash received', txnType: 'transfer',
+    finalSplitType: 'me', myShareAmount: 2000, partnerShareAmount: 0,
+    counterpartyContactId: partner.id,
+  });
+
+  const res = await agentA
+    .get('/api/partner/fairness')
+    .query({ dateFrom: '2027-03-01', dateTo: '2027-03-31', currency: 'CAD' });
+  assert.equal(res.status, 200);
+  const cad = (res.body.byCurrency as Array<{
+    currency: string;
+    balance: number;
+    partnerTransfers: { in: number; out: number };
+  }>).find((c) => c.currency === 'CAD');
+  assert.ok(cad, `expected CAD entry: ${JSON.stringify(res.body.byCurrency)}`);
+  assert.deepEqual(cad.partnerTransfers, { in: 2000, out: 0 });
+  assert.equal(cad.balance, -2000, 'partner-sent money reduces balance (I owe partner)');
 });
 
 test('/fairness: #375 override query param wins over CashflowSettings', async () => {

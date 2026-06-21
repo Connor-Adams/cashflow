@@ -2,7 +2,7 @@ import { D, Decimal, sumD, maxZero } from '../util/decimal';
 import type { CorpTaxYearFacts, CorpTaxReturn, RateTable, TaxLine } from './types';
 import { computeAaii } from './aaii';
 import { sbdEligibleIncome } from './sbd';
-import { computeIntegration } from './integration';
+import { computeIntegration, isConnectedSource } from './integration';
 
 export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   const warnings: string[] = [];
@@ -35,42 +35,80 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   // Investment income — taxable
   const interest = sumD(facts.investmentIncome.interest.map(i => i.cadAmount));
   const rent = sumD(facts.investmentIncome.rentNet.map(i => i.cadAmount));
-  const nonElDivReceived = sumD(facts.investmentIncome.nonEligibleDividends.map(i => i.cadAmount));
-  // Eligible dividends received from non-connected corps are subject to Part IV but treated as taxable investment income at corp level
-  const elDivReceived = sumD(facts.investmentIncome.eligibleDividends.map(i => i.cadAmount));
+  // s.112(1): taxable dividends from connected corporations (intercorp
+  // source-tagged) are deducted in computing taxable income — they bear no
+  // Part I tax (Part IV / RDTOH is their regime, handled in computeIntegration).
+  // Portfolio dividends are KEPT in Part I investment income as a documented
+  // simplification: the engine taxes them at investment rates in lieu of
+  // levying actual Part IV tax, while the matching 38.33% accrues to RDTOH.
+  const connectedDivsReceived = sumD(
+    facts.investmentIncome.eligibleDividends.filter(isConnectedSource).map(i => i.cadAmount),
+  ).plus(sumD(
+    facts.investmentIncome.nonEligibleDividends.filter(isConnectedSource).map(i => i.cadAmount),
+  ));
+  const nonElDivReceived = sumD(
+    facts.investmentIncome.nonEligibleDividends.filter(i => !isConnectedSource(i)).map(i => i.cadAmount),
+  );
+  const elDivReceived = sumD(
+    facts.investmentIncome.eligibleDividends.filter(i => !isConnectedSource(i)).map(i => i.cadAmount),
+  );
   const investmentTaxableIncome = interest.plus(rent).plus(nonElDivReceived).plus(elDivReceived);
   push('L440', 'Investment taxable income', investmentTaxableIncome);
+  if (connectedDivsReceived.greaterThan(0)) {
+    push('L320', 'Taxable dividends deductible under s.112 (connected corps)', connectedDivsReceived);
+  }
 
-  // Taxable capital gains
+  // Taxable capital gains — corps use the high rate (66.67%) on ALL gains
   const grossGains = sumD(facts.capitalGainEvents.map(e => e.proceeds.minus(e.acb).minus(e.outlays)));
-  const includableGains = maxZero(grossGains.times(r.capitalGainsInclusion));
+  const corpInclusionRate = r.capitalGainsInclusionHigh ?? r.capitalGainsInclusion;
+  const includableGains = maxZero(grossGains.times(corpInclusionRate));
   push('L445', 'Taxable capital gains', includableGains);
 
-  // Taxable income
-  const taxableIncome = sbd.eligible.plus(sbd.generalRate).plus(investmentTaxableIncome).plus(includableGains)
-    .minus(facts.carryforwards.nonCapLoss).minus(facts.carryforwards.netCapitalLoss);
-  push('L300T', 'Taxable income', maxZero(taxableIncome));
+  // Taxable income — net capital losses (s.111(1)(b)) only deduct against
+  // taxable capital gains; non-capital losses (s.111(1)(a)) against any income.
+  const netCapitalLossApplied = Decimal.min(facts.carryforwards.netCapitalLoss, includableGains);
+  const taxableIncome = maxZero(
+    sbd.eligible.plus(sbd.generalRate).plus(investmentTaxableIncome).plus(includableGains)
+      .minus(facts.carryforwards.nonCapLoss).minus(netCapitalLossApplied),
+  );
+  push('L300T', 'Taxable income', taxableIncome);
+
+  // Allocate taxable income to the rate pools so loss carryforwards flow into
+  // the tax calc (losses displace general-rate income first, then investment
+  // income, then SBD income — mirroring the statutory residuals):
+  // - SBD applies to the least of ABI, taxable income, business limit (s.125(1))
+  // - investment-rate income is capped at taxable income minus the SBD amount (s.123.3)
+  // - general-rate income is the residual
+  const sbdTaxBase = Decimal.min(sbd.eligible, taxableIncome);
+  const aiiTaxBase = Decimal.min(
+    investmentTaxableIncome.plus(includableGains).minus(netCapitalLossApplied),
+    taxableIncome.minus(sbdTaxBase),
+  );
+  const generalTaxBase = taxableIncome.minus(sbdTaxBase).minus(aiiTaxBase);
 
   // Federal tax
-  const fedSbdTax = sbd.eligible.times(r.corpAbiSbdRateFederal);
-  const fedGeneralTax = sbd.generalRate.times(r.corpGeneralRateFederal);
-  const fedInvestmentTax = investmentTaxableIncome.plus(includableGains).times(r.corpInvestmentRateFederal);
+  const fedSbdTax = sbdTaxBase.times(r.corpAbiSbdRateFederal);
+  const fedGeneralTax = generalTaxBase.times(r.corpGeneralRateFederal);
+  const fedInvestmentTax = aiiTaxBase.times(r.corpInvestmentRateFederal);
   const federalTax = fedSbdTax.plus(fedGeneralTax).plus(fedInvestmentTax);
   push('L700F', 'Federal tax', federalTax);
 
   // ON tax
-  const onSbdTax = sbd.eligible.times(r.corpAbiSbdRateOntario);
-  const onGeneralTax = sbd.generalRate.times(r.corpGeneralRateOntario);
-  const onInvestmentTax = investmentTaxableIncome.plus(includableGains).times(r.corpInvestmentRateOntario);
+  const onSbdTax = sbdTaxBase.times(r.corpAbiSbdRateOntario);
+  const onGeneralTax = generalTaxBase.times(r.corpGeneralRateOntario);
+  const onInvestmentTax = aiiTaxBase.times(r.corpInvestmentRateOntario);
   const provincialTax = onSbdTax.plus(onGeneralTax).plus(onInvestmentTax);
   push('L700P', 'Ontario corporate tax', provincialTax);
 
-  // Refundable tax on AII (added to NERDTOH)
-  const refundableTaxOnAii = investmentTaxableIncome.times(r.corpRefundableTaxOnAII);
+  // Refundable tax on AII (added to NERDTOH) — base includes taxable capital
+  // gains and is capped by the loss deductions above (via aiiTaxBase)
+  const refundableTaxOnAii = aiiTaxBase.times(r.corpRefundableTaxOnAII);
   push('L450', 'Refundable Part I tax on investment income', refundableTaxOnAii);
 
-  // Integration: GRIP, CDA, RDTOH additions, dividend refund
-  const integ = computeIntegration(facts, sbd.generalRate, r);
+  // Integration: GRIP, CDA, RDTOH additions, dividend refund. GRIP is computed
+  // on the POST-loss general-rate residual (s.89(1) "adjusted taxable income"
+  // starts from Division C taxable income), not the pre-loss sbd.generalRate.
+  const integ = computeIntegration(facts, generalTaxBase, r);
   push('L500', 'GRIP addition', integ.gripAddition);
   push('L501', 'CDA addition', integ.cdaAddition);
   push('L502', 'ERDTOH addition', integ.erdtohAddition);
@@ -92,8 +130,15 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
     .plus(openingGripBoost)
     .minus(sumD(facts.dividendsPaid.filter(d => d.kind === 'eligible').map(d => d.amount)));
   const cdaEnding = facts.carryforwards.cda.plus(integ.cdaAddition);
-  const erdtohEnding = facts.carryforwards.erdtoh.plus(integ.erdtohAddition); // refund subtracted below
-  const nerdtohEnding = facts.carryforwards.nerdtoh.plus(integ.nerdtohAddition);
+  // Pools roll forward by what was actually DRAWN from each (s.129(1)):
+  // ERDTOH funds the eligible refund plus any non-eligible overflow; NERDTOH
+  // funds only the non-eligible base refund.
+  const erdtohEnding = maxZero(
+    facts.carryforwards.erdtoh.plus(integ.erdtohAddition).minus(integ.erdtohConsumed),
+  );
+  const nerdtohEnding = maxZero(
+    facts.carryforwards.nerdtoh.plus(integ.nerdtohAddition).minus(integ.nerdtohConsumed),
+  );
 
   return {
     fiscalYear: facts.fiscalYear,
@@ -103,7 +148,7 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
       sbdEligibleIncome: sbd.eligible,
       generalRateIncome: sbd.generalRate,
       aii: aaii,
-      taxableIncome: maxZero(taxableIncome),
+      taxableIncome,
       federalTax,
       provincialTax,
       refundableTaxOnAii,
@@ -111,7 +156,7 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
       netTaxPayable,
       gripEnding: maxZero(gripEnding),
       cdaEnding,
-      erdtohEnding: maxZero(erdtohEnding.minus(integ.dividendRefund)),
+      erdtohEnding,
       nerdtohEnding,
     },
     warnings,

@@ -1,28 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Rectangle, ResponsiveContainer, Sankey, Tooltip } from 'recharts'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import { EmptyState } from '@/components/ui/empty-state'
+import { Alert } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card, CardContent, CardHeader, CardTitle } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
+import { StatCard } from '@connor-adams/designsystem'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { getJson } from '../lib/api'
 import {
   fromDateInputValue,
+  getRelativeDateRange,
   toDateInputValue,
   todayDateInputValue,
 } from '../lib/dateInput'
@@ -45,11 +36,11 @@ const DEFAULT_CURRENCY = 'CAD'
  * recharts components use so the Sankey feels like the rest of the app.
  */
 const NODE_COLORS: Record<SankeyNodeType['kind'], string> = {
-  income: '#10b981', // emerald — money in
-  category: '#3b82f6', // blue — typical spend
-  business: '#8b5cf6', // violet — deductible business spend
-  savings: '#06b6d4', // cyan — savings & investments (future use)
-  uncategorized: '#9ca3af', // slate — needs review
+  income: 'var(--chart-income)',
+  category: 'var(--chart-category)',
+  business: 'var(--chart-business-alt)',
+  savings: 'var(--chart-savings)',
+  uncategorized: 'var(--chart-uncategorized)',
 }
 
 /**
@@ -64,13 +55,6 @@ function localTodayUtcMidnight(): Date {
   return value ?? new Date()
 }
 
-function getRelativeRange(days: number): { from: string; to: string } {
-  const to = localTodayUtcMidnight()
-  const from = new Date(to)
-  from.setUTCDate(from.getUTCDate() - days)
-  return { from: toDateInputValue(from), to: toDateInputValue(to) }
-}
-
 function getYearToDate(): { from: string; to: string } {
   const to = localTodayUtcMidnight()
   const from = new Date(Date.UTC(to.getUTCFullYear(), 0, 1))
@@ -78,10 +62,10 @@ function getYearToDate(): { from: string; to: string } {
 }
 
 const QUICK_RANGES: QuickRange[] = [
-  { key: '30d', label: 'Last 30 days', ...getRelativeRange(30) },
-  { key: '90d', label: 'Last 90 days', ...getRelativeRange(90) },
+  { key: '30d', label: 'Last 30 days', ...getRelativeDateRange(30) },
+  { key: '90d', label: 'Last 90 days', ...getRelativeDateRange(90) },
   { key: 'ytd', label: 'Year to date', ...getYearToDate() },
-  { key: '365d', label: 'Last 12 months', ...getRelativeRange(365) },
+  { key: '365d', label: 'Last 12 months', ...getRelativeDateRange(365) },
   { key: 'all', label: 'All time', from: '', to: '' },
 ]
 
@@ -216,42 +200,32 @@ export function SankeyPage() {
       />
 
       {err ? (
-        <Card className="mt-4">
-          <CardContent>
-            <p role="alert" className="muted">
-              {err}
-            </p>
-          </CardContent>
-        </Card>
+        <Alert variant="error" className="mt-4">
+          {err}
+        </Alert>
       ) : null}
 
       <section className="mt-4 grid gap-3 sm:grid-cols-3">
-        <article className="card statCard">
-          <p className="statLabel">Total income</p>
-          <p className="statValue">
-            {data ? formatMoney(data.totalIncome, currency) : '—'}
-          </p>
-          <p className="muted statHint">
-            Money labelled <code>income</code> for this currency + date range.
-          </p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Total spend</p>
-          <p className="statValue">
-            {data ? formatMoney(data.totalSpend, currency) : '—'}
-          </p>
-          <p className="muted statHint">
-            Sum of category outflows after refund netting. Excludes
-            transfers, investments, and dividends.
-          </p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Transactions</p>
-          <p className="statValue">{data ? data.transactionCount : '—'}</p>
-          <p className="muted statHint">
-            Rows that contributed to the chart (post-filter).
-          </p>
-        </article>
+        <StatCard
+          label="Total income"
+          value={data ? formatMoney(data.totalIncome, currency) : '—'}
+          hint={
+            <>
+              Money labelled <code>income</code> for this currency + date
+              range.
+            </>
+          }
+        />
+        <StatCard
+          label="Total spend"
+          value={data ? formatMoney(data.totalSpend, currency) : '—'}
+          hint="Sum of category outflows after refund netting. Excludes transfers, investments, and dividends."
+        />
+        <StatCard
+          label="Transactions"
+          value={data ? data.transactionCount : '—'}
+          hint="Rows that contributed to the chart (post-filter)."
+        />
       </section>
 
       <Card className="mt-4">
@@ -260,7 +234,7 @@ export function SankeyPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="muted">Loading…</p>
+            <p className="text-sm leading-6 text-muted-foreground">Loading…</p>
           ) : showEmpty ? (
             <EmptyState
               title="No flows for this filter"
@@ -305,20 +279,27 @@ export function SankeyPage() {
       {drill ? (
         <Dialog
           open
-          onOpenChange={(open) => {
-            if (!open) closeDrill()
-          }}
+          onClose={closeDrill}
+          title={<>{drill.label}</>}
+          footer={
+            <>
+              <Button type="button" variant="outline" onClick={closeDrill}>
+                Close
+              </Button>
+            </>
+          }
         >
-          <DialogHeader>
-            <DialogTitle>{drill.label}</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
             {drillErr ? (
-              <p role="alert" className="muted">
+              <p
+                role="alert"
+                className="text-sm leading-6 text-muted-foreground"
+              >
                 {drillErr}
               </p>
             ) : drillLoading ? (
-              <p className="muted">Loading transactions…</p>
+              <p className="text-sm leading-6 text-muted-foreground">
+                Loading transactions…
+              </p>
             ) : drillRows.length === 0 ? (
               <EmptyState
                 title="No source transactions"
@@ -326,7 +307,7 @@ export function SankeyPage() {
               />
             ) : (
               <>
-                <p className="muted mb-2">
+                <p className="mb-2 text-sm leading-6 text-muted-foreground">
                   {drillTotalCount.toLocaleString()} transaction
                   {drillTotalCount === 1 ? '' : 's'} contributed to this flow.
                   {drillTruncated
@@ -349,10 +330,15 @@ export function SankeyPage() {
                         <TableCell>{row.merchant}</TableCell>
                         <TableCell>
                           {row.finalCategory ?? (
-                            <span className="muted">Uncategorized</span>
+                            <span className="text-xs text-muted-foreground">
+                              Uncategorized
+                            </span>
                           )}
                           {row.finalBusiness ? (
-                            <span className="muted"> (business)</span>
+                            <span className="text-xs text-muted-foreground">
+                              {' '}
+                              (business)
+                            </span>
                           ) : null}
                         </TableCell>
                         <TableCell className="text-right">
@@ -364,12 +350,6 @@ export function SankeyPage() {
                 </Table>
               </>
             )}
-          </DialogBody>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={closeDrill}>
-              Close
-            </Button>
-          </DialogFooter>
         </Dialog>
       ) : null}
     </div>
@@ -412,7 +392,7 @@ function SankeyNode({
         height={height}
         fill={fill}
         fillOpacity={0.95}
-        stroke="#0f172a"
+        stroke="var(--chart-link-stroke)"
         strokeOpacity={0.2}
       />
       <text
@@ -482,7 +462,7 @@ function SankeyLinkPath({
     <path
       d={d}
       fill="none"
-      stroke="#3b82f6"
+      stroke="var(--chart-category)"
       strokeOpacity={0.35}
       strokeWidth={linkWidth}
       onClick={handleClick}

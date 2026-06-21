@@ -15,10 +15,6 @@ import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from '../_setup/pgTest
 
 const activeDbs = new Map<string, PgTestDb>();
 
-export interface ChatTestModels {
-  models: typeof import('../../../src/models/index.js');
-}
-
 export async function setupChatTestDb(dbBasename: string): Promise<{
   models: typeof import('../../../src/models/index.js');
   dbPath: string;

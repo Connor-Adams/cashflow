@@ -3,16 +3,17 @@
  * `PlannedEventsPage` and `CalendarPage`. Lives in its own file so the
  * react-refresh lint rule stays happy (components-only export per file).
  */
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { NativeSelect } from '@/components/ui/native-select'
-import { Textarea } from '@/components/ui/textarea'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
+import { Textarea } from '@connor-adams/designsystem'
 import type { Account, PlannedEventStatus, PlannedEventType } from '../../types/api'
 import {
   PLANNED_EVENT_STATUS_OPTIONS,
   PLANNED_EVENT_TYPE_OPTIONS,
   type FormState,
 } from './plannedEventForm'
+import { RecurrencePicker } from './RecurrencePicker'
 
 type PlannedEventFormFieldsProps = {
   form: FormState
@@ -30,7 +31,7 @@ export function PlannedEventFormFields({
   showStatus,
 }: PlannedEventFormFieldsProps) {
   return (
-    <div className="formGrid">
+    <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
       <Label htmlFor={`${idPrefix}-type`}>
         Type
         <NativeSelect
@@ -126,13 +127,13 @@ export function PlannedEventFormFields({
       </Label>
       <Label htmlFor={`${idPrefix}-recurrence`}>
         Recurrence rule (optional)
-        <Input
+        <RecurrencePicker
           id={`${idPrefix}-recurrence`}
           value={form.recurrenceRule}
-          onChange={(e) =>
-            setForm((prev) => ({ ...prev, recurrenceRule: e.target.value }))
+          expectedDate={form.expectedDate}
+          onChange={(rrule) =>
+            setForm((prev) => ({ ...prev, recurrenceRule: rrule }))
           }
-          placeholder="FREQ=MONTHLY;BYMONTHDAY=1"
         />
       </Label>
       {showStatus ? (

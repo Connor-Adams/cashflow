@@ -59,6 +59,48 @@ function daysBetween(a: string, b: string): number {
 }
 
 /**
+ * Count the number of weekdays (Mon–Fri) strictly between two dates (Sat/Sun
+ * are not counted). Holidays are NOT considered — Sat/Sun only.
+ *
+ * Examples:
+ *   Fri→Mon  (2025-06-06 → 2025-06-09) = 1 business day
+ *   Mon→Wed  (2025-06-02 → 2025-06-04) = 2 business days
+ *   Fri→Tue  (2025-06-06 → 2025-06-10) = 2 business days
+ *   Fri→Wed  (2025-06-06 → 2025-06-11) = 3 business days
+ *   same day                             = 0
+ */
+export function businessDaysBetween(a: Date | string, b: Date | string): number {
+  const toUTCMidnight = (d: Date | string) => {
+    if (typeof d === 'string') return new Date(`${d}T00:00:00Z`);
+    // floor to UTC midnight to strip any intra-day offset
+    const copy = new Date(d);
+    copy.setUTCHours(0, 0, 0, 0);
+    return copy;
+  };
+
+  let start = toUTCMidnight(a);
+  let end = toUTCMidnight(b);
+
+  // Always walk forward start→end
+  if (start > end) {
+    const tmp = start;
+    start = end;
+    end = tmp;
+  }
+
+  let count = 0;
+  // Step one day at a time from the day AFTER start, up to and including end
+  const cursor = new Date(start);
+  cursor.setUTCDate(cursor.getUTCDate() + 1);
+  while (cursor <= end) {
+    const dow = cursor.getUTCDay(); // 0=Sun, 6=Sat
+    if (dow !== 0 && dow !== 6) count++;
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return count;
+}
+
+/**
  * Hunt for an exact-merchant, opposite-sign, original-purchase candidate to
  * link a refund to. Skips candidates that are already linked by another
  * refund row — those are surfaced as suggested matches instead so the user
@@ -112,19 +154,24 @@ function findTransferSibling(input: DetectRelationshipsInput): RelationshipCandi
       .filter((c) => c.accountId !== input.accountId)
       .filter((c) => input.householdAccountIds.includes(c.accountId))
       .filter((c) => c.sourceReference != null && c.sourceReference === input.sourceReference)
-      .filter((c) => daysBetween(input.date, c.date) <= input.transferWindowDays)
-      .sort((a, b) => daysBetween(input.date, a.date) - daysBetween(input.date, b.date));
+      // Business-day window (matches the amount-equality path below) so a
+      // weekend-spanning FX pair (Fri-out / Mon-in = 1 business day, 3 calendar
+      // days) sharing a sourceReference still falls inside the default window.
+      .filter((c) => businessDaysBetween(input.date, c.date) <= input.transferWindowDays)
+      .sort((a, b) => businessDaysBetween(input.date, a.date) - businessDaysBetween(input.date, b.date));
     if (byRef[0]) return byRef[0];
   }
   // 2) Amount-equality fallback: same-currency transfers (e.g. RBC → WS) that
   // move identical amounts in opposite signs within the transfer window.
+  // Uses businessDaysBetween so that a Fri-out / Mon-in pair (1 business day,
+  // but 3 calendar days) still falls within the default 2-business-day window.
   const matches = input.candidates
     .filter((c) => c.accountId !== input.accountId)
     .filter((c) => input.householdAccountIds.includes(c.accountId))
     .filter((c) => Math.sign(c.amount) === -Math.sign(input.amount))
     .filter((c) => Math.abs(Math.abs(c.amount) - Math.abs(input.amount)) <= 0.01)
-    .filter((c) => daysBetween(input.date, c.date) <= input.transferWindowDays)
-    .sort((a, b) => daysBetween(input.date, a.date) - daysBetween(input.date, b.date));
+    .filter((c) => businessDaysBetween(input.date, c.date) <= input.transferWindowDays)
+    .sort((a, b) => businessDaysBetween(input.date, a.date) - businessDaysBetween(input.date, b.date));
   return matches[0] ?? null;
 }
 

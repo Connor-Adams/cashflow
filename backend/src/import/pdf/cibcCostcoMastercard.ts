@@ -171,10 +171,10 @@ function applySectionSign(magnitude: number, isCredit: boolean, section: CibcCos
   return isCredit ? abs : -abs;
 }
 
-function rowDateFromPost(postDate: string, period: Period): string {
-  const year = inferYearForMonthDay(postDate, period);
-  const m = /([A-Z][a-z]{2})\s+(\d{1,2})/.exec(postDate);
-  if (!m) throw new Error(`Unparseable post date: ${postDate}`);
+function rowDateFromMonthDay(monthDay: string, period: Period): string {
+  const year = inferYearForMonthDay(monthDay, period);
+  const m = /([A-Z][a-z]{2})\s+(\d{1,2})/.exec(monthDay);
+  if (!m) throw new Error(`Unparseable date: ${monthDay}`);
   const month = MONTHS[m[1]];
   if (month === undefined) throw new Error(`Unknown month abbreviation: ${m[1]}`);
   return toIso(year, month, Number(m[2]));
@@ -187,6 +187,10 @@ function rowDateFromPost(postDate: string, period: Period): string {
  * the LAST token on the line (decimal with optional CR / leading minus); the
  * description is everything in between, minus the spend-category column for
  * `charges` rows. We tokenize by run of 2+ spaces (the column separator).
+ *
+ * Dates by the TRANSACTION date (cols[0]), not the posting date (cols[1]) —
+ * matches amex.ts (commit c4778778) and the CIBC CSV export, so the dedup
+ * fingerprint lines up across PDF and CSV sources instead of double-counting.
  */
 export function parseCibcCostcoRow(
   rawLine: string,
@@ -206,7 +210,7 @@ export function parseCibcCostcoRow(
   if (!merchantRaw) {
     throw new Error(`CIBC Costco row: empty merchant after column extraction: ${JSON.stringify(rawLine)}`);
   }
-  const date = rowDateFromPost(cols[1], period);
+  const date = rowDateFromMonthDay(cols[0], period);
   const { magnitude, isCredit } = parseRowAmount(cols[cols.length - 1]);
   if (!Number.isFinite(magnitude)) {
     throw new Error(`CIBC Costco row has unparseable amount: ${JSON.stringify(cols[cols.length - 1])}`);
@@ -306,14 +310,19 @@ export const cibcCostcoMastercardParser: PdfParser = {
             currency: ctx.defaultCurrency,
             sourceReference: null,
           });
-          parsedSum += Math.abs(row.amount);
+          // Accumulate in the statement's own sign convention: the printed
+          // "Total for …" is NET (charges minus CR credits), and "payments"
+          // is the only section whose rows map to positive cashflow amounts.
+          // Summing absolute values would false-alarm on any CR credit and
+          // could never catch a sign-flip bug.
+          parsedSum += sec === 'payments' ? row.amount : -row.amount;
         } catch (err) {
           parseErrors.push({ rowIndex: i + 1, message: (err as Error).message });
         }
       }
       const total = sectionTotals[sec];
       if (total !== undefined) {
-        const diff = Math.abs(Math.abs(total) - parsedSum);
+        const diff = Math.abs(total - parsedSum);
         if (diff > 0.01) {
           warnings.push(
             `Section "${sec}" sum mismatch: parsed ${parsedSum.toFixed(2)} vs printed total ${total.toFixed(2)}`,

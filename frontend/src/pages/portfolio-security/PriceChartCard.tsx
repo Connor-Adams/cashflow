@@ -1,16 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Scatter,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+  CartesianGrid, Line, LineChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis, } from 'recharts'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
 import { getJson } from '../../lib/api'
 import { getAppConfig } from '../../lib/appConfig'
 import { formatMoney } from '../../lib/formatMoney'

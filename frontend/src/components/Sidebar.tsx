@@ -1,64 +1,15 @@
 import { useCallback, useMemo, useState, useEffect } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
-  BarChart3,
-  BookOpen,
-  BookOpenCheck,
-  FileCheck2,
-  Calculator,
-  CalendarClock,
-  CalendarDays,
-  CheckSquare,
-  ChevronDown,
-  Coins,
-  HandCoins,
-  Landmark,
-  Package,
-  PackageCheck,
-  PackageSearch,
-  CreditCard,
-  ClipboardCheck,
-  Droplet,
-  Filter,
-  Flame,
-  PiggyBank,
-  Globe,
-  Lightbulb,
-  LineChart,
-  LayoutDashboard,
-  Lock,
-  LogOut,
-  MessageSquare,
-  ReceiptText,
-  Repeat,
-  RefreshCw,
-  RotateCcw,
-  ArrowLeftRight,
-  Save,
-  Search,
-  Settings,
-  Shield,
-  Sparkles,
-  Stethoscope,
-  BriefcaseBusiness,
-  BadgeDollarSign,
-  Sun,
-  Moon,
-  GitCompare,
-  Target,
-  TrendingUp,
-  Undo2,
-  Upload,
-  Users,
-  Waypoints,
-} from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+  BarChart3, BookOpenCheck, CalendarClock, CheckSquare, ChevronDown, Receipt, CreditCard, Inbox, LineChart, LayoutDashboard, Lock, LogOut, MessageSquare, ReceiptText, DollarSign, Settings, Shield, Sun, Moon, GitCompare, HeartHandshake, Target, Calculator, Upload, PiggyBank, Sparkles, Tags, Users, } from 'lucide-react'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
 import { useAuth } from '../lib/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { useAiInboxCount } from '@/hooks/useAiInboxCount'
 import { useInsightsCount } from '@/hooks/useInsightsCount'
 import { useAiStatus } from '@/hooks/useAiStatus'
+import { useNavVisibility, type NavFeature } from '@/hooks/useNavVisibility'
 import { FRONTEND_VERSION, useBackendVersion } from '../lib/version'
 
 type NavItem = {
@@ -66,6 +17,7 @@ type NavItem = {
   label: string
   icon: typeof LayoutDashboard
   end?: boolean
+  visibilityKey?: NavFeature
 }
 
 type NavSection = {
@@ -80,10 +32,8 @@ const navSections: NavSection[] = [
     label: 'Today',
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-      { to: '/review', label: 'Review', icon: ClipboardCheck },
-      { to: '/ai/inbox', label: 'AI Inbox', icon: Sparkles },
+      { to: '/inbox', label: 'Inbox', icon: Inbox },
       { to: '/chat', label: 'Chat', icon: MessageSquare },
-      { to: '/ask', label: 'Ask Cashflow', icon: Search },
     ],
   },
   {
@@ -91,33 +41,23 @@ const navSections: NavSection[] = [
     label: 'Money',
     items: [
       { to: '/accounts', label: 'Accounts', icon: CreditCard },
+      { to: '/income', label: 'Income', icon: DollarSign, visibilityKey: 'income' },
       { to: '/transactions', label: 'Transactions', icon: ReceiptText },
-      { to: '/refunds', label: 'Refunds', icon: Undo2 },
-      { to: '/reimbursements', label: 'Reimbursements', icon: HandCoins },
-      { to: '/search', label: 'Smart search', icon: Filter },
-      { to: '/transfers', label: 'Transfers', icon: ArrowLeftRight },
-      { to: '/statements', label: 'Statements', icon: FileCheck2 },
-      { to: '/items', label: 'Items', icon: Package },
-      { to: '/purchases', label: 'Purchases', icon: PackageCheck },
+      { to: '/partner-home', label: 'Partner home', icon: HeartHandshake },
+      { to: '/receipts', label: 'Receipts', icon: Receipt },
       { to: '/import', label: 'Import', icon: Upload },
-      { to: '/recurring', label: 'Recurring', icon: Repeat },
-      { to: '/subscriptions', label: 'Subscriptions', icon: RefreshCw },
-      { to: '/return-warranty', label: 'Returns & warranties', icon: RotateCcw },
-      { to: '/large-purchases', label: 'Large purchases', icon: BadgeDollarSign },
-      { to: '/money-leaks', label: 'Money leaks', icon: Droplet },
     ],
   },
   {
     id: 'planning',
     label: 'Planning',
     items: [
-      { to: '/planned', label: 'Planned', icon: CalendarClock },
-      { to: '/calendar', label: 'Calendar', icon: CalendarDays },
-      { to: '/goals', label: 'Goals', icon: Target },
-      { to: '/forecast', label: 'Forecast', icon: TrendingUp },
-      { to: '/debt', label: 'Debt payoff', icon: Landmark },
-      { to: '/opportunity-cost', label: 'Opportunity cost', icon: Calculator },
-      { to: '/scenarios', label: 'Scenarios', icon: GitCompare },
+      { to: '/budgets', label: 'Budgets', icon: PiggyBank },
+      { to: '/planned', label: 'Planned', icon: CalendarClock, visibilityKey: 'planned' },
+      { to: '/planned/people', label: 'People', icon: Users },
+      { to: '/goals', label: 'Goals', icon: Target, visibilityKey: 'goals' },
+      { to: '/scenarios', label: 'Scenarios', icon: GitCompare, visibilityKey: 'scenarios' },
+      { to: '/scenarios/tax', label: 'Tax', icon: Calculator },
     ],
   },
   {
@@ -125,8 +65,6 @@ const navSections: NavSection[] = [
     label: 'Investments',
     items: [
       { to: '/portfolio', label: 'Portfolio', icon: LineChart },
-      { to: '/net-worth', label: 'Net worth', icon: Coins },
-      { to: '/amazon', label: 'Amazon', icon: PackageSearch },
     ],
   },
   {
@@ -134,29 +72,11 @@ const navSections: NavSection[] = [
     label: 'Insights & rules',
     items: [
       { to: '/rules', label: 'Rules', icon: BookOpenCheck },
-      { to: '/ai/reviews', label: 'AI Reviews', icon: Stethoscope },
-      { to: '/cfo/briefings', label: 'CFO briefing', icon: BriefcaseBusiness },
-      { to: '/insights', label: 'Insights', icon: Lightbulb },
+      { to: '/merchants/cleanup', label: 'Merchant cleanup', icon: Tags },
       { to: '/reports', label: 'Reports', icon: BarChart3 },
-      { to: '/reports/explain-month', label: 'Explain month', icon: BookOpen },
-      {
-        to: '/reports/lifestyle-inflation',
-        label: 'Lifestyle inflation',
-        icon: Flame,
-      },
-      {
-        to: '/reports/savings-rate',
-        label: 'Savings rate',
-        icon: PiggyBank,
-      },
-      { to: '/sankey', label: 'Cashflow', icon: Waypoints },
-      { to: '/audit-log', label: 'Audit log', icon: Shield },
-      { to: '/vault', label: 'Vault', icon: Lock },
-      { to: '/sync', label: 'Backup & sync', icon: Save },
-      { to: '/currency', label: 'Currency', icon: Globe },
+      { to: '/vault', label: 'Vault', icon: Lock, visibilityKey: 'vault' },
       { to: '/monthly-close', label: 'Monthly close', icon: CheckSquare },
-      { to: '/tax', label: 'Tax', icon: Calculator },
-      { to: '/partner', label: 'Partner', icon: Users },
+      { to: '/enrichment', label: 'Enrichment', icon: Sparkles },
     ],
   },
 ]
@@ -234,6 +154,7 @@ type SidebarProps = {
  */
 export function Sidebar({ open, onClose }: SidebarProps) {
   const aiStatus = useAiStatus()
+  const navVis = useNavVisibility()
   const { collapsed, toggle, expand } = useSidebarCollapsed()
   const location = useLocation()
 
@@ -251,12 +172,17 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   }, [location.pathname, expand])
 
   const filteredSections = useMemo<NavSection[]>(() => {
-    if (aiStatus?.openai === true) return navSections
-    return navSections.map((section) => ({
-      ...section,
-      items: section.items.filter((i) => i.to !== '/chat' && i.to !== '/ask'),
-    }))
-  }, [aiStatus])
+    return navSections
+      .map((section) => ({
+        ...section,
+        items: section.items.filter((i) => {
+          if (i.to === '/chat' && aiStatus?.openai !== true) return false
+          if (i.visibilityKey && !navVis[i.visibilityKey]) return false
+          return true
+        }),
+      }))
+      .filter((section) => section.items.length > 0)
+  }, [aiStatus, navVis])
 
   return (
     <aside
@@ -303,8 +229,7 @@ function SidebarNavSections({
   const { count: insightsCount } = useInsightsCount()
 
   function badgeFor(to: string): number {
-    if (to === '/ai/inbox') return aiInboxCount
-    if (to === '/insights') return insightsCount
+    if (to === '/inbox') return aiInboxCount + insightsCount
     return 0
   }
 
@@ -314,6 +239,7 @@ function SidebarNavSections({
         <div key={section.id} className="sidebar__section">
           <button
             type="button"
+            data-slot="sidebar-header"
             className="sidebar__sectionHeader"
             aria-expanded={!collapsed.has(section.id)}
             onClick={() => onToggle(section.id)}
@@ -393,7 +319,7 @@ function SidebarFooter() {
         variant="secondary"
         size="sm"
         onClick={() => void auth.logout()}
-        className="sidebar__logout"
+        className="sidebar__logout w-full justify-start gap-2"
       >
         <LogOut aria-hidden="true" />
         Log out
@@ -407,7 +333,7 @@ function SidebarVersion() {
   const backend = useBackendVersion()
   const backendVersion =
     backend.status === 'ok' ? backend.version : backend.status === 'loading' ? '…' : '?'
-  const drift = backend.status === 'ok' && backend.version !== FRONTEND_VERSION
+  const drift = import.meta.env.DEV && backend.status === 'ok' && backend.version !== FRONTEND_VERSION
   return (
     <div className="sidebar__version" data-drift={drift} aria-label="Build versions">
       <span className="sidebar__versionRow">
@@ -433,13 +359,13 @@ function ThemeToggleButton() {
   const targetLabel = isDark ? 'light' : 'dark'
   return (
     <Button
-      variant="ghost"
+      variant="secondary"
       size="sm"
       onClick={toggleTheme}
       title={`Switch to ${targetLabel} mode`}
       aria-label={`Switch to ${targetLabel} theme`}
       aria-pressed={isDark}
-      className="sidebar__themeToggle"
+      className="sidebar__themeToggle w-full justify-start gap-2"
     >
       {isDark ? <Sun size={18} /> : <Moon size={18} />}
       <span>{isDark ? 'Light mode' : 'Dark mode'}</span>

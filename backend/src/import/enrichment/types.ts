@@ -1,8 +1,3 @@
-import type { Account } from '../../models/Account';
-import type { ExternalOrder } from '../../models/ExternalOrder';
-import type { ExternalOrderItem } from '../../models/ExternalOrderItem';
-import type { RuleRow } from '../applyRules';
-
 export type Confidence = 'high' | 'medium' | 'low';
 
 export type SignalSource =
@@ -17,6 +12,7 @@ export type SignalSource =
   | 'refund-link'
   | 'refund-link-suggested'
   | 'transfer-link'
+  | 'embedding'
   | 'ai';
 
 export type TxnType =
@@ -29,6 +25,7 @@ export type TxnType =
   | 'reward'
   | 'investment'
   | 'dividend'
+  | 'income'
   | 'unknown';
 
 export type SignalFields = Partial<{
@@ -52,29 +49,25 @@ export interface Signal {
   confidence: Confidence;
   fields: SignalFields;
   rationale?: string;
+  /**
+   * Set only by the item-link stage: the concrete order match to persist as a
+   * suggested TransactionOrderLink at import/backfill time. Ignored by
+   * mergeSignals (not in AUTO_FIELD_KEYS) and by TransactionSignal storage.
+   */
+  orderLink?: { externalOrderId: number; confidence: number; matchReason: string };
+  /**
+   * Set only by the apply-rule stage (issue #795): the matched rule's id and
+   * its `set_label` / `set_alert` actions, to be applied as side-effects
+   * (TransactionLabel insert / Notification enqueue) at persist time. Ignored
+   * by mergeSignals and TransactionSignal storage — mirrors `orderLink`.
+   */
+  ruleActions?: {
+    ruleId: number;
+    labelIds: number[];
+    alerts: Array<{ severity: import('../../models/Notification').NotificationSeverity; title?: string; body?: string }>;
+  };
 }
 
-export interface PendingEnrichedTxn {
-  date: string;
-  merchantRaw: string;
-  merchantClean: string;
-  merchantCanonical: string | null;
-  amount: number;
-  currency: string;
-  txnType: TxnType;
-  signals: Signal[];
-  /** id once saved; null while still in-flight */
-  savedId: number | null;
-}
-
-export interface EnrichmentContext {
-  account: Account;
-  householdId: number | null;
-  rulesCache: RuleRow[];
-  amazonOrdersCache: Array<ExternalOrder & { items?: ExternalOrderItem[] }>;
-  /** Rows already processed in this import (saved or deferred). Used for refund/transfer linking. */
-  inFlightBatch: PendingEnrichedTxn[];
-}
 
 export interface EnrichmentResultFields {
   merchantClean: string;

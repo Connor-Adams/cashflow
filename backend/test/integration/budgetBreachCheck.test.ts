@@ -14,6 +14,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -158,7 +159,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -170,7 +171,7 @@ before(async () => {
   primaryHouseholdId = primary.householdId;
   primaryAccountId = primary.accountId;
   primaryUserId = primary.userId;
-  primaryAgent = request.agent(app);
+  primaryAgent = testAgent(app);
   primaryAgent.jar.setCookie(`cashflow_session=${primary.token}; Path=/`);
 });
 
@@ -429,9 +430,10 @@ test('muted budget.breach preference suppresses the in-app row', async () => {
   await createBudget({ category: 'Lunch', amount: 100 });
   await spend(primaryHouseholdId, primaryAccountId, currentMonthDate(15), 'Lunch', -85);
 
-  // Mute the channel before running the cron.
+  // Mute the channel before running the cron. Preferences moved under the
+  // user namespace in issue #379.
   const muteRes = await primaryAgent
-    .patch('/api/notification-preferences/budget.breach')
+    .patch('/api/users/me/notifications/preferences/budget.breach')
     .send({ channelInApp: false });
   assert.equal(muteRes.status, 200);
 

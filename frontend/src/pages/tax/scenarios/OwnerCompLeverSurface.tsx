@@ -30,12 +30,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCorpScenarioDetail } from '@/hooks/useCorpScenarioDetail';
 import { useCorpScenarios } from '@/hooks/useCorpScenarios';
 import {
-  useHouseholdPlanCompute,
-  type HouseholdPlanComputeResult,
-  type IntegrationWarning,
-  type PersonalScenarioComputeEntry,
-} from '@/hooks/useHouseholdPlanCompute';
+  useHouseholdPlanCompute, type HouseholdPlanComputeResult, type IntegrationWarning, type PersonalScenarioComputeEntry, } from '@/hooks/useHouseholdPlanCompute';
 import { fmtCurrency, fmtPct, numericOrZero, sumNumeric } from '../util/format';
+import { StatCard } from '@connor-adams/designsystem';
+import {
+  Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 
 const FIELDS = [
   { key: 'salary', label: 'Salary' },
@@ -206,20 +205,20 @@ export function OwnerCompLeverSurface({
   );
 
   if (corpDetail.error) {
-    return <p className="text-red-600">Failed to load corp scenario: {corpDetail.error}</p>;
+    return <p className="text-danger">Failed to load corp scenario: {corpDetail.error}</p>;
   }
   if (planCompute.error) {
-    return <p className="text-red-600">Failed to load household compute: {planCompute.error}</p>;
+    return <p className="text-danger">Failed to load household compute: {planCompute.error}</p>;
   }
   if (corpDetail.loading || !corpDetail.data || !values) {
-    return <p className="text-gray-500">Loading owner comp surface…</p>;
+    return <p className="text-muted-foreground">Loading owner comp surface…</p>;
   }
 
   return (
     <div className="flex flex-col gap-6">
       <header>
         <h3 className="text-lg font-semibold">Owner compensation levers</h3>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-muted-foreground">
           Slide each lever to see the corp + personal + integrated household tax
           recompute live. Each edit writes an{' '}
           <code>ownerComp.&lt;id&gt;.&lt;field&gt;</code> override on the active
@@ -229,7 +228,7 @@ export function OwnerCompLeverSurface({
 
       <div className="flex flex-col gap-4">
         {shareholderEntityIds.length === 0 ? (
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted-foreground">
             No shareholders linked to this plan yet. Link a personal scenario to
             this household plan to enable owner comp distribution.
           </p>
@@ -265,10 +264,10 @@ interface ShareholderCardProps {
 function ShareholderCard({ shareholderEntityId, values, onChange }: ShareholderCardProps) {
   const total = FIELDS.reduce((sum, f) => sum + (values[f.key] ?? 0), 0);
   return (
-    <section className="rounded-md border border-gray-200 p-4">
+    <section className="rounded-md border border-border p-4">
       <header className="mb-3 flex items-baseline justify-between">
         <h4 className="font-medium">Shareholder #{shareholderEntityId}</h4>
-        <span className="text-xs text-gray-500">Total: {fmtCurrency(total)}</span>
+        <span className="text-xs text-muted-foreground">Total: {fmtCurrency(total)}</span>
       </header>
       <div className="flex flex-col gap-2">
         {FIELDS.map((f) => (
@@ -312,7 +311,7 @@ function SliderRow({ label, value, onChange }: SliderRowProps) {
           const n = Number(e.target.value);
           onChange(Number.isFinite(n) ? n : 0);
         }}
-        className="rounded border border-gray-300 px-2 py-1 text-sm"
+        className="rounded border px-2 py-1 text-sm"
         aria-label={`${label} amount`}
       />
     </div>
@@ -337,8 +336,8 @@ function IntegratedSummary({ loading, data, shareholderEntityIds }: IntegratedSu
 
 function IntegratedSummaryShell({ children }: { children: React.ReactNode }) {
   return (
-    <section className="rounded-md border border-gray-200 p-4">
-      <p className="text-sm text-gray-500">{children}</p>
+    <section className="rounded-md border border-border p-4">
+      <p className="text-sm text-muted-foreground">{children}</p>
     </section>
   );
 }
@@ -378,25 +377,23 @@ function IntegratedSummaryReady({
   const integratedRate = totalRouted > 0 ? totalTax / totalRouted : NaN;
 
   return (
-    <section className="rounded-md border border-gray-200 p-4">
+    <section className="rounded-md border border-border p-4">
       <h4 className="mb-3 font-medium">Integrated summary</h4>
 
       <div className="mb-4">
-        <h5 className="text-sm font-semibold">Corp side</h5>
-        <table className="w-full text-sm">
-          <tbody>
-            <SummaryRow label="T2 federal tax" value={fmtCurrency(corpFederal)} />
-            <SummaryRow label="T2 provincial tax" value={fmtCurrency(corpProvincial)} />
-            <SummaryRow label="Dividend refund" value={fmtCurrency(corpDividendRefund)} />
-            <SummaryRow label="Net corp tax payable" value={fmtCurrency(corpNetTax)} strong />
-          </tbody>
-        </table>
+        <h5 className="mb-2 text-sm font-semibold">Corp side</h5>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <StatCard label="T2 federal tax" value={fmtCurrency(corpFederal)} />
+          <StatCard label="T2 provincial tax" value={fmtCurrency(corpProvincial)} />
+          <StatCard label="Dividend refund" value={fmtCurrency(corpDividendRefund)} />
+          <StatCard label="Net corp tax payable" value={fmtCurrency(corpNetTax)} />
+        </div>
       </div>
 
       <div className="mb-4">
         <h5 className="text-sm font-semibold">Personal side</h5>
         {shareholderEntityIds.length === 0 ? (
-          <p className="text-xs text-gray-500">No shareholders.</p>
+          <p className="text-xs text-muted-foreground">No shareholders.</p>
         ) : (
           <PersonalSideTable
             data={data}
@@ -407,15 +404,13 @@ function IntegratedSummaryReady({
       </div>
 
       <div>
-        <h5 className="text-sm font-semibold">Integration</h5>
-        <table className="w-full text-sm">
-          <tbody>
-            <SummaryRow label="Total routed to shareholders" value={fmtCurrency(totalRouted)} />
-            <SummaryRow label="Total tax (corp + personal)" value={fmtCurrency(totalTax)} />
-            <SummaryRow label="Total take-home" value={fmtCurrency(takeHome)} strong />
-            <SummaryRow label="Integrated tax rate" value={fmtPct(integratedRate)} strong />
-          </tbody>
-        </table>
+        <h5 className="mb-2 text-sm font-semibold">Integration</h5>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <StatCard label="Total routed to shareholders" value={fmtCurrency(totalRouted)} />
+          <StatCard label="Total tax (corp + personal)" value={fmtCurrency(totalTax)} />
+          <StatCard label="Total take-home" value={fmtCurrency(takeHome)} />
+          <StatCard label="Integrated tax rate" value={fmtPct(integratedRate)} />
+        </div>
       </div>
     </section>
   );
@@ -444,19 +439,19 @@ function PersonalSideTable({
   personalByEntity,
 }: PersonalSideTableProps) {
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="text-left text-xs text-gray-500">
-          <th className="py-1 pr-2">Shareholder</th>
-          <th className="py-1 pr-2">Employment</th>
-          <th className="py-1 pr-2">Dividends</th>
-          <th className="py-1 pr-2">Fed tax</th>
-          <th className="py-1 pr-2">Prov tax</th>
-          <th className="py-1 pr-2">CPP</th>
-          <th className="py-1 pr-2">Net to shareholder</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table className="w-full text-sm">
+      <TableHeader>
+        <TableRow className="text-xs text-muted-foreground">
+          <TableHead className="py-1 pr-2">Shareholder</TableHead>
+          <TableHead className="py-1 pr-2 text-right">Employment</TableHead>
+          <TableHead className="py-1 pr-2 text-right">Dividends</TableHead>
+          <TableHead className="py-1 pr-2 text-right">Fed tax</TableHead>
+          <TableHead className="py-1 pr-2 text-right">Prov tax</TableHead>
+          <TableHead className="py-1 pr-2 text-right">CPP</TableHead>
+          <TableHead className="py-1 pr-2 text-right">Net to shareholder</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {shareholderEntityIds.map((id) => (
           <PersonalSideRow
             key={id}
@@ -465,8 +460,8 @@ function PersonalSideTable({
             personal={personalByEntity.get(id)}
           />
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }
 
@@ -489,30 +484,15 @@ function PersonalSideRow({ id, additions, personal }: PersonalSideRowProps) {
   const totalPayable = numericOrZero(t.totalPayable);
   const netToShareholder = emp + dividends - totalPayable;
   return (
-    <tr>
-      <td className="py-1 pr-2">#{id}</td>
-      <td className="py-1 pr-2">{fmtCurrency(emp)}</td>
-      <td className="py-1 pr-2">{fmtCurrency(dividends)}</td>
-      <td className="py-1 pr-2">{fmtCurrency(fedTax)}</td>
-      <td className="py-1 pr-2">{fmtCurrency(provTax)}</td>
-      <td className="py-1 pr-2">{fmtCurrency(cpp)}</td>
-      <td className="py-1 pr-2 font-medium">{fmtCurrency(netToShareholder)}</td>
-    </tr>
-  );
-}
-
-interface SummaryRowProps {
-  label: string;
-  value: string;
-  strong?: boolean;
-}
-
-function SummaryRow({ label, value, strong }: SummaryRowProps) {
-  return (
-    <tr>
-      <td className="py-1 pr-4 text-gray-600">{label}</td>
-      <td className={`py-1 ${strong ? 'font-semibold' : ''}`}>{value}</td>
-    </tr>
+    <TableRow>
+      <TableCell className="py-1 pr-2">#{id}</TableCell>
+      <TableCell className="py-1 pr-2 text-right tabular-nums">{fmtCurrency(emp)}</TableCell>
+      <TableCell className="py-1 pr-2 text-right tabular-nums">{fmtCurrency(dividends)}</TableCell>
+      <TableCell className="py-1 pr-2 text-right tabular-nums">{fmtCurrency(fedTax)}</TableCell>
+      <TableCell className="py-1 pr-2 text-right tabular-nums">{fmtCurrency(provTax)}</TableCell>
+      <TableCell className="py-1 pr-2 text-right tabular-nums">{fmtCurrency(cpp)}</TableCell>
+      <TableCell className="py-1 pr-2 font-medium text-right tabular-nums">{fmtCurrency(netToShareholder)}</TableCell>
+    </TableRow>
   );
 }
 
@@ -523,22 +503,22 @@ interface WarningsListProps {
 function WarningsList({ warnings }: WarningsListProps) {
   if (warnings.length === 0) return null;
   return (
-    <section className="rounded-md border border-amber-300 bg-amber-50 p-4">
-      <h4 className="mb-2 font-medium text-amber-900">
+    <section className="rounded-md border border-warning bg-warning-bg p-4">
+      <h4 className="mb-2 font-medium text-warning">
         Integration warnings ({warnings.length})
       </h4>
-      <ul className="list-disc pl-5 text-sm text-amber-900">
+      <ul className="list-disc pl-5 text-sm text-warning">
         {warnings.map((w, i) => (
           <li key={i}>
             <span className="mr-1 uppercase text-xs">[{w.severity}]</span>
             {w.message}
             {w.shareholderEntityId !== null && (
-              <span className="ml-1 text-xs text-amber-700">
+              <span className="ml-1 text-xs text-warning">
                 (shareholder #{w.shareholderEntityId})
               </span>
             )}
             {w.corpScenarioId !== null && (
-              <span className="ml-1 text-xs text-amber-700">
+              <span className="ml-1 text-xs text-warning">
                 (corp #{w.corpScenarioId})
               </span>
             )}

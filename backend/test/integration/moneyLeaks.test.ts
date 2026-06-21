@@ -12,6 +12,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -67,6 +68,27 @@ async function seed(emailPrefix: string): Promise<Seeded> {
   return { token, householdId: household.id, userId: user.id, accountId: account.id };
 }
 
+// Map a legacy Subscription status to the merged PlannedEvent (kind='subscription')
+// status + statusUncertain pair. Mirrors fromSubscriptionStatus in
+// src/expectations/subscriptionMapper.ts; the money-leaks route reads these
+// rows back through serializeSubscription, which reconstructs the legacy
+// `status` the detector filters on (e.g. only 'active' subs cluster).
+function subscriptionStatusFields(
+  status: 'active' | 'cancelled' | 'ignored' | 'unknown',
+): { status: 'planned' | 'cancelled' | 'ignored'; statusUncertain: boolean } {
+  switch (status) {
+    case 'cancelled':
+      return { status: 'cancelled', statusUncertain: false };
+    case 'ignored':
+      return { status: 'ignored', statusUncertain: false };
+    case 'unknown':
+      return { status: 'planned', statusUncertain: true };
+    case 'active':
+    default:
+      return { status: 'planned', statusUncertain: false };
+  }
+}
+
 async function seedSubscription(args: {
   householdId: number;
   merchant: string;
@@ -81,22 +103,55 @@ async function seedSubscription(args: {
   const cadence = args.cadence ?? 'monthly';
   const annualized =
     cadence === 'monthly' ? args.amount * 12 : args.amount * 52;
-  await models.Subscription.create({
+  const lastChargeDate = new Date().toISOString().slice(0, 10);
+  const owner = (
+    await models.HouseholdMember.findOne({
+      where: { householdId: args.householdId, role: 'owner' },
+      attributes: ['userId'],
+      raw: true,
+    })
+  )!.userId;
+  const pe = await models.PlannedEvent.create({
+    kind: 'subscription',
+    type: 'expense',
+    source: 'recurring_detection',
+    userId: owner,
     householdId: args.householdId,
-    merchantName: args.merchant,
+    name: args.merchant,
     normalizedName: args.merchant.toLowerCase(),
     amount: args.amount.toFixed(4),
     currency: args.currency ?? 'CAD',
     cadence,
-    lastChargeDate: new Date().toISOString().slice(0, 10),
+    lastChargeDate,
     nextExpectedDate: null,
-    status: args.status ?? 'active',
+    // expectedDate (NOT NULL) = nextExpectedDate ?? lastChargeDate.
+    expectedDate: lastChargeDate,
     category: args.category ?? null,
     annualizedCost: annualized.toFixed(4),
-    priceChangeDetected: args.priceChangeDetected ?? false,
     cancellationUrl: null,
     notes: null,
+    ...subscriptionStatusFields(args.status ?? 'active'),
   });
+  // The price-increase signal now lives in an open Insight
+  // (type='subscription_price_increase', entityId=PlannedEvent.id), NOT the
+  // retired planned_events.price_change_detected column. Seed it that way so
+  // the route — which reads open Insights — surfaces the leak.
+  if (args.priceChangeDetected) {
+    await models.Insight.create({
+      householdId: args.householdId,
+      userId: null,
+      type: 'subscription_price_increase',
+      severity: 'warning',
+      title: `${args.merchant} price increased`,
+      description: '',
+      entityType: 'expectation',
+      entityId: pe.id,
+      status: 'open',
+      fingerprint: `subscription_price_increase:${pe.id}:1899`,
+      metadata: { newAmountCents: 1899 },
+      detectedAt: new Date(),
+    });
+  }
 }
 
 async function seedDeliveryCharges(
@@ -154,7 +209,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -167,11 +222,11 @@ before(async () => {
   primaryUserId = primary.userId;
   void primaryUserId;
   primaryAccountId = primary.accountId;
-  primaryAgent = request.agent(app);
+  primaryAgent = testAgent(app);
   primaryAgent.jar.setCookie(`cashflow_session=${primary.token}; Path=/`);
 
   const other = await seed('Other');
-  otherAgent = request.agent(app);
+  otherAgent = testAgent(app);
   otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
 });
 
@@ -186,7 +241,7 @@ test('GET /api/money-leaks returns empty when no leaks present', async () => {
   assert.deepEqual(res.body.totals.byCurrency, []);
 });
 
-test('GET /api/money-leaks surfaces subscription_price_increase from priceChangeDetected', async () => {
+test('GET /api/money-leaks surfaces subscription_price_increase from an open Insight', async () => {
   await seedSubscription({
     householdId: primaryHouseholdId,
     merchant: 'Netflix',

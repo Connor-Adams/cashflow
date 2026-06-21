@@ -1,5 +1,5 @@
 import { Sparkles } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@connor-adams/designsystem'
 
 const SEEDED_PROMPTS = [
   "Show me last month's grocery spend",

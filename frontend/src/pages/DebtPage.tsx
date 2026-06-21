@@ -1,21 +1,16 @@
 import { useCallback, useMemo, useState } from 'react'
 import { PiggyBank, TrendingDown, Save, Pencil } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
+import { StatCard } from '@connor-adams/designsystem'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { formatMoney } from '../lib/formatMoney'
 import {
@@ -81,7 +76,7 @@ export function DebtPage() {
       {/* Extra payment control + summary tiles */}
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="p-3">
-          <Label htmlFor="extra-payment" className="muted mb-1 text-xs uppercase tracking-wide">
+          <Label htmlFor="extra-payment" className="text-muted-foreground mb-1 text-xs uppercase tracking-wide">
             Extra monthly payment
           </Label>
           <Input
@@ -294,7 +289,7 @@ function ComparisonCard({ comparison, liabilities, currency }: ComparisonCardPro
   return (
     <Card className="mb-4 p-3">
       <div className="mb-3 flex items-center gap-2">
-        <TrendingDown className="size-4 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
+        <TrendingDown className="size-4 text-positive" aria-hidden="true" />
         <h2 className="text-sm font-semibold">Avalanche vs snowball</h2>
       </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -314,9 +309,9 @@ function ComparisonCard({ comparison, liabilities, currency }: ComparisonCardPro
           currency={currency}
         />
       </div>
-      <p className="muted mt-3 mb-0 text-sm">
+      <p className="text-muted-foreground mt-3 mb-0 text-sm">
         The avalanche saves{' '}
-        <span className="font-semibold text-emerald-700 dark:text-emerald-300">
+        <span className="font-semibold text-positive">
           {formatMoney(comparison.interestSaved, currency)}
         </span>{' '}
         in interest compared with the snowball.
@@ -342,7 +337,7 @@ function PlanSummary({
 }) {
   return (
     <Card
-      className={`p-3 ${highlight ? 'border-emerald-300 dark:border-emerald-700' : ''}`}
+      className={`p-3 ${highlight ? 'border-positive' : ''}`}
     >
       <div className="mb-2 flex items-baseline justify-between">
         <h3 className="text-sm font-semibold">{title}</h3>
@@ -350,15 +345,15 @@ function PlanSummary({
           {formatMonths(plan.stalled ? null : plan.totalMonths)}
         </Badge>
       </div>
-      <p className="muted mb-2 text-xs">{subtitle}</p>
+      <p className="text-muted-foreground mb-2 text-xs">{subtitle}</p>
       <dl className="grid grid-cols-2 gap-y-1 text-sm">
-        <dt className="muted">Total interest</dt>
+        <dt className="text-muted-foreground">Total interest</dt>
         <dd className="text-right tabular-nums">{formatMoney(plan.totalInterest, currency)}</dd>
-        <dt className="muted">Total paid</dt>
+        <dt className="text-muted-foreground">Total paid</dt>
         <dd className="text-right tabular-nums">{formatMoney(plan.totalPaid, currency)}</dd>
       </dl>
       {plan.stalled ? (
-        <p className="mt-2 mb-0 text-xs text-amber-700 dark:text-amber-300">
+        <p className="mt-2 mb-0 text-xs text-warning">
           Minimum payments don't cover the interest — increase the extra payment to make progress.
         </p>
       ) : (
@@ -366,7 +361,7 @@ function PlanSummary({
           {plan.order.map((id) => (
             <li key={id}>
               {nameById.get(id) ?? `Account ${id}`} —{' '}
-              <span className="muted">{formatMonths(plan.payoffMonthByDebt[id] ?? null)}</span>
+              <span className="text-muted-foreground">{formatMonths(plan.payoffMonthByDebt[id] ?? null)}</span>
             </li>
           ))}
         </ol>
@@ -420,7 +415,7 @@ function SaveScenarioCard({ extra, onSaved }: { extra: number; onSaved: () => vo
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          <Label htmlFor="scenario-name" className="muted mb-1 text-xs">
+          <Label htmlFor="scenario-name" className="text-muted-foreground mb-1 text-xs">
             Plan name
           </Label>
           <Input
@@ -431,7 +426,7 @@ function SaveScenarioCard({ extra, onSaved }: { extra: number; onSaved: () => vo
           />
         </div>
         <div>
-          <Label htmlFor="scenario-strategy" className="muted mb-1 text-xs">
+          <Label htmlFor="scenario-strategy" className="text-muted-foreground mb-1 text-xs">
             Strategy
           </Label>
           <NativeSelect
@@ -440,9 +435,9 @@ function SaveScenarioCard({ extra, onSaved }: { extra: number; onSaved: () => vo
             onChange={(e) => setStrategy(e.target.value as DebtPayoffStrategy)}
           >
             {(['avalanche', 'snowball'] as const).map((s) => (
-              <NativeSelectOption key={s} value={s}>
+              <option key={s} value={s}>
                 {STRATEGY_LABEL[s]}
-              </NativeSelectOption>
+              </option>
             ))}
           </NativeSelect>
         </div>
@@ -475,17 +470,18 @@ type SummaryTileProps = {
 }
 
 function SummaryTile({ label, value, description, tone, loading }: SummaryTileProps) {
+  const displayValue = loading ? '…' : value
   return (
-    <Card className="p-3">
-      <p className="muted mb-1 text-xs uppercase tracking-wide">{label}</p>
-      <p
-        className={`mb-0 text-lg font-semibold tabular-nums ${
-          tone === 'good' ? 'text-emerald-700 dark:text-emerald-300' : ''
-        }`}
-      >
-        {loading ? '…' : value}
-      </p>
-      {description ? <p className="muted mb-0 text-xs">{description}</p> : null}
-    </Card>
+    <StatCard
+      label={label}
+      value={
+        tone === 'good' ? (
+          <span className="text-positive">{displayValue}</span>
+        ) : (
+          displayValue
+        )
+      }
+      hint={description}
+    />
   )
 }

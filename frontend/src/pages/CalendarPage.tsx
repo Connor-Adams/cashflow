@@ -10,29 +10,21 @@
  * Month-grid math lives in lib/calendarMonth.ts (unit-tested). This file
  * is presentational + state glue.
  */
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type FormEvent,
-} from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent, } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Edit3, Plus, Trash2 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  useConfirm,
-} from '@/components/ui/dialog'
-import { EmptyState } from '@/components/ui/empty-state'
+import { Calendar as CalendarIcon, CalendarPlus, ChevronLeft, ChevronRight, Edit3, Plus, Repeat, Trash2 } from 'lucide-react'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Grid } from '@/lib/ds-extras'
+import { StatCard } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { Alert } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { Tabs } from '@/components/ui/tabs'
+import { SectionHeader } from '@/components/ui/section-header'
+import { Tabs } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
@@ -407,13 +399,13 @@ export function CalendarPage() {
         description="Upcoming income, expenses, transfers, and goal contributions. All events come from your planned events list."
       />
 
-      <div className="row" style={{ flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <Tabs items={TAB_ITEMS} value={view} onValueChange={(v) => setView(v as ViewMode)} />
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <div className="ml-auto flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={goPrev} aria-label="Previous month">
             <ChevronLeft aria-hidden="true" />
           </Button>
-          <span className="font-medium" style={{ minWidth: '8rem', textAlign: 'center' }}>
+          <span className="font-medium min-w-32 text-center">
             {formatMonthHeading(year, month)}
           </span>
           <Button variant="outline" size="sm" onClick={goNext} aria-label="Next month">
@@ -427,8 +419,7 @@ export function CalendarPage() {
           </Button>
           <Link
             to="/planned"
-            className="text-sm underline"
-            style={{ marginLeft: '0.5rem' }}
+            className="text-sm underline ml-2"
           >
             Manage events
           </Link>
@@ -438,9 +429,9 @@ export function CalendarPage() {
       <UpcomingSummaryCard summary={summary} />
 
       {error ? (
-        <div role="alert" className="muted" style={{ padding: '1rem' }}>
+        <Alert variant="error" className="mb-3">
           Failed to load calendar: {error}
-        </div>
+        </Alert>
       ) : null}
 
       {view === 'month' ? (
@@ -468,51 +459,76 @@ export function CalendarPage() {
       {dayDialogIso ? (
         <Dialog
           open
-          onOpenChange={(open) => {
-            if (!open) setDayDialogIso(null)
-          }}
+          onClose={() => setDayDialogIso(null)}
+          title={<>{dialogTitleDate}</>}
+          footer={
+            <>
+              <Button
+                variant="outline"
+                onClick={() => setDayDialogIso(null)}
+              >
+                Close
+              </Button>
+              <Button
+                onClick={() => {
+                  const iso = dayDialogIso
+                  setDayDialogIso(null)
+                  openCreate(iso ?? undefined)
+                }}
+              >
+                <Plus aria-hidden="true" /> Add event on this day
+              </Button>
+            </>
+          }
         >
-          <DialogHeader>
-            <DialogTitle>{dialogTitleDate}</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
-            {dayEvents.length === 0 ? (
+          {dayEvents.length === 0 ? (
               <EmptyState
                 title="No events on this day."
                 description="Add one below."
               />
             ) : (
-              <ul style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <ul className="flex flex-col gap-2">
                 {dayEvents.map((ev) => (
                   <li
                     key={`${ev.id}-${ev.eventDate}`}
-                    className="row"
-                    style={{
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '0.75rem',
-                      borderBottom: '1px solid var(--border)',
-                      paddingBottom: '0.5rem',
-                    }}
+                    className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-2"
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div className="flex items-center gap-2">
                       <span
                         className={`inline-block h-3 w-3 rounded-full ${CALENDAR_EVENT_DOT_CLASS[ev.type]}`}
                         aria-hidden="true"
                       />
                       <div>
                         <div className="font-medium">{ev.name}</div>
-                        <div className="muted text-xs">
+                        <div className="text-xs leading-6 text-muted-foreground">
                           {ev.kindLabel} ·{' '}
                           {formatMoney(Number(ev.amount), ev.currency)}
                           {ev.recurrenceRule ? ' · recurring' : ''}
                         </div>
                       </div>
                     </div>
-                    <div className="row" style={{ gap: '0.25rem' }}>
+                    <div className="flex flex-wrap items-center gap-1">
                       <Badge className={CALENDAR_EVENT_BG_CLASS[ev.type]}>
+                        {ev.recurrenceRule ? (
+                          <Repeat
+                            aria-hidden="true"
+                            className="mr-1 inline-block h-3 w-3"
+                          />
+                        ) : (
+                          <CalendarPlus
+                            aria-hidden="true"
+                            className="mr-1 inline-block h-3 w-3"
+                          />
+                        )}
                         {ev.kindLabel}
                       </Badge>
+                      <Link
+                        to={ev.recurrenceRule ? '/recurring' : '/planned'}
+                        className="text-xs underline text-muted-foreground"
+                        onClick={() => setDayDialogIso(null)}
+                      >
+                        View source
+                      </Link>
                       <Button
                         size="sm"
                         variant="secondary"
@@ -535,48 +551,31 @@ export function CalendarPage() {
                 ))}
               </ul>
             )}
-          </DialogBody>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDayDialogIso(null)}
-            >
-              Close
-            </Button>
-            <Button
-              onClick={() => {
-                const iso = dayDialogIso
-                setDayDialogIso(null)
-                openCreate(iso ?? undefined)
-              }}
-            >
-              <Plus aria-hidden="true" /> Add event on this day
-            </Button>
-          </DialogFooter>
         </Dialog>
       ) : null}
 
       {/* Create dialog */}
       {createOpen ? (
-        <Dialog open onOpenChange={(open) => { if (!open) closeCreate() }}>
-          <DialogHeader>
-            <DialogTitle>
+        <Dialog
+          open
+          onClose={closeCreate}
+          title={
+            <>
               {createDate
                 ? `New event on ${formatDateLabel(createDate)}`
                 : 'New planned event'}
-            </DialogTitle>
-          </DialogHeader>
+            </>
+          }
+        >
           <form onSubmit={saveCreate}>
-            <DialogBody>
-              <PlannedEventFormFields
-                form={createForm}
-                setForm={setCreateForm}
-                accountOptions={accounts.filter((a) => a.closedAt == null)}
-                idPrefix="calendar-create"
-                showStatus={false}
-              />
-            </DialogBody>
-            <DialogFooter>
+            <PlannedEventFormFields
+              form={createForm}
+              setForm={setCreateForm}
+              accountOptions={accounts.filter((a) => a.closedAt == null)}
+              idPrefix="calendar-create"
+              showStatus={false}
+            />
+            <div className="mt-4 flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={closeCreate} disabled={createSaving}>
                 Cancel
               </Button>
@@ -584,49 +583,49 @@ export function CalendarPage() {
                 <Plus aria-hidden="true" />
                 {createSaving ? 'Saving...' : 'Save event'}
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         </Dialog>
       ) : null}
 
       {/* Edit dialog */}
       {editingId != null ? (
-        <Dialog open onOpenChange={(open) => { if (!open) cancelEdit() }}>
-          <DialogHeader>
-            <DialogTitle>Edit planned event</DialogTitle>
-          </DialogHeader>
+        <Dialog
+          open
+          onClose={cancelEdit}
+          title={<>Edit planned event</>}
+        >
           <form onSubmit={saveEdit}>
-            <DialogBody>
-              <PlannedEventFormFields
-                form={editForm}
-                setForm={setEditForm}
-                accountOptions={accounts.filter((a) => a.closedAt == null)}
-                idPrefix={`calendar-edit-${editingId}`}
-                showStatus
-              />
-              <p className="muted text-xs" style={{ marginTop: '0.75rem' }}>
-                Need to link this event to a transaction?{' '}
-                <button
-                  type="button"
-                  className="underline"
-                  onClick={() => {
-                    cancelEdit()
-                    navigate('/planned')
-                  }}
-                >
-                  Open the full editor
-                </button>
-                .
-              </p>
-            </DialogBody>
-            <DialogFooter>
+            <PlannedEventFormFields
+              form={editForm}
+              setForm={setEditForm}
+              accountOptions={accounts.filter((a) => a.closedAt == null)}
+              idPrefix={`calendar-edit-${editingId}`}
+              showStatus
+            />
+            <p className="mt-3 text-xs leading-6 text-muted-foreground">
+              Need to link this event to a transaction?{' '}
+              <Button
+                type="button"
+                variant="link"
+                className="underline"
+                onClick={() => {
+                  cancelEdit()
+                  navigate('/planned')
+                }}
+              >
+                Open the full editor
+              </Button>
+              .
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={cancelEdit} disabled={editSaving}>
                 Cancel
               </Button>
               <Button type="submit" disabled={editSaving}>
                 {editSaving ? 'Saving...' : 'Save changes'}
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         </Dialog>
       ) : null}
@@ -647,58 +646,41 @@ type UpcomingSummary = {
 }
 
 function UpcomingSummaryCard({ summary }: { summary: UpcomingSummary }) {
+  const netColor = summary.net >= 0 ? 'text-positive' : 'text-negative'
   return (
-    <Card className="accountsFormCard" style={{ marginBottom: '1rem' }}>
-      <div className="accountsCardHeader">
-        <div>
-          <h2 className="flex items-center gap-2">
+    <Card className="mb-4">
+      <SectionHeader
+        title={
+          <span className="flex items-center gap-2">
             <CalendarIcon aria-hidden="true" className="h-5 w-5" />
             Next 14 days
-          </h2>
-          <p className="muted">
-            {summary.count === 0
-              ? 'Nothing planned in the next two weeks.'
-              : `${summary.count} event${summary.count === 1 ? '' : 's'} ahead.`}
-          </p>
-        </div>
-        <div className="row" style={{ gap: '1.25rem', flexWrap: 'wrap' }}>
-          <Stat label="Expected in" value={summary.inflow} positive />
-          <Stat label="Expected out" value={summary.outflow} negative />
-          <Stat
-            label="Net"
-            value={summary.net}
-            positive={summary.net >= 0}
-            negative={summary.net < 0}
-          />
-        </div>
-      </div>
+          </span>
+        }
+        description={
+          summary.count === 0
+            ? 'Nothing planned in the next two weeks.'
+            : `${summary.count} event${summary.count === 1 ? '' : 's'} ahead.`
+        }
+      />
+      {/* Grid+StatCard: deliberate standardization — replaces custom Stat divs
+          with the shared primitive so all summary stats across the app are
+          uniform. MinItemWidth=120 keeps the 3-up layout on wider viewports
+          while collapsing gracefully on narrow screens. */}
+      <Grid minItemWidth={120} gap="sm">
+        <StatCard
+          label="Expected in"
+          value={<span className="text-positive">{formatMoney(summary.inflow, 'CAD')}</span>}
+        />
+        <StatCard
+          label="Expected out"
+          value={<span className="text-negative">{formatMoney(summary.outflow, 'CAD')}</span>}
+        />
+        <StatCard
+          label="Net"
+          value={<span className={netColor}>{formatMoney(summary.net, 'CAD')}</span>}
+        />
+      </Grid>
     </Card>
-  )
-}
-
-function Stat({
-  label,
-  value,
-  positive,
-  negative,
-}: {
-  label: string
-  value: number
-  positive?: boolean
-  negative?: boolean
-}) {
-  const color = positive
-    ? 'text-emerald-600 dark:text-emerald-300'
-    : negative
-      ? 'text-rose-600 dark:text-rose-300'
-      : 'text-zinc-700 dark:text-zinc-200'
-  return (
-    <div>
-      <div className="muted text-xs">{label}</div>
-      <div className={`text-lg font-semibold ${color}`}>
-        {formatMoney(value, 'CAD')}
-      </div>
-    </div>
   )
 }
 
@@ -713,19 +695,19 @@ type MonthGridViewProps = {
 }
 
 function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: MonthGridViewProps) {
+  const navigate = useNavigate()
   return (
-    <Card className="accountsFormCard">
+    <Card className="mb-4">
       <div
         role="grid"
         aria-label="Month calendar"
-        style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '1px', background: 'var(--border)' }}
+        className="grid grid-cols-7 gap-px bg-border"
       >
         {WEEKDAYS.map((d) => (
           <div
             key={d}
             role="columnheader"
-            className="muted text-xs"
-            style={{ padding: '0.4rem', background: 'var(--card)', textAlign: 'center', fontWeight: 600 }}
+            className="text-xs leading-6 text-muted-foreground bg-card text-center font-semibold p-[0.4rem]"
           >
             {d}
           </div>
@@ -735,48 +717,45 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
           const visible = events.slice(0, 3)
           const hidden = events.length - visible.length
           return (
-            <button
+            <Button
               key={cell.iso}
               type="button"
+              variant="ghost"
               role="gridcell"
               onClick={() => onDayClick(cell.iso)}
               aria-label={`${cell.iso}, ${events.length} event${events.length === 1 ? '' : 's'}`}
               data-in-month={cell.inMonth}
               data-today={cell.isToday}
-              style={{
-                background: 'var(--card)',
-                opacity: cell.inMonth ? 1 : 0.45,
-                minHeight: '5.5rem',
-                padding: '0.4rem',
-                textAlign: 'left',
-                border: 0,
-                cursor: 'pointer',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.25rem',
-                outline: cell.isToday ? '2px solid var(--primary, currentColor)' : 'none',
-                outlineOffset: '-2px',
-              }}
+              className={`bg-card min-h-[5.5rem] p-[0.4rem] text-left border-0 cursor-pointer flex flex-col gap-1 -outline-offset-2 ${cell.inMonth ? 'opacity-100' : 'opacity-45'} ${cell.isToday ? 'outline outline-2 outline-primary' : 'outline-none'}`}
             >
               <span className="text-xs font-medium">{cell.day}</span>
               {visible.map((ev, i) => (
                 <span
                   key={`${ev.id}-${i}`}
-                  className={`text-xs truncate rounded px-1 ${CALENDAR_EVENT_BG_CLASS[ev.type]}`}
-                  title={`${ev.kindLabel}: ${ev.name}`}
+                  role="link"
+                  tabIndex={0}
+                  className={`text-xs truncate rounded px-1 cursor-pointer hover:opacity-80 ${CALENDAR_EVENT_BG_CLASS[ev.type]}`}
+                  title={ev.recurrenceRule ? 'Recurring charge' : 'Planned event'}
+                  onClick={(e) => { e.stopPropagation(); navigate(ev.recurrenceRule ? '/recurring' : '/planned') }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); navigate(ev.recurrenceRule ? '/recurring' : '/planned') } }}
                 >
+                  {ev.recurrenceRule ? (
+                    <Repeat aria-hidden="true" className="mr-0.5 inline-block h-2.5 w-2.5" />
+                  ) : (
+                    <CalendarPlus aria-hidden="true" className="mr-0.5 inline-block h-2.5 w-2.5" />
+                  )}
                   {ev.name}
                 </span>
               ))}
               {hidden > 0 ? (
-                <span className="muted text-xs">+{hidden} more</span>
+                <span className="text-xs leading-6 text-muted-foreground">+{hidden} more</span>
               ) : null}
-            </button>
+            </Button>
           )
         })}
       </div>
       {loading ? (
-        <p className="muted" style={{ marginTop: '0.5rem' }}>Loading…</p>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">Loading…</p>
       ) : null}
       {/* `month` prop is consumed via grid construction upstream; we accept
           it here so the parent can re-render the grid when it changes. */}
@@ -796,8 +775,8 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
   const grouped = useMemo(() => groupByDate(events), [events])
   const entries = Array.from(grouped.entries())
   return (
-    <Card className="accountsFormCard">
-      {loading ? <p className="muted">Loading…</p> : null}
+    <Card className="mb-4">
+      {loading ? <p className="text-sm leading-6 text-muted-foreground">Loading…</p> : null}
       {entries.length === 0 && !loading ? (
         <EmptyState
           title="No events in this window."
@@ -807,44 +786,52 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
       {entries.map(([iso, evs]) => (
         <section
           key={iso}
-          style={{
-            borderBottom: '1px solid var(--border)',
-            paddingBottom: '0.75rem',
-            marginBottom: '0.75rem',
-          }}
+          className="border-b border-border pb-3 mb-3"
         >
-          <h3 className="text-sm font-semibold" style={{ marginBottom: '0.4rem' }}>
+          <h3 className="text-sm font-semibold mb-[0.4rem]">
             {formatDateLabel(iso)}
           </h3>
-          <ul style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <ul className="flex flex-col gap-2">
             {evs.map((ev) => (
               <li
                 key={`${ev.id}-${ev.eventDate}`}
-                className="row"
-                style={{
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: '0.75rem',
-                }}
+                className="mb-3 flex flex-wrap items-center justify-between gap-3"
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div className="flex items-center gap-2">
                   <span
                     className={`inline-block h-3 w-3 rounded-full ${CALENDAR_EVENT_DOT_CLASS[ev.type]}`}
                     aria-hidden="true"
                   />
                   <div>
                     <div className="font-medium">{ev.name}</div>
-                    <div className="muted text-xs">
+                    <div className="text-xs leading-6 text-muted-foreground">
                       {ev.kindLabel} ·{' '}
                       {formatMoney(Number(ev.amount), ev.currency)}
                       {ev.recurrenceRule ? ' · recurring' : ''}
                     </div>
                   </div>
                 </div>
-                <div className="row" style={{ gap: '0.25rem' }}>
+                <div className="flex flex-wrap items-center gap-1">
                   <Badge className={CALENDAR_EVENT_BG_CLASS[ev.type]}>
+                    {ev.recurrenceRule ? (
+                      <Repeat
+                        aria-hidden="true"
+                        className="mr-1 inline-block h-3 w-3"
+                      />
+                    ) : (
+                      <CalendarPlus
+                        aria-hidden="true"
+                        className="mr-1 inline-block h-3 w-3"
+                      />
+                    )}
                     {ev.kindLabel}
                   </Badge>
+                  <Link
+                    to={ev.recurrenceRule ? '/recurring' : '/planned'}
+                    className="text-xs underline text-muted-foreground"
+                  >
+                    View source
+                  </Link>
                   <Button
                     size="sm"
                     variant="secondary"

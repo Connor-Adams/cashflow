@@ -33,6 +33,8 @@ import { Router } from 'express';
 import { Op, type WhereOptions } from 'sequelize';
 import { Account, Transaction } from '../models';
 import { visibleAccountWhere, visibleTransactionWhere } from '../auth/scope';
+import { currentAuth } from '../auth/middleware';
+import { loadCategoryTree, buildRollupRows } from '../categories/rollup';
 import {
   aggregateSankey,
   type SankeyTxnRow,
@@ -109,6 +111,7 @@ async function loadAndAggregate(
         'date',
         'currency',
         'finalCategory',
+        'finalCategoryId', // B2: finalCategoryId selected for rollup
         'finalBusiness',
         'merchantRaw',
         'merchantClean',
@@ -134,6 +137,7 @@ async function loadAndAggregate(
     date: string;
     currency: string;
     finalCategory: string | null;
+    finalCategoryId: number | null;
     finalBusiness: boolean;
     merchantRaw: string | null;
     merchantClean: string | null;
@@ -145,6 +149,7 @@ async function loadAndAggregate(
     date: r.date,
     currency: r.currency,
     finalCategory: r.finalCategory,
+    finalCategoryId: r.finalCategoryId ?? null,
     finalBusiness: r.finalBusiness,
     merchantRaw: r.merchantRaw,
     merchantClean: r.merchantClean,
@@ -219,6 +224,19 @@ router.get('/', async (req, res, next) => {
       dateTo,
       topCategories,
     );
+
+    // Build a raw spend map from sankey category nodes for the rollup.
+    // Each link.target points to a node; use node.categoryId and link.value.
+    const sankeyRaw = new Map<number, number>();
+    for (const link of result.links) {
+      const node = result.nodes[link.target];
+      if (node?.categoryId != null) {
+        sankeyRaw.set(node.categoryId, (sankeyRaw.get(node.categoryId) ?? 0) + link.value);
+      }
+    }
+    const householdId = currentAuth(req).household.id;
+    const categoryTree = buildRollupRows(sankeyRaw, await loadCategoryTree(householdId), currency);
+
     res.json({
       currency: result.currency,
       totalIncome: result.totalIncome,
@@ -230,6 +248,7 @@ router.get('/', async (req, res, next) => {
       links: result.links,
       availableCurrencies,
       dateRange: { from: dateFrom ?? null, to: dateTo ?? null },
+      categoryTree,
     });
   } catch (e) {
     next(e);

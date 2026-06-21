@@ -9,8 +9,7 @@ import path from 'path';
 import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import request from 'supertest';
-
+import { testAgent, testRequest } from './_setup/testServer.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.join(__dirname, '..', '..');
 const dbPath = path.join(backendRoot, 'data', 'test-portfolio-performance.sqlite');
@@ -45,7 +44,7 @@ after(() => {
 async function makeHousehold(tag: string) {
   const { seedHousehold } = await import('./portfolioFixtures.js');
   const seeded = await seedHousehold(models, `perf-${tag}-${Date.now()}@example.com`);
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${seeded.token}; Path=/`);
   return { ...seeded, agent };
 }
@@ -94,7 +93,7 @@ async function seedSnapshot(opts: {
 // ─── Test 1: 401 when unauthenticated ────────────────────────────────────────
 
 test('401 when unauthenticated', async () => {
-  const res = await request(app).get('/api/portfolio/performance');
+  const res = await testRequest(app).get('/api/portfolio/performance');
   assert.equal(res.status, 401);
 });
 
@@ -119,11 +118,19 @@ test('single-account 1Y history TWR ≈ 10%', async () => {
   const { household, user, agent } = await makeHousehold('twr1y');
   const account = await seedAccount(household.id, user.id, 'Main RRSP', 'RRSP1');
 
-  // Two snapshots: start MV=1000 day-1, end MV=1100 day-365
-  const today = new Date();
-  const end = today.toISOString().slice(0, 10);
-  const startD = new Date(today);
-  startD.setDate(startD.getDate() - 365);
+  // Two snapshots: start MV=1000 day-1, end MV=1100 day-365.
+  //
+  // Timezone-awareness (PR #614): GET /api/portfolio/performance clips its
+  // window's `to` to resolveHouseholdToday — "today" in the household's zone
+  // (default America/Toronto), NOT UTC. An `end` snapshot dated at UTC-today
+  // would land *after* the Toronto `to` during the 20:00-23:59 Toronto window
+  // (= next-day UTC), get excluded from the series, and collapse TWR to ~0.
+  // Anchor `end` to the SAME resolved today the endpoint uses (household has no
+  // timezone -> default Toronto) so the snapshot is always in-window.
+  const { resolveHouseholdToday } = await import('../../src/time/householdToday.js');
+  const end = resolveHouseholdToday({ timezone: null });
+  const startD = new Date(`${end}T00:00:00Z`);
+  startD.setUTCDate(startD.getUTCDate() - 364); // safely inside the 1Y (-365d) window
   const start = startD.toISOString().slice(0, 10);
 
   await seedSnapshot({ householdId: household.id, accountId: account.id, date: start, marketValueCad: 1000 });
@@ -248,4 +255,31 @@ test('benchmark Security missing → caveats.benchmarkIsPartial=true', async () 
   assert.equal(res.status, 200);
   assert.equal(res.body.caveats.benchmarkIsPartial, true, 'benchmarkIsPartial should be true when Security is missing');
   assert.equal(res.body.caveats.benchmarkSymbol, 'SPY');
+});
+
+// ─── Test 9: range key is case-insensitive (issue #552) ──────────────────────
+
+test('range=ALL / all / All all resolve to the all-time range (200, not 500)', async () => {
+  const { agent } = await makeHousehold('range-case');
+
+  for (const variant of ['ALL', 'all', 'All']) {
+    const res = await agent.get(`/api/portfolio/performance?range=${variant}`);
+    assert.equal(res.status, 200, `range=${variant} should return 200, got ${res.status}`);
+    // Response echoes the canonical 'All' key regardless of input casing.
+    assert.equal(res.body.range, 'All', `range=${variant} should resolve to canonical 'All'`);
+  }
+});
+
+// ─── Test 10: unknown range returns 400, not 500 (issue #552) ────────────────
+
+test('unknown range returns 400 with a descriptive message (not 500)', async () => {
+  const { agent } = await makeHousehold('range-unknown');
+
+  const res = await agent.get('/api/portfolio/performance?range=BOGUS');
+  assert.equal(res.status, 400, `Unknown range should return 400, got ${res.status}`);
+  assert.match(
+    res.body.error ?? '',
+    /Unrecognized range/i,
+    'Error message should describe the unrecognized range',
+  );
 });

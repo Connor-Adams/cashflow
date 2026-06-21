@@ -5,9 +5,10 @@
  *
  * For each (security, ex-date) event:
  *   - Find every account holding the security on that date by taking the
- *     most-recent HoldingSnapshot at-or-before the ex-date for each
- *     account/security pair. Accounts with no snapshot at-or-before the
- *     ex-date — or with a zero quantity — are skipped.
+ *     most-recent HoldingSnapshot at-or-before the ex-date (and no more than
+ *     SNAPSHOT_STALE_MAX_DAYS before it) for each account/security pair.
+ *     Accounts with no snapshot in that window — or with a zero quantity —
+ *     are skipped.
  *   - Skip the account when a broker-imported `InvestmentActivity` with
  *     `activityType='dividend'` for the same security already exists
  *     within `±dedupDays` of the ex-date. This is the "don't double-count
@@ -45,6 +46,17 @@ export interface ReconcileResult {
 
 const RECONCILER_IMPORT_BATCH = 'alpha_vantage:dividends';
 
+/**
+ * Maximum age (in days) of a HoldingSnapshot relative to the dividend ex-date
+ * before its quantity is too stale to fabricate a synthetic dividend from.
+ * Statements arrive monthly/quarterly, so ~100 days comfortably covers a
+ * quarterly cadence with holiday gaps while rejecting year-old positions that
+ * may have been fully sold. Mirrors the windowed cache lookups elsewhere
+ * (bankOfCanada ensureFxRate, balanceAtDate) which bound lookback rather than
+ * carrying an unbounded stale value forward.
+ */
+const SNAPSHOT_STALE_MAX_DAYS = 100;
+
 function addDays(date: string, delta: number): string {
   const d = new Date(`${date}T00:00:00.000Z`);
   d.setUTCDate(d.getUTCDate() + delta);
@@ -72,10 +84,15 @@ async function latestHoldingPerAccountAtOrBefore(
   securityId: number,
   asOfDate: string,
 ): Promise<Map<number, HoldingSnapshot>> {
+  // Lower-bound the window so a year-old snapshot doesn't fabricate a phantom
+  // dividend from a quantity the account may no longer hold. Upper bound stays
+  // at the ex-date; only snapshots within SNAPSHOT_STALE_MAX_DAYS before it
+  // count.
+  const staleFloor = addDays(asOfDate, -SNAPSHOT_STALE_MAX_DAYS);
   const rows = await HoldingSnapshot.findAll({
     where: {
       securityId,
-      statementDate: { [Op.lte]: asOfDate },
+      statementDate: { [Op.gte]: staleFloor, [Op.lte]: asOfDate },
     },
     order: [
       ['accountId', 'ASC'],

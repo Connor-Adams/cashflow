@@ -2,82 +2,116 @@ import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { ToastProvider } from '@/components/ui/toast'
+import '@testing-library/jest-dom'
 import { NotificationsTab } from './NotificationsTab'
 import * as api from '@/lib/api'
 
-function renderTab() {
-  return render(
-    <ToastProvider>
-      <NotificationsTab />
-    </ToastProvider>,
-  )
+let pushPermission: NotificationPermission = 'default'
+vi.mock('@/hooks/usePushSubscription', () => ({
+  usePushSubscription: () => ({
+    supported: true,
+    permission: pushPermission,
+    subscribed: false,
+    busy: false,
+    error: null,
+    subscribe: vi.fn(),
+    unsubscribe: vi.fn(),
+  }),
+}))
+
+const DIGEST_PREF = {
+  type: 'digest.weekly',
+  channelInApp: true,
+  channelEmail: false,
+  channelPush: false,
+  digestDayOfWeek: 1,
 }
 
-describe('NotificationsTab', () => {
+function mockList() {
+  return vi
+    .spyOn(api, 'getJson')
+    .mockResolvedValue({ data: [DIGEST_PREF] } as never)
+}
+
+describe('NotificationsTab (#796)', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    pushPermission = 'default'
   })
 
-  it('renders the heading', async () => {
-    vi.spyOn(api, 'getJson').mockResolvedValue({ data: [] } as never)
-    renderTab()
+  it('renders the digest preference with channel toggles and a day picker', async () => {
+    mockList()
+    render(<NotificationsTab />)
+    expect(await screen.findByText('Weekly spend digest')).toBeInTheDocument()
+    expect(screen.getByLabelText('In-app')).toBeChecked()
+    expect(screen.getByLabelText('Email')).not.toBeChecked()
+    expect(screen.getByLabelText('Push')).not.toBeChecked()
+    expect(screen.getByLabelText('Digest send day')).toHaveValue('1')
+  })
+
+  it('PATCHes the preference and reflects saved state when a channel is toggled', async () => {
+    const user = userEvent.setup()
+    mockList()
+    const patch = vi.spyOn(api, 'patchJson').mockResolvedValue({
+      ...DIGEST_PREF,
+      channelPush: true,
+    } as never)
+
+    render(<NotificationsTab />)
+    await screen.findByText('Weekly spend digest')
+    await user.click(screen.getByLabelText('Push'))
+
+    await waitFor(() =>
+      expect(patch).toHaveBeenCalledWith(
+        '/api/users/me/notifications/preferences/digest.weekly',
+        { channelPush: true },
+      ),
+    )
+    await waitFor(() => expect(screen.getByLabelText('Push')).toBeChecked())
+  })
+
+  it('PATCHes digestDayOfWeek when the send day changes', async () => {
+    const user = userEvent.setup()
+    mockList()
+    const patch = vi.spyOn(api, 'patchJson').mockResolvedValue({
+      ...DIGEST_PREF,
+      digestDayOfWeek: 3,
+    } as never)
+
+    render(<NotificationsTab />)
+    await screen.findByText('Weekly spend digest')
+    await user.selectOptions(screen.getByLabelText('Digest send day'), '3')
+
+    await waitFor(() =>
+      expect(patch).toHaveBeenCalledWith(
+        '/api/users/me/notifications/preferences/digest.weekly',
+        { digestDayOfWeek: 3 },
+      ),
+    )
+  })
+
+  it('shows the push-blocked hint and disables push when permission is denied (AC #12)', async () => {
+    pushPermission = 'denied'
+    mockList()
+    render(<NotificationsTab />)
+    await screen.findByText('Weekly spend digest')
+    expect(screen.getByLabelText('Push')).toBeDisabled()
+    expect(screen.getByText(/Push blocked in your browser/)).toBeInTheDocument()
+  })
+
+  it('reverts and shows an inline error when the save fails', async () => {
+    const user = userEvent.setup()
+    mockList()
+    vi.spyOn(api, 'patchJson').mockRejectedValue(new Error('500'))
+
+    render(<NotificationsTab />)
+    await screen.findByText('Weekly spend digest')
+    await user.click(screen.getByLabelText('Email'))
+
     expect(
-      await screen.findByRole('heading', { name: /^notifications$/i }),
+      await screen.findByText(/Couldn’t save your digest settings/),
     ).toBeInTheDocument()
-  })
-
-  it('shows an empty state when there are no known types yet', async () => {
-    vi.spyOn(api, 'getJson').mockResolvedValue({ data: [] } as never)
-    renderTab()
-    expect(
-      await screen.findByText(/no notification types yet/i),
-    ).toBeInTheDocument()
-  })
-
-  it('lists known types with in-app + email checkboxes (AC #12)', async () => {
-    vi.spyOn(api, 'getJson').mockResolvedValue({
-      data: [
-        { type: 'budget.breach', channelInApp: true, channelEmail: false },
-        { type: 'insight.new', channelInApp: false, channelEmail: false },
-      ],
-    } as never)
-    renderTab()
-    expect(await screen.findByText(/budget breach/i)).toBeInTheDocument()
-    expect(screen.getByText(/insight new/i)).toBeInTheDocument()
-    // Checkboxes per row
-    expect(
-      screen.getByRole('checkbox', { name: /in-app for budget.breach/i }),
-    ).toBeChecked()
-    expect(
-      screen.getByRole('checkbox', { name: /in-app for insight.new/i }),
-    ).not.toBeChecked()
-    expect(
-      screen.getByRole('checkbox', { name: /email for budget.breach/i }),
-    ).not.toBeChecked()
-  })
-
-  it('toggling a checkbox PATCHes the preference (AC #12)', async () => {
-    vi.spyOn(api, 'getJson').mockResolvedValue({
-      data: [{ type: 'budget.breach', channelInApp: true, channelEmail: false }],
-    } as never)
-    const patchSpy = vi.spyOn(api, 'patchJson').mockResolvedValue({
-      type: 'budget.breach',
-      channelInApp: true,
-      channelEmail: true,
-    } as never)
-
-    renderTab()
-    const emailBox = await screen.findByRole('checkbox', {
-      name: /email for budget.breach/i,
-    })
-    await userEvent.click(emailBox)
-
-    await waitFor(() => {
-      expect(patchSpy).toHaveBeenCalledWith(
-        '/api/notification-preferences/budget.breach',
-        { channelEmail: true },
-      )
-    })
+    // Reverted to the original unchecked state.
+    await waitFor(() => expect(screen.getByLabelText('Email')).not.toBeChecked())
   })
 })

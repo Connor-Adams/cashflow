@@ -1,10 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTaxEntities, type TaxEntity } from '../../hooks/useTaxEntities';
 import {
-  useCorpScenarios,
-  type CorpScenario,
-  type CorpScenarioWithComputed,
-} from '../../hooks/useCorpScenarios';
+  useCorpScenarios, type CorpScenarioWithComputed, } from '../../hooks/useCorpScenarios';
 import { useCorpScenarioDetail } from '../../hooks/useCorpScenarioDetail';
 import { useCorpScenarioChain } from '../../hooks/useCorpScenarioChain';
 import { type CorpTaxLineDto } from '../../hooks/useCorpReturn';
@@ -15,6 +12,16 @@ import { YearStripNav } from './scenarios/YearStripNav';
 import { AssumptionsEditor } from './scenarios/AssumptionsEditor';
 import type { Scenario } from '../../hooks/useScenarios';
 import { patchJson } from '../../lib/api';
+import { fmtCurrency } from './util/format';
+import { labelForTotal } from './util/labels';
+import { TaxLineBreakdownTable } from './components/TaxLineBreakdownTable';
+import { ScenarioCompareBar } from './components/ScenarioCompareBar';
+import { Button } from '@connor-adams/designsystem'
+import { StatCard } from '@connor-adams/designsystem';
+import { Card } from '@connor-adams/designsystem'
+import { CollapsibleCard } from '@/components/ui/collapsible-card';
+import { Alert } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 
 const CURRENT_YEAR = new Date().getFullYear().toString();
 
@@ -70,9 +77,9 @@ export function CorpT2Tab() {
 
   return (
     <div>
-      <header style={{ marginBottom: '0.75rem' }}>
+      <header className="mb-3">
         <h2>Corp T2</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+        <div className="mb-2 flex items-center gap-2">
           <label>
             Fiscal Year{' '}
             <input
@@ -80,11 +87,11 @@ export function CorpT2Tab() {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               placeholder="e.g. 2024 or 2024-01-01/2024-12-31"
-              style={{ width: '18rem' }}
+              className="w-72"
               onKeyDown={(e) => { if (e.key === 'Enter') handleApply(); }}
             />
           </label>
-          <button onClick={handleApply}>Load</button>
+          <Button variant="secondary" size="sm" onClick={handleApply}>Load</Button>
         </div>
         <p className="muted">
           Each scenario layers overrides on top of actuals. Edit overrides on
@@ -93,9 +100,10 @@ export function CorpT2Tab() {
         </p>
       </header>
       {!corpEntity ? (
-        <p className="muted">
-          No corp entity for this household. Create one first (POST /api/tax/entities with kind=corp).
-        </p>
+        <EmptyState
+          title="No corporation yet"
+          description="Add a corporate entity to model its T2 return."
+        />
       ) : yearInt === null ? (
         <p className="error">Fiscal year must start with a 4-digit year (e.g. 2024 or 2024-01-01/2024-12-31).</p>
       ) : (
@@ -161,7 +169,7 @@ function AssociatedGroupInput({ corpEntity, onSaved }: AssociatedGroupInputProps
   }
 
   return (
-    <div style={{ marginBottom: '0.75rem' }}>
+    <div className="mb-3">
       <label>
         Associated group{' '}
         <input
@@ -172,12 +180,12 @@ function AssociatedGroupInput({ corpEntity, onSaved }: AssociatedGroupInputProps
           onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
           placeholder="e.g. ABCorp (blank = no group)"
           disabled={saving}
-          style={{ width: '16rem' }}
+          className="w-64"
         />
       </label>
-      {saving && <span className="muted" style={{ marginLeft: '0.5rem' }}>Saving…</span>}
-      {error && <span className="error" style={{ marginLeft: '0.5rem' }}>Failed: {error}</span>}
-      <p className="muted" style={{ margin: '0.25rem 0 0' }}>
+      {saving && <span className="muted ml-2">Saving…</span>}
+      {error && <span className="error ml-2">Failed: {error}</span>}
+      <p className="muted mt-1">
         Corps sharing the same group tag share a $500k SBD limit and $50k AAII
         threshold. Leave blank for unaffiliated corps.
       </p>
@@ -355,7 +363,7 @@ function CorpT2ScenarioWorkspace({ entityId, year: yearProp, otherCorps }: Works
           isProjecting={isProjecting}
         />
         {chain.error && (
-          <p className="error" style={{ marginTop: '0.25rem' }}>
+          <p className="error mt-1">
             Failed to load year chain: {chain.error}
           </p>
         )}
@@ -390,7 +398,7 @@ function CorpT2ScenarioWorkspace({ entityId, year: yearProp, otherCorps }: Works
             />
           ) : null}
           {compareIds.length > 0 && (
-            <CompareBar
+            <ScenarioCompareBar
               ids={compareIds}
               scenarios={scenarios}
               onRemove={toggleCompare}
@@ -401,7 +409,7 @@ function CorpT2ScenarioWorkspace({ entityId, year: yearProp, otherCorps }: Works
             <ComparisonView
               ids={compareIds}
               onClose={() => setCompareIds([])}
-              endpoint="/api/tax/corp-scenarios/compare"
+              endpoint="/api/tax/scenarios/corp/compare"
             />
           )}
         </div>
@@ -436,17 +444,17 @@ function ActiveCorpScenarioPanel({
   const isProjection = scenario.kind === 'projection_root';
   return (
     <div>
-      <header style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem' }}>
-        <h3 style={{ margin: 0 }}>{scenario.name}</h3>
+      <header className="mb-3 flex items-baseline gap-3">
+        <h3 className="m-0">{scenario.name}</h3>
         <span className="muted">
           {scenario.kind === 'baseline' ? 'baseline (actuals)' : scenario.kind}
         </span>
-        <button onClick={onAddToCompare} style={{ marginLeft: 'auto' }}>
+        <Button variant="secondary" size="sm" onClick={onAddToCompare} className="ml-auto">
           {inCompare ? '✓ In compare' : '+ Add to compare'}
-        </button>
+        </Button>
       </header>
       {isProjection && (
-        <div style={{ marginBottom: '0.75rem' }}>
+        <div className="mb-3">
           <AssumptionsEditor
             assumptions={scenario.assumptions as { inflation?: number; investmentReturn?: number }}
             onChange={onAssumptionsChange}
@@ -458,132 +466,47 @@ function ActiveCorpScenarioPanel({
         onChange={onOverridesChange}
         otherCorps={otherCorps}
       />
-      <section style={{ marginTop: '1rem' }}>
-        <h4>Computed totals</h4>
-        <ul>
+
+      {/* Headline — 4 most decision-relevant corp totals:
+          1. netTaxPayable  — the bottom line; primary planning target
+          2. taxableIncome  — feeds all rate calculations
+          3. activeBusinessIncome — shows SBD eligibility context
+          4. dividendRefund — actionable: drives when to pay dividends */}
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard label="Net tax payable" value={fmtCurrency(computed.totals.netTaxPayable)} />
+        <StatCard label="Taxable income" value={fmtCurrency(computed.totals.taxableIncome)} />
+        <StatCard label="Active business income" value={fmtCurrency(computed.totals.activeBusinessIncome)} />
+        <StatCard label="Dividend refund" value={fmtCurrency(computed.totals.dividendRefund)} />
+      </div>
+
+      {/* All totals, humanized */}
+      <Card className="mb-4">
+        <h4 className="mb-2 text-sm font-semibold">Computed totals</h4>
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
           {Object.entries(computed.totals).map(([k, v]) => (
-            <li key={k}>
-              <strong>{k}</strong>: {String(v)}
-            </li>
+            <div key={k} className="flex justify-between">
+              <dt className="text-muted-foreground">{labelForTotal(k)}</dt>
+              <dd className="tabular-nums">{fmtCurrency(v as string)}</dd>
+            </div>
           ))}
-        </ul>
-        <p className="muted">
+        </dl>
+        <p className="muted mt-2 text-xs">
           {computed.cached ? 'Cached snapshot' : 'Freshly computed'} at{' '}
           {new Date(computed.computedAt).toLocaleString()}
         </p>
-      </section>
+      </Card>
+
       {computed.warnings.length > 0 && (
-        <section style={{ marginTop: '1rem' }}>
-          <h4>Warnings</h4>
-          <ul>
-            {computed.warnings.map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
+        <Alert variant="warning" title="Warnings" className="mb-4">
+          <ul className="m-0 list-disc pl-5">
+            {computed.warnings.map((w, i) => <li key={i}>{w}</li>)}
           </ul>
-        </section>
+        </Alert>
       )}
-      <section style={{ marginTop: '1rem' }}>
-        <h4>Line breakdown</h4>
-        <CorpLineBreakdownTable lines={lines} />
-      </section>
-    </div>
-  );
-}
 
-function CorpLineBreakdownTable({ lines }: { lines: CorpTaxLineDto[] }) {
-  const [expanded, setExpanded] = useState<string | null>(null);
-  if (lines.length === 0) return <p className="muted">No lines to display.</p>;
-  return (
-    <table>
-      <thead>
-        <tr>
-          <th>Line</th>
-          <th>Label</th>
-          <th>Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        {lines.map((l) => (
-          <CorpLineRow
-            key={l.code}
-            line={l}
-            expanded={expanded === l.code}
-            onClick={() => setExpanded(expanded === l.code ? null : l.code)}
-          />
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function CorpLineRow({
-  line,
-  expanded,
-  onClick,
-}: {
-  line: CorpTaxLineDto;
-  expanded: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <>
-      <tr onClick={onClick} style={{ cursor: 'pointer' }}>
-        <td>{line.code}</td>
-        <td>{line.label}</td>
-        <td>${line.amount}</td>
-      </tr>
-      {expanded && (
-        <tr>
-          <td colSpan={3}>
-            {line.formula && <p className="muted">Formula: {line.formula}</p>}
-            <ul>
-              {line.inputs.map((inp, idx) => (
-                <li key={idx}>{inp.source}: ${inp.amount}</li>
-              ))}
-            </ul>
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
-
-interface CompareBarProps {
-  ids: number[];
-  scenarios: CorpScenario[];
-  onRemove: (id: number) => void;
-  onClear: () => void;
-}
-
-function CompareBar({ ids, scenarios, onRemove, onClear }: CompareBarProps) {
-  const byId = new Map(scenarios.map((s) => [s.id, s]));
-  return (
-    <div
-      style={{
-        marginTop: '1rem',
-        padding: '0.5rem',
-        border: '1px solid rgba(255,255,255,0.12)',
-        borderRadius: '4px',
-      }}
-    >
-      <strong>Compare ({ids.length}):</strong>{' '}
-      {ids.map((id) => (
-        <button
-          key={id}
-          onClick={() => onRemove(id)}
-          style={{ marginRight: '0.25rem' }}
-        >
-          {byId.get(id)?.name ?? `#${id}`} ×
-        </button>
-      ))}
-      {ids.length > 0 && (
-        <button onClick={onClear} style={{ marginLeft: '0.5rem' }}>
-          Clear
-        </button>
-      )}
-      {ids.length < 2 && (
-        <span className="muted"> Add at least 2 to see the diff.</span>
-      )}
+      <CollapsibleCard title="Return detail (T2 lines)" defaultOpen={false}>
+        <TaxLineBreakdownTable lines={lines} />
+      </CollapsibleCard>
     </div>
   );
 }

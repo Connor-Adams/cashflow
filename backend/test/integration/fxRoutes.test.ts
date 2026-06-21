@@ -19,6 +19,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let testDb: PgTestDb;
@@ -38,7 +39,7 @@ before(async () => {
   const me = await seedHousehold(models, `fx-routes-me-${Date.now()}@example.com`);
   myUserId = me.user.id;
   myHouseholdId = me.household.id;
-  authed = request.agent(app);
+  authed = testAgent(app);
   authed.jar.setCookie(`cashflow_session=${me.token}; Path=/`);
 
   // Seed a CAD chequing + USD chequing.
@@ -142,7 +143,7 @@ after(async () => {
 });
 
 test('GET /api/fx/exposure: 401 unauthenticated', async () => {
-  const res = await request(app).get('/api/fx/exposure');
+  const res = await testRequest(app).get('/api/fx/exposure');
   assert.equal(res.status, 401);
 });
 
@@ -158,6 +159,25 @@ test('GET /api/fx/exposure: returns per-currency breakdown', async () => {
   assert.ok(currencies.includes('USD'));
   // Total in CAD includes converted USD entries.
   assert.ok(typeof res.body.totalCadEquivalent === 'number');
+});
+
+test('GET /api/fx/exposure: non-CAD reportingCurrency converts CAD via inverse rate (no gaps)', async () => {
+  // dateTo pinned to the seeded FxRate's ratedDate so the lookup cache-hits
+  // deterministically (no live BoC call). Only the X→CAD direction exists in
+  // the FxRate table — CAD→USD must be derived by inverting it.
+  const res = await authed
+    .get('/api/fx/exposure')
+    .query({ dateFrom: '2026-01-01', dateTo: '2026-01-15', reportingCurrency: 'USD' });
+  assert.equal(res.status, 200, `body=${res.text}`);
+  assert.equal(res.body.reportingCurrency, 'USD');
+  assert.deepEqual(res.body.gaps, [], 'CAD must not be an FX gap under USD reporting');
+  const cad = res.body.byCurrency.find((r: { currency: string }) => r.currency === 'CAD');
+  assert.ok(cad);
+  // CAD nets to 98.5 in window; USD equivalent = 98.5 / 1.35 ≈ 72.963.
+  assert.ok(Math.abs(cad.fxRate - 1 / 1.35) < 0.0001, `fxRate=${cad.fxRate}`);
+  assert.ok(Math.abs(cad.cadEquivalent - 72.963) < 0.001, `cadEquivalent=${cad.cadEquivalent}`);
+  // Headline total includes every currency: 72.963 (CAD) + (-50) (USD).
+  assert.ok(Math.abs(res.body.totalCadEquivalent - 22.963) < 0.001, `total=${res.body.totalCadEquivalent}`);
 });
 
 test('GET /api/fx/exposure: rejects bad date', async () => {
@@ -211,6 +231,25 @@ test('GET /api/fx/reporting: normalizes per-metric totals to reporting currency'
     (r: { from: string }) => r.from === 'USD',
   );
   assert.ok(usdRate);
+});
+
+test('GET /api/fx/reporting: non-CAD reportingCurrency converts every bucket (no gaps)', async () => {
+  const res = await authed.get('/api/fx/reporting').query({
+    dateFrom: '2026-01-01',
+    dateTo: '2026-01-15',
+    reportingCurrency: 'USD',
+  });
+  assert.equal(res.status, 200, `body=${res.text}`);
+  assert.equal(res.body.reportingCurrency, 'USD');
+  assert.deepEqual(res.body.gaps, [], 'CAD must not be an FX gap under USD reporting');
+  for (const metric of res.body.metrics as Array<{ key: string; partial: boolean }>) {
+    assert.equal(metric.partial, false, `${metric.key} should not be partial`);
+  }
+  const cadRate = res.body.fxRatesUsed.find(
+    (r: { from: string; to: string }) => r.from === 'CAD' && r.to === 'USD',
+  );
+  assert.ok(cadRate, `expected CAD→USD in fxRatesUsed, got ${JSON.stringify(res.body.fxRatesUsed)}`);
+  assert.ok(Math.abs(cadRate.rate - 1 / 1.35) < 0.0001);
 });
 
 test('GET /api/fx/reporting: determinism — repeated calls return same totals', async () => {

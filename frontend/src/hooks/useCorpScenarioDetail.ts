@@ -25,7 +25,7 @@ export function useCorpScenarioDetail(id: number | null): UseCorpScenarioDetailR
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getJson<CorpScenarioWithComputed>(`/api/tax/corp-scenarios/${id}`)
+    getJson<CorpScenarioWithComputed>(`/api/tax/scenarios/corp/${id}`)
       .then((d) => { if (!cancelled) { setData(d); setLoading(false); } })
       .catch((e: unknown) => {
         if (!cancelled) {

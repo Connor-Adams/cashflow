@@ -190,20 +190,3 @@ export async function upsertPurchase(
 export async function untrackPurchase(transactionId: number): Promise<void> {
   await deleteReq(`/api/transactions/${transactionId}/purchase`)
 }
-
-export async function getPurchase(
-  transactionId: number,
-): Promise<PurchaseDto | null> {
-  try {
-    const resp = await getJson<{ data: PurchaseDto }>(
-      `/api/transactions/${transactionId}/purchase`,
-    )
-    return resp.data
-  } catch (e) {
-    // 404 = not tracked, return null instead of throwing.
-    if (e instanceof Error && /404|not found|not tracked/i.test(e.message)) {
-      return null
-    }
-    throw e
-  }
-}

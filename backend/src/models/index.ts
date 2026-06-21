@@ -18,11 +18,13 @@ import { AiSuggestion, initAiSuggestion } from './AiSuggestion';
 import { ChatThread, initChatThread } from './ChatThread';
 import { ChatMessage, initChatMessage } from './ChatMessage';
 import { ChatProposal, initChatProposal } from './ChatProposal';
+import { CostcoProduct, initCostcoProduct } from './CostcoProduct';
 import { ExternalOrder, initExternalOrder } from './ExternalOrder';
 import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
 import { ExternalOrderTender, initExternalOrderTender } from './ExternalOrderTender';
 import { TransactionOrderLink, initTransactionOrderLink } from './TransactionOrderLink';
 import { TransactionSignal, initTransactionSignal } from './TransactionSignal';
+import { MerchantEmbedding, initMerchantEmbedding } from './MerchantEmbedding';
 import { TransactionRevision, initTransactionRevision } from './TransactionRevision';
 import { Security, initSecurity } from './Security';
 import { InvestmentActivity, initInvestmentActivity } from './InvestmentActivity';
@@ -30,11 +32,21 @@ import { HoldingSnapshot, initHoldingSnapshot } from './HoldingSnapshot';
 import { SecurityPrice, initSecurityPrice } from './SecurityPrice';
 import { SecurityDailyPrice, initSecurityDailyPrice } from './SecurityDailyPrice';
 import { SecurityDividend, initSecurityDividend } from './SecurityDividend';
+import {
+  DividendReconciliation,
+  initDividendReconciliation,
+} from './DividendReconciliation';
 import { FxRate, initFxRate } from './FxRate';
 import { UserEmailIntegration, initUserEmailIntegration } from './UserEmailIntegration';
+import {
+  UserSimplefinIntegration,
+  initUserSimplefinIntegration,
+} from './UserSimplefinIntegration';
 import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSenderAllowlist';
 import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEmailMessage';
 import { UserCaptureToken, initUserCaptureToken } from './UserCaptureToken';
+import { UserReportingToken, initUserReportingToken } from './UserReportingToken';
+import { UserAuditToken, initUserAuditToken } from './UserAuditToken';
 import { Entity, initEntity } from './Entity';
 import { TaxCategory, initTaxCategory } from './TaxCategory';
 import { TaxTag, initTaxTag } from './TaxTag';
@@ -51,6 +63,8 @@ import { InstalmentPayment, initInstalmentPayment } from './InstalmentPayment';
 import { ProviderJobLog, initProviderJobLog } from './ProviderJobLog';
 import { Job, initJob } from './Job';
 import { JobRun, initJobRun } from './JobRun';
+import { PdfImportBatch, initPdfImportBatch } from './PdfImportBatch';
+import { PdfImportItem, initPdfImportItem } from './PdfImportItem';
 import {
   PortfolioForwardProjection,
   initPortfolioForwardProjection,
@@ -67,14 +81,9 @@ import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
 import { Insight, initInsight } from './Insight';
 import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
-import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
 import { CfoBriefing, initCfoBriefing } from './CfoBriefing';
-import {
-  MoneyLeakDismissal,
-  initMoneyLeakDismissal,
-} from './MoneyLeakDismissal';
 import { TaxReserveSetting, initTaxReserveSetting } from './TaxReserveSetting';
 import {
   MonthlyClosePeriod,
@@ -94,6 +103,7 @@ import {
   NotificationPreference,
   initNotificationPreference,
 } from './NotificationPreference';
+import { PushSubscription, initPushSubscription } from './PushSubscription';
 import { VaultDocument, initVaultDocument } from './VaultDocument';
 import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
 import { SavedSearch, initSavedSearch } from './SavedSearch';
@@ -105,6 +115,13 @@ import {
   initDebtPayoffScenario,
 } from './DebtPayoffScenario';
 import { FinancialScenario, initFinancialScenario } from './FinancialScenario';
+import { Label, initLabel } from './Label';
+import { TransactionLabel, initTransactionLabel } from './TransactionLabel';
+import { Feedback, initFeedback } from './Feedback';
+import { ClientErrorEvent, initClientErrorEvent } from './ClientErrorEvent';
+import { ServerErrorEvent, initServerErrorEvent } from './ServerErrorEvent';
+import { IncomeEntry, initIncomeEntry } from './IncomeEntry';
+import { SavedFilter, initSavedFilter } from './SavedFilter';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -125,11 +142,13 @@ initAiSuggestion(sequelize);
 initChatThread(sequelize);
 initChatMessage(sequelize);
 initChatProposal(sequelize);
+initCostcoProduct(sequelize);
 initExternalOrder(sequelize);
 initExternalOrderItem(sequelize);
 initExternalOrderTender(sequelize);
 initTransactionOrderLink(sequelize);
 initTransactionSignal(sequelize);
+initMerchantEmbedding(sequelize);
 initTransactionRevision(sequelize);
 initSecurity(sequelize);
 initInvestmentActivity(sequelize);
@@ -137,11 +156,15 @@ initHoldingSnapshot(sequelize);
 initSecurityPrice(sequelize);
 initSecurityDailyPrice(sequelize);
 initSecurityDividend(sequelize);
+initDividendReconciliation(sequelize);
 initFxRate(sequelize);
 initUserEmailIntegration(sequelize);
+initUserSimplefinIntegration(sequelize);
 initReceiptSenderAllowlist(sequelize);
 initProcessedEmailMessage(sequelize);
 initUserCaptureToken(sequelize);
+initUserReportingToken(sequelize);
+initUserAuditToken(sequelize);
 initEntity(sequelize);
 initTaxCategory(sequelize);
 initTaxTag(sequelize);
@@ -155,6 +178,8 @@ initInstalmentPayment(sequelize);
 initProviderJobLog(sequelize);
 initJob(sequelize);
 initJobRun(sequelize);
+initPdfImportBatch(sequelize);
+initPdfImportItem(sequelize);
 initPortfolioForwardProjection(sequelize);
 initPortfolioDailySnapshot(sequelize);
 registerForwardIncomeStaleHooks(sequelize);
@@ -165,10 +190,8 @@ initHouseholdPlan(sequelize);
 initInsight(sequelize);
 initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
-initSubscription(sequelize);
 initAiReviewRun(sequelize);
 initCfoBriefing(sequelize);
-initMoneyLeakDismissal(sequelize);
 initTaxReserveSetting(sequelize);
 initMonthlyClosePeriod(sequelize);
 initMonthlyCloseTask(sequelize);
@@ -178,6 +201,7 @@ initTransactionLargePurchaseReview(sequelize);
 initCashflowSettings(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
+initPushSubscription(sequelize);
 initAuditLog(sequelize);
 initVaultDocument(sequelize);
 initFinanceEvent(sequelize);
@@ -188,6 +212,36 @@ initSyncBackup(sequelize);
 initLiabilityAccount(sequelize);
 initDebtPayoffScenario(sequelize);
 initFinancialScenario(sequelize);
+initLabel(sequelize);
+initTransactionLabel(sequelize);
+initFeedback(sequelize);
+initClientErrorEvent(sequelize);
+initServerErrorEvent(sequelize);
+initIncomeEntry(sequelize);
+initSavedFilter(sequelize);
+
+// Transaction labels (issue #270). belongsToMany both directions so a
+// transaction can `include` its labels and a label can resolve its
+// transactions, through the join model. hasMany on the join model itself
+// powers the usageCount aggregate in GET /api/labels.
+Household.hasMany(Label, { foreignKey: 'household_id', as: 'labels' });
+Label.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+Transaction.belongsToMany(Label, {
+  through: TransactionLabel,
+  foreignKey: 'transaction_id',
+  otherKey: 'label_id',
+  as: 'labels',
+});
+Label.belongsToMany(Transaction, {
+  through: TransactionLabel,
+  foreignKey: 'label_id',
+  otherKey: 'transaction_id',
+  as: 'transactions',
+});
+Label.hasMany(TransactionLabel, { foreignKey: 'label_id', as: 'links' });
+TransactionLabel.belongsTo(Label, { foreignKey: 'label_id', as: 'label' });
+Transaction.hasMany(TransactionLabel, { foreignKey: 'transaction_id', as: 'labelLinks' });
+TransactionLabel.belongsTo(Transaction, { foreignKey: 'transaction_id', as: 'transaction' });
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -204,9 +258,26 @@ User.hasMany(NotificationPreference, {
 });
 NotificationPreference.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
+User.hasMany(PushSubscription, {
+  foreignKey: 'user_id',
+  as: 'pushSubscriptions',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+PushSubscription.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 Entity.belongsTo(Entity, { foreignKey: 'spouseEntityId', as: 'spouse' });
+
+// entity_id attribution for the T1/T2 tax engine. belongsTo gives
+// Account/Transaction → Entity navigation; the DB-level FK lives in migration
+// 20260618000001 (Postgres only). Reciprocal hasMany matches the repo
+// convention for owning associations.
+Entity.hasMany(Account, { foreignKey: 'entity_id', as: 'accounts' });
+Account.belongsTo(Entity, { foreignKey: 'entity_id', as: 'entity' });
+Entity.hasMany(Transaction, { foreignKey: 'entity_id', as: 'transactions' });
+Transaction.belongsTo(Entity, { foreignKey: 'entity_id', as: 'entity' });
 
 Household.hasMany(TaxTag, { foreignKey: 'household_id', as: 'taxTags' });
 TaxTag.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -265,6 +336,12 @@ User.hasMany(UserEmailIntegration, {
 });
 UserEmailIntegration.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
+User.hasOne(UserSimplefinIntegration, {
+  foreignKey: 'user_id',
+  as: 'simplefinIntegration',
+});
+UserSimplefinIntegration.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
 Account.hasMany(Transaction, { foreignKey: 'account_id', as: 'transactions' });
 Transaction.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
 Account.hasMany(InvestmentActivity, {
@@ -299,6 +376,22 @@ SecurityDividend.belongsTo(Security, {
   foreignKey: 'security_id',
   as: 'security',
 });
+SecurityDividend.hasMany(DividendReconciliation, {
+  foreignKey: 'security_dividend_id',
+  as: 'reconciliations',
+});
+DividendReconciliation.belongsTo(SecurityDividend, {
+  foreignKey: 'security_dividend_id',
+  as: 'dividend',
+});
+DividendReconciliation.belongsTo(Account, {
+  foreignKey: 'account_id',
+  as: 'account',
+});
+DividendReconciliation.belongsTo(Transaction, {
+  foreignKey: 'matched_transaction_id',
+  as: 'matchedTransaction',
+});
 User.hasMany(Session, { foreignKey: 'user_id', as: 'sessions' });
 Session.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Household.hasMany(HouseholdMember, { foreignKey: 'household_id', as: 'members' });
@@ -306,8 +399,13 @@ HouseholdMember.belongsTo(Household, { foreignKey: 'household_id', as: 'househol
 HouseholdMember.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Household.hasMany(Contact, { foreignKey: 'household_id', as: 'contacts' });
 Contact.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+User.hasMany(Contact, { foreignKey: 'user_id', as: 'linkedContacts' });
+Contact.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Household.hasMany(Category, { foreignKey: 'household_id', as: 'categories' });
 Category.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+// Category tree (subcategories): self-referential parent/children.
+Category.belongsTo(Category, { foreignKey: 'parent_id', as: 'parent' });
+Category.hasMany(Category, { foreignKey: 'parent_id', as: 'children', onDelete: 'RESTRICT' });
 Transaction.belongsTo(Contact, { foreignKey: 'ownership_contact_id', as: 'ownershipContact' });
 Household.hasMany(PartnerSettlement, {
   foreignKey: 'household_id',
@@ -322,6 +420,8 @@ Contact.hasMany(PartnerSettlement, {
   as: 'partnerSettlements',
 });
 PartnerSettlement.belongsTo(Contact, { foreignKey: 'contact_id', as: 'contact' });
+User.hasMany(PartnerSettlement, { foreignKey: 'recorded_by_user_id', as: 'recordedSettlements' });
+PartnerSettlement.belongsTo(User, { foreignKey: 'recorded_by_user_id', as: 'recordedByUser' });
 Household.hasMany(BudgetTarget, {
   foreignKey: 'household_id',
   as: 'budgetTargets',
@@ -476,6 +576,10 @@ Household.hasMany(PlannedEvent, {
   onDelete: 'CASCADE',
   hooks: true,
 });
+Household.hasMany(PlannedEvent, {
+  foreignKey: 'household_id',
+  as: 'expectations',
+});
 PlannedEvent.belongsTo(Household, {
   foreignKey: 'household_id',
   as: 'household',
@@ -532,33 +636,6 @@ FinancialGoal.belongsTo(Account, {
   as: 'linkedAccount',
 });
 
-Household.hasMany(Subscription, {
-  foreignKey: 'household_id',
-  as: 'subscriptions',
-  onDelete: 'CASCADE',
-  hooks: true,
-});
-Subscription.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
-
-Household.hasMany(MoneyLeakDismissal, {
-  foreignKey: 'household_id',
-  as: 'moneyLeakDismissals',
-  onDelete: 'CASCADE',
-  hooks: true,
-});
-MoneyLeakDismissal.belongsTo(Household, {
-  foreignKey: 'household_id',
-  as: 'household',
-});
-User.hasMany(MoneyLeakDismissal, {
-  foreignKey: 'dismissed_by_user_id',
-  as: 'moneyLeakDismissals',
-});
-MoneyLeakDismissal.belongsTo(User, {
-  foreignKey: 'dismissed_by_user_id',
-  as: 'dismissedByUser',
-});
-
 Household.hasMany(AiReviewRun, {
   foreignKey: 'household_id',
   as: 'aiReviewRuns',
@@ -577,6 +654,9 @@ AiReviewRun.belongsTo(User, {
   foreignKey: 'user_id',
   as: 'user',
 });
+
+PdfImportBatch.hasMany(PdfImportItem, { foreignKey: 'batch_id', as: 'items', onDelete: 'CASCADE', hooks: true });
+PdfImportItem.belongsTo(PdfImportBatch, { foreignKey: 'batch_id', as: 'batch' });
 
 // CFO briefings (issue #236). Cascades with household; user FK for the
 // actor that requested the briefing.
@@ -920,6 +1000,13 @@ LiabilityAccount.belongsTo(Household, {
   foreignKey: 'household_id',
   as: 'household',
 });
+// Credit-card payment planner (#243). The funding (cash) account a card's
+// bill is paid from. SET NULL at the DB level (see the cc-fields migration) so
+// deleting the funding account unlinks the profile rather than removing it.
+LiabilityAccount.belongsTo(Account, {
+  foreignKey: 'payment_account_id',
+  as: 'paymentAccount',
+});
 
 // DebtPayoffScenario (issue #202). Household-scoped saved payoff plans. The
 // creating user is kept loosely (SET NULL) so a scenario survives the user's
@@ -943,6 +1030,34 @@ DebtPayoffScenario.belongsTo(User, {
   as: 'user',
 });
 
+// SavedFilter (issue #272). One row per user-named filter preset scoped to a
+// page. Cascades on user delete; no household scope (filters are personal).
+User.hasMany(SavedFilter, {
+  foreignKey: 'user_id',
+  as: 'savedFilters',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+SavedFilter.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+// In-app feedback / bug reports (issue #295). Scoped to both the submitting
+// user and their household; both cascade on delete so removing either removes
+// the feedback. The owner-only inbox lists via householdWhere().
+User.hasMany(Feedback, {
+  foreignKey: 'user_id',
+  as: 'feedback',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Feedback.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+Household.hasMany(Feedback, {
+  foreignKey: 'household_id',
+  as: 'feedback',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Feedback.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+
 export {
   sequelize,
   User,
@@ -964,11 +1079,13 @@ export {
   ChatThread,
   ChatMessage,
   ChatProposal,
+  CostcoProduct,
   ExternalOrder,
   ExternalOrderItem,
   ExternalOrderTender,
   TransactionOrderLink,
   TransactionSignal,
+  MerchantEmbedding,
   TransactionRevision,
   Security,
   InvestmentActivity,
@@ -978,9 +1095,12 @@ export {
   SecurityDividend,
   FxRate,
   UserEmailIntegration,
+  UserSimplefinIntegration,
   ReceiptSenderAllowlist,
   ProcessedEmailMessage,
   UserCaptureToken,
+  UserReportingToken,
+  UserAuditToken,
   Entity,
   TaxCategory,
   TaxTag,
@@ -994,7 +1114,13 @@ export {
   ProviderJobLog,
   Job,
   JobRun,
+  PdfImportBatch,
+  PdfImportItem,
+  // Model registry barrel: re-exported for API symmetry though current consumers import from the model file directly.
+  // fallow-ignore-next-line unused-export
   PortfolioForwardProjection,
+  // Model registry barrel: re-exported for API symmetry though current consumers import from the model file directly.
+  // fallow-ignore-next-line unused-export
   PortfolioDailySnapshot,
   Scenario,
   ScenarioReturn,
@@ -1002,10 +1128,8 @@ export {
   Insight,
   PlannedEvent,
   FinancialGoal,
-  Subscription,
   AiReviewRun,
   CfoBriefing,
-  MoneyLeakDismissal,
   TaxReserveSetting,
   MonthlyClosePeriod,
   MonthlyCloseTask,
@@ -1015,6 +1139,7 @@ export {
   CashflowSettings,
   Notification,
   NotificationPreference,
+  PushSubscription,
   AuditLog,
   FinanceEvent,
   BudgetAlertState,
@@ -1025,4 +1150,14 @@ export {
   LiabilityAccount,
   DebtPayoffScenario,
   FinancialScenario,
+  DividendReconciliation,
+  Label,
+  TransactionLabel,
+  Feedback,
+  ClientErrorEvent,
+  ServerErrorEvent,
+  IncomeEntry,
+  // Model registry barrel: re-exported for API symmetry though current consumers import from the model file directly.
+  // fallow-ignore-next-line unused-export
+  SavedFilter,
 };

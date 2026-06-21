@@ -56,6 +56,14 @@ export type DetectedInsight = {
 
 export type DetectorOptions = {
   now: Date;
+  /**
+   * Lowercased merchant names that are tracked subscriptions; `recurring_increase`
+   * skips these so `subscription_price_increase` owns them (no double-surfacing of
+   * the same price hike). The orchestrator builds this from both the subscription's
+   * `normalizedName` and its display `name`, each lowercased — see the note in
+   * `detectRecurringIncrease` and `runDetectorsForHousehold`.
+   */
+  subscriptionMerchants?: Set<string>;
 };
 
 // ---- helpers -----------------------------------------------------------
@@ -163,9 +171,7 @@ export function detectDuplicateTransactions(
 
 const SPIKE_HISTORY_MONTHS = 3;
 const SPIKE_MULT = 2; // current > 2× prior avg
-// TODO(threshold): conservative $50 floor avoids triggering on coffee — revisit
-// after first round of usage to see how many false positives slip through.
-const SPIKE_MIN_CURRENT = 50;
+const SPIKE_MIN_CURRENT = 100;
 
 export function detectMerchantSpendSpike(
   rows: DetectorTransaction[],
@@ -277,6 +283,17 @@ export function detectRecurringIncrease(
 
   const out: DetectedInsight[] = [];
   for (const bucket of buckets.values()) {
+    // Skip merchants that are tracked subscriptions — `subscription_price_increase`
+    // owns price hikes for those, so emitting a `recurring_increase` too would
+    // double-surface the same event. `bucket.merchant` is `merchantClean.trim()`,
+    // so we compare its lowercase against the (already-lowercased) guard set. The
+    // orchestrator seeds that set with BOTH the subscription's `normalizedName`
+    // (which for detection-sourced subs is `merchantClean.trim().toLowerCase()` —
+    // identical to this key) AND its display `name` lowercased, so manually-created
+    // or renamed subs whose `normalizedName` diverges from the live `merchantClean`
+    // are still caught. See `runDetectorsForHousehold`.
+    if (opts.subscriptionMerchants?.has(bucket.merchant.toLowerCase())) continue;
+
     const currentBucket = bucket.byMonth.get(currentKey);
     if (!currentBucket) continue;
 
@@ -422,6 +439,212 @@ export function detectUnusualCategorySpend(
         currentAmount: bucket.current,
         priorAvg,
         multiplier,
+      },
+    });
+  }
+  return out;
+}
+
+// ---- detectCashRunwayLow -----------------------------------------------
+
+/**
+ * One day of the projected cash-balance series the forecast engine produces
+ * (`buildForecast().dailyPoints`). The orchestrator computes this per currency
+ * and passes it in as plain rows so the detector stays DB-free — mirroring how
+ * `loadTransactions`/`loadSettlements` shape DB data into detector inputs.
+ */
+export type DetectorRunwayPoint = {
+  /** ISO YYYY-MM-DD. */
+  date: string;
+  /** Projected end-of-day cash balance for the currency. */
+  balance: number;
+  currency: string;
+};
+
+// How far ahead we look for a low-balance crossing.
+const RUNWAY_HORIZON_DAYS = 30;
+// Buffer the projected balance must stay above. 0 = crossing into negative.
+const RUNWAY_LOW_BUFFER = 0;
+// A crossing this many days out (or a negative balance) is critical, not advisory.
+const RUNWAY_CRITICAL_DAYS = 7;
+// TODO(threshold): horizon=30, buffer=0 are sane defaults; make per-household
+// configurable in a follow-up (see issue out-of-scope note).
+
+/**
+ * Fires when the projected daily balance crosses below `RUNWAY_LOW_BUFFER`
+ * within the next `RUNWAY_HORIZON_DAYS`. Emits at most one finding per currency
+ * series, keyed on the FIRST crossing day inside the horizon. Keying the
+ * fingerprint on the crossing date (not `now`) keeps a stable forecast on the
+ * same row across re-runs; a shifted crossing is conceptually a new finding.
+ */
+export function detectCashRunwayLow(
+  points: DetectorRunwayPoint[],
+  opts: DetectorOptions,
+): DetectedInsight[] {
+  const horizonEnd = new Date(opts.now.getTime() + RUNWAY_HORIZON_DAYS * MS_PER_DAY);
+
+  // Group the series by currency — each currency is evaluated independently.
+  const byCurrency = new Map<string, DetectorRunwayPoint[]>();
+  for (const p of points) {
+    const arr = byCurrency.get(p.currency) ?? [];
+    arr.push(p);
+    byCurrency.set(p.currency, arr);
+  }
+
+  const out: DetectedInsight[] = [];
+  for (const [currency, series] of byCurrency) {
+    const sorted = [...series].sort((a, b) => a.date.localeCompare(b.date));
+    // First day inside the horizon where balance dips below the buffer.
+    let crossing: DetectorRunwayPoint | null = null;
+    for (const p of sorted) {
+      const d = parseDate(p.date);
+      if (d > horizonEnd) break; // beyond horizon — stop scanning
+      if (p.balance < RUNWAY_LOW_BUFFER) {
+        crossing = p;
+        break;
+      }
+    }
+    if (!crossing) continue;
+
+    const daysOut = Math.max(0, Math.round(daysBetween(parseDate(crossing.date), opts.now)));
+    const isNegative = crossing.balance < 0;
+    const severity: InsightSeverity =
+      daysOut <= RUNWAY_CRITICAL_DAYS || isNegative ? 'critical' : 'warning';
+
+    const bufferStr = formatCurrency(RUNWAY_LOW_BUFFER, currency);
+    const description =
+      severity === 'critical'
+        ? `You'll go negative around ${crossing.date} — your projected balance drops below ${bufferStr} in ${daysOut} day(s).`
+        : `You'll dip below ${bufferStr} around ${crossing.date} based on your upcoming bills and expected income. Move money or hold off on big spends.`;
+
+    out.push({
+      type: 'cash_runway_low',
+      severity,
+      title: 'Projected balance is running low',
+      description,
+      entityType: 'forecast',
+      entityId: null,
+      fingerprint: `runway:${currency}:${crossing.date}`,
+      metadata: {
+        currency,
+        crossingDate: crossing.date,
+        projectedBalance: crossing.balance,
+        buffer: RUNWAY_LOW_BUFFER,
+        daysOut,
+        horizonDays: RUNWAY_HORIZON_DAYS,
+      },
+    });
+  }
+  return out;
+}
+
+// ---- detectCategoryTrend -----------------------------------------------
+
+const CATEGORY_TREND_MONTHS = 3;
+// Required total rise from first to last month of the window.
+const CATEGORY_TREND_RATIO = 0.25; // +25%
+// Latest-month spend floor — avoids noise on tiny categories.
+const CATEGORY_TREND_MIN = 100;
+// A rise at/above this escalates info → warning.
+const CATEGORY_TREND_WARNING_RATIO = 0.4; // +40%
+// TODO(threshold): 25%/40%/$100 are conservative starting points; make
+// per-household configurable in a follow-up (see issue out-of-scope note).
+
+/**
+ * Fires when a category's monthly spend shows a sustained upward trend across
+ * a rolling window of `CATEGORY_TREND_MONTHS` FULL prior months. The current
+ * (partial) month is excluded so a mid-month total doesn't bias the slope.
+ *
+ * Distinct from `unusual_category_spend` (which needs a 2x jump vs a prior
+ * average): this looks for a steady monotonic-ish rise that no single month
+ * trips. Requires every month present (a gap means it isn't sustained), a
+ * positive slope, a total rise ≥ `CATEGORY_TREND_RATIO`, and a latest-month
+ * floor of `CATEGORY_TREND_MIN`.
+ */
+export function detectCategoryTrend(
+  rows: DetectorTransaction[],
+  opts: DetectorOptions,
+): DetectedInsight[] {
+  // Prior N full months, oldest → newest (priorMonthKeys returns newest first).
+  const windowKeys = priorMonthKeys(opts.now, CATEGORY_TREND_MONTHS).reverse();
+  const windowSet = new Set(windowKeys);
+  const windowEndKey = windowKeys[windowKeys.length - 1];
+
+  type Bucket = { category: string; currency: string; byMonth: Map<string, number> };
+  const buckets = new Map<string, Bucket>();
+
+  for (const row of rows) {
+    if (row.amount >= 0) continue;
+    if (!row.finalCategory) continue;
+    const month = monthKey(row.date);
+    if (!windowSet.has(month)) continue;
+    const key = `${row.currency}|${row.finalCategory.toLowerCase()}`;
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = { category: row.finalCategory, currency: row.currency, byMonth: new Map() };
+      buckets.set(key, bucket);
+    }
+    bucket.byMonth.set(month, (bucket.byMonth.get(month) ?? 0) + Math.abs(row.amount));
+  }
+
+  const out: DetectedInsight[] = [];
+  for (const bucket of buckets.values()) {
+    // Every month must have spend — a gap means it isn't a sustained trend.
+    const series: number[] = [];
+    let hasGap = false;
+    for (const key of windowKeys) {
+      const v = bucket.byMonth.get(key);
+      if (v == null || v <= 0) {
+        hasGap = true;
+        break;
+      }
+      series.push(v);
+    }
+    if (hasGap || series.length < CATEGORY_TREND_MONTHS) continue;
+
+    const first = series[0];
+    const last = series[series.length - 1];
+    if (last < CATEGORY_TREND_MIN) continue; // tiny-category noise guard
+    if (first <= 0) continue;
+
+    // Linear regression slope over the monthly totals — require a genuine
+    // upward line, not just first<last with a dip in the middle.
+    const n = series.length;
+    let sumX = 0;
+    let sumY = 0;
+    let sumXY = 0;
+    let sumXX = 0;
+    for (let i = 0; i < n; i++) {
+      sumX += i;
+      sumY += series[i];
+      sumXY += i * series[i];
+      sumXX += i * i;
+    }
+    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+    if (slope <= 0) continue;
+
+    const rise = (last - first) / first;
+    if (rise < CATEGORY_TREND_RATIO) continue;
+
+    const pct = Math.round(rise * 100);
+    const severity: InsightSeverity = rise >= CATEGORY_TREND_WARNING_RATIO ? 'warning' : 'info';
+    const trail = series.map((v) => formatCurrency(v, bucket.currency)).join(' → ');
+
+    out.push({
+      type: 'category_trend',
+      severity,
+      title: `${bucket.category} spending keeps climbing`,
+      description: `Your ${bucket.category} spend has risen ${pct}% over the last ${CATEGORY_TREND_MONTHS} months (${trail}). It's a steady trend, not a one-off.`,
+      entityType: null,
+      entityId: null,
+      fingerprint: `category-trend:${bucket.currency}:${bucket.category.toLowerCase()}:${windowEndKey}`,
+      metadata: {
+        category: bucket.category,
+        currency: bucket.currency,
+        windowEndMonth: windowEndKey,
+        monthlyTotals: series,
+        risePct: pct,
+        slope,
       },
     });
   }

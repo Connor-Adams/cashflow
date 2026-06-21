@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getJson } from '@/lib/api'
+import { todayDateInputValue } from '@/lib/dateInput'
 import type { ForecastResponse } from '@/types/api'
 
 /**
@@ -21,10 +22,6 @@ export const FORECAST_RANGE_LABEL: Record<ForecastRange, string> = {
 
 type AsyncState<T> = { data: T | null; loading: boolean; error: Error | null }
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10)
-}
-
 function addDaysIso(iso: string, days: number): string {
   const [y, m, d] = iso.split('-').map((p) => parseInt(p, 10))
   const ms = Date.UTC(y, m - 1, d) + days * 24 * 60 * 60 * 1000
@@ -41,8 +38,12 @@ export function buildForecastQueryString(opts: {
   accountId?: number | null
   includeRecurring?: boolean
 }): string {
-  const dateFrom = todayIso()
-  const dateTo = addDaysIso(dateFrom, FORECAST_RANGE_DAYS[opts.range])
+  // Local calendar day, not UTC's (issue #280): an evening user behind UTC
+  // would otherwise start the window tomorrow and lose today's events.
+  const dateFrom = todayDateInputValue()
+  // The backend window is inclusive on both ends, so an N-day preset ends
+  // N-1 days after dateFrom.
+  const dateTo = addDaysIso(dateFrom, FORECAST_RANGE_DAYS[opts.range] - 1)
   const params = new URLSearchParams()
   params.set('dateFrom', dateFrom)
   params.set('dateTo', dateTo)

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '@connor-adams/designsystem'
 
 export type CustomRangePickerProps = {
   from: string
@@ -15,14 +16,14 @@ export function CustomRangePicker({ from, to, onApply }: CustomRangePickerProps)
       <input type="date" value={f} onChange={(e) => setF(e.target.value)} className="border px-2 py-1 rounded" />
       <span className="text-sm">to</span>
       <input type="date" value={t} onChange={(e) => setT(e.target.value)} className="border px-2 py-1 rounded" />
-      <button
+      <Button
         type="button"
+        size="sm"
         disabled={!valid}
         onClick={() => onApply({ from: f, to: t })}
-        className="px-3 py-1 text-sm rounded bg-primary text-primary-foreground disabled:opacity-50"
       >
         Apply
-      </button>
+      </Button>
     </div>
   )
 }

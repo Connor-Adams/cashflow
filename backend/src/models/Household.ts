@@ -15,6 +15,11 @@ export class Household extends Model<
   declare id: CreationOptional<number>;
   declare name: string;
   declare benchmarkSymbol: CreationOptional<string>;
+  /**
+   * IANA timezone (e.g. 'America/Toronto') for server-side "today" derivation.
+   * Nullable — null falls back to DEFAULT_TIMEZONE (see time/householdToday.ts).
+   */
+  declare timezone: CreationOptional<string | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -29,6 +34,12 @@ export function initHousehold(sequelize: Sequelize): typeof Household {
         field: 'benchmark_symbol',
         allowNull: false,
         defaultValue: 'SPY',
+      },
+      timezone: {
+        type: DataTypes.STRING(64),
+        field: 'timezone',
+        allowNull: true,
+        defaultValue: null,
       },
     } as ModelAttributes<Household>,
     {

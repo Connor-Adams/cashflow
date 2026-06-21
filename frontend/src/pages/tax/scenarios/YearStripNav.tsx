@@ -21,6 +21,8 @@
 // awkward refactor when we add per-entity context (e.g. a label, an aria
 // region name, or analytics tagging) in a follow-up.
 
+import { Button } from '@connor-adams/designsystem'
+
 interface ChainEntryShape {
   scenario: { id: number; year: number; kind: string; name: string };
   computed?: unknown;
@@ -53,10 +55,10 @@ export function YearStripNav({
   return (
     <nav
       aria-label={`Year strip for entity ${entityId}`}
-      className="flex flex-wrap items-center gap-2 border-b border-gray-200 pb-2"
+      className="flex flex-wrap items-center gap-2 border-b border-border pb-2"
     >
       {chain.length === 0 ? (
-        <span className="text-sm text-gray-500">No years yet.</span>
+        <span className="text-sm text-muted-foreground">No years yet.</span>
       ) : (
         <ul className="flex flex-wrap items-center gap-1">
           {chain.map((entry) => {
@@ -66,41 +68,40 @@ export function YearStripNav({
               (activeScenarioId === null || activeScenarioId === scenario.id);
             return (
               <li key={scenario.id}>
-                <button
+                <Button
                   type="button"
+                  variant={isActive ? 'primary' : 'outline'}
+                  size="sm"
                   onClick={() => onSelectYear(scenario.year, scenario.id)}
                   aria-current={isActive ? 'page' : undefined}
-                  className={
-                    isActive
-                      ? 'rounded-md border border-blue-500 bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700'
-                      : 'rounded-md border border-gray-200 bg-white px-3 py-1 text-sm text-gray-700 hover:border-gray-300 hover:bg-gray-50'
-                  }
                   title={`${scenario.name}${scenario.kind === 'projection_root' ? ' (projection)' : ''}`}
                 >
                   <span>{scenario.year}</span>
                   {scenario.kind === 'projection_root' && (
                     <span
                       aria-label="projected year"
-                      className="ml-1 text-xs text-gray-500"
+                      className="ml-1 text-xs text-muted-foreground"
                     >
                       proj
                     </span>
                   )}
-                </button>
+                </Button>
               </li>
             );
           })}
         </ul>
       )}
 
-      <button
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
         onClick={onProjectNextYear}
         disabled={isProjecting || chain.length === 0}
-        className="ml-auto rounded-md border border-dashed border-gray-300 px-3 py-1 text-sm text-gray-600 hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+        className="ml-auto border-dashed"
       >
         {isProjecting ? 'Projecting…' : '+ Project next year'}
-      </button>
+      </Button>
     </nav>
   );
 }

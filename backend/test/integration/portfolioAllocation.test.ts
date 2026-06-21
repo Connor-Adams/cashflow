@@ -8,6 +8,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let testDb: PgTestDb;
@@ -29,7 +30,7 @@ before(async () => {
   const seeded = await seedHousehold(models, `alloc-${Date.now()}@example.com`);
   householdId = seeded.household.id;
   userId = seeded.user.id;
-  authed = request.agent(app);
+  authed = testAgent(app);
   authed.jar.setCookie(`cashflow_session=${seeded.token}; Path=/`);
 
   // Two investment accounts.
@@ -172,6 +173,6 @@ test('byAccount returns one row per account+currency', async () => {
 });
 
 test('Unauthenticated request is rejected', async () => {
-  const res = await request(app).get('/api/portfolio/allocation');
+  const res = await testRequest(app).get('/api/portfolio/allocation');
   assert.ok(res.status === 401 || res.status === 403);
 });

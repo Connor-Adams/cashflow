@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { Calculator, Info, RotateCcw } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Button } from '@connor-adams/designsystem'
+import { Card, CardContent, CardHeader, CardTitle } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { postJson } from '@/lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { safeNum } from '../lib/num'
 
 /**
  * Opportunity-cost calculator (issue #252): "what if I invested this money
@@ -94,19 +95,36 @@ export function OpportunityCostCalculator({
     setHorizonYears(defaults.horizonYears)
     setResult(null)
     setError(null)
+    setFieldErrors({})
+  }
+
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+
+  function validateFields(): Record<string, string> {
+    const errs: Record<string, string> = {}
+    const amountVal = safeNum(amount)
+    if (amountVal === null || amountVal <= 0) errs.amount = 'Enter a positive number.'
+    const horizonVal = safeNum(horizonYears)
+    if (horizonVal === null || horizonVal <= 0) errs.horizonYears = 'Enter a positive number.'
+    const returnVal = safeNum(returnPercent)
+    if (returnVal === null || returnVal < 0) errs.returnPercent = 'Enter a positive number.'
+    return errs
   }
 
   async function calculate(event?: React.FormEvent) {
     event?.preventDefault()
+    const errs = validateFields()
+    setFieldErrors(errs)
+    if (Object.keys(errs).length > 0) return
     setError(null)
     setLoading(true)
     try {
       const payload: Record<string, unknown> = {
         mode,
-        amount: Number(amount),
-        horizonYears: Number(horizonYears),
+        amount: safeNum(amount)!,
+        horizonYears: safeNum(horizonYears)!,
         // Percent in the UI, decimal on the wire.
-        annualReturnRate: Number(returnPercent) / 100,
+        annualReturnRate: safeNum(returnPercent)! / 100,
       }
       if (mode === 'recurring') payload.cadence = cadence
 
@@ -161,9 +179,13 @@ export function OpportunityCostCalculator({
               min="0"
               step="0.01"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => { setAmount(e.target.value); setFieldErrors((p) => ({ ...p, amount: '' })) }}
               placeholder="0.00"
+              aria-invalid={!!fieldErrors.amount}
             />
+            {fieldErrors.amount ? (
+              <span className="text-xs text-danger" role="alert">{fieldErrors.amount}</span>
+            ) : null}
           </Label>
 
           {mode === 'recurring' ? (
@@ -174,9 +196,9 @@ export function OpportunityCostCalculator({
                 onChange={(e) => setCadence(e.target.value as Cadence)}
               >
                 {CADENCE_OPTIONS.map((opt) => (
-                  <NativeSelectOption key={opt.value} value={opt.value}>
+                  <option key={opt.value} value={opt.value}>
                     {opt.label}
-                  </NativeSelectOption>
+                  </option>
                 ))}
               </NativeSelect>
             </Label>
@@ -191,8 +213,12 @@ export function OpportunityCostCalculator({
               max="100"
               step="0.1"
               value={returnPercent}
-              onChange={(e) => setReturnPercent(e.target.value)}
+              onChange={(e) => { setReturnPercent(e.target.value); setFieldErrors((p) => ({ ...p, returnPercent: '' })) }}
+              aria-invalid={!!fieldErrors.returnPercent}
             />
+            {fieldErrors.returnPercent ? (
+              <span className="text-xs text-danger" role="alert">{fieldErrors.returnPercent}</span>
+            ) : null}
           </Label>
 
           <Label>
@@ -203,8 +229,12 @@ export function OpportunityCostCalculator({
               min="0"
               step="0.5"
               value={horizonYears}
-              onChange={(e) => setHorizonYears(e.target.value)}
+              onChange={(e) => { setHorizonYears(e.target.value); setFieldErrors((p) => ({ ...p, horizonYears: '' })) }}
+              aria-invalid={!!fieldErrors.horizonYears}
             />
+            {fieldErrors.horizonYears ? (
+              <span className="text-xs text-danger" role="alert">{fieldErrors.horizonYears}</span>
+            ) : null}
           </Label>
         </div>
 
@@ -221,7 +251,7 @@ export function OpportunityCostCalculator({
       </form>
 
       {error ? (
-        <p role="alert" className="mt-3 text-sm text-rose-600 dark:text-rose-300">
+        <p role="alert" className="mt-3 text-sm text-danger">
           {error}
         </p>
       ) : null}
@@ -290,7 +320,7 @@ function ResultStat({
       <span
         className={
           emphasis
-            ? 'text-2xl font-semibold text-emerald-600 dark:text-emerald-300'
+            ? 'text-2xl font-semibold text-positive'
             : 'text-lg font-medium'
         }
       >

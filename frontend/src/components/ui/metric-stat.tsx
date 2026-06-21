@@ -1,27 +1,18 @@
-import { StatCard } from './stat-card'
+import { StatCard } from '@connor-adams/designsystem'
 
 export type MetricStatProps = {
   label: string
   value: string
-  delta?: number | null
   deltaPct?: number | null
   hint?: string
   loading?: boolean
 }
 
-function formatDelta(deltaPct: number): { arrow: string; text: string; color: string } {
-  if (deltaPct >= 0) {
-    return {
-      arrow: '↑',
-      text: `+${deltaPct.toFixed(2)}%`,
-      color: 'var(--accent-positive)',
-    }
-  }
-  return {
-    arrow: '↓',
-    text: `${Math.abs(deltaPct).toFixed(2)}%`,
-    color: 'var(--accent-warm)',
-  }
+// Format a percentage change as the DS-expected signed delta string ("+1.23%"
+// / "-2.50%"). The DS StatCard parses the sign and colors the badge; with
+// metricKind="gain" an up move reads green and a down move red.
+function formatDeltaPct(deltaPct: number): string {
+  return `${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(2)}%`
 }
 
 export function MetricStat({ label, value, deltaPct, hint, loading }: MetricStatProps) {
@@ -33,15 +24,14 @@ export function MetricStat({ label, value, deltaPct, hint, loading }: MetricStat
     )
   }
   const delta =
-    deltaPct == null || !Number.isFinite(deltaPct)
-      ? null
-      : formatDelta(deltaPct)
-  const compositeHint = delta
-    ? `${delta.arrow} ${delta.text}${hint ? ` · ${hint}` : ''}`
-    : hint
+    deltaPct == null || !Number.isFinite(deltaPct) ? undefined : formatDeltaPct(deltaPct)
   return (
-    <div style={delta ? { borderLeft: `3px solid ${delta.color}` } : undefined}>
-      <StatCard label={label} value={value} hint={compositeHint ?? '—'} />
-    </div>
+    <StatCard
+      label={label}
+      value={value}
+      hint={hint ?? '—'}
+      delta={delta}
+      metricKind="gain"
+    />
   )
 }

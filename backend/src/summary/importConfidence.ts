@@ -22,8 +22,6 @@ import {
   deserializeFlags,
 } from '../import/computeImportConfidence';
 
-export type ImportHealthState = 'clean' | 'needs_review' | 'unknown';
-
 export interface ImportHealthResult {
   /** Total visible transactions in scope (any state, including unknown). */
   total: number;

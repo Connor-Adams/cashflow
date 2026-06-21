@@ -26,8 +26,13 @@ export async function loadItemAllocationContext(
   };
   if (txnIds.length === 0) return empty;
 
+  // Only accepted links may drive allocations. The matcher mass-creates
+  // 'suggested' rows and supersession leaves 'rejected' ones behind; feeding
+  // either into splitTxnByItems double-counts the txn across categories and
+  // fabricates offsetting drift rows. Mirrors every other money-math consumer
+  // (recomputeTransactionReviewFromItems, itemizedSummaries).
   const links = await TransactionOrderLink.findAll({
-    where: { transactionId: { [Op.in]: txnIds } },
+    where: { transactionId: { [Op.in]: txnIds }, status: 'accepted' },
   });
   if (links.length === 0) return empty;
 
@@ -65,7 +70,9 @@ export async function loadItemAllocationContext(
       unitPrice: it.unitPrice,
       quantity: it.quantity,
       inferredCategory: it.inferredCategory,
+      inferredCategoryId: it.inferredCategoryId,
       categoryOverride: it.categoryOverride,
+      categoryOverrideId: it.categoryOverrideId,
       businessUsePercent: it.businessUsePercent,
       businessUseOverride: it.businessUseOverride,
     });

@@ -9,6 +9,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { seedHousehold } from '../helpers/seedHousehold.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -91,7 +92,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -104,13 +105,13 @@ before(async () => {
   primaryUserId = primary.userId;
   primaryContactId = primary.contactId;
   primaryAccountId = await makeAccount('Primary', primary.householdId, primary.userId);
-  primaryAgent = request.agent(app);
+  primaryAgent = testAgent(app);
   primaryAgent.jar.setCookie(`cashflow_session=${primary.token}; Path=/`);
 
   const other = await seedHousehold('Other', 'Their Friend');
   otherHouseholdId = other.householdId;
   await makeAccount('Other', other.householdId, other.userId);
-  otherAgent = request.agent(app);
+  otherAgent = testAgent(app);
   otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
 });
 
@@ -197,6 +198,85 @@ test('GET /api/insights?status= filters by status', async () => {
 test('GET /api/insights?status=garbage rejects unknown status', async () => {
   const res = await primaryAgent.get('/api/insights?status=garbage');
   assert.equal(res.status, 400);
+});
+
+// ---- GET /api/insights ?type= ------------------------------------------
+
+test('GET /api/insights?type= filters by insight type', async () => {
+  // The primary household has a duplicate_transactions insight from the earlier
+  // run tests. The seeded fixtures only produce that one type, so seed a second,
+  // distinct type directly — otherwise the filter has nothing to isolate against.
+  const models = await import('../../src/models');
+  await models.Insight.create({
+    householdId: primaryHouseholdId,
+    userId: primaryUserId,
+    type: 'merchant_spend_spike',
+    severity: 'info',
+    title: 'seed spike for type-filter test',
+    description: null,
+    entityType: null,
+    entityId: null,
+    status: 'open',
+    fingerprint: 'seed:type-filter:merchant_spend_spike',
+    metadata: {},
+    detectedAt: new Date(),
+  });
+
+  const all = await primaryAgent.get('/api/insights');
+  const allTypes = new Set(
+    (all.body.data as Array<{ type: string }>).map((i) => i.type),
+  );
+  assert.ok(allTypes.has('duplicate_transactions'));
+  assert.ok(allTypes.size > 1, 'precondition: more than one insight type present');
+
+  const filtered = await primaryAgent.get(
+    '/api/insights?type=duplicate_transactions',
+  );
+  assert.equal(filtered.status, 200);
+  const items = filtered.body.data as Array<{ type: string }>;
+  assert.ok(items.length >= 1);
+  for (const i of items) assert.equal(i.type, 'duplicate_transactions');
+});
+
+test('GET /api/insights?type= combines with the status filter', async () => {
+  const res = await primaryAgent.get(
+    '/api/insights?type=duplicate_transactions&status=open',
+  );
+  assert.equal(res.status, 200);
+  const items = res.body.data as Array<{ type: string; status: string }>;
+  for (const i of items) {
+    assert.equal(i.type, 'duplicate_transactions');
+    assert.equal(i.status, 'open');
+  }
+});
+
+test('GET /api/insights with an unknown type returns an empty list (type is open STRING)', async () => {
+  const res = await primaryAgent.get('/api/insights?type=not_a_real_type');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.data, []);
+});
+
+test('POST /api/insights/run surfaces a category_trend, retrievable via ?type=category_trend (issue #797)', async () => {
+  // Seed a sustained 3-month rise on a fresh category so detectCategoryTrend
+  // fires: Mar 200 → Apr 250 → May 300 relative to a June "now".
+  const now = new Date();
+  const monthIso = (offset: number, day = 10): string => {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, day));
+    return d.toISOString().slice(0, 10);
+  };
+  await createTransaction(primaryHouseholdId, primaryAccountId, monthIso(3), 'TrendShop', -200, 'TrendCat-797');
+  await createTransaction(primaryHouseholdId, primaryAccountId, monthIso(2), 'TrendShop', -250, 'TrendCat-797');
+  await createTransaction(primaryHouseholdId, primaryAccountId, monthIso(1), 'TrendShop', -300, 'TrendCat-797');
+
+  const run = await primaryAgent.post('/api/insights/run');
+  assert.equal(run.status, 200);
+
+  const filtered = await primaryAgent.get('/api/insights?type=category_trend');
+  assert.equal(filtered.status, 200);
+  const items = filtered.body.data as Array<{ type: string; title: string }>;
+  assert.ok(items.length >= 1, 'expected at least one category_trend row');
+  for (const i of items) assert.equal(i.type, 'category_trend');
+  assert.ok(items.some((i) => i.title.includes('TrendCat-797')));
 });
 
 // ---- Household scope isolation -----------------------------------------

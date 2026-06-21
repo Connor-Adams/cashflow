@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Grid } from '@/lib/ds-extras'
+import { SectionHeader } from '@/components/ui/section-header'
+import { StatCard } from '@connor-adams/designsystem'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { StatCard } from '@/components/ui/stat-card'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
 import { getJson, postJson } from '../lib/api'
 
 /** Shape returned by GET /api/rules/health. Kept inline so the component
@@ -115,46 +115,35 @@ export function RulesHealthSection({ onAfterCreate }: Props) {
 
   if (err) {
     return (
-      <section className="card rulesTableCard">
-        <div className="rulesCardHeader">
-          <div>
-            <h2>Rules health</h2>
-            <p className="muted">Coverage and gaps for your rule set.</p>
-          </div>
-        </div>
-        <p className="error">{err}</p>
-      </section>
+      <Card className="mb-4">
+        <SectionHeader title="Rules health" description="Coverage and gaps for your rule set." />
+        <Alert variant="error">{err}</Alert>
+      </Card>
     )
   }
 
   if (!health) {
     return (
-      <section className="card rulesTableCard">
-        <div className="rulesCardHeader">
-          <div>
-            <h2>Rules health</h2>
-            <p className="muted">Loading…</p>
-          </div>
-        </div>
-      </section>
+      <Card className="mb-4">
+        <SectionHeader title="Rules health" description="Loading…" />
+      </Card>
     )
   }
 
   return (
-    <section className="card rulesTableCard">
-      <div className="rulesCardHeader">
-        <div>
-          <h2>Rules health</h2>
-          <p className="muted">
-            Coverage and gaps over the last {health.windowDays} days.
-          </p>
-        </div>
-        <span className="transactionsPanelBadge">
-          {health.totalRules} rules
-        </span>
-      </div>
+    <Card className="mb-4">
+      <SectionHeader
+        title="Rules health"
+        description={`Coverage and gaps over the last ${health.windowDays} days.`}
+        actions={
+          <Badge variant="count">
+            {health.totalRules} rules
+          </Badge>
+        }
+      />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      {/* Stat grid: standardised to Grid/StatCard for consistent layout across sweep pages */}
+      <Grid minItemWidth={160} gap="md" className="mb-4">
         <StatCard
           label="Hit rate"
           value={formatPercent(health.hitRate)}
@@ -175,15 +164,15 @@ export function RulesHealthSection({ onAfterCreate }: Props) {
           value={String(health.totalRules)}
           hint={`${health.staleRules.length} stale, ${health.duplicateRules.length} duplicate`}
         />
-      </div>
+      </Grid>
 
       {suggestions.length > 0 && (
-        <div className="tableWrap mt-4">
-          <h3 className="text-sm font-semibold mb-2">Suggested rules</h3>
-          <p className="muted text-xs mb-2">
+        <div className="mt-4">
+          <h3 className="text-sm font-semibold mb-1">Suggested rules</h3>
+          <p className="text-xs text-muted-foreground mb-2">
             Repeated reviewed merchants we can automate.
           </p>
-          <Table className="table">
+          <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Pattern</TableHead>
@@ -199,15 +188,17 @@ export function RulesHealthSection({ onAfterCreate }: Props) {
                   <TableCell>{s.category ?? '—'}</TableCell>
                   <TableCell>{s.supportCount} txns</TableCell>
                   <TableCell>
-                    <button
+                    <Button
                       type="button"
+                      variant="secondary"
+                      size="sm"
                       disabled={creatingPattern === s.merchantPattern}
                       onClick={() => void createFromSuggestion(s)}
                     >
                       {creatingPattern === s.merchantPattern
                         ? 'Creating…'
                         : 'Create rule'}
-                    </button>
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}
@@ -217,12 +208,12 @@ export function RulesHealthSection({ onAfterCreate }: Props) {
       )}
 
       {health.staleRules.length > 0 && (
-        <div className="tableWrap mt-4">
-          <h3 className="text-sm font-semibold mb-2">Stale rules</h3>
-          <p className="muted text-xs mb-2">
+        <div className="mt-4">
+          <h3 className="text-sm font-semibold mb-1">Stale rules</h3>
+          <p className="text-xs text-muted-foreground mb-2">
             No match in the last {health.windowDays} days.
           </p>
-          <Table className="table">
+          <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Pattern</TableHead>
@@ -246,13 +237,13 @@ export function RulesHealthSection({ onAfterCreate }: Props) {
       )}
 
       {health.duplicateRules.length > 0 && (
-        <div className="tableWrap mt-4">
-          <h3 className="text-sm font-semibold mb-2">Duplicate rules</h3>
-          <p className="muted text-xs mb-2">
+        <div className="mt-4">
+          <h3 className="text-sm font-semibold mb-1">Duplicate rules</h3>
+          <p className="text-xs text-muted-foreground mb-2">
             Same pattern and match kind. Higher-priority rule wins; consider
             consolidating.
           </p>
-          <Table className="table">
+          <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Pattern</TableHead>
@@ -274,14 +265,14 @@ export function RulesHealthSection({ onAfterCreate }: Props) {
       )}
 
       {health.topMerchantsWithoutRules.length > 0 && (
-        <div className="tableWrap mt-4">
-          <h3 className="text-sm font-semibold mb-2">
+        <div className="mt-4">
+          <h3 className="text-sm font-semibold mb-1">
             Top merchants without rules
           </h3>
-          <p className="muted text-xs mb-2">
+          <p className="text-xs text-muted-foreground mb-2">
             Recent merchants that match no existing rule.
           </p>
-          <Table className="table">
+          <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Merchant</TableHead>
@@ -299,6 +290,6 @@ export function RulesHealthSection({ onAfterCreate }: Props) {
           </Table>
         </div>
       )}
-    </section>
+    </Card>
   )
 }

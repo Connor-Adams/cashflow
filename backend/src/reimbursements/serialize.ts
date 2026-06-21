@@ -45,6 +45,23 @@ export function parseIsoOrNull(raw: unknown): string | null | undefined {
   return s;
 }
 
+/**
+ * Resolve a client-supplied `today` query param (a YYYY-MM-DD string built
+ * from the browser's *local* date) to the reference date for overdue
+ * derivation, falling back to `fallback` (default: the server's UTC today).
+ * Without the override, claims flip overdue at the fallback's midnight.
+ * Non-string / invalid values fall back silently, mirroring how the list
+ * route treats malformed dueDateFrom/To.
+ *
+ * Route handlers pass the household-zone today (resolveHouseholdToday) as the
+ * fallback so the server default also tracks the user's calendar day; the
+ * `?today=` override (#612) remains the highest-priority input.
+ */
+export function resolveToday(raw: unknown, fallback: string = todayIso()): string {
+  if (typeof raw !== 'string') return fallback;
+  return parseIsoOrNull(raw) ?? fallback;
+}
+
 /** Days from `today` until `dueDate`. Negative when overdue, null when no
  *  due date. */
 export function daysUntilDue(
@@ -484,6 +501,23 @@ function addMoney(a: string, b: string): string {
   return ((toCents(a) + toCents(b)) / 10_000).toFixed(4);
 }
 
+/**
+ * Amount to credit toward "received" for a received claim. Linking a repayment
+ * marks the FULL claim received regardless of the repayment's size (the
+ * matcher tolerates a 25% mismatch), so when a same-currency repayment
+ * transaction is hydrated, credit only the actual inflow — capped at the claim
+ * amount — instead of the claim face value. Cross-currency or missing
+ * repayments (manual marks) fall back to the face value.
+ */
+function receivedCredit(r: ReimbursementRow): string {
+  const face = String(r.amount);
+  const rt = r.repaymentTransaction;
+  if (!rt || rt.currency !== r.currency) return face;
+  const inflow = Number(rt.amount);
+  if (!Number.isFinite(inflow) || inflow <= 0) return face;
+  return Math.min(Number(face), inflow).toFixed(4);
+}
+
 // ---------- Per-Contact open-claims aggregate (#374) ----------
 
 export interface ContactOpenReimbursements {
@@ -565,7 +599,7 @@ export function summarize(
         amt,
       );
     } else if (eff === 'received') {
-      g.received = addMoney(g.received, amt);
+      g.received = addMoney(g.received, receivedCredit(r));
     }
     if (eff === 'overdue') overdueCount += 1;
   }

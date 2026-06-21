@@ -1,0 +1,127 @@
+import React from 'react'
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
+import { Sidebar } from './Sidebar'
+
+void React
+
+vi.mock('../lib/useAuth', () => ({
+  useAuth: () => ({ user: { displayName: 'Tester', globalRole: null }, logout: vi.fn() }),
+}))
+vi.mock('../hooks/useTheme', () => ({
+  useTheme: () => ({ theme: 'light', toggleTheme: vi.fn() }),
+}))
+vi.mock('@/hooks/useAiInboxCount', () => ({ useAiInboxCount: () => ({ count: 0 }) }))
+vi.mock('@/hooks/useInsightsCount', () => ({ useInsightsCount: () => ({ count: 0 }) }))
+vi.mock('@/hooks/useAiStatus', () => ({ useAiStatus: () => ({ openai: true }) }))
+const mockNavVisibility = vi.fn(() => ({
+  income: true, planned: true, goals: true, scenarios: true, vault: true, budgets: true,
+}))
+vi.mock('@/hooks/useNavVisibility', () => ({
+  useNavVisibility: () => mockNavVisibility(),
+}))
+vi.mock('../lib/version', () => ({
+  FRONTEND_VERSION: 'test',
+  useBackendVersion: () => ({ status: 'ok', version: 'test' }),
+}))
+
+function renderSidebar() {
+  return render(
+    <MemoryRouter>
+      <Sidebar open={false} onClose={() => {}} />
+    </MemoryRouter>,
+  )
+}
+
+describe('Sidebar rail (PR 0)', () => {
+  it('drops items folded elsewhere', () => {
+    renderSidebar()
+    for (const name of [
+      'Ask Cashflow',
+      'Audit log',
+      'Backup & sync',
+      'Explain month',
+      'Lifestyle inflation',
+      'Savings rate',
+    ]) {
+      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument()
+    }
+  })
+
+  it('places Receipts in the Money section and drops the standalone Amazon entry', () => {
+    renderSidebar()
+    const moneyHeader = screen.getByRole('button', { name: /Money/ })
+    const moneySection = moneyHeader.closest('.sidebar__section') as HTMLElement
+    expect(within(moneySection).getByRole('link', { name: 'Receipts' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Amazon' })).not.toBeInTheDocument()
+  })
+
+  it('keeps Chat reachable (Ask folds into it)', () => {
+    renderSidebar()
+    expect(screen.getByRole('link', { name: 'Chat' })).toBeInTheDocument()
+  })
+
+  it('drops the Transaction-family items folded into /transactions tabs (PR 1)', () => {
+    renderSidebar()
+    for (const name of [
+      'Refunds',
+      'Transfers',
+      'Purchases',
+      'Large purchases',
+      'Returns & warranties',
+      'Items',
+      'Smart search',
+      'Money leaks',
+    ]) {
+      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument()
+    }
+    expect(screen.getByRole('link', { name: 'Transactions' })).toBeInTheDocument()
+  })
+
+  it('drops the items folded into Accounts/Scenarios/Portfolio tabs (PR 3)', () => {
+    renderSidebar()
+    for (const name of ['Credit cards', 'Statements', 'Debt payoff', 'Opportunity cost', 'Net worth']) {
+      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument()
+    }
+    for (const name of ['Accounts', 'Scenarios', 'Portfolio', 'Tax']) {
+      expect(screen.getByRole('link', { name })).toBeInTheDocument()
+    }
+  })
+
+  it('drops Cashflow/Currency/Partner folded into Reports tabs (PR 4)', () => {
+    renderSidebar()
+    for (const name of ['Cashflow', 'Currency', 'Partner']) {
+      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument()
+    }
+    expect(screen.getByRole('link', { name: 'Reports' })).toBeInTheDocument()
+  })
+
+  it('folds Review into the Inbox tabs (PR 5)', () => {
+    renderSidebar()
+    expect(screen.queryByRole('link', { name: 'Review' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Inbox' })).toBeInTheDocument()
+  })
+
+  it('folds the Expectation family into the Planned tabs (PR 2)', () => {
+    renderSidebar()
+    for (const name of ['Calendar', 'Forecast', 'Recurring', 'Subscriptions', 'Reimbursements']) {
+      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument()
+    }
+    expect(screen.getByRole('link', { name: 'Planned' })).toBeInTheDocument()
+  })
+
+  it('shows Budgets under Planning and Enrichment under Insights & rules', () => {
+    renderSidebar() // use the file's existing render helper
+    expect(screen.getByRole('link', { name: /Budgets/ })).toHaveAttribute('href', '/budgets')
+    expect(screen.getByRole('link', { name: /Enrichment/ })).toHaveAttribute('href', '/enrichment')
+  })
+
+  it('shows Budgets even when nav-visibility for budgets is false', () => {
+    mockNavVisibility.mockReturnValueOnce({
+      income: false, planned: false, goals: false, scenarios: false, vault: false, budgets: false,
+    })
+    renderSidebar()
+    expect(screen.getByRole('link', { name: /Budgets/ })).toHaveAttribute('href', '/budgets')
+  })
+})

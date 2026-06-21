@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -26,10 +26,28 @@ jobs:
         uses: fallow-rs/fallow@v2
         with:
           command: audit
-          comment: true
+          # Summary comment is rendered by the ci.yml `code-audit` job (see
+          # scripts/audit-summary.cjs); keep fallow's inline review comments.
+          comment: false
           review-comments: true
           review-guidance: true
           annotations: false
+          # `diff-filter: added` + the default `gate: new-only` scope the verdict
+          # to findings introduced on PR-added lines. The existing whole-repo
+          # backlog is reported (not failed), so flipping the gate on does not
+          # retroactively block. See
+          # docs/superpowers/specs/2026-05-31-fallow-audit-remediation-design.md.
           diff-filter: added
           max-comments: 25
-          fail-on-issues: false
+          # Blocking gate (Phase 1 "stop the bleeding"). The audit verdict is
+          # severity-aware: it fails only on error-tier findings. Dead-code rules
+          # default to "error" (see .fallowrc.json `rules`) and duplication of
+          # newly-added clones counts, so both BLOCK. Complexity must only WARN
+          # (488-finding backlog is out of scope): the audit command's sole
+          # complexity lever is the CRAP threshold, so we raise it past any real
+          # function — a complex-but-clean new function can never push the verdict
+          # to "fail". This input does not touch the global .fallowrc.json health
+          # config, so ci.yml's informational `fallow health` summary still
+          # reports complexity at default thresholds.
+          max-crap: "1000000"
+          fail-on-issues: true

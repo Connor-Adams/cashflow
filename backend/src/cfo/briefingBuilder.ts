@@ -23,7 +23,6 @@ import {
   Transaction,
   Receipt,
   PlannedEvent,
-  Subscription,
   ImportHistory,
 } from '../models';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
@@ -261,6 +260,7 @@ export async function buildCfoBriefing(
     PlannedEvent.findAll({
       where: {
         householdId,
+        kind: 'planned',
         status: 'planned',
         expectedDate: {
           [Op.lt]: periodEnd,
@@ -269,13 +269,15 @@ export async function buildCfoBriefing(
       attributes: ['id', 'name', 'expectedDate', 'amount', 'type'],
       raw: true,
     }),
-    Subscription.findAll({
+    PlannedEvent.findAll({
       where: {
         ...householdWhere(req),
-        status: 'active',
+        kind: 'subscription',
+        status: 'planned',
+        statusUncertain: false,
         createdAt: { [Op.between]: [`${periodStart}T00:00:00Z`, `${periodEnd}T23:59:59Z`] },
       },
-      attributes: ['id', 'merchantName', 'amount', 'currency', 'cadence'],
+      attributes: ['id', 'name', 'amount', 'currency', 'cadence'],
       raw: true,
     }),
     Transaction.count({
@@ -384,10 +386,12 @@ export async function buildCfoBriefing(
     });
   }
 
-  // 5. New subscriptions detected in the window.
+  // 5. New subscriptions detected in the window. The merged PlannedEvent stores
+  // the merchant in `name` (kind='subscription'); the legacy column was
+  // `merchantName`.
   type SubRow = {
     id: number;
-    merchantName: string;
+    name: string;
     amount: unknown;
     currency: string;
     cadence: string;
@@ -400,8 +404,8 @@ export async function buildCfoBriefing(
       refType: 'subscription',
       refId: raw.id,
       severity: 'info',
-      title: `New subscription: ${raw.merchantName}`,
-      summary: `${raw.merchantName} (${monthly.toFixed(2)} ${raw.currency} ${raw.cadence}) detected since the start of this briefing window.`,
+      title: `New subscription: ${raw.name}`,
+      summary: `${raw.name} (${monthly.toFixed(2)} ${raw.currency} ${raw.cadence}) detected since the start of this briefing window.`,
       status: 'open',
       rationale: 'Subscription was created or first observed in this briefing window.',
       link: '/subscriptions',

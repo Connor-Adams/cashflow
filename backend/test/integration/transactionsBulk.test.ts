@@ -8,6 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -27,7 +28,7 @@ before(async () => {
 
   const mod = await import('../../src/app.js');
   app = mod.default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   const register = await authed.post('/api/auth/register').send({
     email: 'bulk@example.com',
     displayName: 'Bulk User',
@@ -288,7 +289,7 @@ test('invited partner sees shared records but not private records', async () => 
   const invite = await authed.post('/api/auth/invites').send();
   assert.equal(invite.status, 201);
 
-  const partner = request.agent(app);
+  const partner = testAgent(app);
   const joined = await partner.post('/api/auth/register').send({
     email: 'partner@example.com',
     displayName: 'Partner User',

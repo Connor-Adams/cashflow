@@ -6,16 +6,26 @@ import './types';
 
 export const SESSION_COOKIE = 'cashflow_session';
 
+// Optional cookie Domain. Set SESSION_COOKIE_DOMAIN to a shared parent (e.g.
+// `.example.com`) so the session cookie is first-party across the UI (`app.`)
+// and API (`api.`) subdomains. Without it the cookie is host-only on the API
+// host, making it a third-party cookie that Safari/iOS (WebKit ITP) drop —
+// which breaks auth for cross-subdomain deployments. Unset → host-only (local).
+function cookieDomainAttr(): string {
+  const domain = process.env.SESSION_COOKIE_DOMAIN?.trim();
+  return domain ? ` Domain=${domain};` : '';
+}
+
 function sessionCookieAttributes(expiresAt: Date): string {
   const sameSite =
     process.env.NODE_ENV === 'production' ? 'SameSite=None; Secure' : 'SameSite=Lax';
-  return `Path=/; HttpOnly; ${sameSite}; Expires=${expiresAt.toUTCString()}`;
+  return `Path=/;${cookieDomainAttr()} HttpOnly; ${sameSite}; Expires=${expiresAt.toUTCString()}`;
 }
 
 function expiredSessionCookieAttributes(): string {
   const sameSite =
     process.env.NODE_ENV === 'production' ? 'SameSite=None; Secure' : 'SameSite=Lax';
-  return `Path=/; HttpOnly; ${sameSite}; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+  return `Path=/;${cookieDomainAttr()} HttpOnly; ${sameSite}; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
 }
 
 function parseCookies(header: string | undefined): Record<string, string> {

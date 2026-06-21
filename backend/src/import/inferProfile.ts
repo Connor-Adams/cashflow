@@ -81,6 +81,28 @@ function detectCanadianBank(headers: string[]): string | null {
   return null;
 }
 
+/**
+ * RBC credit-card and banking CSVs share the same headers (Description 1/2,
+ * CAD$) but the CAD$ sign convention is opposite. Use the "Account Type" column
+ * value to choose: chequing/savings → rbc_banking (pre-signed, passthrough);
+ * a credit product → rbc (invert). Defaults to rbc when Account Type is absent.
+ */
+function refineRbcProfile(
+  headers: string[],
+  sampleRows: Record<string, string>[],
+): string {
+  const map = normalizeHeaderMap(headers);
+  const key = map['account type'];
+  if (key) {
+    for (let i = 0; i < Math.min(sampleRows.length, 20); i++) {
+      const v = stripBom(sampleRows[i][key] ?? '').toLowerCase();
+      if (/chequing|checking|saving|deposit/.test(v)) return 'rbc_banking';
+      if (/visa|mastercard|amex|credit/.test(v)) return 'rbc';
+    }
+  }
+  return 'rbc';
+}
+
 function amexHeaderSignals(headers: string[]): boolean {
   const hs = headerSet(headers);
   return (
@@ -120,6 +142,9 @@ export function inferProfileId(
 
   // Canadian bank detection takes priority — header patterns are highly specific.
   const bank = detectCanadianBank(headers);
+  // RBC credit-card and banking CSVs share headers but sign oppositely; the
+  // "Account Type" column disambiguates them.
+  if (bank === 'rbc') return refineRbcProfile(headers, sampleRows);
   if (bank) return bank;
 
   const maxSamples = Math.min(sampleRows.length, 20);

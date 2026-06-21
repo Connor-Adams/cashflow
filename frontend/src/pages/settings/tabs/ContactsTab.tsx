@@ -1,19 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ChevronDown, ChevronRight, Edit3, Plus, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  useConfirm,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
 import { deleteReq, getJson, patchJson, postJson } from '../../../lib/api'
+import { todayDateInputValue } from '../../../lib/dateInput'
 import { formatMoney } from '../../../lib/formatMoney'
 import type { Contact } from '../../../types/api'
 import type { ReimbursementView } from '../../../types/reimbursement'
@@ -141,7 +136,7 @@ export function ContactsTab() {
               <p className="muted">Contacts track loans and reimbursements without giving login access.</p>
             </div>
           </div>
-          <div className="formGrid">
+          <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
             <Label htmlFor="settings-contact-name">
               Name
               <Input
@@ -193,37 +188,31 @@ export function ContactsTab() {
       {renameTarget && (
         <Dialog
           open
-          onOpenChange={(open) => {
-            if (!open) closeRename()
-          }}
+          onClose={closeRename}
+          title={<>Rename contact</>}
         >
-          <DialogHeader>
-            <DialogTitle>Rename contact</DialogTitle>
-          </DialogHeader>
           <form onSubmit={submitRename}>
-            <DialogBody>
-              <Label htmlFor="settings-rename-name">
-                Contact name
-                <Input
-                  id="settings-rename-name"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  required
-                  autoComplete="off"
-                />
-              </Label>
-              {/* #375 — let the user mark/unmark this Contact as the partner. */}
-              <Label htmlFor="settings-rename-is-partner" className="row">
-                <input
-                  id="settings-rename-is-partner"
-                  type="checkbox"
-                  checked={renameIsPartner}
-                  onChange={(e) => setRenameIsPartner(e.target.checked)}
-                />
-                <span>Partner</span>
-              </Label>
-            </DialogBody>
-            <DialogFooter>
+            <Label htmlFor="settings-rename-name">
+              Contact name
+              <Input
+                id="settings-rename-name"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                required
+                autoComplete="off"
+              />
+            </Label>
+            {/* #375 — let the user mark/unmark this Contact as the partner. */}
+            <Label htmlFor="settings-rename-is-partner" className="row">
+              <input
+                id="settings-rename-is-partner"
+                type="checkbox"
+                checked={renameIsPartner}
+                onChange={(e) => setRenameIsPartner(e.target.checked)}
+              />
+              <span>Partner</span>
+            </Label>
+            <div className="mt-2 flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={closeRename}>
                 Cancel
               </Button>
@@ -238,7 +227,7 @@ export function ContactsTab() {
               >
                 Save
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         </Dialog>
       )}
@@ -273,7 +262,11 @@ function ContactCard({
     setLoading(true)
     setErr(null)
     try {
-      const d = await getJson<ContactDetail>(`/api/contacts/${contact.id}`)
+      // Local calendar day so the open/overdue aggregate flips at the user's
+      // midnight, not UTC's.
+      const d = await getJson<ContactDetail>(
+        `/api/contacts/${contact.id}?today=${todayDateInputValue()}`,
+      )
       setDetail(d)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not load reimbursements')

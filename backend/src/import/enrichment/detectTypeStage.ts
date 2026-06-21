@@ -39,6 +39,72 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
     type: 'transfer',
     re: /\b(transfer (?:to|from|in|out)|wire transfer|interac e?-?transfer|pre-?authorized (?:debit|credit)|cash (?:sent|received)|direct deposit|from chequing account|eft (?:in|out)|aft)\b/i,
   },
+  // RBC internal-transfer narratives: "Online transfer sent - 6113 Connor Adams"
+  // and "Online transfer received". The existing pattern above only matches
+  // "transfer to/from/in/out", so "Online transfer sent" fell through to
+  // 'purchase'. "Online transfer sent|received" is unambiguous — RBC uses it
+  // exclusively for account-to-account funds movement.
+  { type: 'transfer', re: /\bonline transfer (?:sent|received)\b/i },
+  // Additional internal-money-movement narratives (2026-06-03). These bank
+  // descriptions for account-to-account moves and credit-card / loan bill
+  // payments did NOT match any pattern above and fell through to the
+  // negative-default 'purchase' (or positive 'unknown'), inflating dashboard
+  // totalSpend. Each phrase is unambiguous regardless of sign — internal
+  // movement, never spend — so they are intentionally sign-agnostic. We do NOT
+  // add a bare "e-transfer sent" or "^withdrawal" rule: those are genuinely
+  // ambiguous (gambling deposits, cash spent, paying a person for goods) and
+  // are deliberately deferred.
+  { type: 'transfer', re: /\bonline banking transfer\b/i },
+  { type: 'transfer', re: /\bsent money to\b/i },
+  { type: 'transfer', re: /\breceived money from\b/i },
+  { type: 'transfer', re: /\btopped up account\b/i },
+  // Wealthsimple cash-account ledger entries — internal funding / adjustments,
+  // not spend or income. "Deposit (executed at ...)" is a cash deposit; "Cash
+  // correction" a balance adjustment. Narrow regexes: the "(executed" anchor
+  // keeps "Deposit (executed)" from catching "Direct deposit" (income, handled
+  // above) or a bare "term deposit", and excludes "Contribution (executed at)"
+  // which intentionally stays 'unknown'.
+  { type: 'transfer', re: /\bdeposit \(executed\b/i },
+  { type: 'transfer', re: /\bcash correction\b/i },
+  // Allow the parenthesized "(LOAN)" variant — RBC/CIBC render this both as
+  // "ONLINE BANKING LOAN PAYMENT" and "ONLINE BANKING (LOAN) PAYMENT", and the
+  // bare-space-only regex missed the latter, leaking it to the 'purchase'
+  // default and inflating spend. Unambiguously a bank-internal loan/statement
+  // payment (#558).
+  { type: 'payment', re: /\bonline banking (?:\(?loan\)? )?payment\b/i },
+  { type: 'payment', re: /\bonline bill payment for\b/i },
+  { type: 'payment', re: /\bamex bill pymt\b/i },
+  { type: 'payment', re: /\bmisc payment\b.*\b(amex|visa|mastercard|wise|questrade|bmo)\b/i },
+  // Card-statement bill payments where a card network is named in the narrative
+  // (#558). "BILL PAYMENT CIBC VISA", "WEB PAYMENT TD MASTERCARD", "PRE-AUTHORIZED
+  // PAYMENT AMEX" are payments OUT to clear a card balance, never consumption.
+  // The card-network qualifier is the precision signal: a BARE "bill payment"
+  // (e.g. "Hydro bill payment", "pre-authorized payment ROGERS") is a UTILITY /
+  // subscription paid to a merchant = genuine spend, so we deliberately do NOT
+  // match it. Without a network token, the row stays 'purchase'.
+  {
+    type: 'payment',
+    re: /\b(?:bill payment|web payment|pre-?authorized payment)\b.*\b(amex|visa|mastercard|master ?card|discover|credit ?card)\b/i,
+  },
+  // RBC → Wealthsimple investment funding: "Investment WS Investments".
+  // This phrase is not a securities BUY (no "bought N shares"), so it is safe
+  // to match before the negative fallback. The existing `investment` patterns
+  // only match "bought/sold N shares" and "loan of N shares", not this phrase.
+  // We match the full phrase (not bare "investment") to avoid false-positives
+  // on other "investment" narratives like "Investment advisor fee".
+  { type: 'transfer', re: /\binvestment\s+ws\s+investments\b/i },
+  // WS Cash withdrawal: "Withdrawal (executed at YYYY-MM-DD)". Distinct from a
+  // generic ATM withdrawal (which remains ambiguous — could be cash-spending).
+  { type: 'transfer', re: /\bwithdrawal\s+\(executed at\b/i },
+  // E-transfer to own Wealthsimple Cash account — account funding, not spend.
+  // Generic "E-TRANSFER SENT <person>" remains deliberately deferred (ambiguous).
+  { type: 'transfer', re: /\be-transfer sent wealthsimple\b/i },
+  // WS physically-backed gold purchase: "GOLD - Physically backed gold: Bought".
+  { type: 'investment', re: /\bgold\s*-\s*physically backed gold:\s*bought\b/i },
+  // Generic "INVESTMENT PURCHASE" line from brokerage statements.
+  { type: 'investment', re: /\binvestment purchase\b/i },
+  // Loan interest charges — interest expense, not a purchase.
+  { type: 'fee', re: /\bloan interest\b/i },
   // Wise FX conversion: "Converted 5,207.60 USD to 7,084.89 CAD". Both legs of
   // a Wise FX appear on the matching CAD + USD statements with a shared
   // sourceReference; classifying them as transfer lets detectRelationshipsStage
@@ -60,10 +126,78 @@ const EXACT_RAW_MATCHES: Array<{ value: string; type: TxnType }> = [
   { value: 'deposit', type: 'transfer' },
 ];
 
+// Income: external payroll / direct-deposit inflows. Distinguished from the
+// `transfer` pattern below (which also matches "direct deposit") by requiring a
+// positive amount and excluding self-deposits. A "direct deposit from <X>"
+// where <X> is the account owner's own name or an own-account word is internal
+// money movement, not earned income. Bank descriptions are truncated (35-char
+// cap in the reference data) so a corporate-entity suffix is not reliably
+// present — own-name exclusion against the household members is the precision
+// signal that separates "Direct deposit from CDG LABS INC" / "...ADAMS GREENE"
+// (income) from "...ADAMS CONNOR" (the owner paying themselves → transfer).
+const INCOME_WORD_RE = /\b(payroll|salary|paycheque|paycheck)\b/i;
+const DIRECT_DEPOSIT_FROM_RE = /\bdirect deposit from\b/i;
+const OWN_ACCOUNT_RE =
+  /\b(chequing|checking|savings|tfsa|fhsa|rrsp|rrif|rdsp|margin|crypto)\b/i;
+// Government benefit inflows — EI, CRA benefits, GST/HST credit, OAS, etc. —
+// are external income (positive, taxable or benefit money in), not refunds or
+// internal transfers. Confirmed prod narrative: "EI CANADA". Each alternative
+// requires a SPECIFIC benefit token (not a bare "canada") so brand names that
+// share a prefix — "CANADA GOOSE", "CANADA COMPUTERS" — do not match.
+const GOV_BENEFIT_RE =
+  /\b(ei canada|employment insurance|canada (?:pro|fed|rit|workers benefit|child benefit|recovery benefit|emergency (?:response|student) benefit)|fed(?:eral)?\s*\/?\s*prov(?:incial)?\s+pymt|canada (?:gst|hst)|gst\/hst credit|old age security|canada pension plan|universal child care benefit)\b/i;
+
+function tokenizeName(s: string): string[] {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean);
+}
+
+/**
+ * True when the payee text names a household member — every token of some
+ * member's name is present in the payee. A token-SUPERSET test (not substring)
+ * so a shared surname alone ("ADAMS" in both "Connor Adams" and an external
+ * "ADAMS GREENE") does not misclassify external income as a self transfer.
+ */
+function isOwnNameDeposit(
+  payeeTokens: Set<string>,
+  ownerNames: string[],
+): boolean {
+  return ownerNames.some((name) => {
+    const memberTokens = tokenizeName(name);
+    return memberTokens.length > 0 && memberTokens.every((t) => payeeTokens.has(t));
+  });
+}
+
+function detectsIncome(
+  haystack: string,
+  amount: number,
+  ownerNames: string[],
+): boolean {
+  if (amount <= 0) return false;
+  if (INCOME_WORD_RE.test(haystack)) return true;
+  if (GOV_BENEFIT_RE.test(haystack)) return true;
+  if (!DIRECT_DEPOSIT_FROM_RE.test(haystack)) return false;
+  if (OWN_ACCOUNT_RE.test(haystack)) return false;
+  return !isOwnNameDeposit(new Set(tokenizeName(haystack)), ownerNames);
+}
+
 export interface DetectTypeInput {
   merchantRaw: string;
   merchantClean: string;
   amount: number;
+  /**
+   * Owner-side names for the household — member User display names plus any
+   * partner Contact names (see loadHouseholdOwnerNames). Used to tell an external
+   * payroll direct deposit (income) apart from a self-deposit made under an
+   * owner's or partner's own name (transfer). Optional: when omitted, any
+   * "direct deposit from <X>" that isn't an own-account movement is treated as
+   * external income.
+   */
+  ownerNames?: string[];
 }
 
 export function runDetectTypeStage(input: DetectTypeInput): Signal[] {
@@ -81,6 +215,18 @@ export function runDetectTypeStage(input: DetectTypeInput): Signal[] {
         },
       ];
     }
+  }
+
+  if (detectsIncome(haystack, input.amount, input.ownerNames ?? [])) {
+    return [
+      {
+        source: 'type-detect',
+        confidence: 'high',
+        fields: { txnType: 'income' },
+        rationale:
+          'narrative matched income (payroll / government benefit / external direct deposit)',
+      },
+    ];
   }
 
   for (const p of PATTERNS) {

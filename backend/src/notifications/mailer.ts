@@ -51,6 +51,8 @@ export interface MailerDriver {
 }
 
 class PermanentMailerError extends Error {
+  // Read via duck-typing (`'permanent' in err`) in isPermanentMailerError below; fallow can't see that access.
+  // fallow-ignore-next-line unused-class-member
   permanent = true as const;
   constructor(message: string) {
     super(message);
@@ -85,9 +87,6 @@ export class NoopMailerDriver implements MailerDriver {
     );
   }
 
-  clear(): void {
-    this.sent.length = 0;
-  }
 }
 
 /**

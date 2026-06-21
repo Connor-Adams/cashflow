@@ -1,6 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let testDb: PgTestDb;
@@ -23,13 +24,13 @@ before(async () => {
   const me = await seedHousehold(models, `networth-me-${Date.now()}@example.com`);
   myUserId = me.user.id;
   myHouseholdId = me.household.id;
-  authed = request.agent(app);
+  authed = testAgent(app);
   authed.jar.setCookie(`cashflow_session=${me.token}; Path=/`);
 
   const other = await seedHousehold(models, `networth-other-${Date.now()}@example.com`);
   otherUserId = other.user.id;
   otherHouseholdId = other.household.id;
-  otherAuthed = request.agent(app);
+  otherAuthed = testAgent(app);
   otherAuthed.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
 });
 
@@ -38,7 +39,7 @@ after(async () => {
 });
 
 test('GET /api/net-worth/current: 401 unauthenticated', async () => {
-  const res = await request(app).get('/api/net-worth/current');
+  const res = await testRequest(app).get('/api/net-worth/current');
   assert.equal(res.status, 401);
 });
 

@@ -1,7 +1,5 @@
 import type { Decimal } from '../util/decimal';
 
-export type Currency = 'CAD' | 'USD' | string;
-
 export type SlipBoxes = Record<string, Decimal>;
 
 export type SlipFact = {
@@ -24,6 +22,7 @@ export type CapGainEvent = {
   acb: Decimal;
   outlays: Decimal;
   date: string;
+  superficialLossDenied?: Decimal;
 };
 
 export type RrspContrib = {
@@ -37,6 +36,8 @@ export type PersonalCarryforwards = {
   rrspRoom: Decimal;
   nonCapLoss: Decimal;
   instalmentsPaid: Decimal;
+  /** Cumulative FHSA contributions across all years (tracks $40k lifetime cap). */
+  fhsaLifetimeContributions: Decimal;
 };
 
 export type CorpFiscalYear = {
@@ -118,6 +119,20 @@ export type TaxYearFacts = {
   year: number;
   jurisdiction: 'CA-ON';
   employmentIncome: IncomeItem[];
+  /**
+   * Plan-scoped salary additions (e.g. household-plan routed ownerComp salary).
+   * Unlike `employmentIncome` actuals — which buildT1 IGNORES whenever T4 slips
+   * exist (slip-preference dedup) — these are always added on top of L10100.
+   */
+  employmentIncomeAdditions?: IncomeItem[];
+  /** CPP/QPP retirement benefits (L11400). Not pensionable/insurable earnings. */
+  cppBenefits?: Decimal;
+  /**
+   * OAS pension (L11300). Not pensionable/insurable earnings. Also caps the
+   * L23500 social-benefits repayment: the recovery tax cannot exceed OAS
+   * actually received (absent/zero → no clawback).
+   */
+  oasBenefits?: Decimal;
   selfEmploymentIncome: IncomeItem[];
   selfEmploymentExpenses: IncomeItem[];
   interestIncome: IncomeItem[];
@@ -139,6 +154,9 @@ export type TaxYearFacts = {
   /** P10: pension-split synthetic field. Stamped by override key, read by spouseRouter. */
   pensionSplit?: { transferAmount: Decimal };
   ageAtYearEnd: number;
+  rentalIncome: IncomeItem[];
+  rentalExpenses: IncomeItem[];
+  medicalExpenses: IncomeItem[];
 };
 
 export type TaxLine = {
@@ -208,6 +226,8 @@ export type RateTable = {
     employeeRate: Decimal;
   };
   capitalGainsInclusion: Decimal;
+  capitalGainsInclusionHigh?: Decimal;
+  capitalGainsInclusionThreshold?: Decimal;
   onSurtaxBands?: Array<{ threshold: Decimal; rate: Decimal }>;
   ontarioHealthPremium: Array<{ upTo: Decimal | null; flat: Decimal; marginalRate: Decimal }>;
   donationLowRate: Decimal;
@@ -230,6 +250,11 @@ export type RateTable = {
   oasClawbackThreshold: Decimal;               // $90,997 (2024)
   oasClawbackRate: Decimal;                    // 0.15
   fhsaAnnualLimit: Decimal;                    // $8,000
+  amtRate: Decimal;
+  amtExemption: Decimal;
+  amtCapGainsInclusion: Decimal;
+  amtNonRefCreditFraction: Decimal;
+  amtDtcFraction: Decimal;
   sources: { name: string; url: string }[];
 
   // Phase 3 — Corp T2
@@ -245,44 +270,4 @@ export type RateTable = {
   corpAaiiGrindThreshold: Decimal;      // $50,000
   corpAaiiGrindRate: Decimal;           // $5 SBD lost per $1 AAII above threshold
   corpDividendRefundRate: Decimal;      // 38.33% (RDTOH refund cap per dividend $)
-};
-
-// ---------------------------------------------------------------------------
-// Phase 5 — Scenario engine (owner-comp optimizer)
-// ---------------------------------------------------------------------------
-
-export type OwnerComp = {
-  salary: Decimal;                  // gross T4 box 14 from corp to owner
-  eligibleDividends: Decimal;       // gross actual eligible dividends declared
-  nonEligibleDividends: Decimal;    // gross actual non-eligible dividends declared
-};
-
-export type ScenarioInput = {
-  year: number;
-  jurisdiction: 'CA-ON';
-  // Base personal facts (employment income from non-corp sources, investment income, etc.)
-  // OwnerComp.salary will be ADDED to facts.employmentIncome before T1 compute.
-  personalFactsBase: Omit<TaxYearFacts, 'employmentIncome' | 'eligibleDividends' | 'nonEligibleDividends'> & {
-    employmentIncomeBase: IncomeItem[];
-    eligibleDividendsBase: IncomeItem[];
-    nonEligibleDividendsBase: IncomeItem[];
-  };
-  // Base corp facts (ABI, AAII inputs).
-  // OwnerComp.salary will be ADDED to corp salaryPaid (deductible expense reducing ABI).
-  // OwnerComp.dividends* will be ADDED to corp dividendsPaid (eligible/non).
-  corpFactsBase: CorpTaxYearFacts;
-  ownerComp: OwnerComp;
-};
-
-export type ScenarioResult = {
-  ownerComp: OwnerComp;
-  corpReturn: CorpTaxReturn;
-  personalReturn: TaxReturn;
-  combinedTotals: {
-    corpNetTaxPayable: Decimal;
-    personalTotalPayable: Decimal;
-    personalAfterTaxIncome: Decimal;  // simplified: personalReturn.totals.totalIncome - personalReturn.totals.totalPayable
-    householdTotalTax: Decimal;       // corpNetTaxPayable + personalTotalPayable
-    effectiveRate: Decimal;           // householdTotalTax / (ABI + investment income before any draws)
-  };
 };

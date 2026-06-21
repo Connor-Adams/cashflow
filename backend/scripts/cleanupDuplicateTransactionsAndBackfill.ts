@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+// fallow-ignore-file unused-file
 /**
  * One-shot cleanup for the source-reference-instability dedup gap.
  *
@@ -22,7 +23,7 @@
  *   DATABASE_URL="$PUB" yarn workspace cashflow-backend tsx \
  *     scripts/cleanupDuplicateTransactionsAndBackfill.ts --dry-run
  */
-import { Op, type Transaction as SequelizeTransaction } from 'sequelize';
+import { type Transaction as SequelizeTransaction } from 'sequelize';
 import { sequelize, Transaction } from '../src/models';
 import { rowFingerprint } from '../src/import/fingerprint';
 
@@ -44,6 +45,14 @@ interface PairRow {
   older_source_ref: string | null;
   newer_id: number;
   newer_source_ref: string | null;
+}
+
+interface PlannedMerge {
+  pair: PairRow;
+  populated: string;
+  keepId: number;
+  dropId: number;
+  newFp: string;
 }
 
 async function findNullPopulatedPairs(t: SequelizeTransaction): Promise<PairRow[]> {
@@ -68,6 +77,54 @@ async function findNullPopulatedPairs(t: SequelizeTransaction): Promise<PairRow[
   return rows as PairRow[];
 }
 
+function planMerge(pair: PairRow): PlannedMerge {
+  const populated = pair.older_source_ref ?? pair.newer_source_ref;
+  if (populated == null) {
+    throw new Error(
+      `pair has no populated ref (acct=${pair.account_id} date=${pair.date} ids=[${pair.older_id},${pair.newer_id}])`,
+    );
+  }
+  const olderHasNull = pair.older_source_ref == null;
+  return {
+    pair,
+    populated,
+    keepId: olderHasNull ? pair.older_id : pair.newer_id,
+    dropId: olderHasNull ? pair.newer_id : pair.older_id,
+    newFp: rowFingerprint({
+      accountId: pair.account_id,
+      date: pair.date,
+      amount: Number(pair.amount),
+      currency: pair.currency,
+      merchantRaw: pair.merchant_raw,
+      sourceReference: populated,
+    }),
+  };
+}
+
+function logPlan(plan: PlannedMerge): void {
+  const { pair, keepId, dropId, populated } = plan;
+  console.log(
+    `  keep=${keepId} drop=${dropId} acct=${pair.account_id} ${pair.date} ${pair.amount} ` +
+      `${pair.merchant_raw.trim().slice(0, 40)} ref=${populated}`,
+  );
+}
+
+async function applyMerge(
+  plan: PlannedMerge,
+  t: SequelizeTransaction,
+): Promise<{ deleted: number; backfilled: number }> {
+  // Delete the loser FIRST: it already has `newFp` stored (computed at insert
+  // time under the new-merchantRaw formula deployed in prior PR), so writing
+  // `newFp` onto the keeper would otherwise violate the
+  // (account_id, source_row_fingerprint) unique index.
+  const deleted = await Transaction.destroy({ where: { id: plan.dropId }, transaction: t });
+  const [backfilled] = await Transaction.update(
+    { sourceReference: plan.populated, sourceRowFingerprint: plan.newFp },
+    { where: { id: plan.keepId }, transaction: t },
+  );
+  return { deleted, backfilled };
+}
+
 async function phaseA(args: Args): Promise<{ pairs: number; deleted: number; backfilled: number }> {
   let pairs = 0;
   let deleted = 0;
@@ -78,65 +135,46 @@ async function phaseA(args: Args): Promise<{ pairs: number; deleted: number; bac
     pairs = found.length;
     console.log(`[phase A] candidate pairs: ${pairs}`);
 
-    for (const p of found) {
-      const populated = p.older_source_ref ?? p.newer_source_ref;
-      const olderHasNull = p.older_source_ref == null;
-      const keepId = olderHasNull ? p.older_id : p.newer_id;
-      const dropId = olderHasNull ? p.newer_id : p.older_id;
-
-      if (populated == null) {
-        throw new Error(`pair has no populated ref (acct=${p.account_id} date=${p.date} ids=[${p.older_id},${p.newer_id}])`);
-      }
-
-      const newFp = rowFingerprint({
-        accountId: p.account_id,
-        date: p.date,
-        amount: Number(p.amount),
-        currency: p.currency,
-        merchantRaw: p.merchant_raw,
-        sourceReference: populated,
-      });
-
-      console.log(
-        `  keep=${keepId} drop=${dropId} acct=${p.account_id} ${p.date} ${p.amount} ` +
-        `${p.merchant_raw.trim().slice(0, 40)} ref=${populated}`,
-      );
-
-      if (!args.dryRun) {
-        // Delete the loser FIRST: it already has `newFp` stored (computed at
-        // insert time under the new-merchantRaw formula deployed in prior PR),
-        // so writing `newFp` onto the keeper would otherwise violate the
-        // (account_id, source_row_fingerprint) unique index.
-        const removed = await Transaction.destroy({
-          where: { id: dropId },
-          transaction: t,
-        });
-        deleted += removed;
-        const [updated] = await Transaction.update(
-          { sourceReference: populated, sourceRowFingerprint: newFp },
-          { where: { id: keepId }, transaction: t },
-        );
-        backfilled += updated;
-      }
+    for (const pair of found) {
+      const plan = planMerge(pair);
+      logPlan(plan);
+      if (args.dryRun) continue;
+      const result = await applyMerge(plan, t);
+      deleted += result.deleted;
+      backfilled += result.backfilled;
     }
   });
 
   return { pairs, deleted, backfilled };
 }
 
-async function phaseB(args: Args): Promise<{ total: number; recomputed: number }> {
-  let total = 0;
-  let recomputed = 0;
+async function refreshOneFingerprint(row: Transaction, t: SequelizeTransaction): Promise<boolean> {
+  const newFp = rowFingerprint({
+    accountId: row.accountId,
+    date: row.date,
+    amount: Number(row.amount),
+    currency: row.currency,
+    merchantRaw: row.merchantRaw,
+    sourceReference: row.sourceReference ?? null,
+  });
+  if (newFp === row.sourceRowFingerprint) return false;
+  row.sourceRowFingerprint = newFp;
+  await row.save({ transaction: t, hooks: false, silent: true, fields: ['sourceRowFingerprint'] });
+  return true;
+}
 
+async function phaseB(args: Args): Promise<{ total: number; recomputed: number }> {
   if (args.dryRun) {
     const all = await Transaction.count();
     console.log(`[phase B] would scan ${all} transactions to refresh fingerprints (dry run)`);
     return { total: all, recomputed: 0 };
   }
 
+  let total = 0;
+  let recomputed = 0;
   const batchSize = 500;
   let offset = 0;
-  // Loop in a single outer transaction so unique-index conflicts roll back cleanly.
+  // Single outer transaction so unique-index conflicts roll back cleanly.
   await sequelize.transaction(async (t) => {
     while (true) {
       const batch = await Transaction.findAll({
@@ -148,19 +186,7 @@ async function phaseB(args: Args): Promise<{ total: number; recomputed: number }
       if (batch.length === 0) break;
       for (const row of batch) {
         total += 1;
-        const newFp = rowFingerprint({
-          accountId: row.accountId,
-          date: row.date,
-          amount: Number(row.amount),
-          currency: row.currency,
-          merchantRaw: row.merchantRaw,
-          sourceReference: row.sourceReference ?? null,
-        });
-        if (newFp !== row.sourceRowFingerprint) {
-          row.sourceRowFingerprint = newFp;
-          await row.save({ transaction: t, hooks: false, silent: true, fields: ['sourceRowFingerprint'] });
-          recomputed += 1;
-        }
+        if (await refreshOneFingerprint(row, t)) recomputed += 1;
       }
       offset += batch.length;
       console.log(`[phase B] scanned ${offset} so far (recomputed=${recomputed})`);
@@ -170,7 +196,7 @@ async function phaseB(args: Args): Promise<{ total: number; recomputed: number }
   return { total, recomputed };
 }
 
-async function main() {
+async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   console.log(`mode: ${args.dryRun ? 'DRY RUN' : 'LIVE'}`);
   console.log(`db host: ${(process.env.DATABASE_URL || '').split('@')[1]?.split('/')[0] ?? 'unknown'}`);

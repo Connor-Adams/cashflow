@@ -122,6 +122,7 @@ export async function seedActivity(
     quantity?: number | null;
     price?: number | null;
     amount?: number | null;
+    splitRatio?: number | null;
     currency?: string;
   },
 ): Promise<void> {
@@ -136,11 +137,35 @@ export async function seedActivity(
     quantity: opts.quantity != null ? opts.quantity.toFixed(8) : null,
     price: opts.price != null ? opts.price.toFixed(8) : null,
     amount: opts.amount != null ? opts.amount.toFixed(4) : null,
+    splitRatio: opts.splitRatio != null ? String(opts.splitRatio) : null,
     fees: null,
     currency: opts.currency ?? 'CAD',
     sourceReference: null,
     sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
     importBatch: 'portfolio-test',
+  });
+}
+
+export async function seedSecurityPrice(
+  models: Models,
+  args: {
+    securityId: number;
+    symbol: string;
+    price: number;
+    currency?: string;
+    pricedAt?: Date;
+    fetchedAt?: Date;
+    provider?: string;
+  },
+): Promise<void> {
+  await models.SecurityPrice.create({
+    securityId: args.securityId,
+    provider: args.provider ?? 'yahoo',
+    symbol: args.symbol,
+    pricedAt: args.pricedAt ?? new Date(),
+    price: String(args.price),
+    currency: args.currency ?? 'CAD',
+    fetchedAt: args.fetchedAt ?? new Date(),
   });
 }
 

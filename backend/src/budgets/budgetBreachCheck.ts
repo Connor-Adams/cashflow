@@ -37,10 +37,14 @@ import { enqueueNotification } from '../notifications';
 import { logger } from '../observability/logger';
 import {
   aggregateSpendByCategory,
+  categoryAndDescendantNames,
   computeBudgetProgress,
   currentPeriodBounds,
+  netRefundsFromSpend,
+  resolveRefundNets,
   scopeWhereClause,
 } from '../routes/budgets';
+import { loadCategoryTree } from '../categories/rollup';
 import { loadItemAllocationContext } from '../summary/loadItemAllocations';
 
 /**
@@ -245,7 +249,11 @@ export async function processBudget(
   });
   const explicitExcludedIds = explicitExcluded.map((row) => row.transactionId);
 
-  let refundOriginalIds: number[] = [];
+  // When excludeRefundedPurchases is set we fetch the refund rows so we can
+  // net their amount back out below — keeping the original purchase counted
+  // and subtracting only the refunded amount. Dropping the whole original
+  // purchase understated spend on partial refunds (mirrors the /status route).
+  let refundRows: Array<{ linkedTransactionId: number; amount: unknown }> = [];
   if (budget.excludeRefundedPurchases) {
     const refunds = await Transaction.findAll({
       where: {
@@ -258,17 +266,21 @@ export async function processBudget(
           [Op.lte]: bounds.periodEnd,
         },
       },
-      attributes: ['linkedTransactionId'],
+      attributes: ['linkedTransactionId', 'amount'],
       raw: true,
     });
-    refundOriginalIds = refunds
-      .map((r) => r.linkedTransactionId)
-      .filter((v): v is number => typeof v === 'number');
+    refundRows = refunds
+      .filter(
+        (r): r is typeof r & { linkedTransactionId: number } =>
+          typeof r.linkedTransactionId === 'number',
+      )
+      .map((r) => ({
+        linkedTransactionId: r.linkedTransactionId,
+        amount: r.amount,
+      }));
   }
 
-  const allExcludedIds = Array.from(
-    new Set<number>([...explicitExcludedIds, ...refundOriginalIds]),
-  );
+  const allExcludedIds = Array.from(new Set<number>(explicitExcludedIds));
 
   const rows = await Transaction.findAll({
     where: {
@@ -298,6 +310,13 @@ export async function processBudget(
   const itemContext = await loadItemAllocationContext(ids);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const spendByCategory = aggregateSpendByCategory(rows as any, itemContext);
+  // Net the refunded amount out of the original purchase's bucket.
+  netRefundsFromSpend(
+    spendByCategory,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolveRefundNets(rows as any, refundRows),
+  );
+  const tree = await loadCategoryTree(budget.householdId);
   const [progress] = computeBudgetProgress(
     [
       {
@@ -305,6 +324,10 @@ export async function processBudget(
         category: budget.category,
         currency: budget.currency,
         amount: String(budget.amount),
+        categoryNames:
+          budget.categoryId != null
+            ? categoryAndDescendantNames(tree, budget.categoryId)
+            : null,
       },
     ],
     spendByCategory,

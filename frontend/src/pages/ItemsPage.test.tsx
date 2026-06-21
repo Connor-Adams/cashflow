@@ -40,9 +40,17 @@ describe('ItemsPage', () => {
     expect(screen.getByRole('tab', { name: /search/i })).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('analyze tab renders coming-soon placeholder', () => {
+  it('analyze tab renders the analytics view', async () => {
+    vi.mocked(api.getJson).mockResolvedValue({
+      topItems: [],
+      byBrand: [],
+      currencyUsed: 'CAD',
+      currencyOthers: [],
+    })
     renderAt('/items?tab=analyze')
-    expect(screen.getByText(/coming soon/i)).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /analyze/i })).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByText(/no item-level data yet/i)).toBeInTheDocument()
+    expect(screen.queryByText(/coming soon/i)).not.toBeInTheDocument()
   })
 
   it('filter chip change refetches', async () => {
@@ -54,5 +62,18 @@ describe('ItemsPage', () => {
     await waitFor(() =>
       expect(api.getJson).toHaveBeenLastCalledWith(expect.stringContaining('vendor=amazon')),
     )
+  })
+
+  it('shows the "No items yet" EmptyState with an Import CTA when there is no data and no filters (#799)', async () => {
+    renderAt('/items')
+    expect(await screen.findByText('No items yet')).toBeInTheDocument()
+    const cta = screen.getByRole('link', { name: /import a statement/i })
+    expect(cta).toHaveAttribute('href', '/import')
+  })
+
+  it('shows the "Nothing matches this filter" EmptyState with a Clear filters CTA when a filter excludes everything (#799)', async () => {
+    renderAt('/items?vendor=Costco')
+    expect(await screen.findByText('Nothing matches this filter')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /clear filters/i })).toBeInTheDocument()
   })
 })

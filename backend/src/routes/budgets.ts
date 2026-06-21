@@ -14,8 +14,39 @@ import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
 import { splitTxnByItems } from '../import/splitTxnByItems';
 import { loadItemAllocationContext, type ItemAllocationContext } from '../summary/loadItemAllocations';
+import { loadCategoryTree, type CategoryTree } from '../categories/rollup';
 
 const router = Router();
+
+/**
+ * A category's own name plus every descendant category name, used to roll a
+ * per-category budget up its subtree. Pure over a CategoryTree so it's testable
+ * without a DB.
+ */
+export function categoryAndDescendantNames(
+  tree: CategoryTree,
+  categoryId: number,
+): string[] {
+  const childrenByParent = new Map<number, number[]>();
+  for (const [id, parentId] of tree.parentById) {
+    if (parentId == null) continue;
+    const list = childrenByParent.get(parentId) ?? [];
+    list.push(id);
+    childrenByParent.set(parentId, list);
+  }
+  const names: string[] = [];
+  const seen = new Set<number>();
+  const stack = [categoryId];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const name = tree.nameById.get(id);
+    if (name != null) names.push(name);
+    for (const child of childrenByParent.get(id) ?? []) stack.push(child);
+  }
+  return names;
+}
 
 type NormalizedBudgetInput = {
   category: string | null;
@@ -484,6 +515,7 @@ type SpendRow = {
   id: number;
   currency: string;
   finalCategory: string | null;
+  finalCategoryId?: number | null;
   finalBusiness: boolean;
   finalSplitType: string;
   amount: unknown;
@@ -504,10 +536,10 @@ type SpendRow = {
 export function aggregateSpendByCategory(
   rows: SpendRow[],
   itemContext?: ItemAllocationContext,
-): Map<string, { currency: string; category: string | null; spent: number }> {
+): Map<string, { currency: string; category: string | null; categoryId: number | null; spent: number }> {
   const out = new Map<
     string,
-    { currency: string; category: string | null; spent: number }
+    { currency: string; category: string | null; categoryId: number | null; spent: number }
   >();
   for (const row of rows) {
     const amount = num(row.amount);
@@ -519,6 +551,7 @@ export function aggregateSpendByCategory(
             amount: String(row.amount),
             currency: row.currency,
             finalCategory: row.finalCategory,
+            finalCategoryId: row.finalCategoryId ?? null,
             finalBusiness: row.finalBusiness,
             finalSplitType: row.finalSplitType,
             businessAmount: row.businessAmount,
@@ -530,6 +563,7 @@ export function aggregateSpendByCategory(
       : [
           {
             category: row.finalCategory,
+            categoryId: row.finalCategoryId ?? null,
             amount,
             businessAmount: 0,
             currency: row.currency,
@@ -542,6 +576,7 @@ export function aggregateSpendByCategory(
       const existing = out.get(key) ?? {
         currency: alloc.currency,
         category: alloc.category,
+        categoryId: alloc.categoryId ?? null,
         spent: 0,
       };
       existing.spent += spend;
@@ -551,11 +586,86 @@ export function aggregateSpendByCategory(
   return out;
 }
 
+/** One refund's net-back: a positive amount keyed by the ORIGINAL purchase's
+ *  (currency, category) so it offsets the bucket the purchase landed in. */
+export type RefundNet = {
+  amount: unknown;
+  currency: string;
+  category: string | null;
+};
+
+/**
+ * Net refunds out of an aggregated spend map IN PLACE, subtracting only the
+ * refunded amount from the matching (currency, category) bucket — never the
+ * whole original purchase. A $100 charge with a $30 partial refund leaves $70
+ * of spend; a full $100 refund leaves $0. The old `excludeRefundedPurchases`
+ * path dropped the entire original purchase row, which understated spend for
+ * partial refunds.
+ *
+ * Each refund is keyed by the ORIGINAL purchase's category/currency (resolved
+ * via `linkedTransactionId`), so the offset hits the same bucket the purchase
+ * contributed to. Buckets are clamped at 0 so an over-refund can't push spend
+ * negative. Refunds with no matching bucket are ignored.
+ *
+ * Pure helper exported so the route + cron share one definition and it can be
+ * unit-tested without a DB.
+ */
+export function netRefundsFromSpend(
+  spendByCategory: Map<
+    string,
+    { currency: string; category: string | null; spent: number }
+  >,
+  refunds: RefundNet[],
+): void {
+  for (const refund of refunds) {
+    const refundAmount = num(refund.amount);
+    if (refundAmount == null || refundAmount <= 0) continue;
+    const key = `${refund.currency}\0${refund.category ?? ''}`;
+    const bucket = spendByCategory.get(key);
+    if (!bucket) continue;
+    bucket.spent = Math.max(0, bucket.spent - refundAmount);
+  }
+}
+
+/**
+ * Map raw refund rows (each with the original purchase id + refund amount)
+ * to `RefundNet`s keyed by the ORIGINAL purchase's (currency, category),
+ * resolved from the in-window transaction rows. Refunds whose original
+ * purchase isn't in the window (so it was never counted) are dropped — there
+ * is nothing to net. Pure + exported so route and cron share it.
+ */
+export function resolveRefundNets(
+  rows: Array<Pick<SpendRow, 'id' | 'currency' | 'finalCategory'>>,
+  refundRows: Array<{ linkedTransactionId: number; amount: unknown }>,
+): RefundNet[] {
+  const byId = new Map<number, { currency: string; category: string | null }>();
+  for (const row of rows) {
+    byId.set(row.id, { currency: row.currency, category: row.finalCategory });
+  }
+  const nets: RefundNet[] = [];
+  for (const refund of refundRows) {
+    const original = byId.get(refund.linkedTransactionId);
+    if (!original) continue;
+    nets.push({
+      amount: refund.amount,
+      currency: original.currency,
+      category: original.category,
+    });
+  }
+  return nets;
+}
+
 type BudgetForProgress = {
   id: number;
   category: string | null;
   currency: string;
   amount: string;
+  /**
+   * The category's own name plus every descendant category name. When present
+   * on a per-category budget, spend rolls up the subtree (a budget on a parent
+   * counts its children). Omitted → the budget matches only its own bucket.
+   */
+  categoryNames?: string[] | null;
 };
 
 type ProgressItem = {
@@ -598,6 +708,15 @@ export function computeBudgetProgress(
     let spent: number;
     if (budget.category == null) {
       spent = totalsByCurrency.get(budget.currency) ?? 0;
+    } else if (budget.categoryNames && budget.categoryNames.length > 0) {
+      // Roll the subtree up: sum this category's bucket plus every descendant's.
+      const seen = new Set<string>();
+      spent = 0;
+      for (const name of budget.categoryNames) {
+        if (seen.has(name)) continue;
+        seen.add(name);
+        spent += spendByCategory.get(`${budget.currency}\0${name}`)?.spent ?? 0;
+      }
     } else {
       const key = `${budget.currency}\0${budget.category}`;
       spent = spendByCategory.get(key)?.spent ?? 0;
@@ -731,6 +850,10 @@ async function computeStatusForBudgets(
   const now = new Date();
   if (budgets.length === 0) return [];
 
+  // Load the category tree once so a budget on a parent rolls its subtree's
+  // spend up (a budget on "Dining" counts "Dining / Coffee" too).
+  const tree = await loadCategoryTree(currentAuth(req).household.id);
+
   // For each budget compute its own period bounds + scope-filtered spend.
   const results = await Promise.all(
     budgets.map(async (budget) => {
@@ -744,13 +867,13 @@ async function computeStatusForBudgets(
       });
       const explicitExcludedIds = excluded.map((row) => row.transactionId);
 
-      // Issue #215: when the budget opts in to excludeRefundedPurchases,
-      // also exclude the `linked_transaction_id` of every refund row in
-      // this household+currency+date window. The refund itself is already
-      // a positive-amount row that aggregateSpendByCategory ignores (it
-      // only counts amount<0). So zeroing out the original purchase is the
-      // only thing left to do for "this charge was refunded — don't count it".
-      let refundOriginalIds: number[] = [];
+      // Issue #215: when the budget opts in to excludeRefundedPurchases, fetch
+      // the refund rows in this household+currency+date window so we can net
+      // their amount back out below. We keep the ORIGINAL purchase counted and
+      // subtract only the refunded amount (netRefundsFromSpend) — dropping the
+      // whole original purchase understated spend on partial refunds.
+      let refundRows: Array<{ linkedTransactionId: number; amount: unknown }> =
+        [];
       if (budget.excludeRefundedPurchases) {
         const refunds = await Transaction.findAll({
           where: {
@@ -763,17 +886,21 @@ async function computeStatusForBudgets(
               [Op.lte]: bounds.periodEnd,
             },
           },
-          attributes: ['linkedTransactionId'],
+          attributes: ['linkedTransactionId', 'amount'],
           raw: true,
         });
-        refundOriginalIds = refunds
-          .map((r) => r.linkedTransactionId)
-          .filter((v): v is number => typeof v === 'number');
+        refundRows = refunds
+          .filter(
+            (r): r is typeof r & { linkedTransactionId: number } =>
+              typeof r.linkedTransactionId === 'number'
+          )
+          .map((r) => ({
+            linkedTransactionId: r.linkedTransactionId,
+            amount: r.amount,
+          }));
       }
 
-      const allExcludedIds = Array.from(
-        new Set<number>([...explicitExcludedIds, ...refundOriginalIds])
-      );
+      const allExcludedIds = Array.from(new Set<number>(explicitExcludedIds));
 
       const txWhere: WhereOptions = {
         ...householdWhere(req),
@@ -794,6 +921,7 @@ async function computeStatusForBudgets(
           'id',
           'currency',
           'finalCategory',
+          'finalCategoryId', // B2: finalCategoryId selected for future rollup
           'finalBusiness',
           'finalSplitType',
           'amount',
@@ -808,6 +936,11 @@ async function computeStatusForBudgets(
         rows as unknown as SpendRow[],
         itemContext
       );
+      // Net the refunded amount back out of the original purchase's bucket.
+      netRefundsFromSpend(
+        spendByCategory,
+        resolveRefundNets(rows as unknown as SpendRow[], refundRows)
+      );
       const [progress] = computeBudgetProgress(
         [
           {
@@ -815,6 +948,10 @@ async function computeStatusForBudgets(
             category: budget.category,
             currency: budget.currency,
             amount: String(budget.amount),
+            categoryNames:
+              budget.categoryId != null
+                ? categoryAndDescendantNames(tree, budget.categoryId)
+                : null,
           },
         ],
         spendByCategory,

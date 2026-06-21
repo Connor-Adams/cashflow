@@ -10,11 +10,11 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { NativeSelect } from '@/components/ui/native-select'
-import { Alert } from '@/components/ui/alert'
+import { NativeSelect } from '@connor-adams/designsystem'
+import { Alert } from '@connor-adams/designsystem'
 import { getJson } from '../lib/api'
 import type { AuditLogEntry, AuditLogResponse } from '../types/api'
 
@@ -234,9 +234,11 @@ function AuditRow({ row }: { row: AuditLogEntry }) {
       <Card>
         <CardContent className="pt-3 pb-3">
           <div className="flex items-start gap-2">
-            <button
+            <Button
               type="button"
-              className="mt-0.5 text-muted-foreground hover:text-foreground"
+              variant="ghost"
+              size="sm"
+              className="mt-0.5"
               aria-label={open ? 'Collapse details' : 'Expand details'}
               onClick={() => setOpen((v) => !v)}
               disabled={!hasDetails}
@@ -246,7 +248,7 @@ function AuditRow({ row }: { row: AuditLogEntry }) {
               ) : (
                 <ChevronRight size={16} />
               )}
-            </button>
+            </Button>
             <div className="flex-1 min-w-0">
               <div className="flex items-baseline flex-wrap gap-2">
                 <span className="text-sm font-medium">{actionLabel(row.action)}</span>

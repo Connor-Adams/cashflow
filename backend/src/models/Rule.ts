@@ -7,8 +7,7 @@ import {
   InferCreationAttributes,
   CreationOptional,
 } from 'sequelize';
-import { logger } from '../observability/logger';
-
+import type { RuleAction } from '../rules/actions';
 export class Rule extends Model<
   InferAttributes<Rule>,
   InferCreationAttributes<Rule>
@@ -20,6 +19,7 @@ export class Rule extends Model<
   declare matchKind: string;
   declare priority: number;
   declare category: string | null;
+  declare categoryId: number | null;
   declare isBusiness: boolean;
   declare splitType: string;
   /** Stored as DECIMAL; may be string when read from SQLite */
@@ -29,6 +29,14 @@ export class Rule extends Model<
   declare effectiveFrom: string | null;
   /** Exclusive upper bound on Transaction.date; null = "forever". */
   declare effectiveTo: string | null;
+  /**
+   * Composable effect list (issue #795). A rule's effects are stored as a JSON
+   * array of `{ type, payload }`; the scalar columns above mirror the
+   * `set_category` / `set_business` / `set_split` actions for backward compat
+   * and are kept in sync on every write. `set_label` / `set_alert` live only
+   * here. Defaults to `[]`.
+   */
+  declare actions: CreationOptional<RuleAction[]>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -64,6 +72,7 @@ export function initRule(sequelize: Sequelize): typeof Rule {
       },
       priority: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
       category: { type: DataTypes.STRING(128), allowNull: true },
+      categoryId: { type: DataTypes.INTEGER, field: 'category_id', allowNull: true },
       isBusiness: {
         type: DataTypes.BOOLEAN,
         field: 'is_business',
@@ -92,6 +101,12 @@ export function initRule(sequelize: Sequelize): typeof Rule {
         field: 'effective_to',
         allowNull: true,
       },
+      actions: {
+        // JSON works on both SQLite and Postgres (matches Notification.dataJson).
+        type: DataTypes.JSON,
+        allowNull: false,
+        defaultValue: [],
+      },
     } as ModelAttributes<Rule>,
     {
       sequelize,
@@ -101,16 +116,14 @@ export function initRule(sequelize: Sequelize): typeof Rule {
       timestamps: true,
     }
   );
-  Rule.addHook('afterSave', async (instance: Rule, options) => {
+  Rule.addHook('beforeSave', async (instance: Rule, options) => {
     if (instance.householdId == null) return;
-    try {
-      const { ensureCategory } = await import('../util/ensureCategory');
-      await ensureCategory(instance.householdId, instance.category, {
-        transaction: options.transaction,
-      });
-    } catch (e) {
-      logger.warn({ err: e, model: 'Rule' }, 'ensure_category_hook_failed');
-    }
+    const { reconcileCategoryField } = await import('../categories/reconcileCategoryField');
+    await reconcileCategoryField({
+      instance, householdId: instance.householdId,
+      strField: 'category', idField: 'categoryId',
+      transaction: options.transaction ?? undefined,
+    });
   });
   return Rule;
 }

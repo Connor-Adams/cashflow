@@ -1,6 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { rowFingerprint, stableIdentityFingerprint } from '../../src/import/fingerprint';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -11,11 +12,20 @@ let backfillModule: typeof import('../../src/import/runEnrichmentBackfill.js');
 let testDb: PgTestDb;
 
 before(async () => {
+  // Enable the AI batch stage for this worker BEFORE the heavy modules load.
+  // enrichmentAiEnabled is a config/env.ts const evaluated at module-load, and
+  // aiBatchPossible() also requires getOpenAiConfig() != null (OPENAI_API_KEY).
+  // The dynamic import()s below are the first time env.ts / aiBatchOverColdRows
+  // evaluate, so setting these here is in time. The AI caller is always injected
+  // in the AI tests, so no real network call is ever made.
+  process.env.ENRICHMENT_AI_ENABLED = 'true';
+  process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || 'test-openai-key';
+
   testDb = await setupPgTestDb('backfill');
   models = await import('../../src/models/index.js');
   app = (await import('../../src/app.js')).default;
   backfillModule = await import('../../src/import/runEnrichmentBackfill.js');
-  authed = request.agent(app);
+  authed = testAgent(app);
   const register = await authed.post('/api/auth/register').send({
     email: 'backfill@example.com',
     displayName: 'Backfill User',
@@ -296,15 +306,75 @@ test('backfill links a transaction to an Apple ExternalOrder', async () => {
   assert.equal(txn.merchantCanonical, 'Apple');
   assert.match(String(txn.notes ?? ''), /iCloud 50GB/);
 
-  // linkedExternalOrderId lives in the item-link signal's fields JSON,
-  // not on the Transaction row directly (no schema column for it).
-  // Origin's matcher emits source='item-link' for ALL vendors, not vendor-specific names.
+  // The item-link match is persisted through the canonical TransactionOrderLink
+  // join table (status 'suggested'), not a forked column. The signal still records
+  // linkedExternalOrderId in its fields JSON for the audit trail.
   const signal = await models.TransactionSignal.findOne({
     where: { transactionId: txn.id, source: 'item-link' },
   });
   assert.ok(signal, 'expected an item-link signal');
   const fields = signal!.fields as { linkedExternalOrderId?: number };
   assert.equal(fields.linkedExternalOrderId, order.id);
+
+  const link = await models.TransactionOrderLink.findOne({
+    where: { transactionId: txn.id, externalOrderId: order.id },
+  });
+  assert.ok(link, 'backfill should create a suggested TransactionOrderLink for the matched order');
+  assert.equal(link!.status, 'suggested');
+  assert.ok(
+    Number(link!.confidence) >= 70,
+    `link confidence should be the numeric score, got ${link!.confidence}`,
+  );
+  assert.ok(String(link!.matchReason).length > 0, 'link should record a matchReason');
+});
+
+test('backfill order-linking is idempotent and never resurrects a rejected link', async () => {
+  const acc = await models.Account.findOne();
+  assert.ok(acc);
+  const order = await models.ExternalOrder.create({
+    householdId: acc.householdId,
+    createdByUserId: acc.ownerUserId,
+    vendor: 'apple',
+    vendorOrderId: 'APPL-OR-2',
+    dedupeKey: 'apple:APPL-OR-2',
+    orderDate: '2026-04-25',
+    shipmentDate: null,
+    total: '9.99',
+    currency: 'CAD',
+    paymentLast4: null,
+    source: 'bookmarklet-apple-v1',
+    rawPayload: null,
+  } as never);
+  await models.ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'iCloud 200GB',
+    quantity: 1,
+    totalPrice: '9.99',
+    inferredCategory: 'Subscriptions',
+  } as never);
+  const txn = await createTxn({
+    merchantRaw: 'APPLE.COM/BILL',
+    merchantClean: 'APPLE.COM/BILL',
+    amount: -9.99,
+    date: '2026-04-27',
+    reviewFlag: true,
+  });
+
+  await backfillModule.runBackfill(seedFlags({}));
+  await backfillModule.runBackfill(seedFlags({}));
+
+  const links = await models.TransactionOrderLink.findAll({
+    where: { transactionId: txn.id, externalOrderId: order.id },
+  });
+  assert.equal(links.length, 1, 'repeat backfill must not duplicate the link');
+
+  // User rejects the suggestion; a later backfill must leave it rejected.
+  await links[0].update({ status: 'rejected' });
+  await backfillModule.runBackfill(seedFlags({}));
+  const after = await models.TransactionOrderLink.findOne({
+    where: { transactionId: txn.id, externalOrderId: order.id },
+  });
+  assert.equal(after!.status, 'rejected', 'backfill must not resurrect a rejected link');
 });
 
 test('backfill respects merchantPattern filter (substring, case-insensitive)', async () => {
@@ -386,4 +456,134 @@ test('backfill respects dateFrom/dateTo filter', async () => {
   // The in-window row was processed: it picked up at least one signal.
   const afterInSignals = await models.TransactionSignal.count({ where: { transactionId: inWindow.id } });
   assert.ok(afterInSignals > 0, 'in-window row should be processed and have signals');
+});
+
+// ─── Stage 8 ai-batch in backfill (fix #2) ───────────────────────────────────
+// The deterministic pipeline (stages 1-7+9) leaves "cold" rows (reviewFlag
+// stays true). On the import path Stage 8 runs AI over those; backfill must do
+// the same — but only when the caller opts in via flags.ai and never on dry-run.
+
+/**
+ * Fake OpenAI caller matching the BATCH contract from aiBatchStage.ts:
+ * tryBatch reads `(json).results[merchantKey]`. We parse every merchant_key
+ * out of the batch prompt and return a valid suggestion for each, so the test
+ * is resilient to whatever merchant_clean the normalizer produces.
+ */
+function diningBatchCaller(): (
+  msgs: Array<{ role: string; content: string }>,
+) => Promise<Record<string, unknown>> {
+  return async (msgs) => {
+    const prompt = msgs.map((m) => m.content).join('\n');
+    const results: Record<string, unknown> = {};
+    const re = /merchant_key:\s*"([^"]+)"/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(prompt)) !== null) {
+      results[m[1]] = {
+        category: 'Dining',
+        business: false,
+        splitType: 'me',
+        pctMe: 1,
+        pctPartner: 0,
+        confidence: 'high',
+        rationale: 'test caller',
+      };
+    }
+    return { results };
+  };
+}
+
+const throwingCaller = async (): Promise<Record<string, unknown>> => {
+  throw new Error('AI caller must not be invoked');
+};
+
+test('backfill applies AI to a cold row when ai flag set (injected caller)', async () => {
+  const acc = await models.Account.findOne();
+  assert.ok(acc);
+
+  const cold = await createTxn({
+    merchantRaw: 'ZORP CAFE UNKNOWN 8842',
+    merchantClean: 'ZORP CAFE UNKNOWN 8842',
+    amount: -7.25,
+    date: '2026-05-10',
+    reviewFlag: true,
+    autoSource: null,
+  });
+
+  const aiCaller = diningBatchCaller();
+  const result = await backfillModule.runBackfill(
+    seedFlags({ ai: true, householdId: acc.householdId }),
+    {},
+    { aiCaller },
+  );
+
+  // The shared BackfillResult should report at least our one enhancement.
+  assert.ok(result.aiEnhanced >= 1, `expected aiEnhanced >= 1, got ${result.aiEnhanced}`);
+
+  await cold.reload();
+  assert.equal(cold.autoCategory, 'Dining', 'AI category should be persisted');
+  assert.equal(cold.autoSource, 'ai', 'autoSource should be ai after AI enhancement');
+  // NOTE: an AI-only suggestion fills the category but does NOT clear review_flag
+  // — that is a hard invariant in mergeSignals ("AI alone never skips review",
+  // enrichComputeReviewFlag.test.ts). The row stays in the queue with a
+  // suggested category for the human to confirm. Backfill must match the import
+  // path here, which also leaves the flag set.
+  assert.equal(cold.reviewFlag, true, 'AI-only category must not auto-clear the review flag');
+
+  const aiSignal = await models.TransactionSignal.findOne({
+    where: { transactionId: cold.id, source: 'ai' },
+  });
+  assert.ok(aiSignal, 'expected an ai-source TransactionSignal for the cold row');
+});
+
+test('backfill does NOT apply AI when ai flag is off (default)', async () => {
+  const cold = await createTxn({
+    merchantRaw: 'QUUX DINER NOBODY 5521',
+    merchantClean: 'QUUX DINER NOBODY 5521',
+    amount: -9.5,
+    date: '2026-05-11',
+    reviewFlag: true,
+    autoSource: null,
+  });
+
+  // ai defaults off; the caller throws if it is ever invoked.
+  const result = await backfillModule.runBackfill(seedFlags({}), {}, { aiCaller: throwingCaller });
+  assert.equal(result.aiEnhanced, 0, 'aiEnhanced must be 0 when ai flag is off');
+
+  await cold.reload();
+  assert.equal(cold.autoCategory, null, 'cold row must stay uncategorized when ai is off');
+  assert.equal(cold.reviewFlag, true, 'cold row must stay flagged when ai is off');
+
+  const aiSignal = await models.TransactionSignal.findOne({
+    where: { transactionId: cold.id, source: 'ai' },
+  });
+  assert.equal(aiSignal, null, 'no ai signal may be written when ai is off');
+});
+
+test('backfill does NOT apply AI on dry-run even when ai flag set', async () => {
+  const acc = await models.Account.findOne();
+  assert.ok(acc);
+
+  const cold = await createTxn({
+    merchantRaw: 'BLORP BISTRO UNSEEN 3310',
+    merchantClean: 'BLORP BISTRO UNSEEN 3310',
+    amount: -12.0,
+    date: '2026-05-12',
+    reviewFlag: true,
+    autoSource: null,
+  });
+
+  const result = await backfillModule.runBackfill(
+    seedFlags({ ai: true, dryRun: true, householdId: acc.householdId }),
+    {},
+    { aiCaller: throwingCaller },
+  );
+  assert.equal(result.aiEnhanced, 0, 'aiEnhanced must be 0 on dry-run');
+
+  await cold.reload();
+  assert.equal(cold.autoCategory, null, 'dry-run must not persist an AI category');
+
+  const aiSignal = await models.TransactionSignal.findOne({
+    where: { transactionId: cold.id, source: 'ai' },
+  });
+  assert.equal(aiSignal, null, 'dry-run must not write an ai signal');
 });

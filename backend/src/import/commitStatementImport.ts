@@ -17,11 +17,15 @@ import { findExistingInvestmentByFuzzyMatch } from './fuzzyDedupInvestmentActivi
 import { stableIdentityFingerprint } from './fingerprint';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import { enrichTransaction } from './enrich';
+import { applyRuleSideEffects, findRuleActionsSignal } from '../rules/applyRuleSideEffects';
+import { convertIncomeActivityToAccountCurrency } from './convertActivityCurrency';
+import { ensureFxRate } from '../fx/bankOfCanada';
 import {
   computeImportConfidence,
   serializeFlags,
 } from './computeImportConfidence';
 import { extractCounterparty } from './extractCounterparty';
+import { resolveCounterpartyContact } from '../contacts/findOrCreateContact';
 import type { AccountType } from '@cashflow/shared';
 import {
   enrichmentRecurringMinSupport,
@@ -32,6 +36,7 @@ import {
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
+  loadHouseholdOwnerNames,
   loadRecurringHistory,
   loadRelationshipCandidates,
 } from './enrichment/loaders';
@@ -90,10 +95,25 @@ async function createInvestmentActivity(
   account: Account,
   preview: StatementPreview,
   t: SequelizeTransaction
-): Promise<'inserted' | 'duplicate'> {
+): Promise<InvestmentActivity | 'duplicate'> {
   const security = row.security
     ? await findOrCreateSecurity(row.security, account.householdId, t)
     : null;
+  // Re-express a foreign-currency income inflow (e.g. a WS crypto staking
+  // reward the activities-export reports in USD) in the account's currency.
+  // Trades keep their native currency — see convertActivityCurrency.ts.
+  const conv = await convertIncomeActivityToAccountCurrency(
+    {
+      activityType: row.activityType,
+      currency: row.currency,
+      amount: row.amount ?? null,
+      price: row.price ?? null,
+      fees: row.fees ?? null,
+      tradeDate: row.tradeDate,
+    },
+    account.defaultCurrency || 'CAD',
+    (from, to, date) => ensureFxRate(from, to, date),
+  );
   // SAVEPOINT around the INSERT: on Postgres, any query error inside an
   // open transaction aborts the whole transaction and every subsequent
   // query returns "current transaction is aborted". By nesting through
@@ -102,8 +122,8 @@ async function createInvestmentActivity(
   // to treat as a duplicate), only the savepoint rolls back and the
   // outer transaction stays alive.
   try {
-    await sequelize.transaction({ transaction: t }, async (sp) => {
-      await InvestmentActivity.create(
+    return await sequelize.transaction({ transaction: t }, async (sp) =>
+      InvestmentActivity.create(
         {
           accountId: account.id,
           householdId: account.householdId,
@@ -113,18 +133,17 @@ async function createInvestmentActivity(
           settlementDate: row.settlementDate,
           description: row.description,
           quantity: row.quantity == null ? null : String(row.quantity),
-          price: row.price == null ? null : String(row.price),
-          amount: row.amount == null ? null : String(row.amount),
-          fees: row.fees == null ? null : String(row.fees),
-          currency: row.currency,
+          price: conv.price == null ? null : String(conv.price),
+          amount: conv.amount == null ? null : String(conv.amount),
+          fees: conv.fees == null ? null : String(conv.fees),
+          currency: conv.currency ?? row.currency,
           sourceReference: row.sourceReference,
           sourceRowFingerprint: row.sourceRowFingerprint,
           importBatch: preview.importBatch,
         },
         { transaction: sp }
-      );
-    });
-    return 'inserted';
+      )
+    );
   } catch (e) {
     if (isUniqueLike(e)) return 'duplicate';
     throw e;
@@ -233,6 +252,7 @@ export async function commitStatementImport(
   const rules = await loadAllRules(account.householdId);
   const amazonOrdersCache = await loadAmazonOrdersCache(account.householdId ?? null);
   const householdAccountIds = await loadHouseholdAccountIds(account.id, account.householdId ?? null);
+  const ownerNames = await loadHouseholdOwnerNames(account.householdId ?? null);
   const overrideBusiness = preview.overrideBusiness === true;
   let insertedTransactions = 0;
   let insertedInvestmentActivities = 0;
@@ -256,18 +276,25 @@ export async function commitStatementImport(
         incomingStatus: 'posted',
         incomingDate: row.date,
         incomingAmount: row.amount,
+        incomingCurrency: row.currency,
         incomingMerchantRaw: row.merchantRaw,
       });
       if (dedup.kind !== 'no-match') {
         skippedDuplicates += 1;
         continue;
       }
-      const memory = await findMerchantMemory(account.householdId ?? null, row.merchantClean, row.amount);
+      // All three reads thread `t` — see the matching comment in runImport.ts:
+      // un-threaded raw queries cannot see rows inserted earlier in this same
+      // import on Postgres (READ COMMITTED, separate pooled connection).
+      const memory = await findMerchantMemory(account.householdId ?? null, row.merchantClean, row.amount, {
+        transaction: t,
+      });
 
       const recurringHistory = await loadRecurringHistory(
         account.householdId ?? null,
         row.merchantClean,
         row.date,
+        t,
       );
       const relationshipCandidates = await loadRelationshipCandidates(
         account.householdId ?? null,
@@ -275,6 +302,7 @@ export async function commitStatementImport(
         row.merchantClean,
         row.date,
         enrichmentRefundWindowDays,
+        t,
       );
 
       const enriched = await enrichTransaction({
@@ -288,6 +316,7 @@ export async function commitStatementImport(
         accountId: account.id,
         householdId: account.householdId ?? null,
         householdAccountIds,
+        ownerNames,
         rules,
         amazonOrders: amazonOrdersCache,
         memory,
@@ -325,9 +354,14 @@ export async function commitStatementImport(
         amount: row.amount,
       });
 
-      const counterpartyRaw = extractCounterparty(
+      const _cp = extractCounterparty(
         row.merchantRaw,
         account.accountType as AccountType,
+      );
+      const counterpartyContactId = await resolveCounterpartyContact(
+        account.householdId ?? null,
+        _cp,
+        { transaction: t },
       );
       const txn = Transaction.build({
         accountId: account.id,
@@ -337,8 +371,8 @@ export async function commitStatementImport(
         ownershipType:
           f.autoSplitType === 'partner' || f.autoSplitType === 'shared' ? f.autoSplitType : 'me',
         ownershipContactId: null,
-        counterpartyRaw,
-        counterpartyContactId: null,
+        counterpartyRaw: _cp?.name ?? null,
+        counterpartyContactId,
         importBatch: preview.importBatch,
         date: row.date,
         merchantRaw: row.merchantRaw,
@@ -366,6 +400,11 @@ export async function commitStatementImport(
         autoSource: f.autoSource,
         autoConfidence: f.autoConfidence,
         linkedTransactionId: f.linkedTransactionId,
+        // transferLinkedAt stamps the forward pointer at the same moment the
+        // reverse pointer is written onto the sibling (Fix 2). Without this,
+        // the new txn shows as unlinked on the Transfers page even though
+        // linkedTransactionId is populated.
+        transferLinkedAt: f.linkedTransactionId != null ? new Date() : null,
         isRecurring: f.isRecurring,
         reviewFlag: f.reviewFlag,
         reviewedAt: null,
@@ -396,6 +435,41 @@ export async function commitStatementImport(
               { transaction: sp },
             );
           }
+          // Fix 2: write the reverse pointer back onto the already-persisted
+          // sibling. Without this, the link is one-directional — the new txn
+          // points at the sibling but the sibling's linked_transaction_id is
+          // still NULL, so the Transfers-page unmatched queue keeps showing
+          // both legs even after import.
+          if (f.linkedTransactionId != null) {
+            await Transaction.update(
+              {
+                linkedTransactionId: txn.id,
+                transferLinkedAt: new Date(),
+                txnType: 'transfer',
+              },
+              {
+                where: {
+                  id: f.linkedTransactionId,
+                  // Guard: only back-fill if the sibling is not already
+                  // linked to a different txn (prevents clobbering a prior
+                  // manual or auto-link on a second re-import).
+                  linkedTransactionId: null,
+                },
+                transaction: sp,
+              },
+            );
+          }
+
+          // Rule actions side-effects (issue #795): set_label / set_alert.
+          const ruleActions = findRuleActionsSignal(enriched.signals);
+          if (ruleActions) {
+            await applyRuleSideEffects({
+              ruleActions,
+              transactionId: txn.id,
+              householdId: account.householdId ?? null,
+              transaction: sp,
+            });
+          }
         });
         insertedTransactions += 1;
       } catch (e) {
@@ -404,6 +478,15 @@ export async function commitStatementImport(
       }
     }
 
+    // Ids no longer eligible as fuzzy-dedup candidates for later rows of
+    // this commit: existing rows already matched by an earlier incoming row,
+    // plus rows inserted by this commit (visible to the candidate query
+    // inside the same SQL transaction). Each candidate may absorb at most
+    // ONE incoming row — two legitimate identical activities within the
+    // window (recurring buys of pinned-price assets, equal staking rewards)
+    // are distinct events, and letting both consume the same candidate
+    // silently drops the second one.
+    const consumedActivityIds = new Set<number>();
     for (const row of preview.investmentActivities) {
       // When the preview was produced by a multi-source importer
       // (activities-export), run the fuzzy-window matcher BEFORE attempting
@@ -423,6 +506,7 @@ export async function commitStatementImport(
           amount: row.amount,
           currency: row.currency,
           csvDate: row.settlementDate ?? row.tradeDate,
+          excludeIds: consumedActivityIds,
           t,
         });
         if (outcome.kind === 'single-match') {
@@ -433,6 +517,7 @@ export async function commitStatementImport(
               fields: ['settlementDate'],
             });
           }
+          consumedActivityIds.add(outcome.existing.id);
           skippedDuplicates += 1;
           continue;
         }
@@ -447,9 +532,13 @@ export async function commitStatementImport(
         }
         // no-match → fall through to the standard insert path.
       }
-      const status = await createInvestmentActivity(row, account, preview, t);
-      if (status === 'inserted') insertedInvestmentActivities += 1;
-      else skippedDuplicates += 1;
+      const created = await createInvestmentActivity(row, account, preview, t);
+      if (created === 'duplicate') {
+        skippedDuplicates += 1;
+      } else {
+        insertedInvestmentActivities += 1;
+        consumedActivityIds.add(created.id);
+      }
     }
     for (const row of preview.holdings) {
       const status = await createHolding(row, account, preview, t);

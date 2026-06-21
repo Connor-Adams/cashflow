@@ -1,5 +1,5 @@
 import { Plus } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@connor-adams/designsystem'
 import { cn } from '@/lib/utils'
 import type { ChatThread } from '@cashflow/shared'
 
@@ -68,19 +68,20 @@ function ChatThreadRow({
   const title = thread.title?.trim() || 'Untitled'
   const ts = thread.lastMessageAt ?? thread.createdAt
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       role="listitem"
       onClick={() => onSelect(thread.id)}
       aria-current={isSelected ? 'true' : undefined}
       className={cn(
-        'block w-full border-b border-border/40 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/30',
+        'block w-full border-b border-border/40 px-3 py-2 text-left text-sm h-auto',
         isSelected && 'bg-muted/50 font-semibold',
       )}
     >
       <div className="truncate">{title}</div>
       <div className="muted truncate text-xs">{formatRelative(ts)}</div>
-    </button>
+    </Button>
   )
 }
 

@@ -17,9 +17,9 @@
  */
 import { QueryTypes } from 'sequelize';
 import { sequelize } from '../models';
-import { CashflowSettings } from '../models/CashflowSettings';
 import { CASHFLOW_SETTINGS_DEFAULTS } from '../models/CashflowSettings';
 import { jsonExtractText } from '../util/dialectSql';
+import { normalizeContactName } from '../contacts/normalizeContactName';
 
 /**
  * Day-window the detector looks back. Issue #373 fixes this at 90 days;
@@ -52,9 +52,7 @@ export type CounterpartyPromotion = {
  * scope ("v2 — start with exact normalized match").
  */
 export function normalizeCounterpartyName(raw: string | null | undefined): string | null {
-  if (raw == null) return null;
-  const trimmed = String(raw).trim().toLowerCase().replace(/\s+/g, ' ');
-  return trimmed === '' ? null : trimmed;
+  return normalizeContactName(raw);
 }
 
 type CandidateRow = {
@@ -215,7 +213,3 @@ export async function findCounterpartyPromotions(
   });
   return promotions.slice(0, COUNTERPARTY_PROMOTION_LIMIT);
 }
-
-// Re-export for tests that just want the model handle without importing
-// from `../models`.
-export { CashflowSettings };

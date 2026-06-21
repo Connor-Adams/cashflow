@@ -1,4 +1,4 @@
-import { Card } from '@/components/ui/card'
+import { Card } from '@connor-adams/designsystem'
 import { formatMoney } from '../../lib/formatMoney'
 import type { PortfolioSecurityOverview } from '../../types/api'
 
@@ -39,7 +39,7 @@ function formatCompactNumber(value: number, currencyCode?: string): string {
   const body = scaled.toFixed(digits)
   if (currencyCode) {
     try {
-      const formatted = new Intl.NumberFormat(undefined, {
+      const formatted = new Intl.NumberFormat('en-CA', {
         style: 'currency',
         currency: currencyCode.toUpperCase(),
         maximumFractionDigits: digits,

@@ -7,12 +7,15 @@ import {
   InferCreationAttributes,
   CreationOptional,
 } from 'sequelize';
+import { logger } from '../observability/logger';
 
 export type AccountTaxStatus =
   | 'registered_rrsp'
   | 'registered_tfsa'
   | 'registered_fhsa'
   | 'registered_rrif'
+  | 'registered_rdsp'
+  | 'registered_resp'
   | 'non_registered'
   | 'n_a';
 
@@ -28,12 +31,22 @@ export class Account extends Model<
   declare visibility: CreationOptional<string>;
   declare accountType: CreationOptional<string>;
   declare shortCode: string | null;
+  declare bankAccountNumber: string | null;
   declare defaultCurrency: string | null;
   declare entityId: number | null;
   declare taxStatus: CreationOptional<AccountTaxStatus>;
   declare openingBalance: CreationOptional<string>;
   declare openingBalanceDate: CreationOptional<string | null>;
   declare closedAt: CreationOptional<string | null>;
+  declare notes: string | null;
+  /**
+   * Account merge / consolidation (#287). When set, this account is a merged
+   * source: its transactions + planned events were reassigned to the target
+   * account `mergedIntoId`, and the row is hidden from the default account
+   * list. Null for a normal (un-merged) account.
+   */
+  declare mergedIntoId: CreationOptional<number | null>;
+  declare mergedAt: CreationOptional<Date | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -78,6 +91,11 @@ export function initAccount(sequelize: Sequelize): typeof Account {
         field: 'short_code',
         allowNull: true,
       },
+      bankAccountNumber: {
+        type: DataTypes.STRING(64),
+        field: 'bank_account_number',
+        allowNull: true,
+      },
       defaultCurrency: {
         type: DataTypes.STRING(3),
         field: 'default_currency',
@@ -112,6 +130,23 @@ export function initAccount(sequelize: Sequelize): typeof Account {
         allowNull: true,
         defaultValue: null,
       },
+      notes: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        defaultValue: null,
+      },
+      mergedIntoId: {
+        type: DataTypes.INTEGER,
+        field: 'merged_into_id',
+        allowNull: true,
+        defaultValue: null,
+      },
+      mergedAt: {
+        type: DataTypes.DATE,
+        field: 'merged_at',
+        allowNull: true,
+        defaultValue: null,
+      },
     } as ModelAttributes<Account>,
     {
       sequelize,
@@ -121,5 +156,73 @@ export function initAccount(sequelize: Sequelize): typeof Account {
       timestamps: true,
     }
   );
+
+  /**
+   * Default entity_id to the household's `personal` tax entity when not
+   * explicitly set. Accounts created with NULL entity_id are silently excluded
+   * from the T1/T2 tax engine (buildPersonalFacts / buildCorpFacts both query
+   * `where entityId=...`), so every account must carry one. Explicit tagging
+   * (e.g. a corp account from the PDF importer) wins because we only fill when
+   * null. Accounts without a household have no entity to default to and are
+   * left unset. Lazy import dodges the model<->service circular dependency at
+   * init time.
+   */
+  const fillPersonalEntity = async (
+    instance: Account,
+    options: { transaction?: import('sequelize').Transaction },
+  ): Promise<void> => {
+    if (instance.entityId != null || instance.householdId == null) return;
+    try {
+      const { getOrCreatePersonalEntity } = await import(
+        '../tax/services/getOrCreatePersonalEntity'
+      );
+      const personal = await getOrCreatePersonalEntity(instance.householdId, {
+        transaction: options.transaction,
+      });
+      instance.entityId = personal.id;
+    } catch (e) {
+      // Best-effort: a missing household row (orphaned/legacy data) makes the
+      // personal-entity FK insert fail. Never break account creation over it —
+      // leave entity_id null; syncTransactionEntityIds / a later create can
+      // backfill once the household exists.
+      logger.warn({ err: e, householdId: instance.householdId, model: 'Account' }, 'fill_personal_entity_failed');
+    }
+  };
+  Account.addHook('beforeCreate', fillPersonalEntity);
+  Account.addHook('beforeBulkCreate', async (instances, options) => {
+    for (const instance of instances as Account[]) {
+      await fillPersonalEntity(
+        instance,
+        options as { transaction?: import('sequelize').Transaction },
+      );
+    }
+  });
+
+  /**
+   * Default an investment account's tax_status from its name when left at the
+   * 'n_a' default. Registered accounts (TFSA/FHSA/RRSP/RRIF/RDSP) MUST carry a
+   * registered_* status or buildPersonalFacts' taxable allowlist
+   * ('non_registered','n_a') lets their sheltered in-account income/gains leak
+   * onto the personal T1. Only fills the default — an explicit tax_status wins.
+   * Non-investment accounts keep 'n_a'. Lazy import keeps the model free of a
+   * service-layer dependency at init time.
+   */
+  const fillInvestmentTaxStatus = async (instance: Account): Promise<void> => {
+    if (instance.accountType !== 'investment') return;
+    if (instance.taxStatus != null && instance.taxStatus !== 'n_a') return;
+    try {
+      const { inferTaxStatus } = await import('../tax/services/inferTaxStatus');
+      instance.taxStatus = inferTaxStatus(instance.name);
+    } catch (e) {
+      logger.warn({ err: e, model: 'Account' }, 'fill_investment_tax_status_failed');
+    }
+  };
+  Account.addHook('beforeCreate', fillInvestmentTaxStatus);
+  Account.addHook('beforeBulkCreate', async (instances) => {
+    for (const instance of instances as Account[]) {
+      await fillInvestmentTaxStatus(instance);
+    }
+  });
+
   return Account;
 }

@@ -1,45 +1,45 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import { FilterX } from 'lucide-react'
+  Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
+import { FilterX, Inbox, ShoppingBag, TrendingUp, Wallet } from 'lucide-react'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { Link, useNavigate } from 'react-router-dom'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Alert } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { CategoryBreakdown } from '@connor-adams/designsystem'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
+import { Skeleton, SkeletonText } from '@connor-adams/designsystem'
 import { BentoTile, type BentoSpan } from '@/components/dashboard/BentoTile'
-import { HeroTile } from '@/components/dashboard/HeroTile'
+import { PeriodInsightBand } from '@/components/dashboard/PeriodInsightBand'
 import { KpiStack } from '@/components/dashboard/KpiStack'
+import { SplitPanel } from '@/components/dashboard/SplitPanel'
 import { TopGrowersTile } from '@/components/dashboard/TopGrowersTile'
 import { NetWorthTile } from '@/components/dashboard/NetWorthTile'
 import { SafeToSpendTile } from '@/components/dashboard/SafeToSpendTile'
 import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMonthTile'
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { ReceiptCoverageTile } from '@/components/dashboard/ReceiptCoverageTile'
+import { EmailedReceiptsTile } from '@/components/dashboard/EmailedReceiptsTile'
+import { LatestAlertsTile } from '@/components/dashboard/LatestAlertsTile'
 import { ImportHealthTile } from '@/components/dashboard/ImportHealthTile'
-import { CfoBriefingTile } from '@/components/dashboard/CfoBriefingTile'
+import { InboxSummaryTile } from '@/components/dashboard/InboxSummaryTile'
 import { BudgetStatusCard } from '@/components/dashboard/BudgetStatusCard'
+import { ActivationCardDeck } from '@/components/dashboard/ActivationCardDeck'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
-import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
-import { useInsightsSeen } from '@/hooks/useInsightsSeen'
-import { useAuth } from '@/lib/useAuth'
-import { formatMoney } from '../lib/formatMoney'
+
+import { formatCurrency } from '../lib/formatCurrency'
+import { DeltaBadge } from '../components/ui/DeltaBadge'
 import { rankByNetSpend } from '../lib/rankByNetSpend'
+import { businessIncomeSpend } from '../lib/businessIncomeSpend'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
 import {
   fromDateInputValue,
+  getCalendarMonthRange,
+  getCalendarQuarterRange,
+  getCalendarYearRange,
   toDateInputValue,
   todayDateInputValue,
 } from '../lib/dateInput'
@@ -54,7 +54,10 @@ import type {
   BudgetProgressResponse,
   RecurringItem,
   RecurringResponse,
+  RollupRow,
 } from '../types/api'
+import type { PeriodInsightResp, PeriodInsightCurrency } from '@cashflow/shared'
+import { DashboardCategorySection } from './DashboardCategorySection'
 
 type Row = {
   currency: string
@@ -69,6 +72,7 @@ type CurrencyMetrics = {
   totalSpend: number
   totalCredits: number
   totalPayments: number
+  totalIncome: number
   netSpend: number
   transactionCount: number
 }
@@ -79,6 +83,7 @@ type MonthlyCurrencyBreakdown = {
   totalSpend: number
   totalCredits: number
   totalPayments: number
+  totalIncome: number
   netSpend: number
 }
 
@@ -88,6 +93,7 @@ type BusinessReportRow = {
   totalSpend: number
   totalCredits: number
   netSpend: number
+  income: number
 }
 
 type CategoryReportRow = {
@@ -142,29 +148,13 @@ type DashResp = {
   merchantSummaries: MerchantSummaryRow[]
   accountSummaries: AccountSummaryRow[]
   reviewQueue: ReviewQueueRow[]
+  categoryTree?: RollupRow[]
 }
 
 type MonthlyResp = {
   points: { month: string; currency: string; sumAmount: number }[]
 }
 
-type AiInsight = {
-  title: string
-  summary: string
-  severity: InsightSeverity
-  metric: string
-  amount: number
-  comparison: string
-  supportingTransactionIds: number[]
-  rationale: string
-  suggestedAction: string
-}
-
-type AiInsightsResp = {
-  period: string
-  currency: string
-  insights: AiInsight[]
-}
 
 // Ordinal palette for the multi-currency line chart. Each entry resolves
 // against the active theme (Honey & Ink dual-mode tokens in index.css).
@@ -223,10 +213,7 @@ function localTodayUtcMidnight(): Date {
 }
 
 function getDefaultDashboardRange(): { from: string; to: string } {
-  const to = localTodayUtcMidnight()
-  const from = new Date(to)
-  from.setUTCDate(from.getUTCDate() - 30)
-  return { from: toDateInputValue(from), to: toDateInputValue(to) }
+  return getCalendarMonthRange(0)
 }
 
 function getRollingMonthRange(months: number): { from: string; to: string } {
@@ -301,27 +288,28 @@ export function DashboardPage() {
     CategoryReportRow[]
   >([])
   const [monthly, setMonthly] = useState<MonthlyResp | null>(null)
-  const [aiInsights, setAiInsights] = useState<AiInsightsResp | null>(null)
+  const [insight, setInsight] = useState<PeriodInsightResp | null>(null)
   const [budgetProgress, setBudgetProgress] = useState<BudgetProgress[]>([])
   // Recurring charges, fetched separately so a /api/recurring failure
   // never tanks the rest of the dashboard. Empty list on failure or
   // initial load.
   const [recurringItems, setRecurringItems] = useState<RecurringItem[]>([])
   const [recurringLoading, setRecurringLoading] = useState(true)
+  const [priceChangeCount, setPriceChangeCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
-
-  const auth = useAuth()
-  const userIdForSeen = String(auth.user?.id ?? 'anon')
-  const { isSeen, markSeen } = useInsightsSeen(userIdForSeen)
-  const sortedInsights = aiInsights
-    ? [...aiInsights.insights].sort((a, b) => {
-        const order: Record<string, number> = { action: 0, watch: 1, info: 2 }
-        return (order[a.severity] ?? 3) - (order[b.severity] ?? 3)
-      })
-    : []
-  const hasActionSeverity = sortedInsights.some((i) => i.severity === 'action')
-
+  // Banner dismissals persist for the browser session, keyed to the count the
+  // user dismissed at. If the underlying count later changes (new flags, new
+  // price changes), the banner re-surfaces because the stored count no longer
+  // matches — a dismiss silences the *current* situation, not future ones.
+  const [reviewDismissedAt, setReviewDismissedAt] = useSessionState<number | null>(
+    'dashboard.reviewBannerDismissedAt',
+    null
+  )
+  const [priceDismissedAt, setPriceDismissedAt] = useSessionState<number | null>(
+    'dashboard.priceBannerDismissedAt',
+    null
+  )
 
   const summaryQs = useMemo(
     () => summaryQueryString({ currency, dateFrom, dateTo }),
@@ -338,13 +326,7 @@ export function DashboardPage() {
       setLoading(true)
       setErr(null)
       try {
-        const insightQs = new URLSearchParams({
-          currency,
-          period: (dateTo || todayDateInputValue()).slice(0, 7),
-        })
-        insightQs.set('dateFrom', dateFrom)
-        insightQs.set('dateTo', dateTo)
-        const [d, m, prev, insights] = await Promise.all([
+        const [d, m, prev, pi] = await Promise.all([
           getJson<DashResp>(`/api/summary/dashboard${summaryQs}`),
           getJson<MonthlyResp>(`/api/summary/monthly${summaryQs}`),
           previousRange
@@ -356,18 +338,20 @@ export function DashboardPage() {
                 })}`
               )
             : Promise.resolve<DashResp | null>(null),
-          currency
-            ? getJson<AiInsightsResp>(
-                `/api/ai/insights?${insightQs.toString()}`
+          // Only fetch the period insight when both bounds are set — the band
+          // needs a bounded range to detect range-kind and baselines.
+          dateFrom && dateTo
+            ? getJson<PeriodInsightResp>(
+                `/api/summary/period-insight${summaryQs}`
               )
-            : Promise.resolve<AiInsightsResp | null>(null),
+            : Promise.resolve<PeriodInsightResp | null>(null),
         ])
         if (!cancelled) {
           setData(d)
           setMonthly(m)
           setPreviousMetricsByCurrency(prev?.metricsByCurrency ?? [])
           setPreviousCategoryReports(prev?.categoryReports ?? [])
-          setAiInsights(insights)
+          setInsight(pi)
         }
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Error')
@@ -430,6 +414,16 @@ export function DashboardPage() {
     }
   }, [currency])
 
+  useEffect(() => {
+    // Price increases are now subscription_price_increase Insights; count the
+    // open ones. GET /api/insights returns { data: [...] }.
+    void getJson<{ data: unknown[] }>(
+      '/api/insights?type=subscription_price_increase&status=open',
+    )
+      .then((res) => setPriceChangeCount(res.data.length))
+      .catch(() => setPriceChangeCount(0))
+  }, [])
+
   const currencies = useMemo(() => {
     const s = new Set<string>()
     data?.byCategory.forEach((r) => s.add(r.currency))
@@ -442,20 +436,24 @@ export function DashboardPage() {
     const byCat = new Map<string, number>()
     for (const r of data?.byCategory ?? []) {
       if (currency && r.currency !== currency) continue
-      const label = r.category ?? '(uncategorized)'
+      const raw = (r.category ?? '').trim().toLowerCase()
+      if (raw === 'investments') continue
+      const label =
+        raw === '' || raw === 'uncategorized'
+          ? '(uncategorized)'
+          : r.category!
       byCat.set(label, (byCat.get(label) ?? 0) + r.sumAmount)
     }
     // Flip sign so spend reads as positive money-out. Charges land in the DB
     // as negative; refunds/credits as positive. After negation a typical
-    // spend category shows a positive bar (going up), and a category that
-    // net-refunded shows a negative bar (going down) which reads as
+    // spend category shows a positive bar (going right), and a category that
+    // net-refunded shows a negative bar (going left) which reads as
     // "money came back from this category".
-    return Array.from(byCat.entries()).map(([name, total]) => ({ name, total: -total }))
+    // Sort descending by absolute value so the biggest spenders are at the top.
+    return Array.from(byCat.entries())
+      .map(([name, total]) => ({ name, total: -total }))
+      .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
   }, [data, currency])
-
-  // Threshold for switching the category-axis layout. Above this count,
-  // labels overlap even on a wide viewport with default tick spacing.
-  const hasManyCategories = chartData.length > 10
 
   // Drill from a category bar into a pre-filtered Transactions view. Preserves
   // the active currency and date filters so the destination opens with the
@@ -531,70 +529,10 @@ export function DashboardPage() {
     return Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month))
   }, [data?.monthlyByCurrency, currency])
 
-  const businessReportData = useMemo(() => {
-    const rows = data?.netSpendByBusiness ?? []
-    const byFlag = new Map<
-      string,
-      {
-        label: string
-        tone: 'business' | 'personal'
-        totalSpend: number
-        totalCredits: number
-        netSpend: number
-      }
-    >()
-    for (const row of rows) {
-      if (currency && row.currency !== currency) continue
-      const key = row.business ? 'Business' : 'Personal'
-      const existing = byFlag.get(key) ?? {
-        label: key,
-        tone: row.business ? 'business' : 'personal',
-        totalSpend: 0,
-        totalCredits: 0,
-        netSpend: 0,
-      }
-      existing.totalSpend += row.totalSpend
-      existing.totalCredits += row.totalCredits
-      existing.netSpend += row.netSpend
-      byFlag.set(key, existing)
-    }
-    return Array.from(byFlag.values()).sort((a, b) => b.netSpend - a.netSpend)
-  }, [data?.netSpendByBusiness, currency])
-
-  const businessSpotlight = useMemo(() => {
-    const business =
-      businessReportData.find((row) => row.tone === 'business') ?? {
-        label: 'Business',
-        tone: 'business' as const,
-        totalSpend: 0,
-        totalCredits: 0,
-        netSpend: 0,
-      }
-    const personal =
-      businessReportData.find((row) => row.tone === 'personal') ?? {
-        label: 'Personal',
-        tone: 'personal' as const,
-        totalSpend: 0,
-        totalCredits: 0,
-        netSpend: 0,
-      }
-    const totalNetSpend = business.netSpend + personal.netSpend
-    const totalGrossSpend = business.totalSpend + personal.totalSpend
-    const totalCredits = business.totalCredits + personal.totalCredits
-    const safeTotal = totalNetSpend > 0 ? totalNetSpend : 0
-    const businessShare = safeTotal === 0 ? 0 : (business.netSpend / safeTotal) * 100
-    const personalShare = safeTotal === 0 ? 0 : (personal.netSpend / safeTotal) * 100
-
-    return {
-      business,
-      personal,
-      totalNetSpend,
-      totalGrossSpend,
-      totalCredits,
-      businessShare,
-      personalShare,
-    }
-  }, [businessReportData])
+  const bizSplit = useMemo(
+    () => businessIncomeSpend(data?.netSpendByBusiness ?? [], currency),
+    [data?.netSpendByBusiness, currency]
+  )
 
   const merchantReportData = useMemo(
     () => rankByNetSpend(data?.merchantSummaries ?? [], currency),
@@ -622,73 +560,12 @@ export function DashboardPage() {
     const prevSelected = previousMetricsByCurrency.filter(
       (r) => !currency || r.currency === currency
     )
-    const spendTotal = selected.reduce((sum, row) => sum + row.totalSpend, 0)
-    const creditTotal = selected.reduce((sum, row) => sum + row.totalCredits, 0)
-    const paymentTotal = selected.reduce((sum, row) => sum + row.totalPayments, 0)
-    const netSpendTotal = selected.reduce((sum, row) => sum + row.netSpend, 0)
     const txCount = selected.reduce((sum, row) => sum + row.transactionCount, 0)
-    const prevSpendTotal = prevSelected.reduce((sum, row) => sum + row.totalSpend, 0)
-    const prevCreditTotal = prevSelected.reduce((sum, row) => sum + row.totalCredits, 0)
-    const prevPaymentTotal = prevSelected.reduce(
-      (sum, row) => sum + row.totalPayments,
-      0
-    )
-    const prevNetSpendTotal = prevSelected.reduce((sum, row) => sum + row.netSpend, 0)
     const prevTxCount = prevSelected.reduce((sum, row) => sum + row.transactionCount, 0)
-    const singleCurrency = selected.length === 1 ? selected[0].currency : null
-    // When previousRange is null the deltas are suppressed (HeroTile / KpiStack
-    // skip the badges), so the hint at the bottom needs to explain *why* there
-    // are no comparison numbers rather than read as a generic footnote under
-    // populated totals.
-    const comparisonHint =
-      previousRange == null
-        ? 'Period comparison unavailable — pick a start AND end date.'
-        : `${previousRange.from} to ${previousRange.to}`
-    const spendDelta = spendTotal - prevSpendTotal
-    const creditDelta = creditTotal - prevCreditTotal
-    const paymentDelta = paymentTotal - prevPaymentTotal
-    const netSpendDelta = netSpendTotal - prevNetSpendTotal
     const txDelta = txCount - prevTxCount
-    const formatDeltaMoney = (v: number): string => {
-      const abs = Math.abs(v)
-      const sign = v > 0 ? '+' : v < 0 ? '-' : ''
-      if (singleCurrency == null) return `${sign}${abs.toFixed(2)}`
-      return `${sign}${formatMoney(abs, singleCurrency)}`
-    }
-    const formatDeltaCount = (v: number): string =>
-      `${v > 0 ? '+' : ''}${Math.trunc(v)}`
-    // The previous-period prefix lives on Dashboard's delta strings so the
-    // shared StatCard renders it inside the colored badge. Sign detection in
-    // stat-card tolerates the leading descriptor.
-    const withPrevPeriod = (label: string): string =>
-      `vs previous period: ${label}`
-
     return {
-      spendLabel:
-        singleCurrency != null
-          ? formatMoney(spendTotal, singleCurrency)
-          : `${selected.length} currencies`,
-      creditsLabel:
-        singleCurrency != null
-          ? formatMoney(creditTotal, singleCurrency)
-          : `${selected.length} currencies`,
-      paymentsLabel:
-        singleCurrency != null
-          ? formatMoney(paymentTotal, singleCurrency)
-          : `${selected.length} currencies`,
-      netSpendLabel:
-        singleCurrency != null
-          ? formatMoney(netSpendTotal, singleCurrency)
-          : `${selected.length} currencies`,
-      moneyHint:
-        singleCurrency != null ? `In ${singleCurrency}` : 'Across selected currencies',
       txCount,
-      spendDeltaLabel: withPrevPeriod(formatDeltaMoney(spendDelta)),
-      creditsDeltaLabel: withPrevPeriod(formatDeltaMoney(creditDelta)),
-      paymentsDeltaLabel: withPrevPeriod(formatDeltaMoney(paymentDelta)),
-      netSpendDeltaLabel: withPrevPeriod(formatDeltaMoney(netSpendDelta)),
-      txDeltaLabel: withPrevPeriod(formatDeltaCount(txDelta)),
-      comparisonHint,
+      txDelta,
       merchantCount: merchantReportData.length,
       accountCount: accountReportData.length,
       reviewCount: reviewQueueData.length,
@@ -696,12 +573,20 @@ export function DashboardPage() {
   }, [
     data?.metricsByCurrency,
     previousMetricsByCurrency,
-    previousRange,
     currency,
     merchantReportData.length,
     accountReportData.length,
     reviewQueueData.length,
   ])
+
+  // Resolve the period-insight entry matching the selected currency. With no
+  // currency filter, fall back to the first currency (multi-currency full
+  // breakdown is a follow-up).
+  const insightForCurrency: PeriodInsightCurrency | null = useMemo(() => {
+    if (!insight) return null
+    if (currency) return insight.byCurrency.find((c) => c.currency === currency) ?? null
+    return insight.byCurrency[0] ?? null
+  }, [insight, currency])
 
   const activeRangeLabel = useMemo(() => {
     if (!dateFrom && !dateTo) return 'All dates'
@@ -712,6 +597,16 @@ export function DashboardPage() {
 
   const quickRanges = useMemo<QuickRange[]>(
     () => [
+      { key: 'month', label: 'This month', ...getCalendarMonthRange(0) },
+      { key: 'lastMonth', label: 'Last month', ...getCalendarMonthRange(-1) },
+      { key: 'quarter', label: 'This quarter', ...getCalendarQuarterRange(0) },
+      {
+        key: 'lastQuarter',
+        label: 'Last quarter',
+        ...getCalendarQuarterRange(-1),
+      },
+      { key: 'year', label: 'This year', ...getCalendarYearRange(0) },
+      { key: 'lastYear', label: 'Last year', ...getCalendarYearRange(-1) },
       { key: '3m', label: '3 months', ...getRollingMonthRange(3) },
       { key: '6m', label: '6 months', ...getRollingMonthRange(6) },
       { key: 'ytd', label: 'YTD', ...getYearToDateRange() },
@@ -736,7 +631,7 @@ export function DashboardPage() {
   const displayCurrency = currency || (currencies.length === 1 ? currencies[0] : '')
   const formatDashboardAmount = (value: number): string =>
     displayCurrency
-      ? formatMoney(value, displayCurrency)
+      ? formatCurrency(value, displayCurrency)
       : new Intl.NumberFormat(undefined, {
           maximumFractionDigits: 2,
         }).format(value)
@@ -771,9 +666,7 @@ export function DashboardPage() {
     return formatShortMonth(value)
   }
 
-  // Column specs for the bento table-tiles. Defined inside the component
-  // so the render closures can reference `formatMoney` directly without
-  // tunneling it through the column spec.
+  // Column specs for the bento table-tiles.
   const merchantColumns: TableTileColumn<MerchantSummaryRow>[] = [
     { key: 'merchant', label: 'Merchant', render: (r) => r.merchant },
     {
@@ -787,7 +680,7 @@ export function DashboardPage() {
       key: 'net',
       label: 'Net spend',
       align: 'right',
-      render: (r) => formatMoney(r.netSpend, r.currency),
+      render: (r) => formatCurrency(r.netSpend, r.currency),
     },
   ]
 
@@ -808,7 +701,7 @@ export function DashboardPage() {
       key: 'net',
       label: 'Net spend',
       align: 'right',
-      render: (r) => formatMoney(r.netSpend, r.currency),
+      render: (r) => formatCurrency(r.netSpend, r.currency),
     },
   ]
 
@@ -831,20 +724,19 @@ export function DashboardPage() {
       label: 'Amount',
       align: 'right',
       width: '6rem',
-      render: (r) => formatMoney(r.amount, r.currency),
+      render: (r) => formatCurrency(r.amount, r.currency),
     },
   ]
 
-  // Review banner pins to 8 cols so it lines up with the HeroTile beneath
-  // it instead of sprawling full-width across an empty middle. The AI
-  // action banner takes the remaining 4 cols when both fire, otherwise
-  // stretches across the full row.
-  const showReviewBanner = summaryStats.reviewCount > 0
-  const showAiActionBanner = hasActionSeverity
-  const bannerCount =
-    (showReviewBanner ? 1 : 0) + (showAiActionBanner ? 1 : 0)
-  const reviewBannerSpan: BentoSpan = 8
-  const aiBannerSpan: BentoSpan = bannerCount === 2 ? 4 : 12
+  // Review banner pins to 8 cols so it lines up with the period insight band
+  // beneath it instead of sprawling full-width across an empty middle.
+  // Hidden once dismissed at the current count (see reviewDismissedAt above).
+  const showReviewBanner =
+    summaryStats.reviewCount > 0 &&
+    reviewDismissedAt !== summaryStats.reviewCount
+  const reviewBannerSpan: BentoSpan = 12
+  const showPriceBanner =
+    priceChangeCount > 0 && priceDismissedAt !== priceChangeCount
 
   return (
     <div className="page">
@@ -852,11 +744,9 @@ export function DashboardPage() {
         title="Dashboard"
         description="Totals stay in each currency. Filter by currency and date range."
       />
-      {err && <span className="error">{err}</span>}
-      {loading && <p className="muted">Loading dashboard…</p>}
+      {err && <Alert variant="error">{err}</Alert>}
 
-      <Card className="dashboardFilters mt-2 w-fit max-w-full p-2 sm:p-3">
-        <CardContent className="p-0">
+      <Card className="mb-4 mt-2 w-fit max-w-full p-2 sm:p-3" style={{ padding: undefined }}>
           <FilterBar
             className="gap-2"
             currency={currency}
@@ -888,49 +778,65 @@ export function DashboardPage() {
               ) : null
             }
             caption={
-              <p
-                className="muted"
-                style={{
-                  marginBottom: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: '0.4rem',
-                }}
-              >
+              <p className="mb-0 flex items-center flex-wrap gap-[0.4rem] text-sm leading-6 text-muted-foreground">
                 Showing
                 {/* Pill-style active-filter chip — reads as the currently
                     applied scope rather than a low-contrast footnote. Uses
                     --muted as the surface and --border for the outline to stay
                     on the brand token palette (no hex). */}
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.35rem',
-                    padding: '0.25rem 0.65rem',
-                    borderRadius: '9999px',
-                    border: '1px solid var(--border)',
-                    background: 'var(--muted)',
-                    color: 'var(--foreground)',
-                    fontSize: '0.8rem',
-                    lineHeight: 1.2,
-                  }}
-                >
+                <span className="inline-flex items-center gap-[0.35rem] px-[0.65rem] py-1 rounded-full border border-border bg-muted text-foreground text-[0.8rem] leading-[1.2]">
                   <strong>{currency || 'all currencies'}</strong>
-                  <span style={{ color: 'var(--muted-foreground)' }}>·</span>
+                  <span className="text-muted-foreground">·</span>
                   <strong>{activeRangeLabel}</strong>
                 </span>
               </p>
             }
           />
-        </CardContent>
       </Card>
 
+      <ActivationCardDeck />
+
+      {loading ? (
+        <div
+          className="mb-4 grid grid-flow-row-dense grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
+          aria-busy={loading}
+          aria-label="Loading dashboard"
+        >
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div
+              key={`dash-skeleton-stat-${i}`}
+              className="col-span-1 sm:col-span-3 lg:col-span-2 rounded-xl border border-border bg-card p-4"
+            >
+              <Skeleton className="h-3 w-1/2" />
+              <Skeleton className="mt-3 h-7 w-2/3" />
+              <Skeleton className="mt-2 h-3 w-1/3" />
+            </div>
+          ))}
+          <div className="col-span-1 sm:col-span-6 lg:col-span-8 row-span-2 flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="min-h-[14rem] flex-1 rounded-lg" />
+          </div>
+          <div className="col-span-1 sm:col-span-6 lg:col-span-4 row-span-2 flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+            <Skeleton className="h-4 w-1/2" />
+            <SkeletonText lines={6} />
+          </div>
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div
+              key={`dash-skeleton-tile-${i}`}
+              className="col-span-1 sm:col-span-3 lg:col-span-6 row-span-2 flex flex-col gap-3 rounded-xl border border-border bg-card p-4"
+            >
+              <Skeleton className="h-4 w-1/3" />
+              <Skeleton className="min-h-[10rem] flex-1 rounded-lg" />
+            </div>
+          ))}
+        </div>
+      ) : (
       <div
-        className="mb-4 grid grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
+        className="mb-4 grid grid-flow-row-dense grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
         aria-busy={loading}
       >
+        <SafeToSpendTile currency={currency || null} />
+
         {showReviewBanner && (
           <BentoTile
             span={reviewBannerSpan}
@@ -938,34 +844,28 @@ export function DashboardPage() {
             variant="warning"
             role="status"
             aria-live="polite"
+            icon={<Inbox className="size-5" />}
             label={`${summaryStats.reviewCount} transaction${
               summaryStats.reviewCount === 1 ? '' : 's'
             } flagged for review`}
-            description={
-              <>
-                Waiting on category, split, or business decisions before they roll into your totals.{' '}
-                <Link to="/review" className="font-semibold underline">
-                  Open Review Inbox
-                </Link>
-              </>
-            }
+            description="Waiting on category, split, or business decisions before they roll into your totals."
+            actions={<Link to="/review"><Button size="sm">Open Review Inbox</Button></Link>}
+            onDismiss={() => setReviewDismissedAt(summaryStats.reviewCount)}
+            dismissLabel="Dismiss review reminder"
           />
         )}
-        {showAiActionBanner && (
+        {showPriceBanner && (
           <BentoTile
-            span={aiBannerSpan}
+            span={12}
             rows={1}
             variant="destructive"
             role="status"
             aria-live="polite"
-            label={`AI flagged ${sortedInsights.filter((i) => i.severity === 'action').length} action item${
-              sortedInsights.filter((i) => i.severity === 'action').length === 1 ? '' : 's'
-            } this month`}
-            actions={
-              <a href="#ai-insights-tile" className="text-sm font-semibold underline">
-                Jump to insights
-              </a>
-            }
+            icon={<TrendingUp className="size-5" />}
+            label={`${priceChangeCount} subscription price change${priceChangeCount === 1 ? '' : 's'} this month`}
+            actions={<Link to="/subscriptions?priceChange=unack"><Button size="sm" variant="outline">Review</Button></Link>}
+            onDismiss={() => setPriceDismissedAt(priceChangeCount)}
+            dismissLabel="Dismiss subscription price alert"
           />
         )}
         {budgetProgressSorted.length > 0 && (
@@ -976,7 +876,8 @@ export function DashboardPage() {
             label="Budget progress + pacing"
             description="Spend so far against each budget plus how much of the period has elapsed. Tick on the bar = where you'd be if perfectly paced."
           >
-            <div className="budgetPillStrip">
+            {/* formerly .budgetPillStrip */}
+            <div className="flex h-full gap-3 overflow-x-auto pb-1 [scrollbar-width:thin]">
               {budgetProgressSorted.map((item) => {
                 // Tone prefers the backend's pacingState classification
                 // when available — it already accounts for time-elapsed,
@@ -1017,13 +918,13 @@ export function DashboardPage() {
                 // class with interpolation — Tailwind won't pick it up.
                 const pacingBadgeClass: Record<string, string> = {
                   'on-pace':
-                    'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
+                    'bg-success-bg text-success-foreground',
                   ahead:
-                    'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200',
+                    'bg-warning-bg text-warning-foreground',
                   behind:
-                    'bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-200',
+                    'bg-info-bg text-info-foreground',
                   over:
-                    'bg-rose-100 text-rose-900 dark:bg-rose-950 dark:text-rose-200',
+                    'bg-danger-bg text-danger',
                 }
                 const pacingLabel: Record<string, string> = {
                   'on-pace': 'On pace',
@@ -1031,20 +932,39 @@ export function DashboardPage() {
                   behind: 'Under pace',
                   over: 'Over budget',
                 }
+                // Lookup table for the fill background color keyed on tone.
+                // Cannot interpolate class names — Tailwind JIT needs literals.
+                const fillBgStyle: Record<'ok' | 'warn' | 'over', string> = {
+                  ok: 'var(--positive)',
+                  warn: 'var(--primary)',
+                  over: 'var(--destructive)',
+                }
                 return (
+                  // formerly .budgetPill + .budgetPill--{tone}
+                  // color-mix background must be inline (no JIT equivalent)
                   <article
                     key={item.budgetId}
-                    className={`budgetPill budgetPill--${tone}`}
+                    className="flex shrink-0 flex-col justify-center gap-1.5 rounded-md border border-border p-2.5"
+                    // color-mix background has no Tailwind utility — keep inline var().
+                    style={{
+                      background: 'color-mix(in oklch, var(--muted) 50%, transparent)',
+                      minWidth: '200px',
+                      maxWidth: '240px',
+                    }}
                   >
-                    <header className="budgetPill__header">
-                      <strong className="budgetPill__label inline-flex items-center gap-1.5 min-w-0" title={label}>
+                    {/* formerly .budgetPill__header */}
+                    <header className="flex items-baseline justify-between gap-2">
+                      {/* formerly .budgetPill__label */}
+                      <strong className="truncate text-sm font-semibold text-foreground inline-flex items-center gap-1.5 min-w-0" title={label}>
                         <CategoryIcon name={item.category} />
                         <span className="truncate">{label}</span>
                       </strong>
-                      <span className="budgetPill__pct">{percentRounded}%</span>
+                      {/* formerly .budgetPill__pct */}
+                      <span className="shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">{percentRounded}%</span>
                     </header>
+                    {/* formerly .budgetPill__bar — color-mix bg must stay inline */}
                     <div
-                      className="budgetPill__bar relative"
+                      className="relative h-1.5 w-full overflow-hidden rounded-full border border-border bg-muted"
                       role="img"
                       aria-label={
                         elapsedRounded !== null
@@ -1052,9 +972,14 @@ export function DashboardPage() {
                           : `${label} ${percentRounded} percent of target used`
                       }
                     >
+                      {/* formerly .budgetPill__fill + .budgetPill--{tone} .budgetPill__fill */}
                       <span
-                        className="budgetPill__fill"
-                        style={{ width }}
+                        className="block h-full"
+                        style={{
+                          background: fillBgStyle[tone],
+                          transition: 'width 0.3s ease-out',
+                          width,
+                        }}
                       />
                       {elapsedTick !== null && (
                         // Vertical tick indicating where spend "should" be
@@ -1068,13 +993,15 @@ export function DashboardPage() {
                         />
                       )}
                     </div>
-                    <p className="budgetPill__amount">
-                      {formatMoney(item.spent, item.currency)} /{' '}
-                      {formatMoney(item.target, item.currency)}{' '}
-                      <span className="budgetPill__currency">{item.currency}</span>
+                    {/* formerly .budgetPill__amount */}
+                    <p className="m-0 truncate text-xs text-muted-foreground">
+                      {formatCurrency(item.spent, item.currency)} /{' '}
+                      {formatCurrency(item.target, item.currency)}{' '}
+                      {/* formerly .budgetPill__currency */}
+                      <span className="ml-1 opacity-70">{item.currency}</span>
                     </p>
                     {item.pacingState && elapsedRounded !== null && (
-                      <p className="budgetPill__pacing mt-1">
+                      <p className="mt-1">
                         <span
                           className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                             pacingBadgeClass[item.pacingState] ?? ''
@@ -1102,73 +1029,49 @@ export function DashboardPage() {
         <BudgetStatusCard currency={currency || 'CAD'} />
 
         <BentoTile
-          span={8}
+          span={12}
           rows={2}
           variant="hero"
           aria-busy={loading}
           aria-label="This period at a glance"
         >
-          <HeroTile
-            netSpendLabel={summaryStats.netSpendLabel}
-            netSpendDelta={
-              hasComparisonPeriod ? summaryStats.netSpendDeltaLabel : undefined
-            }
-            subMetrics={[
-              {
-                label: 'Spend',
-                value: summaryStats.spendLabel,
-                delta: hasComparisonPeriod
-                  ? summaryStats.spendDeltaLabel
-                  : undefined,
-                metricKind: 'spend',
-              },
-              {
-                label: 'Refunds / credits',
-                value: summaryStats.creditsLabel,
-                delta: hasComparisonPeriod
-                  ? summaryStats.creditsDeltaLabel
-                  : undefined,
-                metricKind: 'gain',
-              },
-              {
-                label: 'Payments / transfers',
-                value: summaryStats.paymentsLabel,
-                delta: hasComparisonPeriod
-                  ? summaryStats.paymentsDeltaLabel
-                  : undefined,
-                metricKind: 'neutral',
-              },
-            ]}
-            comparisonHint={summaryStats.comparisonHint}
-            moneyHint={summaryStats.moneyHint}
-            sparklineData={monthlyBreakdownData.map((m) => ({
-              month: m.month,
-              value: m.netSpend,
-            }))}
-          />
+          {insightForCurrency ? (
+            <PeriodInsightBand
+              data={insightForCurrency}
+              currency={currency}
+              rangeLabel={
+                quickRanges.find(
+                  (q) => q.from === dateFrom && q.to === dateTo,
+                )?.label
+              }
+            />
+          ) : (
+            <div className="text-sm text-muted-foreground">
+              Pick a start and end date to see the period breakdown.
+            </div>
+          )}
         </BentoTile>
 
-        <BentoTile span={4} rows={2} aria-busy={loading} aria-label="Activity counts">
+        <BentoTile span={6} rows={2} aria-busy={loading} aria-label="Activity counts">
           <KpiStack
             items={[
               {
                 label: 'Transactions',
                 value: summaryStats.txCount,
                 hint: 'Rows in current filters',
-                delta: hasComparisonPeriod ? summaryStats.txDeltaLabel : undefined,
-                metricKind: 'neutral',
+                delta: hasComparisonPeriod ? (
+                  <DeltaBadge delta={summaryStats.txDelta} metricKind="neutral" />
+                ) : undefined,
               },
               {
                 label: 'Merchants',
                 value: summaryStats.merchantCount,
                 hint: 'Distinct merchants',
-                metricKind: 'neutral',
               },
               {
                 label: 'Accounts',
                 value: summaryStats.accountCount,
                 hint: 'With activity in period',
-                metricKind: 'neutral',
               },
             ]}
           />
@@ -1176,119 +1079,57 @@ export function DashboardPage() {
 
         <NetWorthTile />
 
-        <SafeToSpendTile currency={currency || null} />
-
-        <CfoBriefingTile />
+        <InboxSummaryTile />
 
         <BentoTile
-          span={8}
+          span={6}
           rows={2}
           aria-busy={loading}
-          label="Business vs personal"
-          description="A direct split of current net spend so business charges do not get lost in the overall totals."
-          actions={
-            <div className="businessSpotlightTotals">
-              <p className="businessSpotlightTotalLabel">Combined net spend</p>
-              <p className="businessSpotlightTotalValue">
-                {formatDashboardAmount(businessSpotlight.totalNetSpend)}
-              </p>
-            </div>
-          }
+          icon={<Wallet className="size-5" />}
+          label="Income · business vs personal"
+          description="Earned income split by business vs personal."
         >
-          <div className="businessSpotlightGrid">
-            {[businessSpotlight.business, businessSpotlight.personal].map((row) => {
-              const share =
-                businessSpotlight.totalNetSpend > 0
-                  ? (row.netSpend / businessSpotlight.totalNetSpend) * 100
-                  : 0
-              return (
-                <article
-                  key={row.label}
-                  className={`businessFocusCard businessFocusCard--${row.tone}`}
-                >
-                  <p className="businessFocusLabel">{row.label}</p>
-                  <p className="businessFocusValue">
-                    {formatDashboardAmount(row.netSpend)}
-                  </p>
-                  <p className="businessFocusShare">
-                    {businessSpotlight.totalNetSpend > 0
-                      ? `${share.toFixed(0)}% of current net spend`
-                      : 'No net spend in current filters'}
-                  </p>
-                  <dl className="businessFocusMetrics">
-                    <div>
-                      <dt>Gross spend</dt>
-                      <dd>{formatDashboardAmount(row.totalSpend)}</dd>
-                    </div>
-                    <div>
-                      <dt>Credits</dt>
-                      <dd>{formatDashboardAmount(row.totalCredits)}</dd>
-                    </div>
-                  </dl>
-                </article>
-              )
-            })}
-          </div>
-
-          <div className="businessSharePanel">
-            <div className="businessShareLabels" aria-hidden="true">
-              {/* Override the .businessShareLabels muted color: these split
-                  percentages are load-bearing context for the bar below and
-                  read as ghosted at --muted-foreground. Bumping to --foreground
-                  + semibold restores them as primary labels. */}
-              <span
-                className="font-semibold"
-                style={{ color: 'var(--foreground)' }}
-              >
-                Business {businessSpotlight.businessShare.toFixed(0)}%
-              </span>
-              <span
-                className="font-semibold"
-                style={{ color: 'var(--foreground)' }}
-              >
-                Personal {businessSpotlight.personalShare.toFixed(0)}%
-              </span>
-            </div>
-            <div
-              className="businessShareBar"
-              role="img"
-              aria-label={`Business ${businessSpotlight.businessShare.toFixed(
-                0
-              )} percent, personal ${businessSpotlight.personalShare.toFixed(
-                0
-              )} percent of net spend`}
-            >
-              <span
-                className="businessShareFill businessShareFill--business"
-                style={{ width: `${businessSpotlight.businessShare}%` }}
-              />
-              <span
-                className="businessShareFill businessShareFill--personal"
-                style={{ width: `${businessSpotlight.personalShare}%` }}
-              />
-            </div>
-            <p className="muted businessShareCaption">
-              Gross spend: {formatDashboardAmount(businessSpotlight.totalGrossSpend)}.
-              Credits: {formatDashboardAmount(businessSpotlight.totalCredits)}.
-            </p>
-          </div>
+          <SplitPanel
+            business={bizSplit.income.business}
+            personal={bizSplit.income.personal}
+            businessShare={bizSplit.incomeShare}
+            currency={displayCurrency}
+            emptyCaption="No income in current filters."
+          />
         </BentoTile>
 
         <BentoTile
-          span={8}
-          rows={1}
+          span={6}
+          rows={2}
           aria-busy={loading}
-          label="Net spend by category"
-          description="Click a bar to open those transactions with the current filters applied. Payments and transfers are excluded."
+          icon={<ShoppingBag className="size-5" />}
+          label="Spend · business vs personal"
+          description="Spend (gross outflows net of refunds) split by business vs personal."
         >
-          {chartData.length === 0 ? (
-            !loading ? (
+          <SplitPanel
+            business={bizSplit.spend.business}
+            personal={bizSplit.spend.personal}
+            businessShare={bizSplit.spendShare}
+            currency={displayCurrency}
+            emptyCaption="No net spend in current filters."
+          />
+        </BentoTile>
+
+        {chartData.length === 0 ? (
+          <BentoTile
+            span={12}
+            rows={1}
+            aria-busy={loading}
+            label="Net spend by category"
+            description="Click a bar to open those transactions with the current filters applied. Payments and transfers are excluded."
+          >
+            {!loading ? (
               <div>
-                <p className="emptyState">
+                <p className="m-0 text-muted-foreground">
                   No category totals for these filters. Your transactions may be in a
                   different currency or outside this date window.
                 </p>
-                <div className="row" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                <div className="mt-2 mb-0 flex flex-wrap items-center gap-3">
                   {currency ? (
                     <Button type="button" variant="secondary" onClick={() => setCurrency('')}>
                       Show all currencies
@@ -1308,152 +1149,29 @@ export function DashboardPage() {
                   )}
                 </div>
               </div>
-            ) : null
-          ) : (
-            <ResponsiveContainer width="100%" height={110}>
-              <BarChart data={chartData} margin={narrowChartMargin}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis
-                  dataKey="name"
-                  // Category-count-aware label handling: once there are more
-                  // than 10 categories, default Recharts spacing overlaps even
-                  // on wide viewports. Steepen the angle and give the axis
-                  // more vertical space so every label still renders without
-                  // clipping (long names like "Snowboarding Gear" need both
-                  // the steeper angle and the extra height to fit).
-                  tick={hasManyCategories ? { fontSize: 11 } : narrowAxisTick}
-                  interval={0}
-                  minTickGap={isNarrowViewport ? 12 : 5}
-                  angle={hasManyCategories ? -55 : 0}
-                  textAnchor={hasManyCategories ? 'end' : 'middle'}
-                  height={hasManyCategories ? 110 : undefined}
-                />
-                <YAxis
-                  tick={narrowAxisTick}
-                  width={isNarrowViewport ? 44 : 60}
-                  tickFormatter={compactCurrencyTickFormatter}
-                />
-                <Tooltip
-                  contentStyle={CHART_TOOLTIP_STYLE}
-                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                  cursor={CHART_TOOLTIP_CURSOR}
-                  formatter={(value) => {
-                    const v = typeof value === 'number' ? value : Number(value)
-                    if (!Number.isFinite(v)) return ''
-                    return currency
-                      ? formatMoney(v, currency)
-                      : new Intl.NumberFormat(undefined, {
-                          maximumFractionDigits: 2,
-                        }).format(v)
-                  }}
-                />
-                <Bar
-                  dataKey="total"
-                  name="Net spend"
-                  fill="var(--chart-spend)"
-                  cursor="pointer"
-                  onClick={(entry) => {
-                    // Recharts hands us the data row as the click payload. Guard
-                    // against missing/unexpected payloads — only navigate when we
-                    // can read a category name.
-                    const name =
-                      entry && typeof entry === 'object' && 'name' in entry
-                        ? String((entry as { name: unknown }).name ?? '')
-                        : ''
-                    if (name) navigateToCategory(name)
-                  }}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-          {chartData.length > 0 ? (
-            <p className="muted" style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.75rem' }}>
-              Jump to:{' '}
-              {chartData.slice(0, 8).map((entry, index) => (
-                <span key={entry.name}>
-                  {index > 0 ? ', ' : ''}
-                  <Link
-                    to={`/transactions?${new URLSearchParams({
-                      category: entry.name,
-                      ...(currency ? { currency } : {}),
-                      ...(dateFrom ? { dateFrom } : {}),
-                      ...(dateTo ? { dateTo } : {}),
-                    }).toString()}`}
-                    className="font-semibold underline"
-                  >
-                    {entry.name}
-                  </Link>
-                </span>
-              ))}
-              {chartData.length > 8 ? '…' : '.'}
-            </p>
-          ) : null}
-        </BentoTile>
-
-        <BentoTile
-          span={4}
-          rows={2}
-          aria-busy={loading}
-          label="AI insights"
-          id="ai-insights-tile"
-          description={
-            aiInsights
-              ? `${aiInsights.currency} · ${aiInsights.period}`
-              : 'Awaiting fetch'
-          }
-        >
-          <div className="aiVisibilityList">
-            {!aiInsights ? (
-              <p className="emptyState">
-                {loading ? 'Loading insights…' : 'No insights available yet.'}
-              </p>
-            ) : aiInsights.insights.length === 0 ? (
-              <p className="emptyState">No AI insights for {aiInsights.period} yet.</p>
-            ) : (
-              sortedInsights.map((insight) => {
-                const unread = !isSeen(aiInsights.period, insight.metric, insight.title)
-                return (
-                  <article
-                    key={`${insight.metric}-${insight.title}`}
-                    className={`aiVisibilityItem${unread ? ' is-unread' : ''}`}
-                    onClick={() => markSeen(aiInsights.period, insight.metric, insight.title)}
-                  >
-                    <div className="aiVisibilityItemHeader">
-                      {unread ? <span className="unreadDot" aria-label="New" /> : null}
-                      <strong>{insight.title}</strong>
-                      <SeverityBadge severity={insight.severity} />
-                    </div>
-                    <p>{insight.summary}</p>
-                    <p className="muted">
-                      {insight.comparison} · {formatDashboardAmount(insight.amount)}
-                    </p>
-                    {insight.supportingTransactionIds.length > 0 ? (
-                      <p className="muted aiVisibilitySupportingIds">
-                        Transactions:{' '}
-                        {insight.supportingTransactionIds.map((id, idx) => (
-                          <span key={`${id}-${idx}`}>
-                            {idx > 0 ? ', ' : null}
-                            <Link to={`/transactions?ids=${id}`}>#{id}</Link>
-                          </span>
-                        ))}
-                      </p>
-                    ) : null}
-                    <p className="muted">{insight.suggestedAction}</p>
-                    {insight.supportingTransactionIds.length > 0 ? (
-                      <Link
-                        to={`/transactions?ids=${insight.supportingTransactionIds.join(',')}`}
-                        className="aiVisibilityAction"
-                      >
-                        Open these transactions
-                      </Link>
-                    ) : null}
-                  </article>
-                )
-              })
-            )}
-          </div>
-        </BentoTile>
+            ) : null}
+          </BentoTile>
+        ) : (
+          // DS CategoryBreakdown IS the tile (Card shell + pill | Progress bar |
+          // AmountText rows); grid placement mirrors a span-12 / rows-1 BentoTile.
+          // amount carries the negated net spend flipped back to money-out so spend
+          // reads as −$; the bar scales to the largest |amount| internally.
+          <CategoryBreakdown
+            aria-busy={loading}
+            className="col-span-full sm:col-span-6 lg:col-span-12 row-span-1"
+            title="Net spend by category"
+            subtitle="Click a bar to open those transactions with the current filters applied. Payments and transfers are excluded."
+            currency={currency || undefined}
+            rows={chartData.map((entry) => ({
+              category: entry.name.toLowerCase(),
+              label: entry.name,
+              amount: -entry.total,
+            }))}
+            onSelect={(_category, row) =>
+              navigateToCategory(typeof row.label === 'string' ? row.label : '')
+            }
+          />
+        )}
 
         <BentoTile
           span={6}
@@ -1464,7 +1182,7 @@ export function DashboardPage() {
         >
           {monthlyBreakdownData.length === 0 ? (
             !loading ? (
-              <p className="emptyState">No monthly breakdown data for these filters.</p>
+              <p className="m-0 text-muted-foreground">No monthly breakdown data for these filters.</p>
             ) : null
           ) : (
             <ResponsiveContainer width="100%" height={110}>
@@ -1522,7 +1240,7 @@ export function DashboardPage() {
           description="One line per currency using signed monthly totals, excluding payments and transfers."
         >
           {monthlyChartData.length === 0 ? (
-            !loading ? <p className="muted">No transactions in this range.</p> : null
+            !loading ? <p className="text-sm leading-6 text-muted-foreground">No transactions in this range.</p> : null
           ) : (
             <ResponsiveContainer width="100%" height={110}>
               <LineChart data={monthlyChartData} margin={narrowChartMargin}>
@@ -1556,7 +1274,7 @@ export function DashboardPage() {
                     if (value == null) return null
                     const v = typeof value === 'number' ? value : Number(value)
                     if (!Number.isFinite(v)) return null
-                    return formatMoney(v, String(name))
+                    return formatCurrency(v, String(name))
                   }}
                 />
                 <Legend
@@ -1587,6 +1305,11 @@ export function DashboardPage() {
           hasComparisonPeriod={hasComparisonPeriod}
           currency={currency}
           loading={loading}
+        />
+
+        <DashboardCategorySection
+          categoryTree={data?.categoryTree ?? []}
+          currency={displayCurrency}
         />
 
         <RecurringThisMonthTile
@@ -1643,6 +1366,10 @@ export function DashboardPage() {
 
         <ReceiptCoverageTile currency={currency || null} />
 
+        <LatestAlertsTile />
+
+        <EmailedReceiptsTile />
+
         <ImportHealthTile currency={currency || null} />
 
         <TableTile
@@ -1659,6 +1386,7 @@ export function DashboardPage() {
           loading={loading}
         />
       </div>
+      )}
     </div>
   )
 }

@@ -23,6 +23,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import {
   setupPgTestDb,
   teardownPgTestDb,
@@ -179,7 +180,7 @@ before(async () => {
 
   // Superadmin must exist before any seed() call — the registration
   // endpoint promotes the first user to superadmin globally.
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -192,14 +193,14 @@ before(async () => {
   primaryUserId = primary.userId;
   primaryAccountId = primary.accountId;
   primaryInvestmentAccountId = primary.investmentAccountId;
-  primaryAgent = request.agent(app);
+  primaryAgent = testAgent(app);
   primaryAgent.jar.setCookie(`cashflow_session=${primary.token}; Path=/`);
 
   const other = await seed('Other');
   otherHouseholdId = other.householdId;
   otherUserId = other.userId;
   otherAccountId = other.accountId;
-  otherAgent = request.agent(app);
+  otherAgent = testAgent(app);
   otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
 });
 

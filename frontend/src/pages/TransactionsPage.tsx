@@ -1,49 +1,44 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, } from 'react'
 import type { ChangeEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { useConfirm } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@/components/ui/native-select'
+import { Alert } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@/components/ui/skeleton'
-import { StatCard } from '@/components/ui/stat-card'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { SectionHeader } from '@/components/ui/section-header'
+import { Grid } from '@/lib/ds-extras'
+import { StatCard } from '@connor-adams/designsystem'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
+import { LabelChipPicker } from '../components/transactions/LabelChipPicker'
+import { labelChipStyle } from '../lib/labelColors'
+import { SavedFiltersDropdown } from '../components/transactions/SavedFiltersDropdown'
+import type { SavedFilter } from '../components/transactions/SavedFiltersDropdown'
 import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
 import { TransactionRevisionsDialog } from '../components/TransactionRevisionsDialog'
 import ReceiptItemsDrawer from '../components/ReceiptItemsDrawer'
+import { TxnMerchantCell, TxnMerchantName, TxnMerchantMeta } from '@/components/ui/txn-merchant-cell'
+import { CounterpartyCell } from '../components/CounterpartyCell'
 import { RefundBadge } from '../components/RefundBadge'
 import type { ReceiptWithItems } from '../../../shared/api-types'
 import {
   getJson,
   patchJson,
-  postFormData,
   postJson,
 } from '../lib/api'
 import {
   fromDateInputValue,
+  getRelativeDateRange,
   toDateInputValue,
   todayDateInputValue,
 } from '../lib/dateInput'
@@ -56,9 +51,26 @@ import type {
   TransactionStatus,
   TransactionBulkPatch,
   TransactionFilterPayload,
+  TransactionLabelRef,
 } from '../types/api'
+import { useLabels } from '../lib/useLabels'
 import { useSessionState } from '../lib/useSessionState'
 import { notifyReceiptsChanged } from '@/hooks/useReceiptCompleteness'
+import { useAttachAndAnalyzeReceipt } from '../lib/useAttachAndAnalyzeReceipt'
+import { TAX_TREATMENTS } from '../lib/taxTreatment'
+import { TaxTreatmentSelect } from '../components/TaxTreatmentSelect'
+import type { TaxTreatment } from '../lib/taxTreatment'
+import { useCategoryPaths } from '../lib/useCategoryPaths'
+import { useCategoryTree } from '../lib/useCategoryTree'
+import { buildPathById } from '../lib/categoryPathById'
+import { resolveCategoryPatch, categoryFieldChanged } from './transactionsCategory'
+
+const ENRICH_FILTER_LABEL: Record<string, string> = {
+  autoSource: 'Source',
+  autoConfidence: 'Confidence',
+  txnType: 'Type',
+  merchantCanonical: 'Merchant',
+}
 
 type CategoryHint = {
   label: string
@@ -110,6 +122,29 @@ type AiAuditResult = AiAuditIssue & {
   status: 'open' | 'applied' | 'dismissed'
 }
 
+/**
+ * Stored pct overrides are 0–1 fractions (backend canonical unit); the
+ * editors speak percent (0–100), matching RulesPage. Round to 2 decimals to
+ * absorb DECIMAL(5,4) float noise (0.3333 -> "33.33").
+ */
+function pctOverrideToInput(v: number | string | null | undefined): string {
+  if (v == null || v === '') return ''
+  const n = Number(v)
+  if (!Number.isFinite(n)) return ''
+  return String(Math.round(n * 10000) / 100)
+}
+
+/** True when a non-empty percent input parsed to an out-of-range fraction. */
+function isShareInputInvalid(raw: string, parsedFraction: number | null): boolean {
+  if (raw.trim() === '') return false
+  return (
+    parsedFraction == null ||
+    !Number.isFinite(parsedFraction) ||
+    parsedFraction < 0 ||
+    parsedFraction > 1
+  )
+}
+
 function formatAiSuggestion(suggestion: AiSuggestion): string {
   const parts = [
     suggestion.category ? `Category: ${suggestion.category}` : null,
@@ -137,13 +172,6 @@ const TRANSACTION_STATUS_FILTERS: Array<{ value: '' | TransactionStatus; label: 
  */
 function localTodayUtcMidnight(): Date {
   return fromDateInputValue(todayDateInputValue())!
-}
-
-function getRelativeDateRange(days: number): { from: string; to: string } {
-  const to = localTodayUtcMidnight()
-  const from = new Date(to)
-  from.setUTCDate(from.getUTCDate() - days)
-  return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
 function getYearToDateRange(): { from: string; to: string } {
@@ -177,6 +205,13 @@ export function TransactionsPage() {
     ''
   )
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
+  // Labels (issue #270): any-of filter (ids) + bulk apply/remove control.
+  const [labelsFilter, setLabelsFilter] = useSessionState<number[]>(
+    'transactions.labelsFilter',
+    []
+  )
+  const [bulkLabelId, setBulkLabelId] = useState('')
+  const [bulkLabelApplying, setBulkLabelApplying] = useState(false)
   const [bulkCat, setBulkCat] = useState('')
   const [bulkBiz, setBulkBiz] = useState('')
   const [bulkSplit, setBulkSplit] = useState('')
@@ -184,12 +219,15 @@ export function TransactionsPage() {
   const [bulkPctPartner, setBulkPctPartner] = useState('')
   // intentionally plain useState — ids filter is one-shot from URL, not session-persisted
   const [idsFilter, setIdsFilter] = useState('')
+  // Enrichment deep-link filters (autoSource/autoConfidence/txnType/merchantCanonical)
+  const [enrichmentFilters, setEnrichmentFilters] = useState<Record<string, string>>({})
   const [bulkMarkReviewed, setBulkMarkReviewed] = useState(false)
   const [bulkApplying, setBulkApplying] = useState(false)
   const [bulkAllApplying, setBulkAllApplying] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
   const confirmAction = useConfirm()
   const { showToast, dismissToast } = useToast()
+  const { labels: allLabels, refresh: refreshLabels } = useLabels()
   const [res, setRes] = useState<Paginated<Transaction> | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -199,6 +237,7 @@ export function TransactionsPage() {
   // Issue #229: per-transaction edit history viewer + restore.
   const [revisionsDialogTxnId, setRevisionsDialogTxnId] = useState<number | null>(null)
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
+  const [hintsError, setHintsError] = useState(false)
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
   const [itemsDrawer, setItemsDrawer] = useState<{ txnId: number; receipts: ReceiptWithItems[] } | null>(null)
   const [bulkAiBusy, setBulkAiBusy] = useState(false)
@@ -211,6 +250,10 @@ export function TransactionsPage() {
   >('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const receiptFileRef = useRef<HTMLInputElement>(null)
+  const { attachAndAnalyze, error: attachErr } = useAttachAndAnalyzeReceipt(async () => {
+    notifyReceiptsChanged()
+    await load()
+  })
   const loadRequestRef = useRef(0)
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -228,6 +271,12 @@ export function TransactionsPage() {
     const urlReviewFlag = searchParams.get('reviewFlag')
     const urlIds = searchParams.get('ids')
     const urlStatus = searchParams.get('status')
+    const urlEnrich: Record<string, string> = {}
+    for (const k of ['autoSource', 'autoConfidence', 'txnType', 'merchantCanonical'] as const) {
+      const v = searchParams.get(k)
+      if (v != null) urlEnrich[k] = v
+    }
+    const hasEnrich = Object.keys(urlEnrich).length > 0
     const hasAny =
       urlCategory != null ||
       urlCurrency != null ||
@@ -236,7 +285,8 @@ export function TransactionsPage() {
       urlImportBatch != null ||
       urlReviewFlag != null ||
       urlIds != null ||
-      urlStatus != null
+      urlStatus != null ||
+      hasEnrich
     if (!hasAny) return
     if (urlCategory != null) setCategoryFilter(urlCategory)
     if (urlCurrency != null) setCurrency(urlCurrency.toUpperCase().slice(0, 3))
@@ -248,6 +298,7 @@ export function TransactionsPage() {
     if (urlStatus === 'pending' || urlStatus === 'posted' || urlStatus === 'cleared') {
       setStatusFilter(urlStatus)
     }
+    if (hasEnrich) setEnrichmentFilters(urlEnrich)
     setPage(1)
     setSearchParams({}, { replace: true })
   }, [
@@ -261,6 +312,7 @@ export function TransactionsPage() {
     setReviewOnly,
     setIdsFilter,
     setStatusFilter,
+    setEnrichmentFilters,
   ])
 
   useEffect(() => {
@@ -277,8 +329,8 @@ export function TransactionsPage() {
 
   useEffect(() => {
     void getJson<{ categories: CategoryHint[] }>('/api/transactions/category-hints')
-      .then((data) => setCategoryHints(data.categories))
-      .catch(() => setCategoryHints([]))
+      .then((data) => { setCategoryHints(data.categories); setHintsError(false) })
+      .catch(() => { setCategoryHints([]); setHintsError(true) })
   }, [])
 
   // Per-issue-262: detect an impossible date range and surface inline guidance.
@@ -316,6 +368,10 @@ export function TransactionsPage() {
       if (dateTo.trim()) qs.set('dateTo', dateTo.trim())
       if (batchFilter.trim()) qs.set('importBatch', batchFilter.trim())
       if (statusFilter) qs.set('status', statusFilter)
+      if (labelsFilter.length > 0) qs.set('labels', labelsFilter.join(','))
+      for (const [k, v] of Object.entries(enrichmentFilters)) {
+        if (v) qs.set(k, v)
+      }
       const data = await getJson<Paginated<Transaction>>(
         `/api/transactions?${qs.toString()}`,
       )
@@ -331,7 +387,7 @@ export function TransactionsPage() {
         setLoading(false)
       }
     }
-  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter, dateRangeInvalid])
+  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter, labelsFilter, enrichmentFilters, dateRangeInvalid])
 
   useEffect(() => {
     void load()
@@ -339,18 +395,27 @@ export function TransactionsPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter])
+  }, [reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter, labelsFilter])
 
   useEffect(() => {
     setSelectedIds(new Set())
     setBulkAiResults([])
     setAiAuditResults([])
     setAiAuditMessage(null)
-  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter])
+  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter, labelsFilter])
 
   async function saveRow(id: number, patch: Record<string, unknown>) {
     await patchJson<Transaction>(`/api/transactions/${id}`, patch)
     await load()
+    // FIX 2: best-effort refresh so a picker-auto-created path becomes
+    // selectable in the cloud picker without a full page reload.
+    void refreshCategoryPaths().catch(() => {})
+  }
+
+  async function createContact(name: string): Promise<Contact> {
+    const c = await postJson<Contact>('/api/contacts', { name })
+    setContacts((prev) => [...prev, c].sort((a, b) => a.name.localeCompare(b.name)))
+    return c
   }
 
   function toggleSelected(id: number) {
@@ -403,15 +468,16 @@ export function TransactionsPage() {
       patch.businessOverride = bulkBiz === 'true'
     if (bulkSplit === 'me' || bulkSplit === 'partner' || bulkSplit === 'shared')
       patch.splitOverride = bulkSplit
+    // Inputs are percent (0–100); the API stores 0–1 fractions.
     if (bulkPctMe.trim()) {
       const n = Number(bulkPctMe)
-      if (!Number.isFinite(n)) return null
-      patch.pctMeOverride = n
+      if (!Number.isFinite(n) || n < 0 || n > 100) return null
+      patch.pctMeOverride = n / 100
     }
     if (bulkPctPartner.trim()) {
       const n = Number(bulkPctPartner)
-      if (!Number.isFinite(n)) return null
-      patch.pctPartnerOverride = n
+      if (!Number.isFinite(n) || n < 0 || n > 100) return null
+      patch.pctPartnerOverride = n / 100
     }
     if (bulkMarkReviewed) patch.reviewFlag = false
     return Object.keys(patch).length ? patch : null
@@ -450,10 +516,14 @@ export function TransactionsPage() {
         : dateTo
           ? `Up to ${dateTo}`
           : 'All dates'
-  const categoryLabels = useMemo(
-    () => categoryHints.map((hint) => hint.label),
-    [categoryHints]
-  )
+  const { paths: categoryPaths, refresh: refreshCategoryPaths } = useCategoryPaths()
+  const { tree: categoryTree } = useCategoryTree()
+  const pathById = useMemo(() => buildPathById(categoryTree), [categoryTree])
+  // Use full category paths from the category tree for the row picker.
+  // Fall back to the legacy hint labels while the tree is loading (first render).
+  const categoryLabels = categoryPaths.length > 0
+    ? categoryPaths
+    : categoryHints.map((hint) => hint.label)
   const hasCustomCurrency = currency !== DEFAULT_TRANSACTION_CURRENCY
   const activeFilters = useMemo(
     () =>
@@ -533,6 +603,18 @@ export function TransactionsPage() {
               },
             }
           : null,
+        labelsFilter.length > 0
+          ? {
+              key: 'labels',
+              label: `Labels: ${labelsFilter
+                .map((id) => allLabels.find((l) => l.id === id)?.name ?? `#${id}`)
+                .join(', ')}`,
+              clear: () => {
+                setPage(1)
+                setLabelsFilter([])
+              },
+            }
+          : null,
       ].filter(Boolean) as Array<{
         key: string
         label: string
@@ -550,6 +632,8 @@ export function TransactionsPage() {
       batchFilter,
       idsFilter,
       statusFilter,
+      labelsFilter,
+      allLabels,
       setReviewOnly,
       setCurrency,
       setCategoryFilter,
@@ -558,6 +642,7 @@ export function TransactionsPage() {
       setBatchFilter,
       setIdsFilter,
       setStatusFilter,
+      setLabelsFilter,
     ]
   )
 
@@ -571,6 +656,31 @@ export function TransactionsPage() {
     setBatchFilter('')
     setIdsFilter('')
     setStatusFilter('')
+    setLabelsFilter([])
+  }
+
+  const currentFilterSnapshot = useMemo<SavedFilter['filterJson']>(() => ({
+    ...(reviewOnly ? { reviewOnly: true } : {}),
+    ...(currency ? { currency } : {}),
+    ...(dateFrom ? { dateFrom } : {}),
+    ...(dateTo ? { dateTo } : {}),
+    ...(categoryFilter ? { categoryFilter } : {}),
+    ...(batchFilter ? { batchFilter } : {}),
+    ...(statusFilter ? { statusFilter } : {}),
+    ...(labelsFilter.length > 0 ? { labelsFilter } : {}),
+  }), [reviewOnly, currency, dateFrom, dateTo, categoryFilter, batchFilter, statusFilter, labelsFilter])
+
+  function applySavedFilter(filterJson: SavedFilter['filterJson']) {
+    setPage(1)
+    setReviewOnly(filterJson.reviewOnly === true)
+    setCurrency(typeof filterJson.currency === 'string' ? filterJson.currency : DEFAULT_TRANSACTION_CURRENCY)
+    setDateFrom(typeof filterJson.dateFrom === 'string' ? filterJson.dateFrom : '')
+    setDateTo(typeof filterJson.dateTo === 'string' ? filterJson.dateTo : '')
+    setCategoryFilter(typeof filterJson.categoryFilter === 'string' ? filterJson.categoryFilter : '')
+    setBatchFilter(typeof filterJson.batchFilter === 'string' ? filterJson.batchFilter : '')
+    setStatusFilter(typeof filterJson.statusFilter === 'string' ? filterJson.statusFilter as '' : '')
+    setLabelsFilter(Array.isArray(filterJson.labelsFilter) ? filterJson.labelsFilter as number[] : [])
+    setIdsFilter('')
   }
 
   async function openItemsDrawer(txnId: number) {
@@ -602,15 +712,7 @@ export function TransactionsPage() {
     e.target.value = ''
     if (!file || tid == null) return
     setErr(null)
-    try {
-      const fd = new FormData()
-      fd.append('file', file)
-      await postFormData<{ id: number }>(`/api/transactions/${tid}/receipts`, fd)
-      notifyReceiptsChanged()
-      await load()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Receipt upload failed')
-    }
+    await attachAndAnalyze(file, tid)
   }
 
   async function applyBulkAi() {
@@ -796,6 +898,39 @@ export function TransactionsPage() {
   }
 
   /**
+   * Bulk apply/remove a label across the selected transactions (issue #270).
+   * On apply, toasts "Applied <label> to N transactions."; on remove, a
+   * matching confirmation. Reloads so the per-row chips reflect the change.
+   */
+  async function applyBulkLabel(op: 'apply' | 'remove') {
+    const labelId = Number(bulkLabelId)
+    if (!Number.isInteger(labelId) || labelId <= 0 || selectedIds.size === 0) return
+    const label = allLabels.find((l) => l.id === labelId)
+    setBulkLabelApplying(true)
+    setErr(null)
+    try {
+      const res = await postJson<{ affected: number }>(
+        '/api/transactions/bulk/labels',
+        { transactionIds: [...selectedIds], labelId, op },
+      )
+      const n = res.affected
+      const labelName = label?.name ?? 'label'
+      showToast({
+        title:
+          op === 'apply'
+            ? `Applied ${labelName} to ${n} transaction${n === 1 ? '' : 's'}.`
+            : `Removed ${labelName} from ${n} transaction${n === 1 ? '' : 's'}.`,
+        variant: 'success',
+      })
+      await Promise.all([load(), refreshLabels()])
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't update labels. Try again.")
+    } finally {
+      setBulkLabelApplying(false)
+    }
+  }
+
+  /**
    * Snapshot of the active filter set, in a shape the backend's
    * /api/transactions/bulk-patch-filter route accepts. Mirrors the fields the
    * GET list endpoint receives in {@link load}, so "Apply to all matching"
@@ -819,9 +954,10 @@ export function TransactionsPage() {
     if (typeof patch.businessOverride === 'boolean')
       parts.push(`business=${patch.businessOverride ? 'yes' : 'no'}`)
     if (typeof patch.splitOverride === 'string') parts.push(`split=${patch.splitOverride}`)
-    if (typeof patch.pctMeOverride === 'number') parts.push(`pct me=${patch.pctMeOverride}`)
+    if (typeof patch.pctMeOverride === 'number')
+      parts.push(`pct me=${pctOverrideToInput(patch.pctMeOverride)}%`)
     if (typeof patch.pctPartnerOverride === 'number')
-      parts.push(`pct partner=${patch.pctPartnerOverride}`)
+      parts.push(`pct partner=${pctOverrideToInput(patch.pctPartnerOverride)}%`)
     if (patch.reviewFlag === false) parts.push('mark reviewed')
     return parts.length ? parts.join(', ') : 'no fields'
   }
@@ -986,38 +1122,36 @@ export function TransactionsPage() {
         ref={receiptFileRef}
         type="file"
         accept="image/jpeg,image/png,image/webp"
+        capture="environment"
         style={{ display: 'none' }}
         aria-hidden
         onChange={onReceiptPicked}
       />
 
-      <section className="transactionsStats">
+      <Grid minItemWidth={160} gap="md" responsiveFloor={false} className="mb-4">
         <StatCard label="Filtered rows" value={totalCount} hint={filteredSummaryLabel} />
         <StatCard label="This page" value={pageCount} hint={`Page ${page} of ${totalPages}`} />
         <StatCard label="Needs review" value={reviewCountOnPage} hint="Rows flagged on the current page" />
         <StatCard label="Selected" value={selectedIds.size} hint="Rows in the current bulk selection" />
         <StatCard label="Receipts" value={receiptCountOnPage} hint="Attachments on the current page" />
-      </section>
+      </Grid>
 
 
-      <section className="card transactionsToolbar">
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>Browse and review</h2>
-            <p className="muted">
-              Filter the ledger, sort the current page, and jump straight into bulk
-              updates when you need them.
-            </p>
-          </div>
-          <div className="transactionsToolbarMeta">
-            <span className="transactionsPanelBadge">
-              {reviewOnly ? 'Review queue' : 'All transactions'}
-            </span>
-            <span className="transactionsPanelBadge">
-              {currency || 'All currencies'}
-            </span>
-          </div>
-        </div>
+      <Card className="mb-4">
+        <SectionHeader
+          title="Browse and review"
+          description="Filter the ledger, sort the current page, and jump straight into bulk updates when you need them."
+          actions={
+            <>
+              <Badge variant="count">
+                {reviewOnly ? 'Review queue' : 'All transactions'}
+              </Badge>
+              <Badge variant="count">
+                {currency || 'All currencies'}
+              </Badge>
+            </>
+          }
+        />
         <div className="quickFilters" aria-label="Quick transaction date ranges">
           {quickRanges.map((range) => (
             <Button
@@ -1054,7 +1188,7 @@ export function TransactionsPage() {
             </Button>
           ))}
         </div>
-        <div className="formGrid transactionsFilterGrid">
+        <Grid minItemWidth={180} fill gap="md" className="mb-3">
           <Label className="transactionsCheckTile">
             <span>Review only</span>
             <Input
@@ -1093,6 +1227,9 @@ export function TransactionsPage() {
               options={categoryLabels}
               placeholder="e.g. Groceries"
             />
+            {hintsError && (
+              <span className="text-xs text-muted-foreground">Hints unavailable</span>
+            )}
           </Label>
           <Label>
             From
@@ -1120,7 +1257,7 @@ export function TransactionsPage() {
             {dateRangeInvalid && (
               <span
                 id="transactions-date-range-error"
-                className="error"
+                className="text-danger"
                 role="alert"
               >
                 End date must be on or after start date.
@@ -1138,6 +1275,40 @@ export function TransactionsPage() {
               placeholder="exact batch label"
             />
           </Label>
+          {/* Labels filter (issue #270, AC #11): multi-select, any-of. Hidden
+              entirely when the household has no labels yet. */}
+          {allLabels.length > 0 && (
+            <fieldset className="transactionsLabelFilter" aria-label="Filter by labels">
+              <legend className="text-sm">Labels</legend>
+              <div className="flex flex-wrap gap-2">
+                {allLabels.map((label) => {
+                  const checked = labelsFilter.includes(label.id)
+                  return (
+                    <label
+                      key={label.id}
+                      className="inline-flex items-center gap-1 rounded-full border border-transparent bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                      style={labelChipStyle(label.color)}
+                    >
+                      <input
+                        type="checkbox"
+                        className="size-3"
+                        checked={checked}
+                        onChange={(e) => {
+                          setPage(1)
+                          setLabelsFilter((prev) =>
+                            e.target.checked
+                              ? [...prev, label.id]
+                              : prev.filter((id) => id !== label.id),
+                          )
+                        }}
+                      />
+                      {label.name}
+                    </label>
+                  )
+                })}
+              </div>
+            </fieldset>
+          )}
           <Label>
             Sort by
             <NativeSelect
@@ -1153,11 +1324,11 @@ export function TransactionsPage() {
                   )
               }
             >
-              <NativeSelectOption value="date">Date</NativeSelectOption>
-              <NativeSelectOption value="merchant">Merchant</NativeSelectOption>
-              <NativeSelectOption value="amount">Amount</NativeSelectOption>
-              <NativeSelectOption value="category">Category</NativeSelectOption>
-              <NativeSelectOption value="review">Review flag</NativeSelectOption>
+              <option value="date">Date</option>
+              <option value="merchant">Merchant</option>
+              <option value="amount">Amount</option>
+              <option value="category">Category</option>
+              <option value="review">Review flag</option>
             </NativeSelect>
           </Label>
           <Label>
@@ -1166,12 +1337,12 @@ export function TransactionsPage() {
               value={sortDir}
               onChange={(e) => setSortDir(e.target.value as 'asc' | 'desc')}
             >
-              <NativeSelectOption value="desc">Descending</NativeSelectOption>
-              <NativeSelectOption value="asc">Ascending</NativeSelectOption>
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
             </NativeSelect>
           </Label>
-        </div>
-          <div className="row transactionsActionRow">
+        </Grid>
+          <div className="mb-3 flex flex-wrap items-center gap-3 mt-3">
           {activeFilters.length > 0 && (
             <Button
               type="button"
@@ -1191,6 +1362,10 @@ export function TransactionsPage() {
               Clear filters
             </Button>
           )}
+          <SavedFiltersDropdown
+            currentFilter={currentFilterSnapshot}
+            onApply={applySavedFilter}
+          />
           <Button type="button" variant="secondary" onClick={() => void load()} disabled={loading}>
             {loading ? 'Refreshing…' : 'Refresh'}
           </Button>
@@ -1219,14 +1394,15 @@ export function TransactionsPage() {
                   >
                     {filter.label}
                   </Link>
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={filter.clear}
                     className="transactionsFilterPill__clear"
                     aria-label={`Clear ${filter.label}`}
                   >
                     ×
-                  </button>
+                  </Button>
                 </span>
               ) : (
                 <Button
@@ -1244,32 +1420,32 @@ export function TransactionsPage() {
             )}
           </div>
         ) : (
-          <p className="muted transactionsHelperCopy">
+          <p className="mb-0 mt-2 text-sm leading-6 text-muted-foreground">
             Showing the default view: {DEFAULT_TRANSACTION_CURRENCY}, all categories,
             all dates.
           </p>
         )}
         {aiEnabled ? (
-          <p className="muted transactionsHelperCopy">
+          <p className="mb-0 mt-2 text-sm leading-6 text-muted-foreground">
             OpenAI is configured. Use <strong>AI</strong> on a row or{' '}
             <strong>AI fill selected</strong> when you want the page to help with
             categorization; use <strong>AI audit selected</strong> to look for
             mislabeled categories or business flags.
           </p>
         ) : (
-          <p className="muted transactionsHelperCopy">
+          <p className="mb-0 mt-2 text-sm leading-6 text-muted-foreground">
             Set <code>OPENAI_API_KEY</code> in <code>backend/.env</code> to enable
             AI suggestions and receipt vision.
           </p>
         )}
-      </section>
-      {err && <span className="error">{err}</span>}
+      </Card>
+      {(err || attachErr) && <Alert variant="error" className="mb-4">{err || attachErr}</Alert>}
       {aiAuditMessage && <p className="uploadMsg">{aiAuditMessage}</p>}
       {bulkAiResults.length > 0 && (
         <section className="card aiVisibilityPanel" aria-label="Latest bulk AI results">
           <div className="aiVisibilityHeader">
             <strong>Latest AI fill</strong>
-            <span className="muted">
+            <span className="text-xs leading-6 text-muted-foreground">
               Review {bulkAiResults.length} suggestion
               {bulkAiResults.length === 1 ? '' : 's'} before applying.
             </span>
@@ -1279,26 +1455,26 @@ export function TransactionsPage() {
               <article key={result.id} className="aiVisibilityItem">
                 <div className="aiVisibilityItemHeader">
                   <strong>{result.merchant}</strong>
-                  <span className="muted">#{result.id}</span>
+                  <span className="text-sm leading-6 text-muted-foreground">#{result.id}</span>
                 </div>
                 <p>{formatAiSuggestion(result.suggestion)}</p>
-                <p className="muted">
+                <p className="mb-4 text-sm leading-6 text-muted-foreground">
                   Fields:{' '}
                   {result.appliedFields.length
                     ? result.appliedFields.join(', ')
                     : 'nothing'}
                 </p>
-                <p className="muted">
+                <p className="mb-4 text-sm leading-6 text-muted-foreground">
                   Confidence: {result.suggestion.confidence ?? 'medium'}
                   {result.suggestion.needsReview ? ' · needs review' : ''}
                 </p>
                 {result.suggestion.evidence?.length ? (
-                  <p className="muted">Evidence: {result.suggestion.evidence.join(', ')}</p>
+                  <p className="mb-4 text-sm leading-6 text-muted-foreground">Evidence: {result.suggestion.evidence.join(', ')}</p>
                 ) : null}
                 {result.suggestion.rationale ? (
-                  <p className="muted">{result.suggestion.rationale}</p>
+                  <p className="mb-4 text-sm leading-6 text-muted-foreground">{result.suggestion.rationale}</p>
                 ) : null}
-                <div className="row">
+                <div className="mb-3 flex flex-wrap items-center gap-3">
                   <Button
                     type="button"
                     variant="secondary"
@@ -1322,7 +1498,7 @@ export function TransactionsPage() {
             ))}
           </div>
           {bulkAiResults.length > 6 ? (
-            <p className="muted aiVisibilityMore">
+            <p className="mb-0 text-xs leading-6 text-muted-foreground">
               {bulkAiResults.length - 6} more result
               {bulkAiResults.length - 6 === 1 ? '' : 's'} applied.
             </p>
@@ -1333,7 +1509,7 @@ export function TransactionsPage() {
         <section className="card aiVisibilityPanel" aria-label="Latest AI audit results">
           <div className="aiVisibilityHeader">
             <strong>AI audit findings</strong>
-            <span className="muted">
+            <span className="text-xs leading-6 text-muted-foreground">
               {aiAuditResults.filter((row) => row.status === 'open').length} open ·{' '}
               {aiAuditResults.length} total
             </span>
@@ -1343,13 +1519,13 @@ export function TransactionsPage() {
               <article key={result.id} className="aiVisibilityItem">
                 <div className="aiVisibilityItemHeader">
                   <strong>{result.merchant}</strong>
-                  <span className="muted">#{result.id}</span>
+                  <span className="text-sm leading-6 text-muted-foreground">#{result.id}</span>
                 </div>
                 <p>
                   {result.issueType.replaceAll('_', ' ')} ·{' '}
                   {formatMoney(Math.abs(result.amount), result.currency)}
                 </p>
-                <p className="muted">
+                <p className="mb-4 text-sm leading-6 text-muted-foreground">
                   Category:{' '}
                   {result.currentCategory ?? 'Uncategorized'}
                   {result.suggestedCategory &&
@@ -1357,7 +1533,7 @@ export function TransactionsPage() {
                     ? ` → ${result.suggestedCategory}`
                     : ''}
                 </p>
-                <p className="muted">
+                <p className="mb-4 text-sm leading-6 text-muted-foreground">
                   Business:{' '}
                   {result.currentBusiness == null
                     ? 'unknown'
@@ -1369,12 +1545,12 @@ export function TransactionsPage() {
                     ? ` → ${result.suggestedBusiness ? 'yes' : 'no'}`
                     : ''}
                 </p>
-                <p className="muted">Confidence: {result.confidence}</p>
+                <p className="mb-4 text-sm leading-6 text-muted-foreground">Confidence: {result.confidence}</p>
                 {result.evidence.length ? (
-                  <p className="muted">Evidence: {result.evidence.join(', ')}</p>
+                  <p className="mb-4 text-sm leading-6 text-muted-foreground">Evidence: {result.evidence.join(', ')}</p>
                 ) : null}
-                {result.rationale ? <p className="muted">{result.rationale}</p> : null}
-                <div className="row">
+                {result.rationale ? <p className="mb-4 text-sm leading-6 text-muted-foreground">{result.rationale}</p> : null}
+                <div className="mb-3 flex flex-wrap items-center gap-3">
                   <Button
                     type="button"
                     variant="secondary"
@@ -1398,7 +1574,7 @@ export function TransactionsPage() {
             ))}
           </div>
           {aiAuditResults.length > 8 ? (
-            <p className="muted aiVisibilityMore">
+            <p className="mb-0 text-xs leading-6 text-muted-foreground">
               {aiAuditResults.length - 8} more finding
               {aiAuditResults.length - 8 === 1 ? '' : 's'} hidden.
             </p>
@@ -1413,7 +1589,7 @@ export function TransactionsPage() {
                 ? `${selectedIds.size} selected`
                 : `${totalCount} matching`}
             </strong>
-            <span className="muted">Apply a batch override without opening each row.</span>
+            <span className="text-xs leading-6 text-muted-foreground">Apply a batch override without opening each row.</span>
           </div>
           {aiEnabled ? (
             <>
@@ -1463,9 +1639,9 @@ export function TransactionsPage() {
               value={bulkBiz}
               onChange={(e) => setBulkBiz(e.target.value)}
             >
-              <NativeSelectOption value="">(no change)</NativeSelectOption>
-              <NativeSelectOption value="true">Yes</NativeSelectOption>
-              <NativeSelectOption value="false">No</NativeSelectOption>
+              <option value="">(no change)</option>
+              <option value="true">Yes</option>
+              <option value="false">No</option>
             </NativeSelect>
           </Label>
           <Label>
@@ -1474,10 +1650,10 @@ export function TransactionsPage() {
               value={bulkSplit}
               onChange={(e) => setBulkSplit(e.target.value)}
             >
-              <NativeSelectOption value="">(no change)</NativeSelectOption>
-              <NativeSelectOption value="me">me</NativeSelectOption>
-              <NativeSelectOption value="partner">partner</NativeSelectOption>
-              <NativeSelectOption value="shared">shared</NativeSelectOption>
+              <option value="">(no change)</option>
+              <option value="me">me</option>
+              <option value="partner">partner</option>
+              <option value="shared">shared</option>
             </NativeSelect>
           </Label>
           <Label>
@@ -1486,7 +1662,7 @@ export function TransactionsPage() {
               value={bulkPctMe}
               onChange={(e) => setBulkPctMe(e.target.value)}
               style={{ width: 64 }}
-              placeholder="0.5"
+              placeholder="50"
             />
           </Label>
           <Label>
@@ -1495,7 +1671,7 @@ export function TransactionsPage() {
               value={bulkPctPartner}
               onChange={(e) => setBulkPctPartner(e.target.value)}
               style={{ width: 64 }}
-              placeholder="0.5"
+              placeholder="50"
             />
           </Label>
           <Label className="checkRow">
@@ -1507,6 +1683,45 @@ export function TransactionsPage() {
             />{' '}
             Mark reviewed
           </Label>
+          {/* Bulk label apply/remove (issue #270). Only meaningful with a
+              selection and at least one label. */}
+          {allLabels.length > 0 && (
+            <Label>
+              Label
+              <div className="flex items-center gap-1">
+                <NativeSelect
+                  value={bulkLabelId}
+                  onChange={(e) => setBulkLabelId(e.target.value)}
+                  aria-label="Bulk label"
+                >
+                  <option value="">(choose)</option>
+                  {allLabels.map((label) => (
+                    <option key={label.id} value={String(label.id)}>
+                      {label.name}
+                    </option>
+                  ))}
+                </NativeSelect>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={bulkLabelApplying || !bulkLabelId || selectedIds.size === 0}
+                  onClick={() => void applyBulkLabel('apply')}
+                >
+                  Apply label
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={bulkLabelApplying || !bulkLabelId || selectedIds.size === 0}
+                  onClick={() => void applyBulkLabel('remove')}
+                >
+                  Remove label
+                </Button>
+              </div>
+            </Label>
+          )}
           <Button
             type="button"
             disabled={
@@ -1554,24 +1769,37 @@ export function TransactionsPage() {
         </div>
       )}
       {confirmAction.dialog}
-      <section className="card transactionsTableCard">
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>Ledger</h2>
-            <p className="muted">
-              Showing {pageCount} row{pageCount === 1 ? '' : 's'} on this page out of{' '}
-              {totalCount} matching the current filters.
-            </p>
+      <Card className="mb-0">
+        <SectionHeader
+          title="Ledger"
+          description={<>Showing {pageCount} row{pageCount === 1 ? '' : 's'} on this page out of{' '}{totalCount} matching the current filters.</>}
+          actions={
+            <>
+              <Badge variant="count">
+                {loading ? 'Refreshing' : 'Up to date'}
+              </Badge>
+              <Badge variant="count">Page {page}/{totalPages}</Badge>
+            </>
+          }
+        />
+        {Object.keys(enrichmentFilters).length > 0 && (
+          <div className="flex items-center gap-2 mb-2 text-sm">
+            <span className="text-muted-foreground">Filtered:</span>
+            {Object.entries(enrichmentFilters).map(([k, v]) => (
+              <span key={k} className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5">
+                {ENRICH_FILTER_LABEL[k] ?? k}: {v === '(none)' ? 'none' : v}
+              </span>
+            ))}
+            <button
+              type="button"
+              className="text-primary hover:underline"
+              onClick={() => { setEnrichmentFilters({}); setPage(1) }}
+            >
+              Clear
+            </button>
           </div>
-          <div className="transactionsToolbarMeta">
-            <span className="transactionsPanelBadge">
-              {loading ? 'Refreshing' : 'Up to date'}
-            </span>
-            <span className="transactionsPanelBadge">Page {page}/{totalPages}</span>
-          </div>
-        </div>
-        <div className="tableWrap transactionsTableWrap">
-          <Table className="table transactionsTable">
+        )}
+        <Table maxHeight="72vh" className="transactionsTable">
             <TableHeader>
               <TableRow>
                 <TableHead className="narrowCol">
@@ -1610,29 +1838,32 @@ export function TransactionsPage() {
                 ))
               ) : !sortedRows.length ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="emptyStateCell">
+                  <TableCell colSpan={9} className="whitespace-normal align-top px-4 py-5">
                     {activeFilters.length > 0 ? (
-                      <>
-                        <p>No transactions match this filter.</p>
-                        <p>
+                      <EmptyState
+                        title="No transactions match this filter"
+                        description="Try widening your filters or removing the most specific ones."
+                        actions={
                           <Button type="button" variant="outline" size="sm" onClick={clearAllFilters}>
                             Clear filters
                           </Button>
-                        </p>
-                      </>
+                        }
+                      />
+                    ) : statusFilter === 'pending' ? (
+                      <EmptyState
+                        title="No pending transactions"
+                        description="Everything in this view has been reviewed."
+                      />
                     ) : (
-                      <>
-                        <p>
-                          {statusFilter === 'pending'
-                            ? 'No pending transactions.'
-                            : 'No transactions yet.'}
-                        </p>
-                        <p className="muted">
-                          Upload a CSV above (pick an account first), or use <strong>Run import</strong> if you
-                          placed files in the configured upload folder. Create accounts under{' '}
-                          <Link to="/accounts">Accounts</Link> if needed.
-                        </p>
-                      </>
+                      <EmptyState
+                        title="No transactions yet"
+                        description="Import a card CSV, OFX export, or PDF statement to start tracking your spending."
+                        actions={
+                          <Link to="/import">
+                            <Button size="sm">Import a statement</Button>
+                          </Link>
+                        }
+                      />
                     )}
                   </TableCell>
                 </TableRow>
@@ -1641,11 +1872,13 @@ export function TransactionsPage() {
                 <TransactionRow
                   key={t.id}
                   t={t}
+                  pathById={pathById}
                   categoryOptions={categoryLabels}
                   contacts={contacts}
                   selected={selectedIds.has(t.id)}
                   onToggleSelected={() => toggleSelected(t.id)}
                   onSave={saveRow}
+                  onCreateContact={createContact}
                     aiEnabled={aiEnabled}
                     onAttachReceipt={(id) => {
                       setAttachForTxnId(id)
@@ -1655,13 +1888,14 @@ export function TransactionsPage() {
                     onError={(msg) => setErr(msg)}
                     onOpenSignals={(id) => setSignalsDialogTxnId(id)}
                     onOpenRevisions={(id) => setRevisionsDialogTxnId(id)}
+                    availableLabels={allLabels}
+                    onLabelsMutated={() => void refreshLabels()}
                   />
                 ))
               )}
             </TableBody>
           </Table>
-        </div>
-        <div className="row transactionsPager">
+        <div className="mb-0 mt-4 justify-center flex flex-wrap items-center gap-3">
           <Button
             type="button"
             variant="secondary"
@@ -1682,7 +1916,7 @@ export function TransactionsPage() {
             Next
           </Button>
         </div>
-      </section>
+      </Card>
       <ReceiptItemsDrawer
         open={itemsDrawer != null}
         onClose={() => setItemsDrawer(null)}
@@ -1747,35 +1981,52 @@ export function TransactionsPage() {
 
 function TransactionRow({
   t,
+  pathById,
   categoryOptions,
   contacts,
   selected,
   onToggleSelected,
   onSave,
+  onCreateContact,
   aiEnabled,
   onAttachReceipt,
   onViewItems,
   onError,
   onOpenSignals,
   onOpenRevisions,
+  availableLabels,
+  onLabelsMutated,
 }: {
   t: Transaction
+  pathById: Map<number, string>
   categoryOptions: string[]
   contacts: Contact[]
   selected: boolean
   onToggleSelected: () => void
   onSave: (id: number, patch: Record<string, unknown>) => Promise<void>
+  onCreateContact: (name: string) => Promise<Contact>
   aiEnabled: boolean
   onAttachReceipt: (transactionId: number) => void
   onViewItems: (transactionId: number) => void
   onError: (message: string) => void
   onOpenSignals: (id: number) => void
   onOpenRevisions: (id: number) => void
+  availableLabels: import('../types/api').Label[]
+  onLabelsMutated: () => void
 }) {
+  const [rowLabels, setRowLabels] = useState<TransactionLabelRef[]>(t.labels ?? [])
   const [aiRowBusy, setAiRowBusy] = useState(false)
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null)
   const [aiSuggestionId, setAiSuggestionId] = useState<number | null>(null)
-  const [cat, setCat] = useState(t.categoryOverride ?? '')
+  // Derive the category baseline from the full path (id-keyed), falling back to
+  // the bare categoryOverride string when the tree hasn't loaded yet.
+  const catBaseline = useMemo(
+    () =>
+      pathById.get(t.categoryOverrideId ?? t.finalCategoryId ?? -1) ??
+      (t.categoryOverride ?? ''),
+    [pathById, t.categoryOverrideId, t.finalCategoryId, t.categoryOverride],
+  )
+  const [cat, setCat] = useState(catBaseline)
   const [biz, setBiz] = useState<string>(
     t.businessOverride === null || t.businessOverride === undefined
       ? ''
@@ -1783,12 +2034,13 @@ function TransactionRow({
         ? 'true'
         : 'false'
   )
-  const [split, setSplit] = useState(t.splitOverride ?? '')
-  const [pctMe, setPctMe] = useState(
-    t.pctMeOverride != null ? String(t.pctMeOverride) : ''
+  const [taxOverride, setTaxOverride] = useState<TaxTreatment | ''>(
+    t.taxTreatmentOverride ?? ''
   )
+  const [split, setSplit] = useState(t.splitOverride ?? '')
+  const [pctMe, setPctMe] = useState(pctOverrideToInput(t.pctMeOverride))
   const [pctPartner, setPctPartner] = useState(
-    t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : ''
+    pctOverrideToInput(t.pctPartnerOverride)
   )
   const [visibility, setVisibility] = useState<'private' | 'shared'>(
     t.visibility ?? 'private'
@@ -1799,33 +2051,39 @@ function TransactionRow({
   const [ownershipContactId, setOwnershipContactId] = useState(
     t.ownershipContactId != null ? String(t.ownershipContactId) : ''
   )
+  const [counterpartyContactId, setCounterpartyContactId] = useState<number | null>(
+    t.counterpartyContactId ?? null,
+  )
   const [status, setStatus] = useState<TransactionStatus>(t.status)
   const [reimburseOpen, setReimburseOpen] = useState(false)
   const rowConfirmAction = useConfirm()
   const rowToast = useToast()
-  const parsedPctMe = pctMe.trim() === '' ? null : Number(pctMe)
+  // Inputs are percent (0–100); the API stores 0–1 fractions.
+  const parsedPctMe = pctMe.trim() === '' ? null : Number(pctMe) / 100
   const parsedPctPartner =
-    pctPartner.trim() === '' ? null : Number(pctPartner)
+    pctPartner.trim() === '' ? null : Number(pctPartner) / 100
   const hasInvalidShareOverride =
-    (pctMe.trim() !== '' && !Number.isFinite(parsedPctMe)) ||
-    (pctPartner.trim() !== '' && !Number.isFinite(parsedPctPartner))
+    isShareInputInvalid(pctMe, parsedPctMe) ||
+    isShareInputInvalid(pctPartner, parsedPctPartner)
   const isDirty =
-    cat !== (t.categoryOverride ?? '') ||
+    cat !== catBaseline ||
     biz !==
       (t.businessOverride === null || t.businessOverride === undefined
         ? ''
         : t.businessOverride
           ? 'true'
           : 'false') ||
+    taxOverride !== (t.taxTreatmentOverride ?? '') ||
     split !== (t.splitOverride ?? '') ||
-    pctMe !== (t.pctMeOverride != null ? String(t.pctMeOverride) : '') ||
-    pctPartner !== (t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : '') ||
+    pctMe !== pctOverrideToInput(t.pctMeOverride) ||
+    pctPartner !== pctOverrideToInput(t.pctPartnerOverride) ||
     visibility !== (t.visibility ?? 'private') ||
     ownershipType !== (t.ownershipType ?? 'me') ||
     ownershipContactId !== (t.ownershipContactId != null ? String(t.ownershipContactId) : '')
+    || (t.counterpartyContactId ?? null) !== counterpartyContactId
 
   const resetDraft = useCallback(() => {
-    setCat(t.categoryOverride ?? '')
+    setCat(catBaseline)
     setBiz(
       t.businessOverride === null || t.businessOverride === undefined
         ? ''
@@ -1833,16 +2091,19 @@ function TransactionRow({
           ? 'true'
           : 'false'
     )
+    setTaxOverride(t.taxTreatmentOverride ?? '')
     setSplit(t.splitOverride ?? '')
-    setPctMe(t.pctMeOverride != null ? String(t.pctMeOverride) : '')
-    setPctPartner(t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : '')
+    setPctMe(pctOverrideToInput(t.pctMeOverride))
+    setPctPartner(pctOverrideToInput(t.pctPartnerOverride))
     setVisibility(t.visibility ?? 'private')
     setOwnershipType(t.ownershipType ?? 'me')
     setOwnershipContactId(t.ownershipContactId != null ? String(t.ownershipContactId) : '')
+    setCounterpartyContactId(t.counterpartyContactId ?? null)
     setStatus(t.status)
+    setRowLabels(t.labels ?? [])
     setAiSuggestion(null)
     setAiSuggestionId(null)
-  }, [t])
+  }, [t, catBaseline])
 
   useEffect(() => {
     resetDraft()
@@ -1889,11 +2150,11 @@ function TransactionRow({
       </TableCell>
       <TableCell>{t.date}</TableCell>
       <TableCell title={t.merchantRaw}>
-        <div className="txnMerchantCell">
-          <span className="txnMerchantName">{t.merchantClean}</span>
-          <span className="txnMerchantMeta">
+        <TxnMerchantCell>
+          <TxnMerchantName>{t.merchantClean}</TxnMerchantName>
+          <TxnMerchantMeta>
             {t.account?.shortCode ?? t.account?.name ?? 'Account'} · {t.importBatch}
-          </span>
+          </TxnMerchantMeta>
           {(t.counterpartyContactId != null || t.counterpartyRaw) && (
             <span className="txnCounterparty text-xs text-muted-foreground">
               {Number(t.amount) >= 0 ? 'from ' : 'to '}
@@ -1906,6 +2167,14 @@ function TransactionRow({
               })()}
             </span>
           )}
+          <CounterpartyCell
+            value={counterpartyContactId}
+            contacts={contacts}
+            onChange={setCounterpartyContactId}
+            onCreateContact={onCreateContact}
+            onError={onError}
+            txnId={t.id}
+          />
           {t.txnType === 'refund' && (
             <RefundBadge
               transactionId={t.id}
@@ -1913,7 +2182,14 @@ function TransactionRow({
               currency={t.currency}
             />
           )}
-        </div>
+          <LabelChipPicker
+            transactionId={t.id}
+            value={rowLabels}
+            availableLabels={availableLabels}
+            onChange={setRowLabels}
+            onLabelsMutated={onLabelsMutated}
+          />
+        </TxnMerchantCell>
       </TableCell>
       <TableCell>
         <div className="txnAmountCell">
@@ -1949,18 +2225,25 @@ function TransactionRow({
           value={biz}
           onChange={(e) => setBiz(e.target.value)}
         >
-          <NativeSelectOption value="">(auto)</NativeSelectOption>
-          <NativeSelectOption value="true">Yes</NativeSelectOption>
-          <NativeSelectOption value="false">No</NativeSelectOption>
+          <option value="">(auto)</option>
+          <option value="true">Yes</option>
+          <option value="false">No</option>
         </NativeSelect>
+        <TaxTreatmentSelect
+          aria-label={`Tax treatment override for transaction ${t.id}`}
+          value={taxOverride || null}
+          options={TAX_TREATMENTS.filter((tt) => tt !== 'none')}
+          emptyLabel="Use category default"
+          onChange={(t) => setTaxOverride(t ?? '')}
+        />
       </TableCell>
       <TableCell>
         <div className="txnSplitCell">
           <NativeSelect value={split} onChange={(e) => setSplit(e.target.value)}>
-            <NativeSelectOption value="">(auto)</NativeSelectOption>
-            <NativeSelectOption value="me">me</NativeSelectOption>
-            <NativeSelectOption value="partner">partner</NativeSelectOption>
-            <NativeSelectOption value="shared">shared</NativeSelectOption>
+            <option value="">(auto)</option>
+            <option value="me">me</option>
+            <option value="partner">partner</option>
+            <option value="shared">shared</option>
           </NativeSelect>
           <div className="txnSplitPercents">
             <Input
@@ -1989,10 +2272,10 @@ function TransactionRow({
             }}
             aria-label={`Ownership for transaction ${t.id}`}
           >
-            <NativeSelectOption value="me">owned by me</NativeSelectOption>
-            <NativeSelectOption value="partner">owned by partner</NativeSelectOption>
-            <NativeSelectOption value="shared">shared</NativeSelectOption>
-            <NativeSelectOption value="contact">contact</NativeSelectOption>
+            <option value="me">owned by me</option>
+            <option value="partner">owned by partner</option>
+            <option value="shared">shared</option>
+            <option value="contact">contact</option>
           </NativeSelect>
           {ownershipType === 'contact' && (
             <NativeSelect
@@ -2000,11 +2283,11 @@ function TransactionRow({
               onChange={(e) => setOwnershipContactId(e.target.value)}
               aria-label={`Contact owner for transaction ${t.id}`}
             >
-              <NativeSelectOption value="">Pick contact</NativeSelectOption>
+              <option value="">Pick contact</option>
               {contacts.map((contact) => (
-                <NativeSelectOption key={contact.id} value={contact.id}>
+                <option key={contact.id} value={contact.id}>
                   {contact.name}
-                </NativeSelectOption>
+                </option>
               ))}
             </NativeSelect>
           )}
@@ -2013,8 +2296,8 @@ function TransactionRow({
             onChange={(e) => setVisibility(e.target.value as 'private' | 'shared')}
             aria-label={`Visibility for transaction ${t.id}`}
           >
-            <NativeSelectOption value="private">private</NativeSelectOption>
-            <NativeSelectOption value="shared">shared</NativeSelectOption>
+            <option value="private">private</option>
+            <option value="shared">shared</option>
           </NativeSelect>
         </div>
       </TableCell>
@@ -2023,7 +2306,7 @@ function TransactionRow({
           {status === 'pending' ? (
             <Badge
               variant="secondary"
-              className="rounded-full bg-amber-100 text-amber-800"
+              className="rounded-full bg-warning-bg text-warning-foreground"
               title="Authorized but not yet posted by your bank."
             >
               Pending
@@ -2031,7 +2314,7 @@ function TransactionRow({
           ) : status === 'cleared' ? (
             <Badge
               variant="secondary"
-              className="rounded-full bg-blue-100 text-blue-800"
+              className="rounded-full bg-info-bg text-info-foreground"
               title="Reconciled against your statement."
             >
               Cleared
@@ -2043,17 +2326,20 @@ function TransactionRow({
             aria-label={`Status for ${t.merchantClean}`}
             onChange={(e) => void changeStatus(e.target.value as TransactionStatus)}
           >
-            <NativeSelectOption value="pending">Pending</NativeSelectOption>
-            <NativeSelectOption value="posted">Posted</NativeSelectOption>
-            <NativeSelectOption value="cleared">Cleared</NativeSelectOption>
+            <option value="pending">Pending</option>
+            <option value="posted">Posted</option>
+            <option value="cleared">Cleared</option>
           </NativeSelect>
-          <span className={t.reviewFlag ? 'txnBadge txnBadge--review' : 'txnBadge'}>
+          <Badge
+            variant="count"
+            className={t.reviewFlag ? 'border-warning bg-warning-bg text-warning-foreground' : undefined}
+          >
             {t.reviewFlag
               ? t.autoCategory
                 ? 'Auto categorized'
                 : 'Needs review'
               : 'Reviewed'}
-          </span>
+          </Badge>
           <Button
             type="button"
             variant="secondary"
@@ -2066,19 +2352,20 @@ function TransactionRow({
             <span>{(t.receiptCount ?? 0) > 0 ? 'Add receipt' : 'Attach receipt'}</span>
           </Button>
           {(t.receiptCount ?? 0) > 0 && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
               className="txnReceiptAction"
               onClick={() => onViewItems(t.id)}
               title="View receipt items"
             >
               View items
-            </button>
+            </Button>
           )}
           {t.receiptWarnings?.length ? (
-            <span className="txnBadge txnBadge--review" title={t.receiptWarnings.join(', ')}>
+            <Badge variant="count" className="border-warning bg-warning-bg text-warning-foreground" title={t.receiptWarnings.join(', ')}>
               Receipt check
-            </span>
+            </Badge>
           ) : null}
           {rowConfirmAction.dialog}
         </div>
@@ -2133,8 +2420,9 @@ function TransactionRow({
                     setBiz(s.business ? 'true' : 'false')
                   }
                   if (s.splitType) setSplit(s.splitType)
-                  if (s.pctMe != null) setPctMe(String(s.pctMe))
-                  if (s.pctPartner != null) setPctPartner(String(s.pctPartner))
+                  if (s.pctMe != null) setPctMe(pctOverrideToInput(s.pctMe))
+                  if (s.pctPartner != null)
+                    setPctPartner(pctOverrideToInput(s.pctPartner))
                 } catch (e) {
                   onError(e instanceof Error ? e.message : 'AI suggestion failed')
                 } finally {
@@ -2149,15 +2437,15 @@ function TransactionRow({
             <div className="txnAiInsight" role="status">
               <strong>AI suggestion</strong>
               <span>{formatAiSuggestion(aiSuggestion)}</span>
-              <span className="muted">
+              <span className="text-sm leading-6 text-muted-foreground">
                 Confidence: {aiSuggestion.confidence ?? 'medium'}
                 {aiSuggestion.needsReview ? ' · needs review' : ''}
               </span>
               {aiSuggestion.evidence?.length ? (
-                <span className="muted">Evidence: {aiSuggestion.evidence.join(', ')}</span>
+                <span className="text-sm leading-6 text-muted-foreground">Evidence: {aiSuggestion.evidence.join(', ')}</span>
               ) : null}
               {aiSuggestion.rationale ? (
-                <span className="muted">{aiSuggestion.rationale}</span>
+                <span className="text-sm leading-6 text-muted-foreground">{aiSuggestion.rationale}</span>
               ) : null}
             </div>
           ) : null}
@@ -2173,26 +2461,37 @@ function TransactionRow({
             disabled={!isDirty && !t.reviewFlag}
             onClick={() => {
               if (hasInvalidShareOverride) {
-                onError('Percent overrides must be valid numbers.')
+                onError('Share overrides must be percentages between 0 and 100.')
                 return
               }
               if (ownershipType === 'contact' && !ownershipContactId) {
                 onError('Pick a contact for contact-owned transactions.')
                 return
               }
-              void onSave(t.id, {
-                categoryOverride: cat || null,
-                businessOverride: biz === '' ? null : biz === 'true',
-                splitOverride: split || null,
-                pctMeOverride: parsedPctMe,
-                pctPartnerOverride: parsedPctPartner,
-                visibility,
-                ownershipType,
-                ownershipContactId:
-                  ownershipType === 'contact' ? Number(ownershipContactId) : null,
-                reviewFlag: false,
-                aiSuggestionId,
-              })
+              // FIX 1: only resolve + send categoryOverrideId when the
+              // category input actually changed from its server-side baseline.
+              // Skipping it when unchanged prevents a bare leaf name from being
+              // re-resolved to a root category on an unrelated field edit.
+              // catBaseline is the full path derived from categoryOverrideId /
+              // finalCategoryId (or the raw string when the tree is absent).
+              const catChanged = categoryFieldChanged(cat, catBaseline)
+              void (catChanged ? resolveCategoryPatch(cat) : Promise.resolve({})).then((catPatch) =>
+                onSave(t.id, {
+                  ...catPatch,
+                  businessOverride: biz === '' ? null : biz === 'true',
+                  taxTreatmentOverride: taxOverride === '' ? null : taxOverride,
+                  splitOverride: split || null,
+                  pctMeOverride: parsedPctMe,
+                  pctPartnerOverride: parsedPctPartner,
+                  visibility,
+                  ownershipType,
+                  ownershipContactId:
+                    ownershipType === 'contact' ? Number(ownershipContactId) : null,
+                  counterpartyContactId,
+                  reviewFlag: false,
+                  aiSuggestionId,
+                })
+              )
             }}
           >
             {!isDirty && t.reviewFlag ? 'Mark reviewed' : isDirty ? 'Save' : 'Saved'}
@@ -2323,7 +2622,7 @@ function MarkReimbursableDialog({
     >
       <Card className="w-full max-w-md p-5">
         <h2 className="mb-1 text-lg font-semibold">Mark reimbursable</h2>
-        <p className="muted text-sm mb-4">
+        <p className="mb-4 text-sm leading-6 text-muted-foreground">
           {txn.merchantClean} · {txn.date}
         </p>
         {canPromote && (
@@ -2331,7 +2630,7 @@ function MarkReimbursableDialog({
           // so the common case is a single button click; the manual flow
           // below still works for free-text or a different contact.
           <div className="mb-4 rounded-md border border-dashed border-border bg-muted/40 p-3 text-sm">
-            <p className="muted mb-2">
+            <p className="mb-2 text-sm leading-6 text-muted-foreground">
               Statement counterparty:{' '}
               <strong className="text-foreground">{promoteName}</strong>
             </p>

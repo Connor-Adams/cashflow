@@ -10,7 +10,7 @@ import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import request from 'supertest';
-
+import { testAgent, testRequest } from './_setup/testServer.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.join(__dirname, '..', '..');
 const dbPath = path.join(backendRoot, 'data', 'test-household-benchmark.sqlite');
@@ -45,7 +45,7 @@ after(() => {
 async function makeHousehold(tag: string) {
   const { seedHousehold } = await import('./portfolioFixtures.js');
   const seeded = await seedHousehold(models, `hb-${tag}-${Date.now()}@example.com`);
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${seeded.token}; Path=/`);
   return { ...seeded, agent };
 }
@@ -83,7 +83,7 @@ test('PATCH /api/household/benchmark returns 400 for invalid symbol', async () =
 // ─── Test 3: 401 unauthenticated ─────────────────────────────────────────────
 
 test('PATCH /api/household/benchmark returns 401 when unauthenticated', async () => {
-  const res = await request(app)
+  const res = await testRequest(app)
     .patch('/api/household/benchmark')
     .send({ benchmarkSymbol: 'VEQT.TO' });
 

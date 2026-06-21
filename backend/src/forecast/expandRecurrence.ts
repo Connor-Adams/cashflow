@@ -50,6 +50,31 @@ type ParsedRRule = {
 };
 
 const MAX_OCCURRENCES = 2000; // hard ceiling so a malformed rule cannot blow up the server
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Subscription-kind expectations carry a `cadence` string instead of a
+ * recurrenceRule. Translate it into a rule the expander understands so a
+ * subscription projects forward over the window like any other recurring
+ * planned event. Returns null for an unknown/empty cadence (caller falls
+ * back to one-off seed behaviour).
+ */
+export function cadenceToRecurrenceRule(cadence: string | null): string | null {
+  switch (cadence) {
+    case 'weekly':
+      return 'FREQ=WEEKLY';
+    case 'monthly':
+      return 'FREQ=MONTHLY';
+    case 'quarterly':
+      return 'FREQ=MONTHLY;INTERVAL=3';
+    case 'semiannual':
+      return 'FREQ=MONTHLY;INTERVAL=6';
+    case 'annual':
+      return 'FREQ=YEARLY';
+    default:
+      return null;
+  }
+}
 
 function parseRRule(rule: string): ParsedRRule | null {
   // Accept either a bare rule body or one prefixed with `RRULE:` (iCal style).
@@ -137,21 +162,26 @@ function addDays(iso: string, n: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-function addMonths(iso: string, n: number, byMonthDay: number | null): string {
+/** Parse a YYYY-MM-DD string to its UTC-midnight epoch milliseconds. */
+function isoToUtcMs(iso: string): number {
+  const [y, m, d] = iso.split('-').map((p) => parseInt(p, 10));
+  return Date.UTC(y, m - 1, d);
+}
+
+function addMonths(iso: string, n: number, targetDay: number): string {
   const [y, m] = iso.split('-').map((p) => parseInt(p, 10));
   const totalMonths = (y * 12 + (m - 1) + n);
   const ny = Math.floor(totalMonths / 12);
   const nm = (totalMonths % 12) + 1;
-  const targetDay = byMonthDay ?? parseInt(iso.split('-')[2], 10);
   const clamped = Math.min(targetDay, daysInMonth(ny, nm));
   return toIso(ny, nm, clamped);
 }
 
-function addYears(iso: string, n: number): string {
-  const [y, m, d] = iso.split('-').map((p) => parseInt(p, 10));
-  // Feb 29 → Feb 28 in non-leap years (keep month/day, clamp day to month).
+function addYears(iso: string, n: number, targetDay: number): string {
+  const [y, m] = iso.split('-').map((p) => parseInt(p, 10));
+  // Feb 29 → Feb 28 in non-leap years (keep month, clamp day to month).
   const ny = y + n;
-  const clamped = Math.min(d, daysInMonth(ny, m));
+  const clamped = Math.min(targetDay, daysInMonth(ny, m));
   return toIso(ny, m, clamped);
 }
 
@@ -188,7 +218,43 @@ export function expandRecurrence(
 
   const occurrences: Occurrence[] = [];
   let current = seedDate;
+  // `step` bounds loop iterations against the defensive MAX cap (reset to 0
+  // after any fast-forward so the budget covers in-window iterations, not
+  // pre-window ones). `occurrenceIndex` is the 0-based index of `current` in
+  // the full occurrence stream — it drives COUNT, which caps TOTAL
+  // occurrences including those before dateFrom.
   let step = 0;
+  let occurrenceIndex = 0;
+  // Anchor the day-of-month/day-of-year on the SEED date (or explicit
+  // BYMONTHDAY), never on the previous occurrence: stepping from a clamped
+  // date (Jan 31 → Feb 28) must recover to the anchor day in longer months
+  // (Mar 31), not drift to the 28th forever. Same for yearly Feb-29 anchors.
+  const anchorDay = parseInt(seedDate.split('-')[2], 10);
+
+  // Fast-forward DAILY/WEEKLY seeds that start well before the window. These
+  // freqs have a fixed day-stride, so we can jump to the last occurrence at
+  // or before dateFrom arithmetically instead of single-stepping. Without
+  // this, an old seed burns the MAX_OCCURRENCES cap on pre-window steps and
+  // emits ZERO in-window occurrences. `occurrenceIndex` is bumped by the
+  // skipped count so COUNT still counts the pre-window occurrences; `step`
+  // stays at 0 so the MAX cap applies to in-window iterations. MONTHLY/YEARLY
+  // don't need this — their per-step span covers >150 years under the cap.
+  if (
+    (rule.freq === 'DAILY' || rule.freq === 'WEEKLY') &&
+    current < dateFrom
+  ) {
+    const strideDays = rule.freq === 'WEEKLY' ? 7 * rule.interval : rule.interval;
+    let skip = Math.floor(
+      (isoToUtcMs(dateFrom) - isoToUtcMs(current)) / (strideDays * MS_PER_DAY),
+    );
+    if (skip > 0) {
+      // Never skip past a COUNT limit — those pre-window occurrences must
+      // still be consumed by the cap, not jumped over.
+      if (rule.count !== null) skip = Math.min(skip, rule.count - 1);
+      current = addDays(current, skip * strideDays);
+      occurrenceIndex = skip;
+    }
+  }
 
   // Generate occurrences in order. Stop when:
   //   - we exceed COUNT
@@ -204,7 +270,7 @@ export function expandRecurrence(
     }
 
     // COUNT is total occurrences (including any before dateFrom).
-    if (rule.count !== null && step + 1 >= rule.count) break;
+    if (rule.count !== null && occurrenceIndex + 1 >= rule.count) break;
 
     // Advance.
     let next: string;
@@ -216,10 +282,10 @@ export function expandRecurrence(
         next = addDays(current, 7 * rule.interval);
         break;
       case 'MONTHLY':
-        next = addMonths(current, rule.interval, rule.byMonthDay);
+        next = addMonths(current, rule.interval, rule.byMonthDay ?? anchorDay);
         break;
       case 'YEARLY':
-        next = addYears(current, rule.interval);
+        next = addYears(current, rule.interval, anchorDay);
         break;
     }
     // Guard against an INTERVAL=0 or similar parse miss that would loop
@@ -227,6 +293,7 @@ export function expandRecurrence(
     if (next <= current) break;
     current = next;
     step += 1;
+    occurrenceIndex += 1;
   }
 
   return occurrences;
