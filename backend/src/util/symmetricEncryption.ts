@@ -13,15 +13,31 @@ const VERSION_BYTE = 0x01;
 const IV_LEN = 12;
 const TAG_LEN = 16;
 
+/** 64 hex chars = 32 bytes. The single source of truth for "valid key shape". */
+const KEY_HEX_RE = /^[0-9a-fA-F]{64}$/;
+
 function decodeKey(rawHex: string): Buffer {
   const cleaned = rawHex.trim();
-  if (!/^[0-9a-fA-F]{64}$/.test(cleaned)) {
+  if (!KEY_HEX_RE.test(cleaned)) {
     throw new Error(
       'EMAIL_INTEGRATION_ENCRYPTION_KEY must be a 64-character hex string (32 bytes). ' +
         'Generate with: openssl rand -hex 32',
     );
   }
   return Buffer.from(cleaned, 'hex');
+}
+
+/**
+ * Side-effect-free check that EMAIL_INTEGRATION_ENCRYPTION_KEY is present AND a
+ * valid 64-char hex string. Reuses the same regex as decodeKey so "present" and
+ * "valid 64-hex" are one check. Does NOT read or mutate the key cache, so it is
+ * safe to call before encrypting (e.g. to fail fast before consuming a
+ * single-use token) and at startup. Returns false for unset/empty/wrong-length/
+ * non-hex; true only for a genuinely usable key.
+ */
+export function isEncryptionKeyConfigured(): boolean {
+  const raw = process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY;
+  return typeof raw === 'string' && KEY_HEX_RE.test(raw.trim());
 }
 
 let cachedKey: Buffer | null = null;

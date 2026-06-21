@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   encryptSecret,
   decryptSecret,
+  isEncryptionKeyConfigured,
   __resetKeyCacheForTests,
 } from './symmetricEncryption';
 
@@ -94,4 +95,39 @@ test('decryptSecret rejects ciphertext with a corrupted IV', () => {
   const buf = Buffer.from(enc, 'base64');
   buf[1] ^= 0x01;
   assert.throws(() => decryptSecret(buf.toString('base64')));
+});
+
+test('isEncryptionKeyConfigured covers missing/valid/wrong-length/non-hex (#814)', () => {
+  const original = process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY;
+  try {
+    // Missing (unset).
+    delete process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY;
+    __resetKeyCacheForTests();
+    assert.equal(isEncryptionKeyConfigured(), false, 'unset → false');
+
+    // Empty string.
+    process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY = '';
+    __resetKeyCacheForTests();
+    assert.equal(isEncryptionKeyConfigured(), false, 'empty → false');
+
+    // Wrong length (too short).
+    process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY = 'abc123';
+    __resetKeyCacheForTests();
+    assert.equal(isEncryptionKeyConfigured(), false, 'too short → false');
+
+    // Right length but non-hex (64 'z' chars).
+    process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY = 'z'.repeat(64);
+    __resetKeyCacheForTests();
+    assert.equal(isEncryptionKeyConfigured(), false, '64 non-hex → false');
+
+    // Valid 64-char hex (with surrounding whitespace — trimmed).
+    process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY = `  ${'a'.repeat(64)}  `;
+    __resetKeyCacheForTests();
+    assert.equal(isEncryptionKeyConfigured(), true, 'valid 64-hex → true');
+  } finally {
+    // isEncryptionKeyConfigured must not mutate the key cache — encryptSecret
+    // still works without an extra reset beyond the env restore below.
+    process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY = original;
+    __resetKeyCacheForTests();
+  }
 });
