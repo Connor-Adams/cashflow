@@ -10,8 +10,11 @@
  */
 import { Router } from 'express';
 import type {
+  SimplefinAccountsResponse,
   SimplefinConnectResponse,
   SimplefinDisconnectResponse,
+  SimplefinLinkRequest,
+  SimplefinLinkResponse,
   SimplefinStatusResponse,
   SimplefinSyncResponse,
 } from '@cashflow/shared';
@@ -19,6 +22,12 @@ import { currentAuth } from '../auth/middleware';
 import { logger } from '../observability/logger';
 import { SimplefinError } from '../simplefin/client';
 import { connect, disconnect, status } from '../simplefin/service';
+import {
+  SimplefinLinkError,
+  linkAccount,
+  listDiscoveredAccounts,
+  unlinkAccount,
+} from '../simplefin/links';
 import { syncSimplefin } from '../simplefin/sync';
 import { isTickRunning } from '../jobs/runner';
 import { UserSimplefinIntegration } from '../models';
@@ -166,6 +175,100 @@ router.post('/sync', async (req, res, next) => {
     }
     if (e instanceof SimplefinError) {
       res.status(502).json({ error: 'sync_failed', message: e.message });
+      return;
+    }
+    next(e);
+  }
+});
+
+/** Map a SimplefinLinkError code to an HTTP status + error body. */
+function sendLinkError(res: import('express').Response, e: SimplefinLinkError): void {
+  switch (e.code) {
+    case 'not_connected':
+      res.status(404).json({ error: 'not_connected', message: e.message });
+      return;
+    case 'discovery_failed':
+      res.status(502).json({ error: 'discovery_failed', message: e.message });
+      return;
+    case 'not_found':
+      res.status(404).json({ error: 'not_found', message: e.message });
+      return;
+    case 'account_not_found':
+      res.status(404).json({ error: 'account_not_found', message: e.message });
+      return;
+    case 'account_not_in_household':
+      res.status(400).json({ error: 'account_not_in_household', message: e.message });
+      return;
+    case 'invalid_request':
+      res.status(400).json({ error: 'invalid_request', message: e.message });
+      return;
+    case 'already_linked':
+      res
+        .status(409)
+        .json({ error: 'already_linked', ownedByCurrentUser: e.ownedByCurrentUser });
+      return;
+    default:
+      res.status(500).json({ error: 'storage_failed', message: e.message });
+  }
+}
+
+// SimpleFIN explicit account mapping (issue #813).
+router.get('/accounts', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const accounts = await listDiscoveredAccounts(user.id, household?.id ?? null);
+    const payload: SimplefinAccountsResponse = { accounts };
+    res.json(payload);
+  } catch (e) {
+    if (e instanceof SimplefinLinkError) {
+      sendLinkError(res, e);
+      return;
+    }
+    next(e);
+  }
+});
+
+router.post('/accounts/:simplefinId/link', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const body = (req.body ?? {}) as SimplefinLinkRequest;
+    const result = await linkAccount({
+      userId: user.id,
+      householdId: household?.id ?? null,
+      simplefinId: req.params.simplefinId,
+      accountId: typeof body.accountId === 'number' ? body.accountId : undefined,
+      create: body.create,
+    });
+    const payload: SimplefinLinkResponse = {
+      simplefinId: result.simplefinId,
+      linkedAccountId: result.linkedAccountId,
+    };
+    logger.info(
+      { userId: user.id, simplefinId: result.simplefinId, accountId: result.linkedAccountId },
+      'simplefin_account_linked',
+    );
+    res.json(payload);
+  } catch (e) {
+    if (e instanceof SimplefinLinkError) {
+      sendLinkError(res, e);
+      return;
+    }
+    next(e);
+  }
+});
+
+router.delete('/accounts/:simplefinId/link', async (req, res, next) => {
+  try {
+    const { user } = currentAuth(req);
+    const result = await unlinkAccount(user.id, req.params.simplefinId);
+    const payload: SimplefinLinkResponse = {
+      simplefinId: result.simplefinId,
+      linkedAccountId: result.linkedAccountId,
+    };
+    res.json(payload);
+  } catch (e) {
+    if (e instanceof SimplefinLinkError) {
+      sendLinkError(res, e);
       return;
     }
     next(e);

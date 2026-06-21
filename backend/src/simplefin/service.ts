@@ -11,7 +11,7 @@
  * service never writes Transaction rows.
  */
 import { Op } from 'sequelize';
-import { Account, UserSimplefinIntegration } from '../models';
+import { Account, SimplefinAccountLink, UserSimplefinIntegration } from '../models';
 import { encryptSecret } from '../util/symmetricEncryption';
 import { logger } from '../observability/logger';
 import type { SimplefinUnlinkedAccount } from '@cashflow/shared';
@@ -49,36 +49,92 @@ function last4(s: string | null | undefined): string {
   return digits.length >= 4 ? digits.slice(-4) : '';
 }
 
+/** A discovered SimpleFIN account paired with its unambiguous Account match. */
+export interface SimplefinAccountMatch {
+  simplefinId: string;
+  accountId: number;
+}
+
 /**
  * Map discovered SimpleFIN accounts to existing Account rows within a household.
  * An account links when there is an UNAMBIGUOUS match by bankAccountNumber
  * (last-4) or, failing that, by normalized name. Ambiguous (multiple) matches
  * are treated as unlinked so we never link to the wrong account.
+ *
+ * Returns both the unlinked list AND the matched (simplefinId → accountId)
+ * pairs, so the caller can persist explicit links (issue #813). The `linked`
+ * count is retained for the connect response.
  */
 export function mapDiscoveredAccounts(
   discovered: SimplefinDiscoveredAccount[],
   accounts: Pick<Account, 'id' | 'name' | 'bankAccountNumber'>[],
-): { linked: number; unlinked: SimplefinUnlinkedAccount[] } {
-  let linked = 0;
+): { linked: number; unlinked: SimplefinUnlinkedAccount[]; matches: SimplefinAccountMatch[] } {
   const unlinked: SimplefinUnlinkedAccount[] = [];
+  const matches: SimplefinAccountMatch[] = [];
 
   for (const d of discovered) {
     const dLast4 = last4(d.accountNumber);
-    let matches: typeof accounts = [];
+    let candidates: typeof accounts = [];
     if (dLast4) {
-      matches = accounts.filter((a) => last4(a.bankAccountNumber) === dLast4);
+      candidates = accounts.filter((a) => last4(a.bankAccountNumber) === dLast4);
     }
-    if (matches.length === 0) {
+    if (candidates.length === 0) {
       const dName = norm(d.name);
-      if (dName) matches = accounts.filter((a) => norm(a.name) === dName);
+      if (dName) candidates = accounts.filter((a) => norm(a.name) === dName);
     }
-    if (matches.length === 1) {
-      linked += 1;
+    if (candidates.length === 1) {
+      matches.push({ simplefinId: d.id, accountId: candidates[0].id });
     } else {
       unlinked.push({ simplefinId: d.id, name: d.name });
     }
   }
-  return { linked, unlinked };
+  return { linked: matches.length, unlinked, matches };
+}
+
+/**
+ * Persist auto-matched discovery links for an integration, first-writer-wins on
+ * account_id (mirrors the UNIQUE(account_id) DB guard). Idempotent: re-running
+ * discovery does not duplicate links or steal an account already claimed. Returns
+ * the number of links now confirmed for the matched set.
+ */
+export async function persistDiscoveryLinks(
+  integrationId: number,
+  matches: SimplefinAccountMatch[],
+): Promise<number> {
+  let linked = 0;
+  for (const m of matches) {
+    // Skip if this account is already claimed by ANY link other than the exact
+    // (integration, simplefinId) pair we're about to write.
+    const accountClaim = await SimplefinAccountLink.findOne({
+      where: { accountId: m.accountId },
+    });
+    if (
+      accountClaim &&
+      !(
+        accountClaim.integrationId === integrationId &&
+        accountClaim.simplefinAccountId === m.simplefinId
+      )
+    ) {
+      continue;
+    }
+    const existing = await SimplefinAccountLink.findOne({
+      where: { integrationId, simplefinAccountId: m.simplefinId },
+    });
+    if (existing) {
+      if (existing.accountId !== m.accountId) {
+        existing.set({ accountId: m.accountId });
+        await existing.save();
+      }
+    } else {
+      await SimplefinAccountLink.create({
+        integrationId,
+        simplefinAccountId: m.simplefinId,
+        accountId: m.accountId,
+      });
+    }
+    linked += 1;
+  }
+  return linked;
 }
 
 /**
@@ -103,16 +159,16 @@ export async function connect(params: {
 
   // 3. Encrypt + upsert. Encryption failure (missing key) propagates → storage_failed.
   const accessUrlEncrypted = encryptSecret(accessUrl);
-  const existing = await UserSimplefinIntegration.findOne({ where: { userId } });
-  if (existing) {
-    existing.set({
+  let integration = await UserSimplefinIntegration.findOne({ where: { userId } });
+  if (integration) {
+    integration.set({
       accessUrlEncrypted,
       status: 'connected',
       statusReason: null,
     });
-    await existing.save();
+    await integration.save();
   } else {
-    await UserSimplefinIntegration.create({
+    integration = await UserSimplefinIntegration.create({
       userId,
       accessUrlEncrypted,
       status: 'connected',
@@ -137,8 +193,13 @@ export async function connect(params: {
             attributes: ['id', 'name', 'bankAccountNumber'],
           });
     const mapped = mapDiscoveredAccounts(discovered, accounts);
-    accountsLinked = mapped.linked;
     unlinkedAccounts = mapped.unlinked;
+    // Persist auto-matched links (issue #813). These are CONFIRMED writes of the
+    // discovery-time heuristic — not a sync-time re-derivation. First-writer-wins
+    // on account_id honours the UNIQUE(account_id) guard; a match whose account
+    // is already claimed (by this or another integration) is dropped silently and
+    // surfaces in the link UI as unlinked-with-suggestion.
+    accountsLinked = await persistDiscoveryLinks(integration.id, mapped.matches);
   } catch (e) {
     logger.warn(
       { userId, message: e instanceof Error ? e.message : String(e) },

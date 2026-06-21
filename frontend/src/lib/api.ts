@@ -6,11 +6,14 @@ import type {
   SimplefinConnectResponse,
   SimplefinDisconnectResponse,
   SimplefinStatusResponse,
+  SimplefinAccountsResponse,
+  SimplefinLinkRequest,
+  SimplefinLinkResponse,
 } from '@cashflow/shared'
 
 const base = import.meta.env.VITE_API_BASE ?? ''
 
-class ApiError extends Error {
+export class ApiError extends Error {
   readonly status: number
   readonly path: string
   readonly requestId: string | null
@@ -90,6 +93,12 @@ export async function deleteReq(path: string): Promise<void> {
   if (!r.ok && r.status !== 204) throw await apiError(r, path)
 }
 
+export async function deleteJson<T>(path: string): Promise<T> {
+  const r = await fetch(`${base}${path}`, { method: 'DELETE', credentials: 'include' })
+  if (!r.ok && r.status !== 204) throw await apiError(r, path)
+  return parseJson<T>(r)
+}
+
 export async function postFormData<T>(path: string, form: FormData): Promise<T> {
   const r = await fetch(`${base}${path}`, {
     method: 'POST',
@@ -133,6 +142,25 @@ export function connectSimplefin(setupToken: string): Promise<SimplefinConnectRe
 }
 export function disconnectSimplefin(): Promise<SimplefinDisconnectResponse> {
   return postJson<SimplefinDisconnectResponse>('/api/simplefin/disconnect')
+}
+
+// SimpleFIN explicit account mapping (issue #813)
+export function getSimplefinAccounts(): Promise<SimplefinAccountsResponse> {
+  return getJson<SimplefinAccountsResponse>('/api/simplefin/accounts')
+}
+export function linkSimplefinAccount(
+  simplefinId: string,
+  body: SimplefinLinkRequest,
+): Promise<SimplefinLinkResponse> {
+  return postJson<SimplefinLinkResponse>(
+    `/api/simplefin/accounts/${encodeURIComponent(simplefinId)}/link`,
+    body,
+  )
+}
+export function unlinkSimplefinAccount(simplefinId: string): Promise<SimplefinLinkResponse> {
+  return deleteJson<SimplefinLinkResponse>(
+    `/api/simplefin/accounts/${encodeURIComponent(simplefinId)}/link`,
+  )
 }
 
 async function apiError(res: Response, path: string): Promise<ApiError> {

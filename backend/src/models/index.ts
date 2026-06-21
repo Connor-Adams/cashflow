@@ -42,6 +42,10 @@ import {
   UserSimplefinIntegration,
   initUserSimplefinIntegration,
 } from './UserSimplefinIntegration';
+import {
+  SimplefinAccountLink,
+  initSimplefinAccountLink,
+} from './SimplefinAccountLink';
 import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSenderAllowlist';
 import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEmailMessage';
 import { UserCaptureToken, initUserCaptureToken } from './UserCaptureToken';
@@ -160,6 +164,7 @@ initDividendReconciliation(sequelize);
 initFxRate(sequelize);
 initUserEmailIntegration(sequelize);
 initUserSimplefinIntegration(sequelize);
+initSimplefinAccountLink(sequelize);
 initReceiptSenderAllowlist(sequelize);
 initProcessedEmailMessage(sequelize);
 initUserCaptureToken(sequelize);
@@ -341,6 +346,26 @@ User.hasOne(UserSimplefinIntegration, {
   as: 'simplefinIntegration',
 });
 UserSimplefinIntegration.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+// SimpleFIN explicit account mapping (issue #813). The link is a child of the
+// integration (cascade-deleted with it) and points at exactly one Account
+// (cascade-deleted with the account). The UNIQUE(account_id) guard lives in the
+// migration; the FK cascades match the migration's ON DELETE CASCADE.
+UserSimplefinIntegration.hasMany(SimplefinAccountLink, {
+  foreignKey: 'integration_id',
+  as: 'accountLinks',
+  onDelete: 'CASCADE',
+});
+SimplefinAccountLink.belongsTo(UserSimplefinIntegration, {
+  foreignKey: 'integration_id',
+  as: 'integration',
+});
+Account.hasOne(SimplefinAccountLink, {
+  foreignKey: 'account_id',
+  as: 'simplefinLink',
+  onDelete: 'CASCADE',
+});
+SimplefinAccountLink.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
 
 Account.hasMany(Transaction, { foreignKey: 'account_id', as: 'transactions' });
 Transaction.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
@@ -1096,6 +1121,7 @@ export {
   FxRate,
   UserEmailIntegration,
   UserSimplefinIntegration,
+  SimplefinAccountLink,
   ReceiptSenderAllowlist,
   ProcessedEmailMessage,
   UserCaptureToken,

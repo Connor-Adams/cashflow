@@ -2004,3 +2004,54 @@ export interface SimplefinSyncRun {
 export interface SimplefinSyncResponse {
   runs: SimplefinSyncRun[];
 }
+
+// ---------------------------------------------------------------------------
+// SimpleFIN explicit account mapping (issue #813)
+// ---------------------------------------------------------------------------
+
+/**
+ * A discovered SimpleFIN account plus its current link state for the caller's
+ * integration. `linkedAccountId` is the confirmed mapping (null when unlinked);
+ * `suggestedAccountId` is the heuristic last-4/name match (a suggestion only —
+ * never written without an explicit link); `alreadyLinkedElsewhere` is true when
+ * the suggested target is already claimed under a different integration.
+ */
+export interface SimplefinAccountLinkState {
+  simplefinId: string;
+  name: string;
+  linkedAccountId: number | null;
+  suggestedAccountId: number | null;
+  alreadyLinkedElsewhere: boolean;
+}
+
+/** Body for GET /api/simplefin/accounts. */
+export interface SimplefinAccountsResponse {
+  accounts: SimplefinAccountLinkState[];
+}
+
+/** Create-a-new-account payload for the link route. */
+export interface SimplefinLinkCreateRequest {
+  name: string;
+  defaultCurrency: string;
+}
+
+/**
+ * Request body for POST /api/simplefin/accounts/:simplefinId/link. Exactly one
+ * of `accountId` (link to existing) or `create` (create + link) must be set.
+ */
+export interface SimplefinLinkRequest {
+  accountId?: number;
+  create?: SimplefinLinkCreateRequest;
+}
+
+/** Success body for the link / unlink routes. */
+export interface SimplefinLinkResponse {
+  simplefinId: string;
+  linkedAccountId: number | null;
+}
+
+/** 409 body when a target account or simplefinId is already linked. */
+export interface SimplefinAlreadyLinkedResponse {
+  error: 'already_linked';
+  ownedByCurrentUser: boolean;
+}

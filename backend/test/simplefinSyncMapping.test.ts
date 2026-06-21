@@ -61,22 +61,16 @@ test('startDateEpoch uses lastSyncedAt when present', () => {
   assert.equal(startDateEpoch(last, now), Math.floor(last.getTime() / 1000));
 });
 
-test('resolveAccountId returns the id on a single normalized-name match', () => {
-  const accounts = [
-    { id: 10, name: 'Joint Checking' },
-    { id: 11, name: 'Savings' },
-  ];
-  assert.equal(resolveAccountId({ name: 'joint checking' }, accounts), 10);
+test('#813: resolveAccountId returns the linked accountId for a known simplefin id', () => {
+  const links = new Map<string, number>([
+    ['ACT-1', 10],
+    ['ACT-2', 11],
+  ]);
+  assert.equal(resolveAccountId({ id: 'ACT-1' }, links), 10);
 });
 
-test('resolveAccountId returns null on no match and on ambiguous match', () => {
-  assert.equal(resolveAccountId({ name: 'Brokerage' }, [{ id: 1, name: 'Checking' }]), null);
-  assert.equal(
-    resolveAccountId({ name: 'Checking' }, [
-      { id: 1, name: 'Checking' },
-      { id: 2, name: 'checking' },
-    ]),
-    null,
-  );
-  assert.equal(resolveAccountId({ name: '' }, [{ id: 1, name: '' }]), null);
+test('#813: resolveAccountId returns null for an unlinked simplefin id (no name fallback)', () => {
+  const links = new Map<string, number>([['ACT-1', 10]]);
+  assert.equal(resolveAccountId({ id: 'ACT-UNLINKED' }, links), null);
+  assert.equal(resolveAccountId({ id: 'ACT-1' }, new Map()), null);
 });
