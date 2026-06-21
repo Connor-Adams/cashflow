@@ -1,7 +1,7 @@
 /**
  * Data export routes (issue #302).
  *
- * Mounted on `/api/me` so all routes are user-scoped:
+ * Mounted on `/api/me` (so route paths here are relative to that prefix):
  *   GET    /api/me/exports              — list user's exports newest-first
  *   POST   /api/me/export               — request a new export (201)
  *   GET    /api/me/export/:id           — status of one export
@@ -66,7 +66,7 @@ function serializeExport(row: DataExport, req: import('express').Request): Expor
 // GET /api/me/exports
 // ---------------------------------------------------------------------------
 
-router.get('/me/exports', async (req, res) => {
+router.get('/exports', async (req, res) => {
   const auth = currentAuth(req);
   const rows = await DataExport.findAll({
     where: { userId: auth.user.id },
@@ -79,7 +79,7 @@ router.get('/me/exports', async (req, res) => {
 // POST /api/me/export
 // ---------------------------------------------------------------------------
 
-router.post('/me/export', async (req, res) => {
+router.post('/export', async (req, res) => {
   const auth = currentAuth(req);
   const userId = auth.user.id;
 
@@ -129,7 +129,7 @@ router.post('/me/export', async (req, res) => {
 // GET /api/me/export/:id
 // ---------------------------------------------------------------------------
 
-router.get('/me/export/:id', async (req, res) => {
+router.get('/export/:id', async (req, res) => {
   const auth = currentAuth(req);
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) {
@@ -153,7 +153,7 @@ router.get('/me/export/:id', async (req, res) => {
 // GET /api/me/export/:id/download
 // ---------------------------------------------------------------------------
 
-router.get('/me/export/:id/download', async (req, res) => {
+router.get('/export/:id/download', async (req, res) => {
   const auth = currentAuth(req);
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) {

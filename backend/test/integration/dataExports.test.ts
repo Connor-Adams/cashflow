@@ -127,23 +127,29 @@ test('POST /api/me/export creates a queued row and returns 201 (AC #2)', async (
 // ---------------------------------------------------------------------------
 
 test('POST /api/me/export while one is in-flight returns 409 (AC #3)', async () => {
-  // Manually set the existing export to 'running' to simulate in-flight state
+  // Create a dedicated in-flight row directly via the model so no background
+  // job is dispatched. Driving this through POST would race the export job,
+  // which can flip the row to ready/failed before we assert the 409.
   const models = await import('../../src/models/index.js');
-  const exports = await models.DataExport.findAll({
-    where: { userId: userAId },
-    order: [['id', 'DESC']],
-    limit: 1,
+  const inFlight = await models.DataExport.create({
+    userId: userAId,
+    status: 'running',
+    readyAt: null,
+    expiresAt: null,
+    storageKey: null,
+    byteSize: null,
+    errorMessage: null,
   });
-  assert.ok(exports.length > 0, 'UserA should have at least one export');
-  await exports[0].update({ status: 'running' });
 
-  const r = await userAAgent.post('/api/me/export').send({});
-  assert.equal(r.status, 409);
-  assert.equal(r.body.error, 'EXPORT_IN_FLIGHT');
-  assert.ok(r.body.message, 'should include a human-readable message');
-
-  // Reset back to queued so later tests pass
-  await exports[0].update({ status: 'queued' });
+  try {
+    const r = await userAAgent.post('/api/me/export').send({});
+    assert.equal(r.status, 409);
+    assert.equal(r.body.error, 'EXPORT_IN_FLIGHT');
+    assert.ok(r.body.message, 'should include a human-readable message');
+  } finally {
+    // Remove the synthetic row so it does not interfere with later tests.
+    await inFlight.destroy();
+  }
 });
 
 // ---------------------------------------------------------------------------

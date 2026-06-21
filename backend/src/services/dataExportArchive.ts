@@ -24,11 +24,38 @@ import { logger } from '../observability/logger';
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Run a household-scoped SELECT, tolerating tables that no longer exist.
+ *
+ * The export is a best-effort point-in-time snapshot, and the physical schema
+ * evolves (tables get folded/renamed as primitives are unified). A query that
+ * targets a since-dropped table must not fail the whole backup — it just yields
+ * an empty section. We swallow only the "relation/table does not exist" errors
+ * (Postgres 42P01, SQLite "no such table") and re-throw anything else so real
+ * failures (bad SQL, connection loss) still surface.
+ */
 async function queryAll(sql: string, replacements: Record<string, unknown>): Promise<unknown[]> {
-  return sequelize.query(sql, {
-    type: QueryTypes.SELECT,
-    replacements,
-  });
+  try {
+    return await sequelize.query(sql, {
+      type: QueryTypes.SELECT,
+      replacements,
+    });
+  } catch (err: unknown) {
+    if (isMissingRelationError(err)) {
+      logger.warn({ sql }, 'data_export_skip_missing_relation');
+      return [];
+    }
+    throw err;
+  }
+}
+
+/** True when the error is a "table/relation does not exist" from PG or SQLite. */
+function isMissingRelationError(err: unknown): boolean {
+  const e = err as { parent?: { code?: string }; original?: { code?: string }; message?: string };
+  // Postgres undefined_table
+  if (e?.parent?.code === '42P01' || e?.original?.code === '42P01') return true;
+  // SQLite
+  return typeof e?.message === 'string' && /no such table/i.test(e.message);
 }
 
 // ---------------------------------------------------------------------------

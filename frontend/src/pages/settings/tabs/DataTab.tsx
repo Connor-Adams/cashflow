@@ -13,10 +13,10 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Skeleton } from '@/components/ui/skeleton'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Skeleton } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { getJson, postJson } from '@/lib/api'
 import type {
@@ -70,13 +70,13 @@ function ExportRow({ row, onRetry }: ExportRowProps) {
   if (row.status === 'ready') {
     const days = row.expiresAt ? daysUntil(row.expiresAt) : 0
     statusLabel = days > 0 ? `Ready · expires in ${days} day${days !== 1 ? 's' : ''}` : 'Expired'
-    statusClass = days > 0 ? 'text-emerald-700' : 'text-slate-500'
+    statusClass = days > 0 ? 'text-success' : 'text-muted-foreground'
     if (row.downloadUrl && days > 0) {
       actionNode = (
         <a
           href={row.downloadUrl}
           download
-          className="text-sm text-blue-600 hover:underline font-medium"
+          className="text-sm text-primary hover:underline font-medium"
           data-testid={`download-link-${row.id}`}
         >
           Download
@@ -84,18 +84,18 @@ function ExportRow({ row, onRetry }: ExportRowProps) {
       )
     } else if (days === 0) {
       actionNode = (
-        <span className="text-sm text-slate-500 italic">
+        <span className="text-sm text-muted-foreground italic">
           This export has expired. Request a new one.
         </span>
       )
     }
   } else if (isInFlight) {
     statusLabel = `Preparing your backup… (${elapsedSince(row.requestedAt)})`
-    statusClass = 'text-blue-600'
+    statusClass = 'text-info'
   } else {
     // failed
     statusLabel = `Failed: ${row.errorMessage ?? 'Unknown error'}`
-    statusClass = 'text-red-600'
+    statusClass = 'text-danger'
     actionNode = (
       <Button
         variant="outline"
@@ -112,14 +112,14 @@ function ExportRow({ row, onRetry }: ExportRowProps) {
 
   return (
     <tr
-      className="border-b border-gray-50 last:border-0"
+      className="border-b border-border last:border-0"
       data-testid={`export-row-${row.id}`}
     >
-      <td className="py-3 text-sm text-gray-600">{date}</td>
+      <td className="py-3 text-sm text-muted-foreground">{date}</td>
       <td className={`py-3 text-sm font-medium ${statusClass}`} data-testid={`export-status-${row.id}`}>
         {statusLabel}
       </td>
-      <td className="py-3 text-sm text-gray-500">
+      <td className="py-3 text-sm text-muted-foreground">
         {row.byteSize != null ? formatSize(row.byteSize) : '—'}
       </td>
       <td className="py-3 text-right">{actionNode}</td>
@@ -214,11 +214,11 @@ export function DataTab() {
   }, [requestExport])
 
   return (
-    <Card className="settingsCard">
-      <div className="flex items-start justify-between">
+    <Card className="p-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="settingsCard__title">Your data</h2>
-          <p className="settingsCard__description">
+          <h2 className="text-base font-semibold">Your data</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
             Cashflow stores everything you do here. Download a portable copy anytime.
           </p>
         </div>
@@ -233,7 +233,7 @@ export function DataTab() {
 
       {inFlightMessage && (
         <p
-          className="mt-3 text-sm text-amber-700 bg-amber-50 rounded px-3 py-2"
+          className="mt-3 text-sm text-warning-foreground bg-warning-bg rounded px-3 py-2"
           data-testid="in-flight-message"
         >
           {inFlightMessage}
@@ -248,11 +248,11 @@ export function DataTab() {
       )}
 
       {error && !loading && (
-        <div className="mt-4 text-sm text-red-600">
+        <div className="mt-4 text-sm text-danger">
           <p>{error}</p>
           <button
             type="button"
-            className="mt-2 text-blue-600 hover:underline"
+            className="mt-2 text-primary hover:underline"
             onClick={() => void load()}
           >
             Try again
@@ -271,7 +271,7 @@ export function DataTab() {
       {!loading && !error && exports.length > 0 && (
         <table className="w-full mt-4 text-sm" data-testid="exports-table">
           <thead>
-            <tr className="text-left text-gray-500 border-b border-gray-100">
+            <tr className="text-left text-muted-foreground border-b border-border">
               <th className="py-2">Requested</th>
               <th className="py-2">Status</th>
               <th className="py-2">Size</th>

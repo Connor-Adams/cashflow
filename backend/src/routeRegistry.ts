@@ -307,9 +307,9 @@ export const gatedRoutes: RouteEntry[] = [
   { paths: '/api/finance-events', handlers: [financeEventsRouter] },
   { paths: '/api/sync', handlers: [syncRouter] },
   {
-    paths: '/api',
+    paths: '/api/me',
     handlers: [dataExportsRouter],
-    why: 'Full user data export (issue #302). Router self-mounts /me/export[s] and /me/export/:id[/download] under /api. Bare-/api catch-all alongside the other /api routers; download is HMAC-signed so it stays user-scoped.',
+    why: 'Full user data export (issue #302). Specific /api/me prefix (NOT a bare-/api catch-all): exposes /export[s] and /export/:id[/download], user-scoped via currentAuth. Download is HMAC-signed so a URL issued to one user cannot be replayed by another.',
   },
   { paths: '/api/reports', handlers: [reportsRouter] },
   {

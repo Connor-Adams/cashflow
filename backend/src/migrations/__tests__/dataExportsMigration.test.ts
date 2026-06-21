@@ -15,7 +15,7 @@ let migration: { up: (...args: any[]) => Promise<void>; down: (...args: any[]) =
 before(async () => {
   sequelize = new Sequelize({ dialect: 'sqlite', storage: ':memory:', logging: false });
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  migration = require('../../src/migrations/20260608000001-create-data-exports.js');
+  migration = require('../20260608000001-create-data-exports.js');
 });
 
 after(async () => {
