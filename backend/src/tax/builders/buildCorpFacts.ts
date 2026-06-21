@@ -142,6 +142,10 @@ export async function buildCorpFacts(
         currency: 'CAD',
         fees,
         splitRatio: a.splitRatio != null ? Number(a.splitRatio) : null,
+        costBasisAllocationPct:
+          a.costBasisAllocationPct != null ? Number(a.costBasisAllocationPct) : null,
+        cashComponent: a.cashComponent != null ? Number(a.cashComponent) : null,
+        recipientSecurityId: a.recipientSecurityId ?? null,
       });
     }
     const acb = computeAcb(acbInput);

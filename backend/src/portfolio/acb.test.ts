@@ -655,6 +655,162 @@ test('SELL after a transfer_in uses the blended ACB', () => {
   APPROX(r.finalState.acbPerUnit, 75);
 });
 
+// ---------------------------------------------------------------------------
+// Corporate actions (issue #301): dividend_in_kind, spin_off, merger.
+// (return_of_capital is covered above.)
+// ---------------------------------------------------------------------------
+
+function spinOff(
+  tradeDate: string,
+  quantity: number | null,
+  costBasisAllocationPct: number | null
+): AcbActivity {
+  return {
+    id: nextId++,
+    tradeDate,
+    activityType: 'spin_off',
+    quantity,
+    amount: null,
+    currency: 'CAD',
+    fees: null,
+    costBasisAllocationPct,
+  };
+}
+
+function merger(
+  tradeDate: string,
+  quantity: number | null,
+  cashComponent: number | null
+): AcbActivity {
+  return {
+    id: nextId++,
+    tradeDate,
+    activityType: 'merger',
+    quantity,
+    amount: null,
+    currency: 'CAD',
+    fees: null,
+    cashComponent,
+  };
+}
+
+test('dividend_in_kind adds shares at zero incremental cost, lowering per-unit ACB', () => {
+  // BUY 10 @ $1000 → totalCost $1000, ACB $100
+  // dividend_in_kind +2 shares → totalCost unchanged $1000, qty 12,
+  // ACB 1000/12 ≈ 83.3333. No realized event (not taxable income).
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'dividend_in_kind', 2, null),
+  ]);
+  APPROX(r.finalState.quantity, 12);
+  APPROX(r.finalState.totalCost, 1000);
+  APPROX(r.finalState.acbPerUnit, 1000 / 12);
+  assert.equal(r.realizedEvents.length, 0);
+});
+
+test('dividend_in_kind with null/zero quantity emits a warning and is ignored', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'dividend_in_kind', null, null),
+  ]);
+  assert.ok(r.warnings.some((w) => /DIVIDEND_IN_KIND|dividend in kind/i.test(w)));
+  APPROX(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 1000);
+});
+
+test('SELL after a dividend_in_kind uses the diluted per-unit ACB', () => {
+  // BUY 12 @ $1200 → ACB $100. dividend_in_kind +3 → qty 15, ACB 1200/15 = $80.
+  // SELL 5 @ $500 → costRemoved 5*80 = $400, gain $100.
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 12, 1200),
+    act('2024-03-15', 'dividend_in_kind', 3, null),
+    act('2024-06-15', 'sell', 5, 500),
+  ]);
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].acbPerUnitAtSale, 80);
+  APPROX(r.realizedEvents[0].costRemoved, 400);
+  APPROX(r.realizedEvents[0].realizedGain, 100);
+  APPROX(r.finalState.quantity, 10);
+});
+
+test('spin_off reduces the parent total cost by the allocation pct, qty unchanged', () => {
+  // BUY 10 @ $1000 → totalCost $1000, ACB $100.
+  // spin_off pct 0.25 → parent keeps 0.75 → totalCost $750, qty 10, ACB $75.
+  // (The recipient's $250 allocated basis is injected by the route, not here.)
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    spinOff('2024-06-15', 10, 0.25),
+  ]);
+  APPROX(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 750);
+  APPROX(r.finalState.acbPerUnit, 75);
+  assert.equal(r.realizedEvents.length, 0);
+});
+
+test('spin_off with pct of 1 reduces parent basis to zero (full allocation)', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    spinOff('2024-06-15', 10, 1),
+  ]);
+  APPROX(r.finalState.totalCost, 0);
+  APPROX(r.finalState.acbPerUnit, 0);
+  APPROX(r.finalState.quantity, 10);
+});
+
+test('spin_off with out-of-range pct (0 or >1) emits a warning and is ignored', () => {
+  const zero = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    spinOff('2024-06-15', 10, 0),
+  ]);
+  assert.ok(zero.warnings.some((w) => /SPIN_?OFF|spin-off/i.test(w)));
+  APPROX(zero.finalState.totalCost, 1000);
+
+  const over = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    spinOff('2024-06-15', 10, 1.5),
+  ]);
+  assert.ok(over.warnings.some((w) => /SPIN_?OFF|spin-off/i.test(w)));
+  APPROX(over.finalState.totalCost, 1000);
+});
+
+test('merger disposes the source position, cash component is proceeds', () => {
+  // BUY 10 @ $1000 → totalCost $1000, ACB $100.
+  // merger cashComponent $5/share → cashProceeds = 5*10 = $50.
+  // realized event: proceeds $50, costRemoved $1000, gain -$950. Position zeroed.
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    merger('2024-06-15', 10, 5),
+  ]);
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].proceeds, 50);
+  APPROX(r.realizedEvents[0].costRemoved, 1000);
+  APPROX(r.realizedEvents[0].realizedGain, -950);
+  APPROX(r.realizedTotal, -950);
+  APPROX(r.finalState.quantity, 0);
+  APPROX(r.finalState.totalCost, 0);
+});
+
+test('merger with no cash component disposes at zero proceeds (full loss of basis carried)', () => {
+  // BUY 10 @ $1000 → totalCost $1000. merger no cash → proceeds $0,
+  // realized -$1000 (the basis transfers to the recipient via the route;
+  // the source stream records a zero-proceeds disposition).
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    merger('2024-06-15', 10, null),
+  ]);
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].proceeds, 0);
+  APPROX(r.realizedEvents[0].realizedGain, -1000);
+  APPROX(r.finalState.quantity, 0);
+  APPROX(r.finalState.totalCost, 0);
+});
+
+test('merger on a zero (closed) position emits a warning and is ignored', () => {
+  const r = computeAcb([merger('2024-06-15', 10, 5)]);
+  assert.ok(r.warnings.some((w) => /MERGER|merger/i.test(w)));
+  assert.equal(r.realizedEvents.length, 0);
+});
+
 test('acb_adjustment adds to total cost without changing quantity', () => {
   // s.53(1)(f): a denied superficial loss is added back to the ACB of the
   // substituted shares. The synthetic acb_adjustment row carries that addback.

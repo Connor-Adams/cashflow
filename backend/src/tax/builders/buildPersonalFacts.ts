@@ -304,6 +304,10 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
         currency: 'CAD',
         fees,
         splitRatio: a.splitRatio != null ? Number(a.splitRatio) : null,
+        costBasisAllocationPct:
+          a.costBasisAllocationPct != null ? Number(a.costBasisAllocationPct) : null,
+        cashComponent: a.cashComponent != null ? Number(a.cashComponent) : null,
+        recipientSecurityId: a.recipientSecurityId ?? null,
       });
     }
     // s.53(1)(f): a denied superficial loss is added back to the ACB of the

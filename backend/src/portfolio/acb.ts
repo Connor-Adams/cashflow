@@ -22,6 +22,14 @@
  *    in-kind transfer is not a disposition under CRA rules. The
  *    ambiguous bare `transfer` activityType (used for cash CONT-like
  *    rows) stays a no-op.
+ *  - `dividend_in_kind` (stock dividend) adds shares at zero incremental
+ *    cost — total cost is preserved and per-unit ACB drops. Not taxable.
+ *  - `spin_off` reduces the parent's total cost by `costBasisAllocationPct`
+ *    (quantity unchanged, no disposition); the recipient security's
+ *    allocated basis is injected onto its own stream by the caller.
+ *  - `merger` disposes the source position entirely — `cashComponent` per
+ *    share is proceeds against the cost base (a realized event) and the
+ *    residual basis transfers to the acquirer via the caller.
  *  - `acb_adjustment` is a synthetic cost-base adjustment: amount is added
  *    to totalCost with no quantity change. Used by the tax builders to add
  *    a denied superficial loss back to the substituted shares' ACB
@@ -53,6 +61,27 @@ export type AcbActivity = {
    * split. Total cost is preserved across the split.
    */
   splitRatio?: number | null;
+  /**
+   * Fraction (0, 1] of the parent's total cost base allocated to the
+   * spun-off security. Required for `activityType === 'spin_off'`. The
+   * parent keeps `(1 - pct)` of its basis; the remainder is added to the
+   * recipient security's stream by the caller (this engine is
+   * single-security and only reduces the parent here).
+   */
+  costBasisAllocationPct?: number | null;
+  /**
+   * Cash received per share in a `merger`, in addition to the new
+   * security. Treated as disposition proceeds against the source
+   * position's cost base. Optional — absent means the basis transfers in
+   * full to the recipient and the source is disposed at zero proceeds.
+   */
+  cashComponent?: number | null;
+  /**
+   * Security received in a `spin_off` / `merger`. Carried for the
+   * coordination layer (the route writes a basis-injection activity onto
+   * this security's stream); the single-security ACB math does not use it.
+   */
+  recipientSecurityId?: number | null;
 };
 
 /** Position state recorded after each buy/sell event. */
@@ -390,6 +419,86 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
         quantity: newQuantity,
         totalCost: newTotalCost,
         acbPerUnit: newAcb,
+      };
+      timeline.push(state);
+    } else if (type === 'dividend_in_kind') {
+      // Stock dividend (dividend in kind): the issuer distributes
+      // additional shares instead of cash. CRA: no taxable income and no
+      // additional cost — the existing cost base is simply spread over the
+      // larger share count, lowering the per-unit ACB. Total cost is
+      // preserved (like a split, but expressed as extra shares rather than
+      // a ratio).
+      if (activity.quantity == null || activity.quantity <= EPS) {
+        warnings.push(
+          `DIVIDEND_IN_KIND activity ${activity.id} on ${activity.tradeDate} missing or non-positive quantity; ignored`
+        );
+        continue;
+      }
+      const newQuantity = state.quantity + activity.quantity;
+      const newAcb = newQuantity > EPS ? state.totalCost / newQuantity : 0;
+      state = {
+        asOf: activity.tradeDate,
+        quantity: newQuantity,
+        totalCost: state.totalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
+    } else if (type === 'spin_off') {
+      // Spin-off (parent side): a fraction `costBasisAllocationPct` of the
+      // parent's cost base is allocated to the newly issued security. The
+      // parent keeps `(1 - pct)` of its basis; quantity is unchanged and
+      // there is no disposition. The recipient security receives
+      // `pct * old_basis` as a separate basis-injection activity written
+      // onto its own stream by the caller (this engine is single-security).
+      const pct = activity.costBasisAllocationPct;
+      if (pct == null || pct <= 0 || pct > 1 || !Number.isFinite(pct)) {
+        warnings.push(
+          `SPIN_OFF activity ${activity.id} on ${activity.tradeDate} missing or out-of-range costBasisAllocationPct (expected (0, 1]); ignored`
+        );
+        continue;
+      }
+      const newTotalCost = state.totalCost * (1 - pct);
+      const newAcb = state.quantity > EPS ? newTotalCost / state.quantity : 0;
+      state = {
+        asOf: activity.tradeDate,
+        quantity: state.quantity,
+        totalCost: newTotalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
+    } else if (type === 'merger') {
+      // Merger / acquisition (source side): the source holding is disposed
+      // entirely. Any cash received (`cashComponent` per share) is treated
+      // as proceeds against the full cost base, producing a realized event;
+      // the residual cost base transfers to the acquiring security via a
+      // basis-injection activity written onto its stream by the caller.
+      // After a merger the source position is closed.
+      if (state.quantity <= EPS) {
+        warnings.push(
+          `MERGER activity ${activity.id} on ${activity.tradeDate} applied to zero position; ignored`
+        );
+        continue;
+      }
+      const perShareCash = Math.abs(activity.cashComponent ?? 0);
+      const cashProceeds = perShareCash * state.quantity;
+      const costRemoved = state.totalCost;
+      const realizedGain = cashProceeds - costRemoved;
+      realizedEvents.push({
+        activityId: activity.id,
+        tradeDate: activity.tradeDate,
+        qtySold: state.quantity,
+        proceeds: cashProceeds,
+        acbPerUnitAtSale: state.acbPerUnit,
+        costRemoved,
+        realizedGain,
+        currency: activity.currency || currency,
+      });
+      realizedTotal += realizedGain;
+      state = {
+        asOf: activity.tradeDate,
+        quantity: 0,
+        totalCost: 0,
+        acbPerUnit: 0,
       };
       timeline.push(state);
     } else if (type === 'staking_reward') {
