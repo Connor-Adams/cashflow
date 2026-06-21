@@ -1,20 +1,30 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3, Plus, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  useConfirm,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { ChevronDown, ChevronRight, Edit3, Plus, Trash2 } from 'lucide-react'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
 import { deleteReq, getJson, patchJson, postJson } from '../../../lib/api'
+import { todayDateInputValue } from '../../../lib/dateInput'
+import { formatMoney } from '../../../lib/formatMoney'
 import type { Contact } from '../../../types/api'
+import type { ReimbursementView } from '../../../types/reimbursement'
+
+/**
+ * #374 — Contact detail response shape from GET /api/contacts/:id.
+ * Mirrors backend/src/routes/contacts.ts.
+ */
+type ContactDetail = Contact & {
+  openReimbursements: {
+    count: number
+    byCurrency: Record<string, string>
+    items: ReimbursementView[]
+  }
+  today: string
+}
 
 export function ContactsTab() {
   const [contacts, setContacts] = useState<Contact[]>([])
@@ -126,7 +136,7 @@ export function ContactsTab() {
               <p className="muted">Contacts track loans and reimbursements without giving login access.</p>
             </div>
           </div>
-          <div className="formGrid">
+          <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
             <Label htmlFor="settings-contact-name">
               Name
               <Input
@@ -166,66 +176,43 @@ export function ContactsTab() {
       )}
       <section className="accountsGrid mb-4">
         {contacts.map((contact) => (
-          <Card className="accountCard" key={contact.id}>
-            <div>
-              <h3>
-                {contact.name}
-                {contact.isPartner && (
-                  <span className="muted ml-2 text-xs font-normal uppercase tracking-wide">
-                    Partner
-                  </span>
-                )}
-              </h3>
-              {contact.notes && <p className="muted">{contact.notes}</p>}
-            </div>
-            <div className="row">
-              <Button type="button" size="sm" variant="secondary" onClick={() => openRename(contact)}>
-                <Edit3 aria-hidden="true" />
-                Edit
-              </Button>
-              <Button type="button" size="sm" variant="destructive" onClick={() => void removeContact(contact)}>
-                <Trash2 aria-hidden="true" />
-                Delete
-              </Button>
-            </div>
-          </Card>
+          <ContactCard
+            key={contact.id}
+            contact={contact}
+            onEdit={() => openRename(contact)}
+            onDelete={() => void removeContact(contact)}
+          />
         ))}
       </section>
 
       {renameTarget && (
         <Dialog
           open
-          onOpenChange={(open) => {
-            if (!open) closeRename()
-          }}
+          onClose={closeRename}
+          title={<>Rename contact</>}
         >
-          <DialogHeader>
-            <DialogTitle>Rename contact</DialogTitle>
-          </DialogHeader>
           <form onSubmit={submitRename}>
-            <DialogBody>
-              <Label htmlFor="settings-rename-name">
-                Contact name
-                <Input
-                  id="settings-rename-name"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  required
-                  autoComplete="off"
-                />
-              </Label>
-              {/* #375 — let the user mark/unmark this Contact as the partner. */}
-              <Label htmlFor="settings-rename-is-partner" className="row">
-                <input
-                  id="settings-rename-is-partner"
-                  type="checkbox"
-                  checked={renameIsPartner}
-                  onChange={(e) => setRenameIsPartner(e.target.checked)}
-                />
-                <span>Partner</span>
-              </Label>
-            </DialogBody>
-            <DialogFooter>
+            <Label htmlFor="settings-rename-name">
+              Contact name
+              <Input
+                id="settings-rename-name"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                required
+                autoComplete="off"
+              />
+            </Label>
+            {/* #375 — let the user mark/unmark this Contact as the partner. */}
+            <Label htmlFor="settings-rename-is-partner" className="row">
+              <input
+                id="settings-rename-is-partner"
+                type="checkbox"
+                checked={renameIsPartner}
+                onChange={(e) => setRenameIsPartner(e.target.checked)}
+              />
+              <span>Partner</span>
+            </Label>
+            <div className="mt-2 flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={closeRename}>
                 Cancel
               </Button>
@@ -240,11 +227,166 @@ export function ContactsTab() {
               >
                 Save
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         </Dialog>
       )}
       {confirm.dialog}
     </>
   )
+}
+
+/**
+ * #374 — Per-contact card with a collapsible "Open reimbursements" section.
+ * The aggregate ($X across Y items) loads lazily on first expand to keep the
+ * initial /settings/contacts render cheap when the household has many contacts.
+ */
+function ContactCard({
+  contact,
+  onEdit,
+  onDelete,
+}: {
+  contact: Contact
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [detail, setDetail] = useState<ContactDetail | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function toggle() {
+    const next = !expanded
+    setExpanded(next)
+    if (!next || detail) return
+    setLoading(true)
+    setErr(null)
+    try {
+      // Local calendar day so the open/overdue aggregate flips at the user's
+      // midnight, not UTC's.
+      const d = await getJson<ContactDetail>(
+        `/api/contacts/${contact.id}?today=${todayDateInputValue()}`,
+      )
+      setDetail(d)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not load reimbursements')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Render the per-currency totals as "$60.00 CAD + $40.00 USD" so a
+  // multi-currency household sees both at a glance.
+  const summaryLine = detail
+    ? formatOpenSummary(detail.openReimbursements)
+    : null
+
+  return (
+    <Card className="accountCard">
+      <div>
+        <h3>
+          {contact.name}
+          {contact.isPartner && (
+            <span className="muted ml-2 text-xs font-normal uppercase tracking-wide">
+              Partner
+            </span>
+          )}
+        </h3>
+        {contact.notes && <p className="muted">{contact.notes}</p>}
+      </div>
+      <div className="row">
+        <Button type="button" size="sm" variant="secondary" onClick={onEdit}>
+          <Edit3 aria-hidden="true" />
+          Edit
+        </Button>
+        <Button type="button" size="sm" variant="destructive" onClick={onDelete}>
+          <Trash2 aria-hidden="true" />
+          Delete
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => void toggle()}
+          aria-expanded={expanded}
+          aria-controls={`contact-${contact.id}-reimbursements`}
+          title="Open reimbursements tied to this contact"
+        >
+          {expanded ? (
+            <ChevronDown aria-hidden="true" />
+          ) : (
+            <ChevronRight aria-hidden="true" />
+          )}
+          Reimbursements
+        </Button>
+      </div>
+      {expanded && (
+        <div
+          id={`contact-${contact.id}-reimbursements`}
+          className="mt-3 border-t border-border pt-3 text-sm"
+        >
+          {loading && <p className="muted">Loading…</p>}
+          {err && (
+            <p className="error" role="alert">
+              {err}
+            </p>
+          )}
+          {!loading && !err && detail && (
+            <>
+              <p>
+                <strong>Open reimbursements:</strong>{' '}
+                {detail.openReimbursements.count > 0 ? (
+                  <span>
+                    {summaryLine} across {detail.openReimbursements.count} item
+                    {detail.openReimbursements.count === 1 ? '' : 's'}
+                  </span>
+                ) : (
+                  <span className="muted">none</span>
+                )}
+              </p>
+              {detail.openReimbursements.items.length > 0 && (
+                <ul className="mt-2 flex flex-col gap-1">
+                  {detail.openReimbursements.items.map((item) => (
+                    <li
+                      key={item.id}
+                      className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-2 py-1"
+                    >
+                      <span className="flex flex-col">
+                        <span>
+                          {formatMoney(Number(item.amount), item.currency)}{' '}
+                          <span className="muted text-xs">
+                            ({item.effectiveStatus}
+                            {item.dueDate ? ` · due ${item.dueDate}` : ''})
+                          </span>
+                        </span>
+                        {item.transaction && (
+                          <span className="muted text-xs">
+                            {item.transaction.date} · {item.transaction.merchant}
+                          </span>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+/**
+ * Render "$60.00 CAD + $40.00 USD" from the per-currency aggregate. Empty
+ * input returns "$0" so callers can render the summary line unconditionally.
+ */
+function formatOpenSummary(open: {
+  byCurrency: Record<string, string>
+}): string {
+  const entries = Object.entries(open.byCurrency)
+  if (entries.length === 0) return '$0'
+  return entries
+    .map(([currency, amount]) => formatMoney(Number(amount), currency))
+    .join(' + ')
 }

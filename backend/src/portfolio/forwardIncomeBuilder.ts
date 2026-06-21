@@ -11,8 +11,13 @@ import { computeForwardProjection, type PaymentEvent } from './forwardIncome';
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 async function latestHoldingsByHousehold(householdId: number, asOf: Date): Promise<Map<number, { qty: number; currency: string }>> {
+  const asOfDate = asOf.toISOString().slice(0, 10);
   const invAccounts = await Account.findAll({
-    where: { householdId, accountType: 'investment' },
+    where: {
+      householdId,
+      accountType: 'investment',
+      [Op.or]: [{ closedAt: null }, { closedAt: { [Op.gt]: asOfDate } }],
+    },
     attributes: ['id'],
   });
   if (invAccounts.length === 0) return new Map();
@@ -23,7 +28,15 @@ async function latestHoldingsByHousehold(householdId: number, asOf: Date): Promi
       accountId: { [Op.in]: acctIds },
       statementDate: { [Op.lte]: asOf.toISOString().slice(0, 10) },
     },
-    order: [['statementDate', 'DESC']],
+    // id DESC tiebreaker so same-date duplicate snapshots (corrected
+    // re-imports) resolve deterministically to the newest row — matching
+    // portfolioMarketValueAt / latestActivePositions (PR #604/#607). Without
+    // it, statementDate-DESC ties are arbitrary on Postgres and the quantity
+    // is nondeterministic.
+    order: [
+      ['statementDate', 'DESC'],
+      ['id', 'DESC'],
+    ],
   });
   const latestByPair = new Map<string, HoldingSnapshot>();
   for (const s of snapshots) {
@@ -68,7 +81,11 @@ export async function rebuildForwardProjectionsForHousehold(
       },
     });
     const invAccounts = await Account.findAll({
-      where: { householdId, accountType: 'investment' },
+      where: {
+        householdId,
+        accountType: 'investment',
+        [Op.or]: [{ closedAt: null }, { closedAt: { [Op.gt]: asOf.toISOString().slice(0, 10) } }],
+      },
       attributes: ['id'],
     });
     intEvents = await InvestmentActivity.findAll({

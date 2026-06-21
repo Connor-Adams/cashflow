@@ -12,15 +12,11 @@
  */
 import { useMemo, useState } from 'react';
 import {
-  TAX_SCOPE_LABELS,
-  patchTransactionTax,
-  useMissingReceipts,
-  useReviewQueue,
-  useTaxSummary,
-  useTaxTags,
-  type TaxScope,
-} from '../../hooks/useTaxHygiene';
+  TAX_SCOPE_LABELS, patchTransactionTax, useMissingReceipts, useReviewQueue, useTaxSummary, useTaxTags, type TaxScope, } from '../../hooks/useTaxHygiene';
+import { Button } from '@connor-adams/designsystem'
 import { fmtCurrency, fmtPct } from './util/format';
+import {
+  Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@connor-adams/designsystem'
 
 interface Props {
   year: number;
@@ -64,7 +60,7 @@ export function TaxHygieneTab({ year }: Props) {
   };
 
   return (
-    <div className="tax-hygiene-tab" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+    <div className="tax-hygiene-tab flex flex-col gap-6">
       <ScopeBar
         scope={scope}
         onChange={handleScopeChange}
@@ -103,37 +99,24 @@ interface ScopeBarProps {
 
 function ScopeBar({ scope, onChange, onExport }: ScopeBarProps) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        gap: '0.5rem',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-      }}
-    >
+    <div className="flex flex-wrap items-center gap-2">
       <span className="muted">Scope:</span>
       {SCOPES.map((s) => (
-        <button
+        <Button
           key={s}
           type="button"
+          variant={scope === s ? 'primary' : 'outline'}
+          size="sm"
           onClick={() => onChange(s)}
           aria-pressed={scope === s}
-          style={{
-            padding: '0.25rem 0.75rem',
-            border: '1px solid var(--border-color, #ccc)',
-            background: scope === s ? 'var(--accent, #2563eb)' : 'transparent',
-            color: scope === s ? 'white' : 'inherit',
-            borderRadius: '4px',
-            cursor: 'pointer',
-          }}
         >
           {TAX_SCOPE_LABELS[s]}
-        </button>
+        </Button>
       ))}
-      <span style={{ flex: 1 }} />
-      <button type="button" onClick={onExport}>
+      <span className="flex-1" />
+      <Button type="button" variant="secondary" size="sm" onClick={onExport}>
         Export tax CSV
-      </button>
+      </Button>
     </div>
   );
 }
@@ -159,37 +142,27 @@ function SummaryCards({ rows, loading, error }: SummaryCardsProps) {
   return (
     <section>
       <h2>Tax summary</h2>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: '1rem',
-        }}
-      >
+      <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
         {rows.map((r) => {
           const reviewedPct =
             r.transactionCount > 0 ? r.reviewedCount / r.transactionCount : 0;
           return (
             <article
               key={r.currency}
-              style={{
-                border: '1px solid var(--border-color, #ccc)',
-                borderRadius: '6px',
-                padding: '1rem',
-              }}
+              className="rounded-[6px] border border-border p-4"
             >
-              <h3 style={{ marginTop: 0 }}>{r.currency}</h3>
-              <dl style={{ display: 'grid', gridTemplateColumns: 'auto auto', gap: '0.25rem 1rem', margin: 0 }}>
+              <h3 className="mt-0">{r.currency}</h3>
+              <dl className="m-0 grid grid-cols-[auto_auto] gap-x-4 gap-y-1">
                 <dt>Gross</dt>
-                <dd style={{ margin: 0, textAlign: 'right' }}>{fmtCurrency(r.gross)}</dd>
+                <dd className="m-0 text-right">{fmtCurrency(r.gross)}</dd>
                 <dt>Deductible est.</dt>
-                <dd style={{ margin: 0, textAlign: 'right' }}>{fmtCurrency(r.deductibleEstimate)}</dd>
+                <dd className="m-0 text-right">{fmtCurrency(r.deductibleEstimate)}</dd>
                 <dt>HST/GST est.</dt>
-                <dd style={{ margin: 0, textAlign: 'right' }}>{fmtCurrency(r.hstGstEstimate)}</dd>
+                <dd className="m-0 text-right">{fmtCurrency(r.hstGstEstimate)}</dd>
                 <dt>Transactions</dt>
-                <dd style={{ margin: 0, textAlign: 'right' }}>{r.transactionCount}</dd>
+                <dd className="m-0 text-right">{r.transactionCount}</dd>
                 <dt>Reviewed</dt>
-                <dd style={{ margin: 0, textAlign: 'right' }}>
+                <dd className="m-0 text-right">
                   {r.reviewedCount} ({fmtPct(reviewedPct)})
                 </dd>
               </dl>
@@ -263,33 +236,33 @@ function ReviewQueueSection({
       {rows.length === 0 ? (
         <p className="muted">Nothing left to review in this scope.</p>
       ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              <th style={{ textAlign: 'left' }}>Date</th>
-              <th style={{ textAlign: 'left' }}>Merchant</th>
-              <th style={{ textAlign: 'right' }}>Amount</th>
-              <th style={{ textAlign: 'left' }}>Category</th>
-              <th style={{ textAlign: 'left' }}>Tag</th>
-              <th style={{ textAlign: 'right' }}>Deductible %</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Date</TableHead>
+              <TableHead>Merchant</TableHead>
+              <TableHead className="text-right">Amount</TableHead>
+              <TableHead>Category</TableHead>
+              <TableHead>Tag</TableHead>
+              <TableHead className="text-right">Deductible %</TableHead>
+              <TableHead></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {rows.map((r) => (
-              <tr key={r.id} style={{ borderBottom: '1px solid var(--border-color, #eee)' }}>
-                <td>{r.date}</td>
-                <td>
+              <TableRow key={r.id}>
+                <TableCell>{r.date}</TableCell>
+                <TableCell>
                   {r.merchant}
                   {r.accountName && (
                     <span className="muted"> ({r.accountName})</span>
                   )}
-                </td>
-                <td style={{ textAlign: 'right' }}>
+                </TableCell>
+                <TableCell className="text-right">
                   {fmtCurrency(r.amount)} {r.currency}
-                </td>
-                <td>{r.finalCategory ?? <span className="muted">—</span>}</td>
-                <td>
+                </TableCell>
+                <TableCell>{r.finalCategory ?? <span className="muted">—</span>}</TableCell>
+                <TableCell>
                   <select
                     value={r.taxTagId ?? ''}
                     onChange={(e) =>
@@ -306,19 +279,19 @@ function ReviewQueueSection({
                       </option>
                     ))}
                   </select>
-                </td>
-                <td style={{ textAlign: 'right' }}>
+                </TableCell>
+                <TableCell className="text-right">
                   {fmtPct(Number(r.deductiblePercent))}
-                </td>
-                <td>
-                  <button type="button" onClick={() => handleApprove(r.id)}>
+                </TableCell>
+                <TableCell>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => handleApprove(r.id)}>
                     Mark reviewed
-                  </button>
-                </td>
-              </tr>
+                  </Button>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
     </section>
   );

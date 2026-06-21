@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { Sparkles } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { useConfirm } from '@/components/ui/dialog'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Textarea } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
 import { postJson } from '../../../lib/api'
+import { formatMoney } from '../../../lib/formatMoney'
 import {
   listCaptureTokens,
   mintCaptureToken,
@@ -13,6 +14,8 @@ import {
   type CaptureTokenRow,
 } from '../../../lib/captureTokens'
 import { CounterpartyBackfillCard } from './imports/CounterpartyBackfillCard'
+import { InteracSyncCard } from './imports/InteracSyncCard'
+import { SimplefinConnectCard } from './imports/SimplefinConnectCard'
 
 // ---------------------------------------------------------------------------
 // Types (inlined from SettingsPage.tsx — no shared type file yet)
@@ -332,8 +335,8 @@ export function ImportsTab() {
             </p>
           </div>
         </div>
-        <div className="formGrid" style={{ gap: '0.75rem' }}>
-          <label htmlFor="settings-receipt-text">
+        <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
+          <label htmlFor="settings-receipt-text" className="flex flex-col gap-1 text-[0.82rem]">
             Paste receipt email body
             <Textarea
               id="settings-receipt-text"
@@ -479,13 +482,13 @@ export function ImportsTab() {
                 <strong>{receiptResult.created ? 'Created' : 'Already on file'}:</strong>{' '}
                 {receiptResult.extracted.vendorName ?? receiptResult.extracted.vendor}
                 {receiptResult.extracted.orderDate && ` · ${receiptResult.extracted.orderDate}`}
-                {receiptResult.extracted.total != null && ` · ${receiptResult.extracted.total} ${receiptResult.extracted.currency ?? ''}`}
+                {receiptResult.extracted.total != null && ` · ${formatMoney(Number(receiptResult.extracted.total), receiptResult.extracted.currency ?? undefined)}`}
               </div>
               {receiptResult.extracted.tenders && receiptResult.extracted.tenders.length > 1 && (
                 <div className="muted" style={{ marginTop: '0.25rem', fontSize: '0.85rem' }}>
                   Split tender:{' '}
                   {receiptResult.extracted.tenders
-                    .map((t) => `${t.network ?? 'card'}${t.paymentLast4 ? ` ••${t.paymentLast4}` : ''} ${t.amount}`)
+                    .map((t) => `${t.network ?? 'card'}${t.paymentLast4 ? ` ••${t.paymentLast4}` : ''} ${formatMoney(Number(t.amount), receiptResult.extracted.currency ?? undefined)}`)
                     .join(' + ')}
                 </div>
               )}
@@ -517,7 +520,7 @@ export function ImportsTab() {
                     <li key={i}>
                       {item.title}
                       {item.quantity > 1 && ` × ${item.quantity}`}
-                      {item.totalPrice != null && ` — ${item.totalPrice}`}
+                      {item.totalPrice != null && ` — ${formatMoney(item.totalPrice, receiptResult.extracted.currency ?? undefined)}`}
                       {item.inferredCategory && <span className="muted"> · {item.inferredCategory}</span>}
                     </li>
                   ))}
@@ -592,24 +595,20 @@ export function ImportsTab() {
         )}
         {captureBookmarklets && (
           <div className="row" style={{ gap: '0.5rem', marginTop: '0.75rem' }}>
-            <Button asChild variant="secondary">
-              <a
-                ref={amazonAnchorRef}
-                draggable
-                onClick={(e) => e.preventDefault()}
-              >
-                ↗ Capture Amazon orders
-              </a>
-            </Button>
-            <Button asChild variant="secondary">
-              <a
-                ref={appleAnchorRef}
-                draggable
-                onClick={(e) => e.preventDefault()}
-              >
-                ↗ Capture Apple purchases
-              </a>
-            </Button>
+            <a
+              ref={amazonAnchorRef}
+              draggable
+              onClick={(e) => e.preventDefault()}
+            >
+              <Button variant="secondary">↗ Capture Amazon orders</Button>
+            </a>
+            <a
+              ref={appleAnchorRef}
+              draggable
+              onClick={(e) => e.preventDefault()}
+            >
+              <Button variant="secondary">↗ Capture Apple purchases</Button>
+            </a>
           </div>
         )}
         {captureToken && !captureBookmarklets && (
@@ -621,10 +620,7 @@ export function ImportsTab() {
           </p>
         )}
 
-        <div
-          className="formGrid"
-          style={{ gap: '0.5rem', marginTop: '1rem', borderTop: '1px solid var(--border)', paddingTop: '0.75rem' }}
-        >
+        <div className="mt-4 grid gap-2 border-t border-border pt-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
           <div>
             <strong style={{ display: 'block' }}>Paste captured orders</strong>
             <span className="muted" style={{ fontSize: '0.85rem' }}>
@@ -670,8 +666,12 @@ export function ImportsTab() {
           )}
         </div>
       </Card>
+      {/* ── SimpleFIN Bridge bank connection (issue #790) ───────────────── */}
+      <SimplefinConnectCard />
       {/* ── Counterparty backfill (issue #376) ──────────────────────────── */}
       <CounterpartyBackfillCard />
+      {/* ── Interac email counterparty sync ─────────────────────────────── */}
+      <InteracSyncCard />
     </>
   )
 }

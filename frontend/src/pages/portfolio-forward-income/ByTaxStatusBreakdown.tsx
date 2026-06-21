@@ -1,4 +1,4 @@
-import { Card } from '@/components/ui/card'
+import { Card } from '@connor-adams/designsystem'
 import type { PortfolioForwardIncomeTaxBucket } from '../../types/api'
 import { formatMoney } from '../../lib/formatMoney'
 
@@ -7,6 +7,8 @@ const TAX_LABEL: Record<PortfolioForwardIncomeTaxBucket['taxStatus'], string> = 
   registered_rrsp: 'RRSP',
   registered_fhsa: 'FHSA',
   registered_rrif: 'RRIF',
+  registered_rdsp: 'RDSP',
+  registered_resp: 'RESP',
   non_registered: 'Non-registered',
   n_a: 'Other',
 }

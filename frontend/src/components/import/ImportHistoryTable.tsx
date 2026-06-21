@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Button } from '@connor-adams/designsystem'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { getJson } from '../../lib/api'
 
 export type ImportHistoryRow = {
@@ -50,6 +43,10 @@ type ImportHistoryTableProps = {
   /** Optional label override for the row action button. Defaults to
    *  "Open batch". */
   actionLabel?: string
+  /** Fires after each successful fetch with the number of history rows, so
+   *  a parent (e.g. ImportPage) can show a page-level empty state. Receives
+   *  the count; not called on fetch error. */
+  onLoaded?: (count: number) => void
 }
 
 /**
@@ -62,14 +59,18 @@ export function ImportHistoryTable({
   onRowClick,
   refreshKey = 0,
   actionLabel = 'Open batch',
+  onLoaded,
 }: ImportHistoryTableProps) {
   const [importHistory, setImportHistory] = useState<ImportHistoryRow[]>([])
 
   const refreshImportHistory = useCallback(() => {
     void getJson<ImportHistoryRow[]>('/api/import/history')
-      .then(setImportHistory)
+      .then((rows) => {
+        setImportHistory(rows)
+        onLoaded?.(rows.length)
+      })
       .catch(() => {})
-  }, [])
+  }, [onLoaded])
 
   useEffect(() => {
     refreshImportHistory()
@@ -88,8 +89,7 @@ export function ImportHistoryTable({
           </p>
         </div>
       </div>
-      <div className="tableWrap">
-        <Table className="table">
+      <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Started</TableHead>
@@ -139,7 +139,7 @@ export function ImportHistoryTable({
                       ) : (
                         <span className="flex items-center gap-1.5">
                           <span
-                            className="rounded px-1.5 py-0.5 text-green-700 dark:text-green-300"
+                            className="rounded px-1.5 py-0.5 text-positive"
                             style={{ backgroundColor: 'var(--bg2)' }}
                             title={`${clean} clean`}
                           >
@@ -147,7 +147,7 @@ export function ImportHistoryTable({
                           </span>
                           {needsReview > 0 ? (
                             <span
-                              className="rounded px-1.5 py-0.5 text-amber-700 dark:text-amber-300"
+                              className="rounded px-1.5 py-0.5 text-warning"
                               style={{ backgroundColor: 'var(--bg2)' }}
                               title={`${needsReview} need review`}
                             >
@@ -173,7 +173,6 @@ export function ImportHistoryTable({
             )}
           </TableBody>
         </Table>
-      </div>
     </section>
   )
 }

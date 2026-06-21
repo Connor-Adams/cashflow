@@ -78,7 +78,3 @@ export function lookupSeedBrand(merchantClean: string): string | null {
   }
   return null;
 }
-
-export function getSeedBrandList(): readonly BrandEntry[] {
-  return SEED_BRANDS;
-}

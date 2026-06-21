@@ -1,4 +1,4 @@
-import { Op } from 'sequelize';
+import { Op, type Transaction as DbTransaction } from 'sequelize';
 import { ExternalOrder, Transaction, TransactionOrderLink } from '../models';
 
 export function isAmazonLikeMerchant(merchant: string): boolean {
@@ -25,6 +25,42 @@ export type MatchScore = {
   confidence: number;
   matchReason: string;
 };
+
+/** A candidate is auto-suggested only at or above this confidence. */
+export const MATCH_CONFIDENCE_THRESHOLD = 70;
+
+/**
+ * When nothing clears the threshold, a single best candidate may still be
+ * surfaced for review — but only if it reaches this floor. Below it (e.g. a
+ * merchant-only confidence of 15) the match is noise, not a suggestion.
+ */
+export const FALLBACK_MIN_CONFIDENCE = 50;
+
+/**
+ * Pick which scored orders become suggested links for one transaction.
+ *
+ * - Every candidate at/above {@link MATCH_CONFIDENCE_THRESHOLD} is returned
+ *   (a transaction can legitimately span multiple confident orders).
+ * - Otherwise fall back to AT MOST the single best candidate, and only when it
+ *   is unambiguous (no tie at the top score) and clears
+ *   {@link FALLBACK_MIN_CONFIDENCE}.
+ *
+ * The tie guard is the fix for the historical fan-out: the previous filter
+ * `confidence === best` linked the transaction to EVERY order tied at the best
+ * sub-threshold score, so one charge whose amount collided with many stale
+ * Amazon orders (each scoring 50) produced a link to all of them.
+ */
+export function selectMatchCandidates<T extends { confidence: number }>(scored: T[]): T[] {
+  const strong = scored.filter((candidate) => candidate.confidence >= MATCH_CONFIDENCE_THRESHOLD);
+  if (strong.length > 0) return strong;
+
+  const sorted = [...scored].sort((a, b) => b.confidence - a.confidence);
+  const best = sorted[0];
+  if (!best || best.confidence < FALLBACK_MIN_CONFIDENCE) return [];
+  const tiedAtBest = sorted.filter((candidate) => candidate.confidence === best.confidence);
+  if (tiedAtBest.length > 1) return []; // ambiguous fan-out — abstain rather than guess
+  return [best];
+}
 
 export function scoreAmazonOrderMatch(txn: Transaction, order: ExternalOrder): MatchScore {
   let score = 0;
@@ -74,6 +110,39 @@ export function scoreAmazonOrderMatch(txn: Transaction, order: ExternalOrder): M
   };
 }
 
+/**
+ * Create — or refresh — a *suggested* link between a transaction and an external
+ * order. Idempotent: an existing link for the same (transaction, order) pair is
+ * never duplicated, and a link the user has already accepted or rejected is left
+ * untouched — only a still-'suggested' row gets its score/reason refreshed.
+ * Pass `transaction` to enlist the write in a surrounding DB transaction.
+ * Returns whether a new row was created.
+ */
+export async function upsertSuggestedOrderLink(args: {
+  transactionId: number;
+  externalOrderId: number;
+  confidence: number;
+  matchReason: string;
+  transaction?: DbTransaction;
+}): Promise<boolean> {
+  const { transactionId, externalOrderId, confidence, matchReason, transaction } = args;
+  const [link, created] = await TransactionOrderLink.findOrCreate({
+    where: { transactionId, externalOrderId },
+    defaults: {
+      transactionId,
+      externalOrderId,
+      confidence: String(confidence),
+      matchReason,
+      status: 'suggested',
+    },
+    transaction,
+  });
+  if (!created && link.status === 'suggested') {
+    await link.update({ confidence: String(confidence), matchReason }, { transaction });
+  }
+  return created;
+}
+
 export async function runAmazonMatching(args: {
   householdId: number;
 }): Promise<{
@@ -108,30 +177,15 @@ export async function runAmazonMatching(args: {
   let matchedDateTo: string | null = null;
 
   for (const txn of txns.filter((row) => isAmazonLikeMerchant(`${row.merchantRaw} ${row.merchantClean}`))) {
-    const scores = orders
-      .map((order) => ({ order, ...scoreAmazonOrderMatch(txn, order) }))
-      .sort((a, b) => b.confidence - a.confidence);
-    const best = scores[0]?.confidence ?? 0;
-    const candidates = scores.filter((candidate) =>
-      candidate.confidence >= 70 || (best < 70 && candidate.confidence === best && best > 0),
-    );
+    const scores = orders.map((order) => ({ order, ...scoreAmazonOrderMatch(txn, order) }));
+    const candidates = selectMatchCandidates(scores);
     for (const candidate of candidates) {
-      const [link, created] = await TransactionOrderLink.findOrCreate({
-        where: { transactionId: txn.id, externalOrderId: candidate.order.id },
-        defaults: {
-          transactionId: txn.id,
-          externalOrderId: candidate.order.id,
-          confidence: String(candidate.confidence),
-          matchReason: candidate.matchReason,
-          status: 'suggested',
-        },
+      const created = await upsertSuggestedOrderLink({
+        transactionId: txn.id,
+        externalOrderId: candidate.order.id,
+        confidence: candidate.confidence,
+        matchReason: candidate.matchReason,
       });
-      if (!created && link.status === 'suggested') {
-        await link.update({
-          confidence: String(candidate.confidence),
-          matchReason: candidate.matchReason,
-        });
-      }
       if (created) {
         suggested += 1;
         if (matchedDateFrom == null || txn.date < matchedDateFrom) matchedDateFrom = txn.date;

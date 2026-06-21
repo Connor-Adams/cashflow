@@ -12,6 +12,7 @@
 // us the next snapshot — keeps this component fully presentational beyond the
 // in-flight request state owned by `useSetSpouseLink`.
 import { useState } from 'react';
+import { Button } from '@connor-adams/designsystem'
 import { useSetSpouseLink } from '@/hooks/useSetSpouseLink';
 
 interface Props {
@@ -59,9 +60,9 @@ export function SpouseLinkPicker({ entity, candidateEntities, onChange }: Props)
         <span>
           <strong>Spouse:</strong> {spouseLabel}
         </span>
-        <button onClick={handleUnlink} disabled={loading}>
+        <Button variant="ghost" size="sm" onClick={handleUnlink} disabled={loading}>
           Unlink
-        </button>
+        </Button>
         {error && <span className="error">{error}</span>}
       </div>
     );
@@ -96,9 +97,9 @@ export function SpouseLinkPicker({ entity, candidateEntities, onChange }: Props)
           </option>
         ))}
       </select>
-      <button onClick={handleLink} disabled={loading || pendingSpouseId === ''}>
+      <Button variant="secondary" size="sm" onClick={handleLink} disabled={loading || pendingSpouseId === ''}>
         Link as spouse
-      </button>
+      </Button>
       {error && <span className="error">{error}</span>}
     </div>
   );

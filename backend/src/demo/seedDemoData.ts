@@ -4,6 +4,7 @@ import {
   ExternalOrderItem,
   Household,
   HouseholdMember,
+  Receipt,
   Rule,
   Transaction,
   User,
@@ -280,6 +281,7 @@ export async function seedDemoData(): Promise<void> {
       }
     }
 
+    const seededOrders: ExternalOrder[] = [];
     for (const order of demoAmazonOrders) {
       const [externalOrder, created] = await ExternalOrder.findOrCreate({
         where: { householdId: household.id, dedupeKey: `amazon:order:${order.vendorOrderId}` },
@@ -320,6 +322,45 @@ export async function seedDemoData(): Promise<void> {
           );
         }
       }
+      seededOrders.push(externalOrder);
+    }
+
+    // Attach each seeded Amazon order to a demo transaction via a Receipt row.
+    // Both /api/items and the transaction receipt-items drawer reach order items
+    // only through a Receipt -> transaction link, so without these rows a fresh
+    // demo account shows zero items. Orders are matched to a transaction by amount
+    // (each Amazon txn equals its order total); the second order is intentionally
+    // pinned onto the first order's transaction so the drawer demonstrates its
+    // multi-receipt layout (one transaction, two receipts).
+    const demoTxns = await Transaction.findAll({
+      where: { householdId: household.id },
+      transaction: t,
+    });
+    const txnByAmount = new Map<string, Transaction>();
+    for (const txn of demoTxns) {
+      const key = Math.abs(Number(txn.amount)).toFixed(2);
+      if (!txnByAmount.has(key)) txnByAmount.set(key, txn);
+    }
+    for (const [i, order] of demoAmazonOrders.entries()) {
+      const externalOrder = seededOrders[i];
+      if (!externalOrder) continue;
+      // Pin the 2nd order onto the 1st order's transaction for the multi-receipt demo.
+      const matchTotal = i === 1 ? demoAmazonOrders[0].total : order.total;
+      const txn = txnByAmount.get(matchTotal.toFixed(2));
+      if (!txn) continue;
+      await Receipt.findOrCreate({
+        where: { externalOrderId: externalOrder.id },
+        defaults: {
+          transactionId: txn.id,
+          externalOrderId: externalOrder.id,
+          storedFilename: `demo/amazon-${order.vendorOrderId}.pdf`,
+          originalName: `amazon-order-${order.vendorOrderId}.pdf`,
+          mimeType: 'application/pdf',
+          sizeBytes: 1024,
+          extractedNote: null,
+        },
+        transaction: t,
+      });
     }
   });
 

@@ -12,6 +12,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -61,7 +62,7 @@ before(async () => {
 
   // Bootstrap a superadmin via the register endpoint (it auto-promotes the
   // first user to superadmin) so subsequent seed inserts proceed.
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'super-admin@example.com',
     displayName: 'Super',
@@ -70,11 +71,11 @@ before(async () => {
   assert.equal(register.status, 201);
 
   const sa = await seedUser({ emailPrefix: 'sa', role: 'superadmin' });
-  superadminAgent = request.agent(app);
+  superadminAgent = testAgent(app);
   superadminAgent.jar.setCookie(`cashflow_session=${sa.token}; Path=/`);
 
   const u = await seedUser({ emailPrefix: 'regular', role: 'user' });
-  userAgent = request.agent(app);
+  userAgent = testAgent(app);
   userAgent.jar.setCookie(`cashflow_session=${u.token}; Path=/`);
   targetUserId = u.userId;
 });

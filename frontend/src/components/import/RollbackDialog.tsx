@@ -1,13 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogBody,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Button } from '@connor-adams/designsystem'
+import { Dialog } from '@connor-adams/designsystem'
 import { getJson, postJson } from '../../lib/api'
 
 /**
@@ -41,6 +34,8 @@ export type RollbackImpact = {
     transactionTaxMetadata: number
     budgetExclusions: number
     plannedEventsUnlinked: number
+    investmentActivities: number
+    holdingSnapshots: number
   }
   sample: Array<{
     id: number
@@ -60,6 +55,8 @@ export type RollbackResult = {
   deletedTransactionTaxMetadata: number
   deletedBudgetExclusions: number
   unlinkedPlannedEvents: number
+  deletedInvestmentActivities: number
+  deletedHoldingSnapshots: number
 }
 
 type RollbackDialogProps = {
@@ -134,47 +131,45 @@ export function RollbackDialog({
   return (
     <Dialog
       open={open}
-      onOpenChange={(next) => {
-        if (!next) onClose()
-      }}
-    >
-      <DialogHeader>
-        <DialogTitle>Roll back import “{batchLabel}”?</DialogTitle>
-        <DialogDescription>
+      onClose={onClose}
+      title={<>Roll back import “{batchLabel}”?</>}
+      description={
+        <>
           This deletes the transactions created by this import batch and the
           dependent records they spawned. Manual transactions and other
           batches are preserved.
-        </DialogDescription>
-      </DialogHeader>
-      <DialogBody>
-        {loading && <p className="muted">Loading preview…</p>}
-        {error && (
-          <p role="alert" className="text-sm text-red-700 dark:text-red-400">
-            {error}
-          </p>
-        )}
-        {impact && (
-          <div className="space-y-3" data-testid="rollback-impact">
-            <RollbackBlockerList blockers={impact.blockers} />
-            <RollbackCounts impact={impact} />
-            <RollbackSample sample={impact.sample} />
-          </div>
-        )}
-      </DialogBody>
-      <DialogFooter>
-        <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
-          Cancel
-        </Button>
-        <Button
-          type="button"
-          variant="destructive"
-          onClick={() => void handleRollback()}
-          disabled={!impact?.canRollback || submitting}
-          aria-disabled={!impact?.canRollback || submitting}
-        >
-          {submitting ? 'Rolling back…' : 'Roll back batch'}
-        </Button>
-      </DialogFooter>
+        </>
+      }
+      footer={
+        <>
+          <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={() => void handleRollback()}
+            disabled={!impact?.canRollback || submitting}
+            aria-disabled={!impact?.canRollback || submitting}
+          >
+            {submitting ? 'Rolling back…' : 'Roll back batch'}
+          </Button>
+        </>
+      }
+    >
+      {loading && <p className="muted">Loading preview…</p>}
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
+      {impact && (
+        <div className="space-y-3" data-testid="rollback-impact">
+          <RollbackBlockerList blockers={impact.blockers} />
+          <RollbackCounts impact={impact} />
+          <RollbackSample sample={impact.sample} />
+        </div>
+      )}
     </Dialog>
   )
 }
@@ -183,7 +178,7 @@ function RollbackBlockerList({ blockers }: { blockers: RollbackBlocker[] }) {
   if (blockers.length === 0) return null
   return (
     <ul
-      className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-700 dark:bg-red-950 dark:text-red-200"
+      className="rounded border border-danger bg-danger-bg p-3 text-sm text-danger"
       data-testid="rollback-blockers"
     >
       {blockers.map((blocker) => (
@@ -206,6 +201,8 @@ function RollbackCounts({ impact }: { impact: RollbackImpact }) {
     { label: 'Tax metadata to clear', value: counts.transactionTaxMetadata },
     { label: 'Budget exclusions to clear', value: counts.budgetExclusions },
     { label: 'Planned events to unlink', value: counts.plannedEventsUnlinked },
+    { label: 'Investment activities to delete', value: counts.investmentActivities },
+    { label: 'Holding snapshots to delete', value: counts.holdingSnapshots },
   ]
   return (
     <dl

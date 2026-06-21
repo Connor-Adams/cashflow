@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { useShareholderLoans, type ShareholderLoanKind, type ShareholderLoanDto } from '../../hooks/useShareholderLoans';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
+import { Button } from '@connor-adams/designsystem'
+import { fmtCurrency } from './util/format';
+import { StatCard } from '@connor-adams/designsystem';
+import { EmptyState } from '@connor-adams/designsystem'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 
 const KIND_LABELS: Record<ShareholderLoanKind, string> = {
   advance: 'Advance (corp to owner)',
@@ -12,7 +17,7 @@ const KIND_LABELS: Record<ShareholderLoanKind, string> = {
 const KIND_OPTIONS: ShareholderLoanKind[] = ['advance', 'repayment', 'dividend_credit', 'salary_credit'];
 
 export function ShareholderLoanTab() {
-  const { loans, error, add, refresh } = useShareholderLoans();
+  const { loans, balance, error, add, refresh } = useShareholderLoans();
   const { entities, error: entitiesError } = useTaxEntities();
   const corpEntity = entities?.find((e) => e.kind === 'corp') ?? null;
 
@@ -53,21 +58,33 @@ export function ShareholderLoanTab() {
     }
   }
 
+  if (!corpEntity && !entitiesError) {
+    return (
+      <div>
+        <h2>Shareholder Loans</h2>
+        <EmptyState
+          title="No corporation found"
+          description="Add a corporate entity to track shareholder loans."
+        />
+      </div>
+    );
+  }
+
   return (
     <div>
       <h2>Shareholder Loans</h2>
+
+      <div className="mb-4 max-w-xs">
+        <StatCard label="Loan balance" value={fmtCurrency(balance)} />
+      </div>
 
       {(error ?? entitiesError) && (
         <p className="error">Error: {error ?? entitiesError}</p>
       )}
 
-      {!corpEntity && !entitiesError && (
-        <p className="muted">No corp entity found. Create one via POST /api/tax/entities.</p>
-      )}
-
-      <section style={{ marginBottom: '1.5rem' }}>
+      <section className="mb-6">
         <h3>Add Entry</h3>
-        <form onSubmit={(e) => { void handleSubmit(e); }} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxWidth: '32rem' }}>
+        <form onSubmit={(e) => { void handleSubmit(e); }} className="flex flex-col gap-2 max-w-lg">
           <label>
             Date{' '}
             <input
@@ -86,7 +103,7 @@ export function ShareholderLoanTab() {
             </select>
           </label>
           <label>
-            Amount ($){' '}
+            Amount ({corpEntity?.currency ?? 'CAD'}){' '}
             <input
               type="number"
               step="0.01"
@@ -106,11 +123,11 @@ export function ShareholderLoanTab() {
             />
           </label>
           {formError && <p className="error">{formError}</p>}
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button type="submit" disabled={submitting || !corpEntity}>
+          <div className="flex gap-2">
+            <Button type="submit" variant="primary" size="sm" disabled={submitting || !corpEntity}>
               {submitting ? 'Saving…' : 'Add'}
-            </button>
-            <button type="button" onClick={() => { void refresh(); }}>Refresh</button>
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => { void refresh(); }}>Refresh</Button>
           </div>
         </form>
       </section>
@@ -119,21 +136,21 @@ export function ShareholderLoanTab() {
         {loans.length === 0 ? (
           <p className="muted">No shareholder loan entries yet.</p>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Kind</th>
-                <th>Amount</th>
-                <th>Description</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Kind</TableHead>
+                <TableHead className="text-right">Amount</TableHead>
+                <TableHead>Description</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {loans.map((loan) => (
                 <LoanRow key={loan.id} loan={loan} />
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
       </section>
     </div>
@@ -142,11 +159,11 @@ export function ShareholderLoanTab() {
 
 function LoanRow({ loan }: { loan: ShareholderLoanDto }) {
   return (
-    <tr>
-      <td>{loan.date}</td>
-      <td>{KIND_LABELS[loan.kind] ?? loan.kind}</td>
-      <td>${loan.amount}</td>
-      <td>{loan.description ?? '—'}</td>
-    </tr>
+    <TableRow>
+      <TableCell>{loan.date}</TableCell>
+      <TableCell>{KIND_LABELS[loan.kind] ?? loan.kind}</TableCell>
+      <TableCell className="text-right tabular-nums">{fmtCurrency(loan.amount)}</TableCell>
+      <TableCell>{loan.description ?? '—'}</TableCell>
+    </TableRow>
   );
 }

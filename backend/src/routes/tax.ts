@@ -1,6 +1,8 @@
 import { Router } from 'express';
+import { Op } from 'sequelize';
 import { currentAuth } from '../auth/middleware';
-import { Entity, TaxReturn, TaxSlip, Carryforward, ShareholderLoan, InstalmentPayment, sequelize } from '../models';
+import { visibleTransactionWhere } from '../auth/scope';
+import { Account, Entity, TaxReturn, TaxSlip, Carryforward, ShareholderLoan, InstalmentPayment, Transaction, sequelize } from '../models';
 import { buildPersonalFacts } from '../tax/builders/buildPersonalFacts';
 import { buildCorpFacts } from '../tax/builders/buildCorpFacts';
 import { buildT1 } from '../tax/engine/t1';
@@ -10,12 +12,111 @@ import { factsHash } from '../tax/util/factsHash';
 import type { CorpFiscalYear } from '../tax/engine/types';
 import { rollPersonalCarryforwards } from '../tax/services/rollPersonalCarryforwards';
 import { buildReconciliationReport } from '../tax/reconciliation/buildReport';
+import { computeShareholderLoanBalance } from '../tax/services/shareholderLoanBalance';
 
 const router = Router();
 
 // GET /api/tax/years — list years the engine has rate tables for.
 router.get('/years', (_req, res) => {
   res.json({ years: supportedYears() });
+});
+
+// GET /api/tax/classification-queue?entityId=&year=
+// Unclassified corp→personal transfer pairs + detected payroll deposits for a
+// personal entity in a calendar year. Read-only derivation (no table).
+router.get('/classification-queue', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const entityId = Number(req.query.entityId);
+    const year = Number(req.query.year);
+    if (!Number.isInteger(entityId) || !Number.isInteger(year) || isNaN(entityId) || isNaN(year)) {
+      res.status(400).json({ error: 'entityId and year query params required' });
+      return;
+    }
+    const statusRaw = req.query.status;
+    const status = statusRaw === undefined ? 'unclassified' : String(statusRaw);
+    if (status !== 'unclassified' && status !== 'classified') {
+      res.status(400).json({ error: 'invalid status' });
+      return;
+    }
+    const overrideWhere = status === 'classified' ? { [Op.ne]: null } : null;
+    const personal = await Entity.findByPk(entityId);
+    if (!personal || personal.kind !== 'personal' || personal.householdId !== household.id) {
+      res.status(404).json({ error: 'personal entity not found' });
+      return;
+    }
+    const start = `${year}-01-01`;
+    const end = `${year}-12-31`;
+
+    const corpEntities = await Entity.findAll({ where: { householdId: personal.householdId, kind: 'corp' } });
+    const corpEntityIds = new Set(corpEntities.map((e) => e.id));
+
+    const personalLegs = await Transaction.findAll({
+      where: {
+        ...visibleTransactionWhere(req),
+        entityId,
+        date: { [Op.between]: [start, end] },
+        txnType: 'transfer',
+        linkedTransactionId: { [Op.ne]: null },
+        taxTreatmentOverride: overrideWhere,
+      },
+    });
+
+    const linkedIds = personalLegs
+      .map((l) => l.linkedTransactionId)
+      .filter((x): x is number => x != null);
+    const linkedTxns = linkedIds.length
+      ? await Transaction.findAll({ where: { id: { [Op.in]: linkedIds } } })
+      : [];
+    const linkedById = new Map(linkedTxns.map((t) => [t.id, t]));
+    const corpDistributions: Array<{ personal: Transaction; corp: Transaction }> = [];
+    for (const leg of personalLegs) {
+      const other = linkedById.get(leg.linkedTransactionId as number);
+      if (other && other.entityId != null && corpEntityIds.has(other.entityId)) {
+        corpDistributions.push({ personal: leg, corp: other });
+      }
+    }
+
+    const payroll = await Transaction.findAll({
+      where: {
+        ...visibleTransactionWhere(req),
+        entityId,
+        date: { [Op.between]: [start, end] },
+        txnType: 'income',
+        taxTreatmentOverride: overrideWhere,
+      },
+    });
+
+    const allTxns = [
+      ...corpDistributions.flatMap((d) => [d.personal, d.corp]),
+      ...payroll,
+    ] as Transaction[];
+    const acctIds = Array.from(new Set(allTxns.map((t) => t.accountId)));
+    const accts = acctIds.length
+      ? await Account.findAll({ where: { id: acctIds } })
+      : [];
+    const acctName = new Map(accts.map((a) => [a.id, a.name]));
+    const slim = (t: Transaction) => ({
+      id: t.id,
+      date: t.date,
+      amount: t.amount,
+      currency: t.currency,
+      merchantClean: t.merchantClean,
+      accountId: t.accountId,
+      accountName: acctName.get(t.accountId) ?? null,
+      txnType: t.txnType,
+      taxTreatmentOverride: t.taxTreatmentOverride,
+    });
+    res.json({
+      corpDistributions: corpDistributions.map((d) => ({
+        personal: slim(d.personal as Transaction),
+        corp: slim(d.corp as Transaction),
+      })),
+      payroll: payroll.map(slim),
+    });
+  } catch (e) {
+    next(e);
+  }
 });
 
 // GET /api/tax/entities — list all entities for the authenticated household.
@@ -44,29 +145,13 @@ router.patch('/entities/:id', async (req, res, next) => {
       return;
     }
 
-    const body = (req.body ?? {}) as { associatedGroupId?: unknown };
-    // Field must be present in the body — distinguishes "set to null" (clear)
-    // from "not specified" (no-op would be ambiguous so reject as 400).
-    if (!Object.prototype.hasOwnProperty.call(body, 'associatedGroupId')) {
+    const body = (req.body ?? {}) as { associatedGroupId?: unknown; ownerEntityId?: unknown };
+    const hasGroup = Object.prototype.hasOwnProperty.call(body, 'associatedGroupId');
+    const hasOwner = Object.prototype.hasOwnProperty.call(body, 'ownerEntityId');
+    if (!hasGroup && !hasOwner) {
       res.status(400).json({
         error: 'invalid_body',
-        message: 'associatedGroupId (string | null) required',
-      });
-      return;
-    }
-    const raw = body.associatedGroupId;
-    let associatedGroupId: string | null;
-    if (raw === null) {
-      associatedGroupId = null;
-    } else if (typeof raw === 'string') {
-      const trimmed = raw.trim();
-      // Empty string treated as null (clear) — UX: blanking the text input
-      // shouldn't require a separate "delete" gesture.
-      associatedGroupId = trimmed === '' ? null : trimmed;
-    } else {
-      res.status(400).json({
-        error: 'invalid_body',
-        message: 'associatedGroupId must be a string or null',
+        message: 'associatedGroupId or ownerEntityId required',
       });
       return;
     }
@@ -83,12 +168,48 @@ router.patch('/entities/:id', async (req, res, next) => {
     if (entity.kind !== 'corp') {
       res.status(400).json({
         error: 'invalid_kind',
-        message: 'associatedGroupId can only be set on kind=corp entities',
+        message: 'associatedGroupId / ownerEntityId can only be set on kind=corp entities',
       });
       return;
     }
 
-    await entity.update({ associatedGroupId });
+    const patch: { associatedGroupId?: string | null; ownerEntityId?: number | null } = {};
+
+    if (hasGroup) {
+      const raw = body.associatedGroupId;
+      if (raw === null) {
+        patch.associatedGroupId = null;
+      } else if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        patch.associatedGroupId = trimmed === '' ? null : trimmed;
+      } else {
+        res.status(400).json({ error: 'invalid_body', message: 'associatedGroupId must be a string or null' });
+        return;
+      }
+    }
+
+    if (hasOwner) {
+      const raw = body.ownerEntityId;
+      if (raw === null) {
+        patch.ownerEntityId = null;
+      } else if (Number.isInteger(raw)) {
+        const target = await Entity.findByPk(raw as number);
+        if (!target || target.householdId !== household.id) {
+          res.status(400).json({ error: 'invalid_owner', message: 'ownerEntityId must be an entity in this household' });
+          return;
+        }
+        if (target.kind !== 'personal') {
+          res.status(400).json({ error: 'invalid_owner', message: 'ownerEntityId must be a personal entity' });
+          return;
+        }
+        patch.ownerEntityId = raw as number;
+      } else {
+        res.status(400).json({ error: 'invalid_body', message: 'ownerEntityId must be an integer or null' });
+        return;
+      }
+    }
+
+    await entity.update(patch);
     res.status(200).json({ entity });
   } catch (err) {
     next(err);
@@ -602,14 +723,15 @@ router.get('/corp/shareholder-loans', async (req, res, next) => {
     const { household } = currentAuth(req);
     const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'corp' } });
     if (!entity) {
-      res.json({ shareholderLoans: [] });
+      res.json({ shareholderLoans: [], balance: '0.00' });
       return;
     }
     const rows = await ShareholderLoan.findAll({
       where: { entityId: entity.id },
       order: [['date', 'DESC']],
     });
-    res.json({ shareholderLoans: rows });
+    const balance = await computeShareholderLoanBalance(entity.id);
+    res.json({ shareholderLoans: rows, balance: balance.toFixed(2) });
   } catch (err) {
     next(err);
   }

@@ -8,6 +8,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -57,7 +58,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -66,11 +67,11 @@ before(async () => {
   assert.equal(register.status, 201);
 
   const primary = await seed('Primary');
-  primaryAgent = request.agent(app);
+  primaryAgent = testAgent(app);
   primaryAgent.jar.setCookie(`cashflow_session=${primary.token}; Path=/`);
 
   const other = await seed('Other');
-  otherAgent = request.agent(app);
+  otherAgent = testAgent(app);
   otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
 });
 
@@ -163,7 +164,7 @@ test('cross-user isolation: other user PATCH does not bleed into primary', async
 });
 
 test('unauthenticated request is rejected', async () => {
-  const fresh = request.agent(app);
+  const fresh = testAgent(app);
   const res = await fresh.get('/api/settings/cashflow');
   assert.equal(res.status, 401);
 });

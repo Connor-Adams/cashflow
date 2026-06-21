@@ -1,38 +1,33 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { Download, Plus, Trash2 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Alert } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Grid } from '@/lib/ds-extras'
+import { StatCard } from '@connor-adams/designsystem'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
-import {
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  useConfirm,
-} from '@/components/ui/dialog'
+import { Dialog } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@/components/ui/native-select'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { Textarea } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Skeleton } from '@connor-adams/designsystem'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Card } from '@connor-adams/designsystem'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
+import { cn } from '@/lib/utils'
 import { buildCsv, downloadCsv } from '../lib/csv'
 import {
   fromDateInputValue,
+  getRelativeDateRange,
   toDateInputValue,
   todayDateInputValue,
 } from '../lib/dateInput'
@@ -120,13 +115,6 @@ function localTodayUtcMidnight(): Date {
   return fromDateInputValue(todayDateInputValue())!
 }
 
-function getRelativeDateRange(days: number): { from: string; to: string } {
-  const to = localTodayUtcMidnight()
-  const from = new Date(to)
-  from.setUTCDate(from.getUTCDate() - days)
-  return { from: toDateInputValue(from), to: toDateInputValue(to) }
-}
-
 function getYearToDateRange(): { from: string; to: string } {
   const to = localTodayUtcMidnight()
   const from = new Date(Date.UTC(to.getUTCFullYear(), 0, 1))
@@ -167,6 +155,8 @@ export function ReportsPage() {
   const [formNotes, setFormNotes] = useState<string>('')
   const [formSubmitting, setFormSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const [formAmountError, setFormAmountError] = useState<string | null>(null)
+  const [formDateError, setFormDateError] = useState<string | null>(null)
   const { showToast } = useToast()
   const confirm = useConfirm()
 
@@ -353,6 +343,8 @@ export function ReportsPage() {
 
   function openSettlementDialog() {
     setFormError(null)
+    setFormAmountError(null)
+    setFormDateError(null)
     setFormContactId(contacts.length > 0 ? String(contacts[0].id) : '')
     setFormDirection('i_paid_partner')
     setFormCurrency(currency || DEFAULT_REPORTS_CURRENCY)
@@ -420,6 +412,19 @@ export function ReportsPage() {
   )
   const partnerExportDisabled = visiblePartnerRows.length === 0
   const businessExportDisabled = visibleBusinessRows.length === 0
+
+  // Page-level empty state (#799): every report dataset is empty AND no filter
+  // is narrowing the view, so the account genuinely has no spend to report.
+  // When a filter is active we fall through to the per-table empty rows, which
+  // already say "no activity for these filters".
+  const hasNoSpendData =
+    !loading &&
+    !err &&
+    !hasActiveFilters &&
+    (partner?.byCurrency.length ?? 0) === 0 &&
+    (business?.byCurrency.length ?? 0) === 0 &&
+    merchantSummaries.length === 0 &&
+    accountSummaries.length === 0
 
   // Build a "{from}-to-{to}" stub for the filename. Falls back to "all-dates"
   // and uses today's date as a leg when only one bound is set, so filenames
@@ -498,6 +503,26 @@ export function ReportsPage() {
     }
   }
 
+  if (hasNoSpendData) {
+    return (
+      <div className="page">
+        <PageHeader
+          title="Reports"
+          description="Partner balances and business totals stay separated by currency and time window."
+        />
+        <EmptyState
+          title="No spend to report yet"
+          description="Import some transactions and your monthly summary will appear here."
+          actions={
+            <Link to="/import">
+              <Button size="sm">Import a statement</Button>
+            </Link>
+          }
+        />
+      </div>
+    )
+  }
+
   return (
     <>
     <div className="page">
@@ -505,7 +530,7 @@ export function ReportsPage() {
         title="Reports"
         description="Partner balances and business totals stay separated by currency and time window."
       />
-      <section className="card reportsFilters">
+      <Card className="mb-4">
         <FilterBar
           currency={currency}
           onCurrencyChange={setCurrency}
@@ -534,54 +559,56 @@ export function ReportsPage() {
             ) : null
           }
           caption={
-            <p className="muted" style={{ marginBottom: 0 }}>
+            <p className="mb-0 text-sm leading-6 text-muted-foreground">
               Showing <strong>{currency || 'all currencies'}</strong> for{' '}
               <strong>{activeRangeLabel}</strong>.
             </p>
           }
         />
-      </section>
-      {err && <span className="error">{err}</span>}
-      {loading && <p className="muted">Loading…</p>}
+      </Card>
+      {err && <Alert variant="error" className="mb-4">{err}</Alert>}
 
-      <section className="reportsStats" aria-busy={loading}>
-        <article className="card statCard">
-          <p className="statLabel">My share</p>
-          <p className="statValue">
-            {singleCurrency ? formatMoney(partnerMineTotal, singleCurrency) : `${reportCurrencies.length} currencies`}
-          </p>
-          <p className="muted statHint">{moneySummaryHint}</p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Partner share</p>
-          <p className="statValue">
-            {singleCurrency
-              ? formatMoney(partnerShareTotal, singleCurrency)
-              : `${reportCurrencies.length} currencies`}
-          </p>
-          <p className="muted statHint">{moneySummaryHint}</p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Business total</p>
-          <p className="statValue">
-            {singleCurrency ? formatMoney(businessTotal, singleCurrency) : `${reportCurrencies.length} currencies`}
-          </p>
-          <p className="muted statHint">{moneySummaryHint}</p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Currencies</p>
-          <p className="statValue">{reportCurrencies.length}</p>
-          <p className="muted statHint">
-            {totalPartnerRows} partner row{totalPartnerRows === 1 ? '' : 's'} and{' '}
-            {totalBusinessRows} business row{totalBusinessRows === 1 ? '' : 's'}
-          </p>
-        </article>
-      </section>
+      {loading ? (
+        <Grid minItemWidth={180} gap="md" responsiveFloor={false} className="mb-4" aria-busy={loading}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={`reports-skeleton-${i}`} className="mb-0">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="mt-2 h-7 w-28" />
+              <Skeleton className="mt-2 h-3 w-24" />
+            </Card>
+          ))}
+        </Grid>
+      ) : (
+      <Grid minItemWidth={180} gap="md" responsiveFloor={false} className="mb-4" aria-busy={loading}>
+        <StatCard
+          label="My share"
+          value={singleCurrency ? formatMoney(partnerMineTotal, singleCurrency) : `${reportCurrencies.length} currencies`}
+          hint={moneySummaryHint}
+        />
+        <StatCard
+          label="Partner share"
+          value={singleCurrency
+            ? formatMoney(partnerShareTotal, singleCurrency)
+            : `${reportCurrencies.length} currencies`}
+          hint={moneySummaryHint}
+        />
+        <StatCard
+          label="Business total"
+          value={singleCurrency ? formatMoney(businessTotal, singleCurrency) : `${reportCurrencies.length} currencies`}
+          hint={moneySummaryHint}
+        />
+        <StatCard
+          label="Currencies"
+          value={reportCurrencies.length}
+          hint={`${totalPartnerRows} partner row${totalPartnerRows === 1 ? '' : 's'} and ${totalBusinessRows} business row${totalBusinessRows === 1 ? '' : 's'}`}
+        />
+      </Grid>
+      )}
 
-      <div className="reportsGrid">
+      <Grid minItemWidth={320} gap="lg">
         <CollapsibleCard
           id="partner-split"
-          className="reportsTableCard"
+          className="mb-0"
           title="Partner split totals"
           description="How much of the selected spend belongs to each person."
           actions={
@@ -620,33 +647,31 @@ export function ReportsPage() {
           }
         >
           {showPartnerRollup && (
-            <ul className="partnerNetRollup" style={{ listStyle: 'none', padding: 0, margin: '0 0 0.75rem 0', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <ul className="list-none p-0 mb-3 flex flex-col gap-1">
               {partnerNetByCurrency.map(([cur, total]) => {
                 const rounded = Math.round(total * 100) / 100
                 if (rounded === 0) {
                   return (
-                    <li key={cur} className="muted" style={{ fontSize: '0.875rem' }}>
+                    <li key={cur} className="text-sm leading-6 text-muted-foreground mb-0">
                       <strong>{cur}</strong>: even
                     </li>
                   )
                 }
                 const partnerOwesMe = rounded > 0
-                const color = partnerOwesMe ? 'var(--accent-green)' : 'var(--danger)'
                 const label = partnerOwesMe ? 'partner owes you' : 'you owe partner'
                 return (
-                  <li key={cur} style={{ fontSize: '0.875rem' }}>
+                  <li key={cur} className="text-sm">
                     <strong>{cur}</strong>:{' '}
-                    <span style={{ color, fontWeight: 600 }}>
+                    <span className={cn('font-semibold', partnerOwesMe ? 'text-positive' : 'text-danger')}>
                       {formatMoney(Math.abs(rounded), cur)}
                     </span>{' '}
-                    <span className="muted">({label})</span>
+                    <span className="text-sm leading-6 text-muted-foreground mb-0">({label})</span>
                   </li>
                 )
               })}
             </ul>
           )}
-          <div className="tableWrap" aria-busy={loading}>
-            <Table className="table">
+          <Table aria-busy={loading}>
               <TableHeader>
                 <TableRow>
                   <TableHead>Currency</TableHead>
@@ -657,29 +682,29 @@ export function ReportsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
+                {loading &&
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <SkeletonRow key={`reports-skeleton-${i}`} cols={5} />
+                  ))}
                 {(partner?.byCurrency.length ?? 0) === 0 && !loading && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="emptyStateCell">
-                      <p className="emptyState">
-                        No partner-split data for these filters. Import transactions or widen the date range.
-                      </p>
-                    </TableCell>
-                  </TableRow>
+                  <EmptyTableRow
+                    colSpan={5}
+                    title="No partner-split data for these filters. Import transactions or widen the date range."
+                  />
                 )}
                 {partner?.byCurrency.map((r) => {
                   let netInner
                   if (r.direction === 'even') {
-                    netInner = <span className="muted">Even</span>
+                    netInner = <span className="text-sm leading-6 text-muted-foreground mb-0">Even</span>
                   } else {
                     const partnerOwesMe = r.direction === 'partner_owes_me'
-                    const color = partnerOwesMe ? 'var(--accent-green)' : 'var(--danger)'
                     const sign = partnerOwesMe ? '+' : '−'
                     const label = partnerOwesMe ? 'partner owes you' : 'you owe partner'
                     netInner = (
-                      <span style={{ color }}>
+                      <span className={partnerOwesMe ? 'text-positive' : 'text-danger'}>
                         {sign}
                         {formatMoney(Math.abs(r.net), r.currency)}{' '}
-                        <span className="muted">({label})</span>
+                        <span className="text-sm leading-6 text-muted-foreground mb-0">({label})</span>
                       </span>
                     )
                   }
@@ -695,7 +720,7 @@ export function ReportsPage() {
                       {hasSettlements && (
                         <>
                           <br />
-                          <span className="muted" style={{ fontSize: '0.75rem' }}>
+                          <span className="text-xs text-muted-foreground mb-0">
                             (after {r.settlementCount} settlement
                             {r.settlementCount === 1 ? '' : 's'})
                           </span>
@@ -719,12 +744,11 @@ export function ReportsPage() {
                 })}
               </TableBody>
             </Table>
-          </div>
         </CollapsibleCard>
 
         <CollapsibleCard
           id="business-expenses"
-          className="reportsTableCard"
+          className="mb-0"
           title="Business expenses"
           description="Transactions marked business, grouped by currency."
           actions={
@@ -745,8 +769,7 @@ export function ReportsPage() {
             </Button>
           }
         >
-          <div className="tableWrap" aria-busy={loading}>
-            <Table className="table">
+          <Table aria-busy={loading}>
               <TableHeader>
                 <TableRow>
                   <TableHead>Currency</TableHead>
@@ -754,14 +777,15 @@ export function ReportsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
+                {loading &&
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <SkeletonRow key={`reports-skeleton-${i}`} cols={2} />
+                  ))}
                 {(business?.byCurrency.length ?? 0) === 0 && !loading && (
-                  <TableRow>
-                    <TableCell colSpan={2} className="emptyStateCell">
-                      <p className="emptyState">
-                        No business-tagged amounts for these filters.
-                      </p>
-                    </TableCell>
-                  </TableRow>
+                  <EmptyTableRow
+                    colSpan={2}
+                    title="No business-tagged amounts for these filters."
+                  />
                 )}
                 {business?.byCurrency.map((r) => (
                   <TableRow key={r.currency}>
@@ -771,19 +795,17 @@ export function ReportsPage() {
                 ))}
               </TableBody>
             </Table>
-          </div>
         </CollapsibleCard>
-      </div>
+      </Grid>
 
       <CollapsibleCard
         id="settlements"
-        className="reportsTableCard"
+        className="mb-0"
         title="Recent settlements"
         description="Manual records of money paid between you and a contact. Applied to the net partner balance above."
       >
-        {settlementsErr && <span className="error">{settlementsErr}</span>}
-        <div className="tableWrap">
-          <Table className="table">
+        {settlementsErr && <Alert variant="error" className="mb-4">{settlementsErr}</Alert>}
+        <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>
@@ -796,13 +818,10 @@ export function ReportsPage() {
             </TableHeader>
             <TableBody>
               {recentSettlements.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="emptyStateCell">
-                    <p className="emptyState">
-                      No settlements yet. Click "Record settlement" above when money changes hands.
-                    </p>
-                  </TableCell>
-                </TableRow>
+                <EmptyTableRow
+                  colSpan={6}
+                  title='No settlements yet. Click "Record settlement" above when money changes hands.'
+                />
               )}
               {recentSettlements.map((row) => (
                 <TableRow key={row.id}>
@@ -815,13 +834,7 @@ export function ReportsPage() {
                   </TableCell>
                   <TableCell>{formatMoney(Number(row.amount), row.currency)}</TableCell>
                   <TableCell
-                    className="muted"
-                    style={{
-                      maxWidth: '14rem',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
+                    className="text-sm leading-6 text-muted-foreground mb-0 max-w-[14rem] overflow-hidden text-ellipsis whitespace-nowrap"
                     title={row.notes ?? undefined}
                   >
                     {row.notes ?? ''}
@@ -841,7 +854,6 @@ export function ReportsPage() {
               ))}
             </TableBody>
           </Table>
-        </div>
       </CollapsibleCard>
 
       <RankedReportSection
@@ -924,19 +936,14 @@ export function ReportsPage() {
     {dialogOpen && (
       <Dialog
         open
-        onOpenChange={(open) => {
-          if (!open) {
-            setDialogOpen(false)
-            setFormError(null)
-          }
+        onClose={() => {
+          setDialogOpen(false)
+          setFormError(null)
         }}
+        title={<>Record settlement</>}
       >
-        <DialogHeader>
-          <DialogTitle>Record settlement</DialogTitle>
-        </DialogHeader>
         <form onSubmit={submitSettlement}>
-          <DialogBody>
-            <div className="formGrid" style={{ display: 'grid', gap: '0.75rem' }}>
+            <Grid minItemWidth={180} fill gap="md" className="mb-3">
               <Label htmlFor="settlement-contact">
                 Contact
                 <NativeSelect
@@ -946,14 +953,14 @@ export function ReportsPage() {
                   required
                 >
                   {contacts.length === 0 && (
-                    <NativeSelectOption value="">
-                      No contacts available
-                    </NativeSelectOption>
+                    <option value="">
+                      No contacts — add one in Settings
+                    </option>
                   )}
                   {contacts.map((c) => (
-                    <NativeSelectOption key={c.id} value={String(c.id)}>
+                    <option key={c.id} value={String(c.id)}>
                       {c.name}
-                    </NativeSelectOption>
+                    </option>
                   ))}
                 </NativeSelect>
               </Label>
@@ -968,12 +975,12 @@ export function ReportsPage() {
                     )
                   }
                 >
-                  <NativeSelectOption value="i_paid_partner">
+                  <option value="i_paid_partner">
                     I paid partner
-                  </NativeSelectOption>
-                  <NativeSelectOption value="partner_paid_me">
+                  </option>
+                  <option value="partner_paid_me">
                     Partner paid me
-                  </NativeSelectOption>
+                  </option>
                 </NativeSelect>
               </Label>
               <Label htmlFor="settlement-currency">
@@ -983,10 +990,15 @@ export function ReportsPage() {
                   value={formCurrency}
                   onChange={(e) => setFormCurrency(e.target.value)}
                 >
+                  {availableCurrencies.length === 0 && (
+                    <option value="">
+                      No currencies — add an account in Settings
+                    </option>
+                  )}
                   {availableCurrencies.map((c) => (
-                    <NativeSelectOption key={c} value={c}>
+                    <option key={c} value={c}>
                       {c}
-                    </NativeSelectOption>
+                    </option>
                   ))}
                 </NativeSelect>
               </Label>
@@ -999,9 +1011,29 @@ export function ReportsPage() {
                   step="0.01"
                   min="0.01"
                   value={formAmount}
-                  onChange={(e) => setFormAmount(e.target.value)}
+                  onChange={(e) => {
+                    setFormAmount(e.target.value)
+                    const n = Number(e.target.value)
+                    if (e.target.value !== '' && (!Number.isFinite(n) || n <= 0)) {
+                      setFormAmountError('Enter a positive amount.')
+                    } else {
+                      setFormAmountError(null)
+                    }
+                  }}
+                  onBlur={(e) => {
+                    const n = Number(e.target.value)
+                    if (!e.target.value || !Number.isFinite(n) || n <= 0) {
+                      setFormAmountError('Enter a positive amount.')
+                    }
+                  }}
                   required
+                  aria-describedby={formAmountError ? 'settlement-amount-err' : undefined}
                 />
+                {formAmountError && (
+                  <span id="settlement-amount-err" className="text-danger text-xs" role="alert">
+                    {formAmountError}
+                  </span>
+                )}
               </Label>
               <Label htmlFor="settlement-date">
                 Date
@@ -1009,9 +1041,21 @@ export function ReportsPage() {
                   id="settlement-date"
                   type="date"
                   value={formDate}
-                  onChange={(e) => setFormDate(e.target.value)}
+                  onChange={(e) => {
+                    setFormDate(e.target.value)
+                    if (e.target.value) setFormDateError(null)
+                  }}
+                  onBlur={(e) => {
+                    if (!e.target.value) setFormDateError('Date required.')
+                  }}
                   required
+                  aria-describedby={formDateError ? 'settlement-date-err' : undefined}
                 />
+                {formDateError && (
+                  <span id="settlement-date-err" className="text-danger text-xs" role="alert">
+                    {formDateError}
+                  </span>
+                )}
               </Label>
               <Label htmlFor="settlement-notes">
                 Notes
@@ -1022,10 +1066,9 @@ export function ReportsPage() {
                   onChange={(e) => setFormNotes(e.target.value)}
                 />
               </Label>
-              {formError && <span className="error">{formError}</span>}
-            </div>
-          </DialogBody>
-          <DialogFooter>
+              {formError && <Alert variant="error" className="mb-4">{formError}</Alert>}
+            </Grid>
+          <div className="flex justify-end gap-2">
             <Button
               type="button"
               variant="outline"
@@ -1033,10 +1076,10 @@ export function ReportsPage() {
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={formSubmitting}>
+            <Button type="submit" disabled={formSubmitting || Boolean(formAmountError) || Boolean(formDateError)}>
               {formSubmitting ? 'Saving...' : 'Save settlement'}
             </Button>
-          </DialogFooter>
+          </div>
         </form>
       </Dialog>
     )}
@@ -1087,8 +1130,7 @@ function RankedReportSection<R>({
       description={description}
       toggleLabel={title}
     >
-      <div className="tableWrap">
-        <Table className="table">
+      <Table>
           <TableHeader>
             <TableRow>
               {showCurrencyColumn && <TableHead>Currency</TableHead>}
@@ -1099,18 +1141,13 @@ function RankedReportSection<R>({
           </TableHeader>
           <TableBody>
             {!loading && rows.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={totalColumns} className="emptyStateCell">
-                  <p className="emptyState">{emptyMessage}</p>
-                </TableCell>
-              </TableRow>
+              <EmptyTableRow colSpan={totalColumns} title={emptyMessage} />
             )}
             {rows.map((row) => (
               <TableRow key={rowKey(row)}>{renderRow(row)}</TableRow>
             ))}
           </TableBody>
         </Table>
-      </div>
     </CollapsibleCard>
   )
 }

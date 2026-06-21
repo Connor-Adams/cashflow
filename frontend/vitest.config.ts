@@ -24,9 +24,25 @@ export default defineConfig({
       },
     },
     globals: true,
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'scripts/**/*.test.ts'],
     // vitest.setup.ts binds jsdom localStorage on globalThis (Node 26 workaround).
     // test-setup.ts wires @testing-library/jest-dom matchers.
     setupFiles: ['./vitest.setup.ts', './src/test-setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'text-summary', 'html', 'lcov', 'json-summary'],
+      reportsDirectory: './coverage',
+      // `all` counts uncovered source files as 0% so the denominator is the
+      // whole app, not just files a test happened to import.
+      all: true,
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        'src/**/*.test.{ts,tsx}',
+        'src/**/*.d.ts',
+        'src/main.tsx',
+        'src/vite-env.d.ts',
+        'src/test-setup.ts',
+      ],
+    },
   },
 })

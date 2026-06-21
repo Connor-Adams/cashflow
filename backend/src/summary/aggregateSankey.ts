@@ -44,7 +44,7 @@
  * so the drill-down endpoint can return the transaction IDs that flowed
  * through a clicked link without re-running the aggregation.
  */
-import { num } from '../util/numbers';
+import { num, toUnits, fromUnits } from '../util/numbers';
 import {
   classifyPositiveAmount,
   isNonCategorical,
@@ -56,6 +56,8 @@ export type SankeyTxnRow = {
   date: string;
   currency: string;
   finalCategory: string | null;
+  /** Resolved category primary key — carried through to the node for drill-down. */
+  finalCategoryId?: number | null;
   finalBusiness: boolean;
   merchantRaw: string | null;
   merchantClean: string | null;
@@ -76,6 +78,14 @@ export interface SankeyNode {
   /** Display name (also acts as the unique key inside the response). */
   name: string;
   kind: SankeyNodeKind;
+  /**
+   * The resolved category primary key for category nodes; null/undefined for
+   * income, business, and other non-category nodes. Carried through from
+   * `SankeyTxnRow.finalCategoryId` — first non-null value seen wins (bucket
+   * is keyed by label string, so in practice all rows sharing a label share
+   * the same id post-B1).
+   */
+  categoryId?: number | null;
 }
 
 export interface SankeyLink {
@@ -168,6 +178,8 @@ export function aggregateSankey(
     label: string;
     netSpend: number;
     txnIds: number[];
+    /** First non-null finalCategoryId seen for this label. null when unknown. */
+    categoryId: number | null;
   };
   // Keyed by the resolved category label (or 'Uncategorized'); negatives
   // contribute totalSpend, positive credits reduce it.
@@ -180,6 +192,7 @@ export function aggregateSankey(
     label: 'Business spending',
     netSpend: 0,
     txnIds: [],
+    categoryId: null,
   };
 
   let totalIncome = 0;
@@ -197,11 +210,12 @@ export function aggregateSankey(
     totalTransactionCount += 1;
     const nonSpend = isNonSpend(row.txnType, row.accountType);
 
+    // Accumulate in integer units (×10 000) to avoid float drift.
+    const amtU = toUnits(amount);
     if (amount < 0 && !nonSpend) {
       // -------- SPEND row ------------------------------------------------
-      const spend = -amount;
       if (row.finalBusiness) {
-        businessBucket.netSpend += spend;
+        businessBucket.netSpend += -amtU;
         businessBucket.txnIds.push(row.id);
       } else {
         const label = resolveCategoryLabel(row);
@@ -209,9 +223,14 @@ export function aggregateSankey(
           label,
           netSpend: 0,
           txnIds: [],
+          categoryId: null,
         };
-        bucket.netSpend += spend;
+        bucket.netSpend += -amtU;
         bucket.txnIds.push(row.id);
+        // Keep first non-null categoryId seen for this label.
+        if (bucket.categoryId === null && (row.finalCategoryId ?? null) !== null) {
+          bucket.categoryId = row.finalCategoryId as number;
+        }
         categoryBuckets.set(label, bucket);
       }
       continue;
@@ -239,7 +258,7 @@ export function aggregateSankey(
       //   - refund/reward (or fallback credit) → net against the category
       //     it offset, same semantics as dashboard's netSpend.
       if (row.txnType === 'income') {
-        totalIncome += amount;
+        totalIncome += amtU;
         incomeTxnIds.push(row.id);
         continue;
       }
@@ -248,7 +267,7 @@ export function aggregateSankey(
       // Routed to the business bucket if business=true, otherwise to the
       // row's resolved category.
       if (row.finalBusiness) {
-        businessBucket.netSpend -= amount;
+        businessBucket.netSpend -= amtU;
         businessBucket.txnIds.push(row.id);
       } else {
         const label = resolveCategoryLabel(row);
@@ -256,9 +275,14 @@ export function aggregateSankey(
           label,
           netSpend: 0,
           txnIds: [],
+          categoryId: null,
         };
-        cat.netSpend -= amount;
+        cat.netSpend -= amtU;
         cat.txnIds.push(row.id);
+        // Keep first non-null categoryId seen for this label.
+        if (cat.categoryId === null && (row.finalCategoryId ?? null) !== null) {
+          cat.categoryId = row.finalCategoryId as number;
+        }
         categoryBuckets.set(label, cat);
       }
       continue;
@@ -285,6 +309,8 @@ export function aggregateSankey(
       label: OTHER_CATEGORIES_LABEL,
       netSpend: overflow.reduce((sum, c) => sum + c.netSpend, 0),
       txnIds: overflow.flatMap((c) => c.txnIds),
+      // "Other categories" aggregates multiple categories; no single id applies.
+      categoryId: null,
     };
   }
 
@@ -299,10 +325,11 @@ export function aggregateSankey(
 
   // Compute totalSpend from the FINAL buckets (post-overflow, post-business
   // routing) so it reconciles with the rendered link widths.
-  const totalSpend = sinkBuckets.reduce((sum, b) => sum + b.netSpend, 0);
+  // Both totalIncome and bucket.netSpend are still in integer units here.
+  const totalSpendU = sinkBuckets.reduce((sum, b) => sum + b.netSpend, 0);
 
   // -------- Empty state ----------------------------------------------
-  if (totalIncome === 0 && totalSpend === 0) {
+  if (totalIncome === 0 && totalSpendU === 0) {
     return {
       currency,
       totalIncome: 0,
@@ -331,9 +358,16 @@ export function aggregateSankey(
     let kind: SankeyNodeKind = 'category';
     if (sink.label === businessBucket.label) kind = 'business';
     else if (sink.label === UNCATEGORIZED_LABEL) kind = 'uncategorized';
-    nodes.push({ name: sink.label, kind });
+    const node: SankeyNode = { name: sink.label, kind };
+    // Attach categoryId for category/uncategorized nodes so callers can
+    // correlate the node back to the Category primitive without a second
+    // label-based lookup.
+    if (kind === 'category' || kind === 'uncategorized') {
+      node.categoryId = sink.categoryId;
+    }
+    nodes.push(node);
 
-    links.push({ source: 0, target: targetIdx, value: sink.netSpend });
+    links.push({ source: 0, target: targetIdx, value: fromUnits(sink.netSpend) });
     edgeMap.set(`0-${targetIdx}`, sink.txnIds);
   }
 
@@ -345,8 +379,8 @@ export function aggregateSankey(
 
   return {
     currency,
-    totalIncome,
-    totalSpend,
+    totalIncome: fromUnits(totalIncome),
+    totalSpend: fromUnits(totalSpendU),
     transactionCount: totalTransactionCount,
     nodes,
     links,

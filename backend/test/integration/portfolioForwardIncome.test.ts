@@ -9,8 +9,7 @@ import path from 'path';
 import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import request from 'supertest';
-
+import { testAgent, testRequest } from './_setup/testServer.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.join(__dirname, '..', '..');
 const dbPath = path.join(backendRoot, 'data', 'test-portfolio-forward-income.sqlite');
@@ -45,7 +44,7 @@ after(() => {
 async function makeHousehold(tag: string) {
   const { seedHousehold } = await import('./portfolioFixtures.js');
   const seeded = await seedHousehold(models, `fi-${tag}-${Date.now()}@example.com`);
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${seeded.token}; Path=/`);
   return { ...seeded, agent };
 }
@@ -75,7 +74,7 @@ async function seedAccountWithTax(
 // ─── Test 1: 401 when unauthenticated ────────────────────────────────────────
 
 test('401 when unauthenticated', async () => {
-  const res = await request(app).get('/api/portfolio/forward-income');
+  const res = await testRequest(app).get('/api/portfolio/forward-income');
   assert.equal(res.status, 401);
 });
 
@@ -118,12 +117,18 @@ test('returns projection for held CAD security with monthly dividends', async ()
     currency: 'CAD',
   });
 
-  // 12 monthly dividends of $0.10/share each — all within the last 12 months
-  const months = [
-    '2025-06-01', '2025-07-01', '2025-08-01', '2025-09-01',
-    '2025-10-01', '2025-11-01', '2025-12-01', '2026-01-01',
-    '2026-02-01', '2026-03-01', '2026-04-01', '2026-05-01',
-  ];
+  // 12 monthly dividends of $0.10/share each, anchored to the run date so they
+  // always fall inside the endpoint's trailing-365-day window (inferCadence:
+  // date >= asOf-365d && date <= asOf). Hardcoded dates rotted — the earliest
+  // aged out of the window once "now" crossed its first-of-month, dropping the
+  // sum to 11 × $0.10. Offsets 0..11 (this month back through 11 months ago)
+  // keep all 12 comfortably in-window for any run date.
+  const now = new Date();
+  const months = Array.from({ length: 12 }, (_, i) =>
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1))
+      .toISOString()
+      .slice(0, 10),
+  );
   for (const date of months) {
     await seedDividend(models, { securityId: vcn.id, exDividendDate: date, amount: 0.10, currency: 'CAD' });
   }
@@ -166,8 +171,18 @@ test('FX converts USD income to CAD using a seeded rate', async () => {
     currency: 'USD',
   });
 
-  // Quarterly dividends $0.80/share (=$3.20/year * 50 = $160 USD) — within last 12 months
-  const quarters = ['2025-06-15', '2025-09-15', '2025-12-15', '2026-03-15'];
+  // Quarterly dividends $0.80/share (=$3.20/year * 50 = $160 USD), anchored to the
+  // run date so all four stay inside the endpoint's trailing-365-day window. The
+  // old hardcoded dates rotted: the earliest ('2025-06-15') landed exactly on the
+  // asOf-365d boundary once "now" reached 2026-06-15 and dropped out, leaving 3
+  // quarters ($120) and breaking the >140 assertion. Offsets 1/4/7/10 months back
+  // keep all four comfortably in-window for any run date (matching Test 3 above).
+  const now = new Date();
+  const quarters = [1, 4, 7, 10].map((i) =>
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 15))
+      .toISOString()
+      .slice(0, 10),
+  );
   for (const date of quarters) {
     await seedDividend(models, { securityId: vti.id, exDividendDate: date, amount: 0.80, currency: 'USD' });
   }
@@ -374,4 +389,107 @@ test('second call refreshes projections when dividend added between calls', asyn
   );
   // ~$0.15/share * 12 * 100 shares = $180
   assert.ok(secondIncome > 100, `expected secondIncome > 100, got ${secondIncome}`);
+});
+
+// ─── FX hard-failure handling: stale-rate fallback, never silent parity ──────
+
+test('falls back to the most recent cached FX rate instead of valuing USD at parity', async () => {
+  const { household, user, agent } = await makeHousehold('usd-fx-stale');
+  const { seedSecurity, seedHolding, seedDividend } = await import('./portfolioFixtures.js');
+
+  const acct = await seedAccountWithTax(household.id, user.id, 'RRSP-USD2', 'RRSPUSD2', 'registered_rrsp');
+  const vxus = await seedSecurity(models, household.id, 'VXUS', 'Vanguard Intl', 'ETF', 'USD');
+
+  await seedHolding(models, {
+    accountId: acct.id,
+    householdId: household.id,
+    securityId: vxus.id,
+    statementDate: '2025-01-31',
+    quantity: 100,
+    price: 20,
+    marketValue: 2000,
+    costBasis: 1800,
+    currency: 'USD',
+  });
+
+  // Monthly dividends anchored to the run date (same pattern as the CAD test).
+  const now = new Date();
+  const months = Array.from({ length: 12 }, (_, i) =>
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1))
+      .toISOString()
+      .slice(0, 10),
+  );
+  for (const date of months) {
+    await seedDividend(models, { securityId: vxus.id, exDividendDate: date, amount: 0.10, currency: 'USD' });
+  }
+
+  // ONLY a stale USD→CAD rate exists (outside ensureFxRate's 7-day window)
+  // and the BoC API is unreachable. The endpoint must use the stale rate,
+  // not silently value USD income at parity (rate 1).
+  await models.FxRate.destroy({ where: {} });
+  const staleDate = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
+  await models.FxRate.create({
+    fromCurrency: 'USD',
+    toCurrency: 'CAD',
+    ratedDate: staleDate,
+    rate: '1.30',
+    source: 'fixture',
+    fetchedAt: new Date(),
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('BoC unreachable (stubbed in test)');
+  }) as unknown as typeof fetch;
+  try {
+    const res = await agent.get('/api/portfolio/forward-income');
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const row = res.body.rows.find((r: { symbol: string }) => r.symbol === 'VXUS');
+    assert.ok(row, 'VXUS row present');
+    assert.ok(row.projectedAnnualIncomeNative > 100, `native=${row.projectedAnnualIncomeNative}`);
+    assert.ok(
+      Math.abs(row.projectedAnnualIncomeCad - row.projectedAnnualIncomeNative * 1.30) < 1,
+      `expected CAD ≈ native × 1.30, got cad=${row.projectedAnnualIncomeCad} native=${row.projectedAnnualIncomeNative}`,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('returns 502 when no FX data exists at all for a held currency', async () => {
+  const { household, user, agent } = await makeHousehold('usd-fx-none');
+  const { seedSecurity, seedHolding, seedDividend } = await import('./portfolioFixtures.js');
+
+  const acct = await seedAccountWithTax(household.id, user.id, 'RRSP-USD3', 'RRSPUSD3', 'registered_rrsp');
+  const vea = await seedSecurity(models, household.id, 'VEA', 'Vanguard Dev Mkts', 'ETF', 'USD');
+
+  await seedHolding(models, {
+    accountId: acct.id,
+    householdId: household.id,
+    securityId: vea.id,
+    statementDate: '2025-01-31',
+    quantity: 10,
+    price: 50,
+    marketValue: 500,
+    costBasis: 400,
+    currency: 'USD',
+  });
+  await seedDividend(models, {
+    securityId: vea.id,
+    exDividendDate: new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10),
+    amount: 0.50,
+    currency: 'USD',
+  });
+
+  await models.FxRate.destroy({ where: {} });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('BoC unreachable (stubbed in test)');
+  }) as unknown as typeof fetch;
+  try {
+    const res = await agent.get('/api/portfolio/forward-income');
+    assert.equal(res.status, 502, JSON.stringify(res.body));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

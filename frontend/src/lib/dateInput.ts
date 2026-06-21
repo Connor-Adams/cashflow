@@ -73,3 +73,80 @@ export function todayDateInputValue(now: Date = new Date()): string {
   const day = String(now.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
+
+/**
+ * Compute the `{ from, to }` strings for a "last N days" quick-range ending
+ * on the user's local "today".
+ *
+ * Both endpoints are INCLUSIVE — backend date filters use gte/lte — so
+ * `from` is today minus (days − 1), giving a window of exactly `days`
+ * calendar days. Subtracting `days` would silently produce an N+1-day window
+ * ("30 days" spanning 31 days).
+ *
+ * Optional `now` argument is for tests.
+ */
+export function getRelativeDateRange(
+  days: number,
+  now: Date = new Date()
+): { from: string; to: string } {
+  const to = fromDateInputValue(todayDateInputValue(now))!
+  const from = new Date(to)
+  from.setUTCDate(from.getUTCDate() - (days - 1))
+  return { from: toDateInputValue(from), to: toDateInputValue(to) }
+}
+
+/**
+ * Calendar-month range. `offset` 0 = current month, -1 = previous month.
+ * `from` is the 1st; `to` is the LAST day of the (offset-adjusted) month —
+ * NOT "today". Period-end `to` keeps "This year" distinct from "YTD" so the
+ * FilterBar exact-match highlight doesn't collide. `Date.UTC` normalizes
+ * negative/overflow months, giving automatic year rollover.
+ *
+ * Optional `now` argument is for tests.
+ */
+export function getCalendarMonthRange(
+  offset: number,
+  now: Date = new Date()
+): { from: string; to: string } {
+  const today = fromDateInputValue(todayDateInputValue(now))!
+  const year = today.getUTCFullYear()
+  const month = today.getUTCMonth() + offset
+  const from = new Date(Date.UTC(year, month, 1))
+  const to = new Date(Date.UTC(year, month + 1, 0))
+  return { from: toDateInputValue(from), to: toDateInputValue(to) }
+}
+
+/**
+ * Calendar-quarter range. `offset` 0 = current quarter, -1 = previous.
+ * Quarters start at month 0/3/6/9; `to` is the last day of the quarter.
+ *
+ * Optional `now` argument is for tests.
+ */
+export function getCalendarQuarterRange(
+  offset: number,
+  now: Date = new Date()
+): { from: string; to: string } {
+  const today = fromDateInputValue(todayDateInputValue(now))!
+  const year = today.getUTCFullYear()
+  const quarterStartMonth = Math.floor(today.getUTCMonth() / 3) * 3 + offset * 3
+  const from = new Date(Date.UTC(year, quarterStartMonth, 1))
+  const to = new Date(Date.UTC(year, quarterStartMonth + 3, 0))
+  return { from: toDateInputValue(from), to: toDateInputValue(to) }
+}
+
+/**
+ * Calendar-year range. `offset` 0 = current year, -1 = previous.
+ * `from` is Jan 1, `to` is Dec 31 of the (offset-adjusted) year.
+ *
+ * Optional `now` argument is for tests.
+ */
+export function getCalendarYearRange(
+  offset: number,
+  now: Date = new Date()
+): { from: string; to: string } {
+  const today = fromDateInputValue(todayDateInputValue(now))!
+  const year = today.getUTCFullYear() + offset
+  const from = new Date(Date.UTC(year, 0, 1))
+  const to = new Date(Date.UTC(year, 11, 31))
+  return { from: toDateInputValue(from), to: toDateInputValue(to) }
+}

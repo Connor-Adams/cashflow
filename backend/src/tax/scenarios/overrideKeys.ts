@@ -2,6 +2,7 @@
 import { D, type Decimal } from '../util/decimal';
 import type { CapGainEvent, IncomeItem, RrspContrib, TaxYearFacts } from '../engine/types';
 import type { OverrideKeyDef, OverrideMap } from './types';
+import { corpKeys } from './corpOverrideKeys';
 
 function assertNumber(value: unknown, key: string): asserts value is number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -125,10 +126,6 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
       return {
         ...facts,
         pensionIncome: (facts.pensionIncome ?? D('0')).plus(d),
-        employmentIncome: [
-          ...facts.employmentIncome,
-          { source: 'override:income.pensionIncome', amount: d, cadAmount: d },
-        ],
       };
     },
   },
@@ -140,13 +137,13 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
     validate: (v) => assertNumber(v, 'income.cppRetirement'),
     apply: (facts, value) => {
       assertNumber(value, 'income.cppRetirement');
+      // L11400 — NOT employment income: CPP benefits are neither pensionable
+      // nor insurable, so routing them through employmentIncome manufactured
+      // phantom CPP contributions, EI premiums, and the employment amount.
       const d = D(String(value));
       return {
         ...facts,
-        employmentIncome: [
-          ...facts.employmentIncome,
-          { source: 'override:income.cppRetirement', amount: d, cadAmount: d },
-        ],
+        cppBenefits: (facts.cppBenefits ?? D('0')).plus(d),
       };
     },
   },
@@ -158,13 +155,12 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
     validate: (v) => assertNumber(v, 'income.oasRetirement'),
     apply: (facts, value) => {
       assertNumber(value, 'income.oasRetirement');
+      // L11300 — see income.cppRetirement note. The same field is read by the
+      // L23500 clawback: repayment caps at OAS actually received.
       const d = D(String(value));
       return {
         ...facts,
-        employmentIncome: [
-          ...facts.employmentIncome,
-          { source: 'override:income.oasRetirement', amount: d, cadAmount: d },
-        ],
+        oasBenefits: (facts.oasBenefits ?? D('0')).plus(d),
       };
     },
   },
@@ -357,9 +353,9 @@ export function registerOverrideKeys(entries: OverrideKeyDef[]): void {
   }
 }
 
-// Self-register corp keys when this module loads (any consumer imports
-// overrideKeys.ts, so corp keys are always present). Use require() rather than
-// `import` so the call runs AFTER `indexByKey` is initialized — ES `import`
-// statements get hoisted to the top of the compiled file and trigger TDZ.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-require('./corpOverrideKeys');
+// Register corp keys when this module loads (any consumer imports overrideKeys.ts,
+// so corp keys are always present). `corpOverrideKeys.ts` only DEFINES `corpKeys`
+// and no longer imports back into this module, so the static import above is
+// acyclic and the registration call here runs after `indexByKey` /
+// `registerOverrideKeys` are initialized (it sits at the end of module load).
+registerOverrideKeys(corpKeys);

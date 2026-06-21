@@ -9,26 +9,20 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CalendarClock, ShieldCheck } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyTableRow } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
-import { NativeSelect } from '@/components/ui/native-select'
+import { Alert } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { Tabs, TabPanel } from '@/components/ui/tabs'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
+import { Tabs } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { getJson, patchJson } from '../lib/api'
-import { formatMoney } from '../lib/formatMoney'
+import { formatMoneyOr } from '../lib/formatMoney'
 import type {
   ReceiptStatus,
   ReturnWarrantyRowView,
@@ -153,7 +147,7 @@ export function ReturnWarrantyPage() {
       </div>
 
       {tab === 'expiring' && (
-        <section className="card mb-4 flex flex-wrap items-center gap-3">
+        <Card className="mb-4 flex flex-wrap items-center gap-3">
           <label htmlFor="expiring-days" className="text-sm">
             Window (days)
           </label>
@@ -168,63 +162,71 @@ export function ReturnWarrantyPage() {
               </option>
             ))}
           </NativeSelect>
-        </section>
+        </Card>
       )}
 
       {err && (
-        <p className="error" role="alert">
+        <Alert variant="error" className="mb-4">
           {err}
-        </p>
+        </Alert>
       )}
 
-      <TabPanel value="active" active={tab} tabsId="return-warranty-tabs">
-        <ReturnTable
-          rows={rows}
-          loading={loading}
-          emptyTitle="No active return windows."
-          emptyDescription="Open a transaction and add a return deadline to track it here."
-          onEdit={setEditing}
-          showReturnDeadline
-          showWarranty
-        />
-      </TabPanel>
+      {tab === 'active' && (
+        <div role="tabpanel">
+          <ReturnTable
+            rows={rows}
+            loading={loading}
+            emptyTitle="No active return windows."
+            emptyDescription="Open a transaction and add a return deadline to track it here."
+            onEdit={setEditing}
+            showReturnDeadline
+            showWarranty
+          />
+        </div>
+      )}
 
-      <TabPanel value="expiring" active={tab} tabsId="return-warranty-tabs">
-        <ReturnTable
-          rows={rows}
-          loading={loading}
-          emptyTitle={`Nothing expiring in the next ${expiringDays} days.`}
-          emptyDescription="Widen the window or check back later."
-          onEdit={setEditing}
-          showReturnDeadline
-          showWarranty={false}
-          highlightExpiringSoon
-        />
-      </TabPanel>
+      {tab === 'expiring' && (
+        <div role="tabpanel">
+          <ReturnTable
+            rows={rows}
+            loading={loading}
+            emptyTitle={`Nothing expiring in the next ${expiringDays} days.`}
+            emptyDescription="Widen the window or check back later."
+            onEdit={setEditing}
+            showReturnDeadline
+            showWarranty={false}
+            highlightExpiringSoon
+          />
+        </div>
+      )}
 
-      <TabPanel value="warranties" active={tab} tabsId="return-warranty-tabs">
-        <ReturnTable
-          rows={rows}
-          loading={loading}
-          emptyTitle="No warranty-covered purchases."
-          emptyDescription="Add a warranty end date to a purchase to track it here."
-          onEdit={setEditing}
-          showReturnDeadline={false}
-          showWarranty
-        />
-      </TabPanel>
+      {tab === 'warranties' && (
+        <div role="tabpanel">
+          <ReturnTable
+            rows={rows}
+            loading={loading}
+            emptyTitle="No warranty-covered purchases."
+            emptyDescription="Add a warranty end date to a purchase to track it here."
+            onEdit={setEditing}
+            showReturnDeadline={false}
+            showWarranty
+          />
+        </div>
+      )}
 
-      <TabPanel value="missing" active={tab} tabsId="return-warranty-tabs">
-        <ReturnTable
-          rows={rows}
-          loading={loading}
-          emptyTitle="No purchases are missing receipts."
-          emptyDescription="Mark a purchase 'Missing' to flag it for follow-up."
-          onEdit={setEditing}
-          showReturnDeadline
-          showWarranty
-        />
-      </TabPanel>
+      {tab === 'missing' && (
+        <div role="tabpanel">
+          <ReturnTable
+            rows={rows}
+            loading={loading}
+            emptyTitle="No purchases are missing receipts."
+            emptyDescription="Mark a purchase 'Missing' to flag it for follow-up."
+            onEdit={setEditing}
+            showReturnDeadline
+            showWarranty
+          />
+        </div>
+      )}
 
       {editing && (
         <EditDialog
@@ -258,7 +260,7 @@ function ReturnTable({
 }) {
   return (
     <Card className="overflow-x-auto p-0">
-      <Table className="table">
+      <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Date</TableHead>
@@ -312,23 +314,24 @@ function RowView({
   showWarranty: boolean
   highlightExpiringSoon?: boolean
 }) {
-  const amountNum = Number(row.amount) || 0
+  const amountNum =
+    row.amount === '' || row.amount == null ? null : Number(row.amount)
   return (
     <TableRow>
       <TableCell>{row.date}</TableCell>
       <TableCell>
         <div>{row.merchant}</div>
         {row.accountName && (
-          <div className="muted text-xs">{row.accountName}</div>
+          <div className="text-xs text-muted-foreground">{row.accountName}</div>
         )}
       </TableCell>
-      <TableCell>{formatMoney(amountNum, row.currency)}</TableCell>
+      <TableCell>{formatMoneyOr(amountNum, row.currency)}</TableCell>
       <TableCell>
         <Badge variant={RECEIPT_STATUS_VARIANT[row.receiptStatus]}>
           {receiptStatusLabel(row.receiptStatus)}
         </Badge>
         {row.hasReceipt && row.receiptStatus !== 'have' && (
-          <div className="muted text-xs mt-1">attachment on file</div>
+          <div className="text-xs text-muted-foreground mt-1">attachment on file</div>
         )}
       </TableCell>
       {showReturnDeadline && (
@@ -343,7 +346,7 @@ function RowView({
               expiringSoon={Boolean(highlightExpiringSoon)}
             />
           ) : (
-            <span className="muted">—</span>
+            <span className="text-sm text-muted-foreground">—</span>
           )}
         </TableCell>
       )}
@@ -358,7 +361,7 @@ function RowView({
               }
             />
           ) : (
-            <span className="muted">—</span>
+            <span className="text-sm text-muted-foreground">—</span>
           )}
         </TableCell>
       )}
@@ -388,7 +391,7 @@ function DeadlineCell({
   const tone = expired
     ? 'text-destructive'
     : soon || expiringSoon
-      ? 'text-amber-600 dark:text-amber-400'
+      ? 'text-warning'
       : ''
   return (
     <div className={tone}>
@@ -489,7 +492,7 @@ function EditDialog({
     >
       <Card className="w-full max-w-md p-5">
         <h2 className="mb-3 text-lg font-semibold">Edit return / warranty</h2>
-        <p className="muted text-sm mb-4">
+        <p className="text-sm text-muted-foreground mb-4">
           {row.merchant} · {row.date}
         </p>
         <form onSubmit={submit} className="flex flex-col gap-3">

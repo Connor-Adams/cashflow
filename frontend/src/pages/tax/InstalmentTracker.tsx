@@ -1,5 +1,9 @@
 import { useState } from 'react';
+import { Button } from '@connor-adams/designsystem'
 import { useInstalments } from '../../hooks/useInstalments';
+import { fmtCurrency } from './util/format';
+import {
+  Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 
 type Props = {
   year: number;
@@ -58,31 +62,31 @@ export function InstalmentTracker({ year }: Props) {
       {items.length === 0 ? (
         <p className="muted">No instalment payments recorded for {year}.</p>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Paid On</th>
-              <th>Quarter</th>
-              <th>Amount</th>
-              <th>Notes</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Paid On</TableHead>
+              <TableHead>Quarter</TableHead>
+              <TableHead className="text-right">Amount</TableHead>
+              <TableHead>Notes</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {items.map((item) => (
-              <tr key={item.id}>
-                <td>{item.paidOn}</td>
-                <td>{item.quarter != null ? `Q${item.quarter}` : 'Other'}</td>
-                <td>${parseFloat(item.amount).toFixed(2)}</td>
-                <td>{item.notes ?? '—'}</td>
-              </tr>
+              <TableRow key={item.id}>
+                <TableCell>{item.paidOn}</TableCell>
+                <TableCell>{item.quarter != null ? `Q${item.quarter}` : 'Other'}</TableCell>
+                <TableCell className="text-right tabular-nums">{fmtCurrency(item.amount)}</TableCell>
+                <TableCell>{item.notes ?? '—'}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
 
-      <form onSubmit={handleSubmit} style={{ marginTop: '1rem' }}>
+      <form onSubmit={handleSubmit} className="mt-4">
         <h4>Record a payment</h4>
-        <div style={{ display: 'grid', gap: '0.5rem', maxWidth: '400px' }}>
+        <div className="grid gap-2 max-w-sm">
           <label>
             Quarter
             <select value={quarter} onChange={(e) => setQuarter(e.target.value)}>
@@ -122,9 +126,9 @@ export function InstalmentTracker({ year }: Props) {
             />
           </label>
           {submitError && <p className="error">{submitError}</p>}
-          <button type="submit" disabled={submitting}>
+          <Button type="submit" disabled={submitting}>
             {submitting ? 'Saving…' : 'Add payment'}
-          </button>
+          </Button>
         </div>
       </form>
     </div>

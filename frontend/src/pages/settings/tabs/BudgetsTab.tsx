@@ -2,21 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Edit3, Plus, Trash2 } from 'lucide-react'
 import { CategoryIcon } from '../../../components/CategoryIcon'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { useConfirm } from '@/components/ui/dialog'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { NativeSelect } from '@/components/ui/native-select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postJson } from '../../../lib/api'
 import { formatMoney } from '../../../lib/formatMoney'
@@ -95,7 +89,7 @@ function AlertThresholdChips({
 }) {
   return (
     <fieldset className="mt-1">
-      <legend className="text-sm font-medium text-gray-700 dark:text-gray-300">
+      <legend className="text-sm font-medium text-foreground">
         Alert me at
       </legend>
       <div className="flex flex-wrap gap-2 mt-1">
@@ -107,8 +101,8 @@ function AlertThresholdChips({
               htmlFor={`${idPrefix}-threshold-${threshold}`}
               className={
                 isOn
-                  ? 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200 cursor-pointer'
-                  : 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 cursor-pointer'
+                  ? 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-success-bg text-positive cursor-pointer'
+                  : 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-muted text-muted-foreground cursor-pointer'
               }
             >
               <input
@@ -208,6 +202,7 @@ export function BudgetsTab() {
   const confirm = useConfirm()
 
   const [budgets, setBudgets] = useState<Budget[]>([])
+  const [loading, setLoading] = useState(true)
   const [budgetCategoryHints, setBudgetCategoryHints] = useState<string[]>([])
   const [budgetForm, setBudgetForm] = useState<BudgetFormState>(emptyBudgetForm)
   const [budgetSubmitting, setBudgetSubmitting] = useState(false)
@@ -221,6 +216,8 @@ export function BudgetsTab() {
       setBudgets(resp.data)
     } catch {
       // Errors surfaced via toast in handlers
+    } finally {
+      setLoading(false)
     }
   }, [])
 
@@ -411,14 +408,13 @@ export function BudgetsTab() {
             </p>
           </div>
         </div>
-        {sortedBudgets.length === 0 ? (
+        {!loading && sortedBudgets.length === 0 ? (
           <EmptyState
             title="No budgets yet."
             description="Add one to track progress with pacing comparison."
           />
         ) : (
-          <div className="tableWrap">
-            <Table className="table">
+          <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Category</TableHead>
@@ -430,14 +426,18 @@ export function BudgetsTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sortedBudgets.map((budget) => {
+                {loading
+                  ? Array.from({ length: 6 }).map((_, i) => (
+                      <SkeletonRow key={`budgets-skeleton-${i}`} cols={6} />
+                    ))
+                  : sortedBudgets.map((budget) => {
                   const isEditing = budgetEditId === budget.id
                   if (isEditing) {
                     return (
                       <TableRow key={budget.id}>
                         <TableCell colSpan={6}>
                           <form onSubmit={saveBudgetEdit}>
-                            <div className="formGrid">
+                            <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
                               <Label htmlFor={`settings-budget-edit-category-${budget.id}`}>
                                 Category
                                 <Input
@@ -614,13 +614,12 @@ export function BudgetsTab() {
                       </TableCell>
                     </TableRow>
                   )
-                })}
+                    })}
               </TableBody>
             </Table>
-          </div>
         )}
         <form onSubmit={createBudget}>
-          <div className="formGrid">
+          <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
             <Label htmlFor="settings-budget-category">
               Category
               <NativeSelect

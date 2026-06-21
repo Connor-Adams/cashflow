@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Card } from '@/components/ui/card'
+import { Card } from '@connor-adams/designsystem'
 import { getJson } from '../../lib/api'
 import { getAppConfig } from '../../lib/appConfig'
 import { formatMoney } from '../../lib/formatMoney'

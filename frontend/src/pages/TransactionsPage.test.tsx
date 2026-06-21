@@ -31,6 +31,7 @@ beforeEach(() => {
     if (path === '/api/transactions/category-hints') return { categories: [] }
     if (path === '/api/ai/status') return { openai: false }
     if (path === '/api/contacts') return []
+    if (path === '/api/categories/tree') return []
     return null
   })
 })
@@ -141,6 +142,7 @@ describe('TransactionsPage transaction status controls', () => {
       if (path === '/api/transactions/category-hints') return { categories: [] }
       if (path === '/api/ai/status') return { openai: false }
       if (path === '/api/contacts') return []
+      if (path === '/api/categories/tree') return []
       return null
     })
     renderPage()
@@ -162,6 +164,7 @@ describe('TransactionsPage transaction status controls', () => {
       if (path === '/api/transactions/category-hints') return { categories: [] }
       if (path === '/api/ai/status') return { openai: false }
       if (path === '/api/contacts') return []
+      if (path === '/api/categories/tree') return []
       return null
     })
     renderPage()
@@ -177,6 +180,178 @@ describe('TransactionsPage transaction status controls', () => {
         status: 'cleared',
       }),
     )
+  })
+})
+
+describe('TransactionsPage tax treatment override control', () => {
+  it('changing tax treatment override includes it in the PATCH call', async () => {
+    vi.mocked(api.getJson).mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/transactions?')) {
+        return {
+          data: [
+            makeTransaction({
+              id: 42,
+              merchantClean: 'Tax Test Merchant',
+              status: 'posted',
+              taxTreatmentOverride: null,
+            }),
+          ],
+          page: 1,
+          pageSize: 25,
+          total: 1,
+        }
+      }
+      if (path === '/api/transactions/category-hints') return { categories: [] }
+      if (path === '/api/ai/status') return { openai: false }
+      if (path === '/api/contacts') return []
+      if (path === '/api/categories/tree') return []
+      return null
+    })
+    vi.mocked(api.patchJson).mockResolvedValue({})
+    renderPage()
+
+    const select = await screen.findByRole('combobox', {
+      name: /tax treatment override for transaction 42/i,
+    })
+    await userEvent.selectOptions(select, 'rrsp_contribution')
+
+    const saveButton = screen.getByRole('button', { name: /^save$/i })
+    await userEvent.click(saveButton)
+
+    await waitFor(() => {
+      expect(api.patchJson).toHaveBeenCalledWith(
+        '/api/transactions/42',
+        expect.objectContaining({ taxTreatmentOverride: 'rrsp_contribution' }),
+      )
+    })
+  })
+})
+
+describe('TransactionsPage share override percent units', () => {
+  function mockOneTransaction(overrides: Partial<Transaction> = {}) {
+    vi.mocked(api.getJson).mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/transactions?')) {
+        return {
+          data: [
+            makeTransaction({
+              id: 7,
+              merchantClean: 'Split Merchant',
+              status: 'posted',
+              ...overrides,
+            }),
+          ],
+          page: 1,
+          pageSize: 25,
+          total: 1,
+        }
+      }
+      if (path === '/api/transactions/category-hints') return { categories: [] }
+      if (path === '/api/ai/status') return { openai: false }
+      if (path === '/api/contacts') return []
+      if (path === '/api/categories/tree') return []
+      return null
+    })
+  }
+
+  it('displays a stored fraction override as a percentage in the row editor', async () => {
+    mockOneTransaction({ pctMeOverride: 0.25, pctPartnerOverride: 0.75 })
+    renderPage()
+    const meInput = await screen.findByLabelText(/my share override for transaction 7/i)
+    const ptnInput = screen.getByLabelText(/partner share override for transaction 7/i)
+    expect(meInput).toHaveValue('25')
+    expect(ptnInput).toHaveValue('75')
+  })
+
+  it('sends a 0-1 fraction when a percentage is typed in the row editor', async () => {
+    mockOneTransaction()
+    vi.mocked(api.patchJson).mockResolvedValue({})
+    renderPage()
+    const meInput = await screen.findByLabelText(/my share override for transaction 7/i)
+    await userEvent.type(meInput, '50')
+    await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    await waitFor(() =>
+      expect(api.patchJson).toHaveBeenCalledWith(
+        '/api/transactions/7',
+        expect.objectContaining({ pctMeOverride: 0.5 }),
+      ),
+    )
+  })
+
+  it('does not save an out-of-range row percentage', async () => {
+    mockOneTransaction()
+    renderPage()
+    const meInput = await screen.findByLabelText(/my share override for transaction 7/i)
+    await userEvent.type(meInput, '150')
+    await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    expect(api.patchJson).not.toHaveBeenCalled()
+  })
+
+  it('converts the bulk % me input from percent to fraction', async () => {
+    mockOneTransaction()
+    vi.mocked(api.postJson).mockResolvedValue({ updated: 1 })
+    renderPage()
+    await userEvent.click(await screen.findByLabelText(/select transaction 7/i))
+    await userEvent.type(screen.getByLabelText('% me'), '50')
+    await userEvent.click(screen.getByRole('button', { name: /apply to selected/i }))
+    await waitFor(() =>
+      expect(api.postJson).toHaveBeenCalledWith(
+        '/api/transactions/bulk-patch',
+        expect.objectContaining({
+          patch: expect.objectContaining({ pctMeOverride: 0.5 }),
+        }),
+      ),
+    )
+  })
+
+  it('disables bulk apply for an out-of-range percentage', async () => {
+    mockOneTransaction()
+    renderPage()
+    await userEvent.click(await screen.findByLabelText(/select transaction 7/i))
+    await userEvent.type(screen.getByLabelText('% me'), '150')
+    expect(screen.getByRole('button', { name: /apply to selected/i })).toBeDisabled()
+  })
+})
+
+describe('TransactionsPage enrichment deep-link filters', () => {
+  it('sends enrichment filter from the URL and shows a clearable chip', async () => {
+    render(
+      <MemoryRouter initialEntries={['/transactions?autoConfidence=low']}>
+        <ToastProvider>
+          <TransactionsPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+    // Wait for the list request that carries autoConfidence=low
+    await waitFor(() => {
+      const calls = vi
+        .mocked(api.getJson)
+        .mock.calls.filter((c) => String(c[0]).startsWith('/api/transactions?'))
+      expect(
+        calls.some((call) => {
+          const url = new URL(String(call[0]), 'http://x')
+          return url.searchParams.get('autoConfidence') === 'low'
+        }),
+      ).toBe(true)
+    })
+    // A chip labelled "Confidence: low" should be visible
+    expect(screen.getByText(/confidence:\s*low/i)).toBeInTheDocument()
+
+    // Clicking Clear should remove the chip
+    await userEvent.click(screen.getByRole('button', { name: /^clear$/i }))
+    await waitFor(() =>
+      expect(screen.queryByText(/confidence:\s*low/i)).not.toBeInTheDocument(),
+    )
+  })
+})
+
+describe('TransactionsPage empty state (#799)', () => {
+  it('shows the "No transactions yet" EmptyState with an Import CTA when there is no data', async () => {
+    renderPage()
+    expect(
+      await screen.findByText('No transactions yet'),
+    ).toBeInTheDocument()
+    const cta = screen.getByRole('link', { name: /import a statement/i })
+    expect(cta).toHaveAttribute('href', '/import')
   })
 })
 
@@ -204,9 +379,12 @@ function makeTransaction(
     autoCategory: null,
     categoryOverride: null,
     finalCategory: null,
+    categoryOverrideId: null,
+    finalCategoryId: null,
     autoBusiness: null,
     businessOverride: null,
     finalBusiness: false,
+    taxTreatmentOverride: null,
     autoSplitType: null,
     splitOverride: null,
     finalSplitType: 'me',

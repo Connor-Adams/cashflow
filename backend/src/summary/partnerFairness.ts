@@ -46,7 +46,20 @@ export type SharedTxnRow = {
    * any row where the import pipeline did not surface a counterparty.
    */
   counterpartyContactId: number | null;
+  /** transactions.created_by_user_id — the payer in the single-payer model. Drives viewer-relative projection. NULL on legacy rows. */
+  payerUserId: number | null;
+  /**
+   * Controller-set sharedness flag. `buildFairnessByCurrency`/`buildFairnessMonthly`
+   * project rows for the viewer, which can drive the displayed `partnerShare` to 0
+   * on a still-shared row (stored myShare=0 → non-payer view). The aggregation
+   * helpers honour this flag so a shared row is never dropped on its projected
+   * value. Direct callers that omit it fall back to `partnerShare !== 0`.
+   */
+  shared?: boolean;
 };
+
+/** Direct partner transfer amounts per currency (in = partner sent me, out = I sent partner). */
+export type PartnerTransferTotals = { in: number; out: number };
 
 /** Settlement summary keyed by (contactId, currency). Mirrors `partnerMath.SettlementSummary`. */
 export type SettlementTotals = {
@@ -127,9 +140,16 @@ export type FairnessByCurrency = {
    * lunch / side-gig / family-gift rows the toggle defaults to excluding.
    */
   nonPartnerInflows: number;
+  /** Direct partner transfers folded into balance (in = partner sent me, out = I sent partner). */
+  partnerTransfers: PartnerTransferTotals;
   /**
-   * Cumulative settlement-adjusted balance: gross + (iPaid - partnerPaid).
-   * Positive: partner owes me. Negative: I owe partner.
+   * Cumulative settlement-adjusted balance: sum of per-row viewer-relative
+   * balance contributions + (iPaid − partnerPaid). Each shared row contributes
+   * `payer==viewer ? −partnerShare : +partnerShare` (see `projectRow`). In the
+   * owner / no-viewer POV this collapses to `−partnerShareTotal + (iPaid −
+   * partnerPaid)` — the original single-payer formula. Spend is stored negative,
+   * so the payer's `−partnerShare` yields the positive "owed to me" value.
+   * Positive: partner owes me (this viewer). Negative: I owe partner.
    */
   balance: number;
   /** Direction is computed at sub-cent precision so 0.001 renders as "even". */
@@ -153,7 +173,12 @@ export type FairnessMonthlyPoint = {
   partnerShare: number;
   /** Total settlement movement in this month (iPaid - partnerPaid). */
   settlementDelta: number;
-  /** Net change to outstanding balance in this month: partnerShare + settlementDelta. */
+  /**
+   * Net change to outstanding balance in this month: sum of per-row viewer-relative
+   * balance contributions + settlementDelta (see `projectRow`). In the owner /
+   * no-viewer POV this equals `−partnerShare + settlementDelta`. Spend is stored
+   * negative; the payer's contribution yields the "owed to me" delta for the month.
+   */
   netDelta: number;
   /** Running cumulative balance through the END of this month. */
   cumulativeBalance: number;
@@ -205,7 +230,7 @@ export function aggregateCategoryBreakdown(
 ): FairnessCategoryBreakdown[] {
   const byCategory = new Map<string, FairnessCategoryBreakdown>();
   for (const r of rows) {
-    if (r.partnerShare === 0) continue;
+    if (!(r.shared ?? r.partnerShare !== 0)) continue;
     const key = r.category ?? 'Uncategorized';
     const bucket =
       byCategory.get(key) ??
@@ -238,7 +263,7 @@ export function topLargestShared(
   rows: SharedTxnRow[],
 ): FairnessLargestTransaction[] {
   return rows
-    .filter((r) => r.partnerShare !== 0)
+    .filter((r) => r.shared ?? r.partnerShare !== 0)
     .slice()
     .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
     .slice(0, TOP_LARGEST_LIMIT)
@@ -276,7 +301,40 @@ export function topLargestShared(
 export type FairnessOptions = {
   partnerContactIds?: Set<number>;
   excludeNonPartnerInflows?: boolean;
+  /**
+   * When set, project shares relative to this user: a row's consumption
+   * display swaps when viewerUserId !== payerUserId, and balance uses the
+   * per-row contribution `(payer==viewer ? -partnerShare : +partnerShare)`.
+   * When null/undefined, behaves as owner POV (legacy: me = payer).
+   */
+  viewerUserId?: number | null;
+  partnerTransfersByCurrency?: Map<string, PartnerTransferTotals>;
 };
+
+/**
+ * Project a stored (owner-POV) row to the viewer's perspective.
+ * - `shared` is computed from the STORED partnerShare (viewer-independent):
+ *   a row is shared iff the non-payer owes a non-zero amount.
+ * - `myShare`/`partnerShare` are consumption portions, swapped when the
+ *   viewer is not the payer.
+ * - `balanceContribution` is the signed receivable for the viewer:
+ *   the payer is owed `partnerShare`; the non-payer owes it. Spend is stored
+ *   negative, so `-partnerShare` yields the positive "owed to me" figure.
+ */
+function projectRow(
+  row: SharedTxnRow,
+  viewerUserId: number | null | undefined,
+): { shared: boolean; myShare: number; partnerShare: number; balanceContribution: number } {
+  const shared = row.partnerShare !== 0;
+  const isPayer =
+    viewerUserId == null || row.payerUserId == null || row.payerUserId === viewerUserId;
+  return {
+    shared,
+    myShare: isPayer ? row.myShare : row.partnerShare,
+    partnerShare: isPayer ? row.partnerShare : row.myShare,
+    balanceContribution: isPayer ? -row.partnerShare : row.partnerShare,
+  };
+}
 
 /**
  * #375 — classify a single shared row as a partner inflow or non-partner
@@ -298,6 +356,55 @@ function classifyInflow(
 }
 
 /**
+ * Project one settlement row's direction to the viewer's perspective. A
+ * settlement's `direction` is recorded relative to `recordedByUserId` ("i" =
+ * that user). When the viewer is a DIFFERENT user, "i_paid_partner" reads as
+ * "partner_paid_me" and vice-versa — so iPaid/partnerPaid swap. When viewer or
+ * recordedBy is unknown (legacy / no auth), no flip (owner POV).
+ */
+export function projectSettlementContribution(
+  direction: 'i_paid_partner' | 'partner_paid_me',
+  amount: number,
+  recordedByUserId: number | null,
+  viewerUserId: number | null | undefined,
+): { iPaid: number; partnerPaid: number } {
+  const flip =
+    viewerUserId != null && recordedByUserId != null && recordedByUserId !== viewerUserId;
+  const iPaidRaw = direction === 'i_paid_partner' ? amount : 0;
+  const partnerPaidRaw = direction === 'partner_paid_me' ? amount : 0;
+  return flip
+    ? { iPaid: partnerPaidRaw, partnerPaid: iPaidRaw }
+    : { iPaid: iPaidRaw, partnerPaid: partnerPaidRaw };
+}
+
+/**
+ * Per-currency direct partner transfers: money the partner sent me (`in`,
+ * amount>0) vs money I sent the partner (`out`, amount<0), over rows where the
+ * counterparty is a partner Contact AND partnerShare === 0 (pure transfers;
+ * shared-split rows stay in the fairness path to avoid double-counting). Non-loan
+ * categories are intentionally NOT excluded — cash between partners is real
+ * settlement money.
+ */
+export function computePartnerTransferDelta(
+  rows: SharedTxnRow[],
+  partnerContactIds: Set<number>,
+): Map<string, PartnerTransferTotals> {
+  const out = new Map<string, PartnerTransferTotals>();
+  for (const r of rows) {
+    const cid = r.counterpartyContactId;
+    if (cid == null || !partnerContactIds.has(cid)) continue;
+    if (r.partnerShare !== 0) continue;
+    const n = r.amount;
+    if (!Number.isFinite(n) || n === 0) continue;
+    const acc = out.get(r.currency) ?? { in: 0, out: 0 };
+    if (n < 0) acc.out += -n;
+    else acc.in += n;
+    out.set(r.currency, acc);
+  }
+  return out;
+}
+
+/**
  * Build the per-currency fairness summary used by `GET /api/partner/fairness`.
  *
  * @param rows           Raw shared transaction rows (already scoped to household + date filter)
@@ -315,6 +422,8 @@ export function buildFairnessByCurrency(
 ): FairnessByCurrency[] {
   const partnerContactIds = options.partnerContactIds ?? new Set<number>();
   const excludeNonPartnerInflows = options.excludeNonPartnerInflows ?? false;
+  const viewerUserId = options.viewerUserId;
+  const partnerTransfers = options.partnerTransfersByCurrency ?? new Map<string, PartnerTransferTotals>();
 
   const byCurrency = new Map<string, FairnessByCurrency>();
 
@@ -323,16 +432,28 @@ export function buildFairnessByCurrency(
   // (sharedSpendTotal, balance, categoryBreakdown, largestShared) ignores
   // them. We still tally the inflow splits separately on the unfiltered
   // input below, so the user can always see what they're hiding.
+  //
+  // Rows are pushed PROJECTED to the viewer (myShare/partnerShare swapped when
+  // the viewer is not the payer) so all downstream display reads the viewer's
+  // values. Sharedness uses the STORED partnerShare (viewer-independent), and
+  // the per-row balance contribution is accumulated separately — balance is
+  // NOT derivable from the swapped totals.
   const rowsByCurrency = new Map<string, SharedTxnRow[]>();
+  const contributionsByCurrency = new Map<string, number>();
   for (const r of rows) {
-    if (r.partnerShare === 0) continue;
+    const p = projectRow(r, viewerUserId);
+    if (!p.shared) continue;
     if (excludeNonPartnerInflows) {
       const kind = classifyInflow(r, partnerContactIds);
       if (kind === 'non_partner') continue;
     }
     const list = rowsByCurrency.get(r.currency) ?? [];
-    list.push(r);
+    list.push({ ...r, myShare: p.myShare, partnerShare: p.partnerShare, shared: p.shared });
     rowsByCurrency.set(r.currency, list);
+    contributionsByCurrency.set(
+      r.currency,
+      (contributionsByCurrency.get(r.currency) ?? 0) + p.balanceContribution,
+    );
   }
 
   // Tally partner/non-partner inflows on the unfiltered input so the UI can
@@ -357,18 +478,20 @@ export function buildFairnessByCurrency(
     settlementByCurrency.set(s.currency, cur);
   }
 
-  // Union currencies across rows, inflows, and settlements so a currency
-  // with only one of those still surfaces.
+  // Union currencies across rows, inflows, settlements, and transfers so a
+  // currency with only one of those still surfaces.
   const allCurrencies = new Set<string>([
     ...rowsByCurrency.keys(),
     ...inflowsByCurrency.keys(),
     ...settlementByCurrency.keys(),
+    ...partnerTransfers.keys(),
   ]);
 
   for (const currency of allCurrencies) {
     const list = rowsByCurrency.get(currency) ?? [];
     const settlement = settlementByCurrency.get(currency) ?? { iPaid: 0, partnerPaid: 0 };
     const inflowSplit = inflowsByCurrency.get(currency) ?? { partner: 0, nonPartner: 0 };
+    const tr = partnerTransfers.get(currency) ?? { in: 0, out: 0 };
     let sharedSpendTotal = 0;
     let myShareTotal = 0;
     let partnerShareTotal = 0;
@@ -386,7 +509,11 @@ export function buildFairnessByCurrency(
         currentMonthSharedSpend += Math.abs(r.amount);
       }
     }
-    const balance = partnerShareTotal + (settlement.iPaid - settlement.partnerPaid);
+    // Viewer-relative shared-row contribution (= −partnerShareTotal in owner POV)
+    // + settlements + main's direct partner-transfer delta.
+    const rowsContribution = contributionsByCurrency.get(currency) ?? 0;
+    const balance =
+      rowsContribution + (settlement.iPaid - settlement.partnerPaid) + (tr.out - tr.in);
     const paidMore: FairnessPaidMore = {
       // What I covered = my-share on shared rows (purchases). Positive number for display.
       youCovered: Math.max(0, -myShareTotal),
@@ -402,6 +529,7 @@ export function buildFairnessByCurrency(
       currentMonthSharedSpend,
       partnerInflows: inflowSplit.partner,
       nonPartnerInflows: inflowSplit.nonPartner,
+      partnerTransfers: tr,
       balance,
       direction: directionFromBalance(balance),
       paidMore,
@@ -436,17 +564,21 @@ export function buildFairnessMonthly(
 ): FairnessMonthlyPoint[] {
   const partnerContactIds = options.partnerContactIds ?? new Set<number>();
   const excludeNonPartnerInflows = options.excludeNonPartnerInflows ?? false;
+  const viewerUserId = options.viewerUserId;
 
   type Acc = {
     sharedSpend: number;
     myShare: number;
     partnerShare: number;
     settlementDelta: number;
+    /** Sum of per-row viewer-relative balance contributions (netDelta base). */
+    contribution: number;
   };
   const byKey = new Map<string, Acc>(); // key: `${currency}\0${month}`
 
   for (const r of rows) {
-    if (r.partnerShare === 0) continue;
+    const p = projectRow(r, viewerUserId);
+    if (!p.shared) continue;
     if (excludeNonPartnerInflows) {
       const kind = classifyInflow(r, partnerContactIds);
       if (kind === 'non_partner') continue;
@@ -455,10 +587,11 @@ export function buildFairnessMonthly(
     const key = `${r.currency}\0${month}`;
     const acc =
       byKey.get(key) ??
-      ({ sharedSpend: 0, myShare: 0, partnerShare: 0, settlementDelta: 0 } satisfies Acc);
+      ({ sharedSpend: 0, myShare: 0, partnerShare: 0, settlementDelta: 0, contribution: 0 } satisfies Acc);
     acc.sharedSpend += r.amount;
-    acc.myShare += r.myShare;
-    acc.partnerShare += r.partnerShare;
+    acc.myShare += p.myShare;
+    acc.partnerShare += p.partnerShare;
+    acc.contribution += p.balanceContribution;
     byKey.set(key, acc);
   }
 
@@ -466,8 +599,25 @@ export function buildFairnessMonthly(
     const key = `${s.currency}\0${s.month}`;
     const acc =
       byKey.get(key) ??
-      ({ sharedSpend: 0, myShare: 0, partnerShare: 0, settlementDelta: 0 } satisfies Acc);
+      ({ sharedSpend: 0, myShare: 0, partnerShare: 0, settlementDelta: 0, contribution: 0 } satisfies Acc);
     acc.settlementDelta += s.iPaid - s.partnerPaid;
+    byKey.set(key, acc);
+  }
+
+  // Partner direct transfers behave like settlements (same (out − in) fold as
+  // the headline balance): one `+= -n` handles both directions.
+  for (const r of rows) {
+    const cid = r.counterpartyContactId;
+    if (cid == null || !partnerContactIds.has(cid)) continue;
+    if (r.partnerShare !== 0) continue;
+    const n = r.amount;
+    if (!Number.isFinite(n) || n === 0) continue;
+    const month = r.date.slice(0, 7);
+    const key = `${r.currency}\0${month}`;
+    const acc =
+      byKey.get(key) ??
+      ({ sharedSpend: 0, myShare: 0, partnerShare: 0, settlementDelta: 0, contribution: 0 } satisfies Acc);
+    acc.settlementDelta += -n;
     byKey.set(key, acc);
   }
 
@@ -486,7 +636,7 @@ export function buildFairnessMonthly(
   const runningByCurrency = new Map<string, number>();
   const points: FairnessMonthlyPoint[] = [];
   for (const { currency, month, acc } of entries) {
-    const netDelta = acc.partnerShare + acc.settlementDelta;
+    const netDelta = acc.contribution + acc.settlementDelta;
     const running = (runningByCurrency.get(currency) ?? 0) + netDelta;
     runningByCurrency.set(currency, running);
     points.push({

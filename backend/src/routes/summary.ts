@@ -1,14 +1,24 @@
 import { Router } from 'express';
 import type { Request } from 'express';
 import { Op } from 'sequelize';
-import { Account, Contact, PartnerSettlement, Transaction, sequelize } from '../models';
+import {
+  Account,
+  Contact,
+  PartnerSettlement,
+  Reimbursement,
+  Transaction,
+  sequelize,
+} from '../models';
 import { num } from '../util/numbers';
 import {
   aggregateDashboard,
   type AccountRow,
   type SummaryTxnRow,
 } from '../summary/aggregateDashboard';
-import { loadItemAllocationContext } from '../summary/loadItemAllocations';
+import {
+  loadItemAllocationContext,
+  type ItemAllocationContext,
+} from '../summary/loadItemAllocations';
 import {
   aggregateMonthly,
   type MonthlyTxnRow,
@@ -18,7 +28,58 @@ import {
   type RawPartnerRow,
   type SettlementSummary,
 } from '../summary/partnerMath';
+import {
+  computeOwedBack,
+  realCostOf,
+  computePeerLending,
+  type OwedBackRow,
+} from '../summary/periodInsight';
 import { householdWhere, visibleAccountWhere, visibleTransactionWhere } from '../auth/scope';
+import { currentAuth } from '../auth/middleware';
+import { loadCategoryTree, buildRollupRowsByCurrency } from '../categories/rollup';
+import type { PeriodInsightResp, PeriodInsightCurrency } from '@cashflow/shared';
+
+/**
+ * Build a per-currency raw spend map from points that each carry a `currency`,
+ * `categoryId`, and `sumAmount`. Skips null categoryIds. Uses Math.abs so that
+ * credit rows don't cancel out spend. The result is:
+ *   Map<currency, Map<categoryId, absSpend>>
+ * suitable for passing to `buildRollupRowsByCurrency`.
+ */
+function rawSpendByCurrencyCat(
+  points: Array<{ currency: string; categoryId: number | null; sumAmount: number }>,
+): Map<string, Map<number, number>> {
+  const outer = new Map<string, Map<number, number>>();
+  for (const p of points) {
+    if (p.categoryId == null) continue;
+    let inner = outer.get(p.currency);
+    if (!inner) { inner = new Map(); outer.set(p.currency, inner); }
+    inner.set(p.categoryId, (inner.get(p.categoryId) ?? 0) + Math.abs(p.sumAmount));
+  }
+  return outer;
+}
+
+/** One window's inclusive ISO date range. */
+type DateRange = { from: string; to: string };
+
+/** Shape gate for an ISO calendar date string `YYYY-MM-DD`. */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * A real `YYYY-MM-DD` calendar date: passes the shape gate AND round-trips
+ * through `Date.UTC` to its own components (so `2026-13-99` — shape-valid but
+ * an impossible month/day — is rejected). Returns false for any non-string.
+ */
+function isValidIsoDate(s: string): boolean {
+  if (!ISO_DATE.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return (
+    dt.getUTCFullYear() === y &&
+    dt.getUTCMonth() === m - 1 &&
+    dt.getUTCDate() === d
+  );
+}
 
 const router = Router();
 
@@ -49,6 +110,7 @@ router.get('/dashboard', async (req, res, next) => {
           'date',
           'currency',
           'finalCategory',
+          'finalCategoryId', // B2: finalCategoryId selected for rollup
           'finalBusiness',
           'finalSplitType',
           'merchantRaw',
@@ -78,6 +140,14 @@ router.get('/dashboard', async (req, res, next) => {
       rows as unknown as SummaryTxnRow[],
       accountById,
       itemContext,
+    );
+
+    const householdId = currentAuth(req).household.id;
+    // byCategory fans one category across multiple buckets (currency\0category\0business\0split);
+    // re-sum per (currency, categoryId) before rolling up so totals stay currency-scoped.
+    const categoryTree = buildRollupRowsByCurrency(
+      rawSpendByCurrencyCat(Array.from(aggregates.byCategory.values())),
+      await loadCategoryTree(householdId),
     );
 
     res.json({
@@ -110,7 +180,212 @@ router.get('/dashboard', async (req, res, next) => {
           a.date === b.date ? Math.abs(b.amount) - Math.abs(a.amount) : b.date.localeCompare(a.date)
         )
         .slice(0, 12),
+      categoryTree,
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ───────────────────────── /period-insight helpers ─────────────────────────
+
+/**
+ * Empty item-allocation context. The period-insight aggregations classify
+ * net-spend at the transaction grain (not item grain), so no order/item
+ * allocation is needed — pass empty maps to `aggregateDashboard`.
+ */
+const EMPTY_ITEM_CONTEXT: ItemAllocationContext = {
+  linksByTxn: new Map(),
+  ordersById: new Map(),
+  itemsByOrder: new Map(),
+};
+
+/** Row shape loaded for the period window: the SummaryTxnRow fields
+ *  `aggregateDashboard` needs, plus the owed-back fields. `accountType` is
+ *  stitched on from the account map after loading. */
+type PeriodRow = SummaryTxnRow &
+  OwedBackRow & {
+    accountId: number;
+    partnerShareAmount: string | null;
+    accountType?: string | null;
+    counterpartyContactId: number | null;
+  };
+
+/**
+ * Load the in-range, household-scoped, optionally currency-filtered transaction
+ * rows for one window. Selects the full attribute set `aggregateDashboard`
+ * consumes so the canonical netSpend matches `/dashboard` exactly.
+ */
+async function loadPeriodRows(
+  req: Request,
+  range: DateRange,
+  currency: string | null,
+): Promise<PeriodRow[]> {
+  const where: Record<string, unknown> = {
+    ...visibleTransactionWhere(req),
+    date: { [Op.between]: [range.from, range.to] },
+  };
+  if (currency) where.currency = currency;
+  const rows = await Transaction.findAll({
+    where,
+    attributes: [
+      'id',
+      'accountId',
+      'date',
+      'currency',
+      'finalCategory',
+      'finalCategoryId', // B2: finalCategoryId selected for future rollup
+      'finalBusiness',
+      'finalSplitType',
+      'merchantRaw',
+      'merchantClean',
+      'merchantCanonical',
+      'amount',
+      'businessAmount',
+      'partnerShareAmount',
+      'reviewFlag',
+      'txnType',
+      'linkedTransactionId',
+      'counterpartyContactId',
+    ],
+    raw: true,
+  });
+  return rows as unknown as PeriodRow[];
+}
+
+/** Stitch `accountType` onto each loaded row from the account map. Kept so the
+ *  period rows carry the account's type alongside the owed-back fields. */
+function withAccountType(
+  rows: PeriodRow[],
+  accountById: Map<number, AccountRow>,
+): PeriodRow[] {
+  for (const r of rows) {
+    r.accountType = accountById.get(r.accountId)?.accountType ?? null;
+  }
+  return rows;
+}
+
+/**
+ * Sum the reimbursable claim amount per transaction for claims whose source
+ * transaction is dated in the range (ANY status — owedBack is a flow counted
+ * regardless of repayment). Joined via the `transaction` association.
+ */
+async function loadReimbursableByTxn(
+  req: Request,
+  range: DateRange,
+  currency: string | null,
+): Promise<Map<number, number>> {
+  const rows = await Reimbursement.findAll({
+    where: { ...householdWhere(req) },
+    attributes: ['transactionId', 'amount'],
+    include: [
+      {
+        model: Transaction,
+        as: 'transaction',
+        attributes: [],
+        where: {
+          ...visibleTransactionWhere(req),
+          date: { [Op.between]: [range.from, range.to] },
+          ...(currency ? { currency } : {}),
+        },
+        required: true,
+      },
+    ],
+    raw: true,
+  });
+  const map = new Map<number, number>();
+  for (const r of rows as unknown as Array<{ transactionId: number; amount: string }>) {
+    const amt = Math.abs(num(r.amount) ?? 0);
+    map.set(r.transactionId, (map.get(r.transactionId) ?? 0) + amt);
+  }
+  return map;
+}
+
+/**
+ * GET /api/summary/period-insight — PERIOD-SCOPED decomposition of net-spend
+ * into realCost (true consumption) vs owedBack (loaned out this period), plus a
+ * "where the money moved this period" breakdown (spend / credits / income /
+ * payments). No cross-period comparison, no all-time outstanding stock, no
+ * per-category drill-down — everything is computed over the single requested
+ * window. Pure helpers live in summary/periodInsight.ts.
+ */
+router.get('/period-insight', async (req, res, next) => {
+  try {
+    const currency =
+      typeof req.query.currency === 'string' && req.query.currency
+        ? req.query.currency.toUpperCase().slice(0, 3)
+        : null;
+    const from = String(req.query.dateFrom ?? '');
+    const to = String(req.query.dateTo ?? '');
+    if (!from || !to) {
+      res.status(400).json({ error: 'dateFrom and dateTo are required' });
+      return;
+    }
+    // Date-shape guard: reject anything that is not a real `YYYY-MM-DD`
+    // calendar date (rejects both wrong shape and impossible dates like
+    // 2026-13-99). Replaces the old range-validation path.
+    if (!isValidIsoDate(from) || !isValidIsoDate(to)) {
+      res.status(400).json({ error: 'invalid date' });
+      return;
+    }
+
+    // Account map (shared across the window aggregation).
+    const accounts = await Account.findAll({
+      where: visibleAccountWhere(req),
+      attributes: ['id', 'name', 'shortCode', 'accountType'],
+      raw: true,
+    });
+    const accountById = new Map<number, AccountRow>(
+      (accounts as unknown as AccountRow[]).map((a) => [a.id, a]),
+    );
+
+    // Main window rows + reimbursables.
+    const [mainRowsRaw, reimbursableByTxn] = await Promise.all([
+      loadPeriodRows(req, { from, to }, currency),
+      loadReimbursableByTxn(req, { from, to }, currency),
+    ]);
+    const mainRows = withAccountType(mainRowsRaw, accountById);
+
+    // Canonical per-currency metrics via the existing aggregator.
+    const agg = aggregateDashboard(
+      mainRows as unknown as SummaryTxnRow[],
+      accountById,
+      EMPTY_ITEM_CONTEXT,
+    );
+    const owed = computeOwedBack(mainRows, reimbursableByTxn);
+
+    const partnerContacts = await Contact.findAll({
+      where: householdWhere(req),
+      attributes: ['id', 'isPartner'],
+      raw: true,
+    });
+    const partnerContactIds = new Set<number>(
+      (partnerContacts as Array<{ id: number; isPartner: boolean | number }>)
+        .filter((c) => Boolean(c.isPartner))
+        .map((c) => c.id),
+    );
+    const lending = computePeerLending(mainRows, partnerContactIds);
+
+    // Assemble per currency — everything period-scoped, read off the one window.
+    const byCurrency: PeriodInsightCurrency[] = [];
+    for (const [cur, metrics] of agg.metricsByCurrency) {
+      const o = owed.get(cur) ?? { owedBack: 0, reimbursable: 0, partnerShare: 0 };
+      byCurrency.push({
+        currency: cur,
+        netSpend: metrics.netSpend,
+        realCost: realCostOf(metrics.netSpend, o.owedBack),
+        owedBack: o.owedBack,
+        owedBackBreakdown: { reimbursable: o.reimbursable, partnerShare: o.partnerShare },
+        peerLending: lending.get(cur) ?? { lent: 0, received: 0 },
+        totalSpend: metrics.totalSpend,
+        totalCredits: metrics.totalCredits,
+        totalIncome: metrics.totalIncome,
+        totalPayments: metrics.totalPayments,
+      });
+    }
+
+    const body: PeriodInsightResp = { byCurrency };
+    res.json(body);
   } catch (e) {
     next(e);
   }
@@ -251,6 +526,7 @@ router.get('/monthly', async (req, res, next) => {
           'merchantRaw',
           'merchantClean',
           'finalCategory',
+          'finalCategoryId', // B2: finalCategoryId selected for rollup
           'finalBusiness',
           'finalSplitType',
           'businessAmount',
@@ -279,6 +555,13 @@ router.get('/monthly', async (req, res, next) => {
       accountTypeById,
       itemContext,
     );
+
+    const householdId = currentAuth(req).household.id;
+    const categoryTree = buildRollupRowsByCurrency(
+      rawSpendByCurrencyCat(categoryPoints),
+      await loadCategoryTree(householdId),
+    );
+
     res.json({
       points: points.sort((a, b) =>
         a.month === b.month
@@ -290,6 +573,7 @@ router.get('/monthly', async (req, res, next) => {
         if (a.currency !== b.currency) return a.currency.localeCompare(b.currency);
         return (a.category ?? '').localeCompare(b.category ?? '');
       }),
+      categoryTree,
     });
   } catch (e) {
     next(e);

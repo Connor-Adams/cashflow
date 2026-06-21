@@ -11,8 +11,10 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Button } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
+import { Alert } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 import { getJson, patchJson, postJson } from '@/lib/api'
 
 export type InsightSeverity = 'info' | 'warning' | 'critical'
@@ -66,6 +68,8 @@ function compareInsights(a: InsightRow, b: InsightRow): number {
 }
 
 function entityHref(row: InsightRow): string | null {
+  // The forecast drill-down is a derivation, not a row — it has no entityId.
+  if (row.entityType === 'forecast') return '/planned/forecast'
   if (!row.entityType || row.entityId == null) return null
   switch (row.entityType) {
     case 'transaction':
@@ -145,7 +149,7 @@ export function InsightsPage() {
       <header className="flex items-baseline justify-between mb-4">
         <div>
           <h1 className="text-2xl font-semibold">Insights</h1>
-          <p className="muted text-sm">
+          <p className="text-sm text-muted-foreground">
             {rows.length} total · {counts.open} open
           </p>
         </div>
@@ -155,35 +159,56 @@ export function InsightsPage() {
       </header>
 
       <nav
-        className="flex gap-2 border-b border-[var(--border)] mb-4"
+        className="flex gap-2 border-b border-border mb-4"
         aria-label="Filter by status"
       >
         {TAB_ORDER.map((t) => (
-          <button
+          <Button
             key={t}
             type="button"
+            variant="ghost"
             onClick={() => setTab(t)}
             aria-pressed={tab === t}
             className={
               tab === t
-                ? 'px-3 py-2 border-b-2 border-[var(--primary)] font-semibold'
-                : 'px-3 py-2 border-b-2 border-transparent text-[var(--muted-foreground)]'
+                ? 'px-3 py-2 border-b-2 border-primary font-semibold rounded-none'
+                : 'px-3 py-2 border-b-2 border-transparent text-muted-foreground rounded-none'
             }
           >
             {TAB_LABEL[t]} <span className="text-xs">({counts[t]})</span>
-          </button>
+          </Button>
         ))}
       </nav>
 
-      {err ? <p className="error mb-2">{err}</p> : null}
-      {loading ? <p className="muted">Loading…</p> : null}
+      {err ? <Alert variant="error" className="mb-2">{err}</Alert> : null}
+      {loading ? <p className="text-sm leading-6 text-muted-foreground">Loading…</p> : null}
       {!loading && visible.length === 0 ? (
-        <p className="muted py-6 text-center">
-          Nothing here yet. Use <strong>Run detectors</strong> to scan recent activity.{' '}
-          <Link to="/" className="underline">
-            Back to Dashboard
-          </Link>
-        </p>
+        rows.length === 0 ? (
+          <EmptyState
+            title="No insights yet"
+            description="Run the detectors to scan your recent activity for anything worth a look."
+            actions={
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void runDetectors()}
+                disabled={running}
+              >
+                {running ? 'Running…' : 'Run detectors'}
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState
+            title="Nothing matches this filter"
+            description={`No ${TAB_LABEL[tab].toLowerCase()} insights right now. Clear the filter to see everything.`}
+            actions={
+              <Button type="button" size="sm" variant="outline" onClick={() => setTab('open')}>
+                Clear filters
+              </Button>
+            }
+          />
+        )
       ) : null}
 
       <ul className="flex flex-col gap-3">
@@ -193,7 +218,7 @@ export function InsightsPage() {
           return (
             <li
               key={row.id}
-              className="rounded-lg border border-[var(--border)] bg-[var(--bg2)] p-4"
+              className="rounded-lg border border-border bg-[var(--bg2)] p-4"
               data-testid="insight-row"
               data-insight-id={row.id}
             >
@@ -201,18 +226,18 @@ export function InsightsPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <Badge variant={SEVERITY_VARIANT[row.severity]}>{row.severity}</Badge>
-                    <span className="text-xs muted">{row.type.replace(/_/g, ' ')}</span>
+                    <span className="text-xs text-muted-foreground">{row.type.replace(/_/g, ' ')}</span>
                   </div>
                   <p className="font-semibold mb-1">{row.title}</p>
                   {row.description ? (
-                    <p className="text-sm muted">{row.description}</p>
+                    <p className="text-sm text-muted-foreground">{row.description}</p>
                   ) : null}
                 </div>
                 <div className="flex flex-col gap-2 items-end shrink-0">
                   {link ? (
                     <Link
                       to={link}
-                      className="text-sm underline-offset-4 hover:underline text-[var(--primary)]"
+                      className="text-sm underline-offset-4 hover:underline text-primary"
                     >
                       View
                     </Link>
@@ -247,7 +272,7 @@ export function InsightsPage() {
                   )}
                 </div>
               </div>
-              {itemErr ? <p className="error mt-2">{itemErr}</p> : null}
+              {itemErr ? <Alert variant="error" className="mt-2">{itemErr}</Alert> : null}
             </li>
           )
         })}

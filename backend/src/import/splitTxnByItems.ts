@@ -5,6 +5,7 @@ export type AllocatorTxn = {
   amount: string;
   currency: string;
   finalCategory: string | null;
+  finalCategoryId?: number | null;
   finalBusiness: boolean;
   finalSplitType: string;
   businessAmount: string;
@@ -30,7 +31,9 @@ export type AllocatorItem = {
   unitPrice: string | null;
   quantity: number;
   inferredCategory: string | null;
+  inferredCategoryId?: number | null;
   categoryOverride: string | null;
+  categoryOverrideId?: number | null;
   businessUsePercent: string | null;
   businessUseOverride: string | null;
 };
@@ -44,6 +47,7 @@ export type AllocatorInput = {
 
 export type CategoryAllocation = {
   category: string | null;
+  categoryId: number | null;
   amount: number;
   businessAmount: number;
   currency: string;
@@ -65,10 +69,20 @@ function effectiveCategory(item: AllocatorItem, txnCategory: string | null): str
   return item.categoryOverride ?? item.inferredCategory ?? txnCategory;
 }
 
-function effectiveBusinessPct(item: AllocatorItem): number {
-  const ov = item.businessUseOverride;
-  if (ov != null) return n(ov);
-  return n(item.businessUsePercent);
+function effectiveCategoryId(item: AllocatorItem, txnCategoryId: number | null): number | null {
+  return item.categoryOverrideId ?? item.inferredCategoryId ?? txnCategoryId;
+}
+
+/**
+ * Business fraction (0..1) for an item. Explicit per-item percentages win;
+ * otherwise fall back to the txn-level business fraction so itemizing a
+ * business txn doesn't silently re-book its spend as personal (imported
+ * Amazon/receipt items usually carry no business pct at all).
+ */
+function effectiveBusinessFraction(item: AllocatorItem, fallback: number): number {
+  if (item.businessUseOverride != null) return n(item.businessUseOverride) / 100;
+  if (item.businessUsePercent != null) return n(item.businessUsePercent) / 100;
+  return fallback;
 }
 
 export function splitTxnByItems(input: AllocatorInput): CategoryAllocation[] {
@@ -80,22 +94,40 @@ export function splitTxnByItems(input: AllocatorInput): CategoryAllocation[] {
   const usable = links.filter((l) => {
     const order = ordersById.get(l.externalOrderId);
     const items = itemsByOrder.get(l.externalOrderId);
-    return order != null && items != null && items.length > 0;
+    if (order == null || items == null || items.length === 0) return false;
+    // Cross-currency order/item prices are not txn-currency amounts; allocating
+    // them as-is skews category totals by the FX factor (and dumps the
+    // difference into a phantom drift row). Matching only penalizes currency
+    // mismatch and manual links never check it, so guard here.
+    return (
+      !order.currency ||
+      !txn.currency ||
+      order.currency.toUpperCase() === txn.currency.toUpperCase()
+    );
   });
   if (usable.length === 0) {
     const bizAmt = n(txn.businessAmount);
     return [
       {
         category: txn.finalCategory,
+        categoryId: txn.finalCategoryId ?? null,
         amount: txnAmount,
-        businessAmount: bizAmt === 0 ? 0 : bizAmt * sign,
+        businessAmount: bizAmt,
         currency: txn.currency,
       },
     ];
   }
 
+  // Fraction of the txn that is business spend (0..1). businessAmount carries
+  // the txn's sign, so the ratio is positive; clamp for safety.
+  const txnBizRatio = txnAmount !== 0 ? n(txn.businessAmount) / txnAmount : 0;
+  const txnBizFraction = Number.isFinite(txnBizRatio)
+    ? Math.min(Math.max(txnBizRatio, 0), 1)
+    : 0;
+
+  const txnCategoryId = txn.finalCategoryId ?? null;
   const bucket = new Map<string, CategoryAllocation>();
-  const add = (cat: string | null, amount: number, businessAmount: number) => {
+  const add = (cat: string | null, catId: number | null, amount: number, businessAmount: number) => {
     const key = cat ?? '';
     const existing = bucket.get(key);
     if (existing) {
@@ -104,6 +136,7 @@ export function splitTxnByItems(input: AllocatorInput): CategoryAllocation[] {
     } else {
       bucket.set(key, {
         category: cat,
+        categoryId: catId,
         amount,
         businessAmount,
         currency: txn.currency,
@@ -126,8 +159,9 @@ export function splitTxnByItems(input: AllocatorInput): CategoryAllocation[] {
       const portion = linkAmt / items.length;
       for (const it of items) {
         const cat = effectiveCategory(it, txn.finalCategory);
-        const biz = (effectiveBusinessPct(it) / 100) * portion;
-        add(cat, portion * sign, biz * sign);
+        const catId = effectiveCategoryId(it, txnCategoryId);
+        const biz = effectiveBusinessFraction(it, txnBizFraction) * portion;
+        add(cat, catId, portion * sign, biz * sign);
         allocated += portion;
       }
       continue;
@@ -138,8 +172,9 @@ export function splitTxnByItems(input: AllocatorInput): CategoryAllocation[] {
       const weight = baseSum > 0 ? rawBase / baseSum : 0;
       const portion = rawBase * share + extras * weight;
       const cat = effectiveCategory(it, txn.finalCategory);
-      const biz = (effectiveBusinessPct(it) / 100) * portion;
-      add(cat, portion * sign, biz * sign);
+      const catId = effectiveCategoryId(it, txnCategoryId);
+      const biz = effectiveBusinessFraction(it, txnBizFraction) * portion;
+      add(cat, catId, portion * sign, biz * sign);
       allocated += portion;
     }
   }
@@ -152,7 +187,7 @@ export function splitTxnByItems(input: AllocatorInput): CategoryAllocation[] {
       computed: allocated,
       drift,
     }, 'split_txn_drift');
-    add(txn.finalCategory, drift * sign, 0);
+    add(txn.finalCategory, txnCategoryId, drift * sign, drift * sign * txnBizFraction);
   }
 
   return Array.from(bucket.values());

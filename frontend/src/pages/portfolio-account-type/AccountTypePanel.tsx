@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Card } from '@/components/ui/card'
+import { Card } from '@connor-adams/designsystem'
 import { getJson } from '../../lib/api'
 import type { PortfolioByAccountType } from '../../types/api'
 import { BucketBreakdownTable } from './BucketBreakdownTable'

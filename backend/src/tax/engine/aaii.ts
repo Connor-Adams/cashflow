@@ -13,6 +13,7 @@ export function computeAaii(facts: CorpTaxYearFacts, r: RateTable): Decimal {
   const nonElDiv = sumD(facts.investmentIncome.nonEligibleDividends.map(i => i.cadAmount));
   const rentNet = sumD(facts.investmentIncome.rentNet.map(i => i.cadAmount));
   const grossGains = sumD(facts.capitalGainEvents.map(e => e.proceeds.minus(e.acb).minus(e.outlays)));
-  const includableGains = grossGains.times(r.capitalGainsInclusion); // 50%
+  const corpInclusionRate = r.capitalGainsInclusionHigh ?? r.capitalGainsInclusion;
+  const includableGains = grossGains.times(corpInclusionRate);
   return maxZero(interest.plus(elDiv).plus(nonElDiv).plus(rentNet).plus(includableGains));
 }

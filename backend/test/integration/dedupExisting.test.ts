@@ -1,3 +1,4 @@
+// fallow-ignore-file code-duplication
 /**
  * Integration tests for stable-identity pre-insert dedup
  * (the fix for re-importing the same Amex statement after Amex populates
@@ -78,9 +79,17 @@ async function seedTransaction(opts: {
 }
 
 async function makeAccount() {
+  // Account needs a household so the beforeCreate hook fills entity_id
+  // (NOT NULL since migration 20260619000001). Dedup itself is account-scoped
+  // (findExistingForDedup keys on accountId + sourceIdentityFingerprint), so
+  // the household is irrelevant to what these tests exercise.
+  const household = await models.Household.create({
+    name: `Dedup HH ${Date.now()}-${Math.random()}`,
+  });
   const acc = await models.Account.create({
     name: `Dedup Account ${Date.now()}-${Math.random()}`,
     owner: 'me',
+    householdId: household.id,
     defaultCurrency: 'CAD',
     accountType: 'checking',
     visibility: 'private',

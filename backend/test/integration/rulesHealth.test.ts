@@ -18,6 +18,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { seedHousehold } from '../helpers/seedHousehold.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -138,7 +139,7 @@ before(async () => {
   app = mod.default;
 
   // First-registered user becomes superadmin; we don't drive that agent.
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'super-rules-health@example.com',
     displayName: 'Super',
@@ -149,13 +150,13 @@ before(async () => {
   const a = await seedHousehold('RulesHealthA', 'A Partner');
   householdAId = a.householdId;
   userAId = a.userId;
-  agentA = request.agent(app);
+  agentA = testAgent(app);
   agentA.jar.setCookie(`cashflow_session=${a.token}; Path=/`);
 
   const b = await seedHousehold('RulesHealthB', 'B Partner');
   householdBId = b.householdId;
   userBId = b.userId;
-  agentB = request.agent(app);
+  agentB = testAgent(app);
   agentB.jar.setCookie(`cashflow_session=${b.token}; Path=/`);
 
   const models = await import('../../src/models');

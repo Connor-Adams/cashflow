@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@connor-adams/designsystem'
 import type { ItemsFilters } from '@/hooks/useItems'
 
 type Props = {
@@ -189,8 +189,10 @@ function Chip({
 }) {
   return (
     <div className="relative">
-      <button
+      <Button
         type="button"
+        variant={active ? 'outline' : 'ghost'}
+        size="sm"
         aria-expanded={open}
         aria-label={label}
         onClick={(e) => {
@@ -201,10 +203,10 @@ function Chip({
           if (open) onClose()
           else onOpen()
         }}
-        className={`rounded-full border px-3 py-1 text-sm ${active ? 'border-foreground bg-card text-foreground' : 'border-border bg-muted/30 text-muted-foreground'}`}
+        className="rounded-full"
       >
         {label}
-      </button>
+      </Button>
       {open && (
         <div className="absolute z-10 mt-1 flex gap-2 rounded border border-border bg-card p-2 shadow">
           {children}

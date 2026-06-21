@@ -1,19 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Plus, RefreshCw } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
-import { EmptyTableRow } from '@/components/ui/empty-state'
+import { EmptyTableRow } from '@/lib/ds-extras'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
@@ -91,7 +84,7 @@ export function StatementsPage() {
       const qs = filterAccountId
         ? `?accountId=${encodeURIComponent(filterAccountId)}&pageSize=100`
         : '?pageSize=100'
-      const l = await getJson<StatementListResponse>(`/api/statements${qs}`)
+      const l = await getJson<StatementListResponse>(`/api/accounts/statements${qs}`)
       setList(l)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Error')
@@ -119,7 +112,7 @@ export function StatementsPage() {
   const loadDetail = useCallback(async (id: number) => {
     setDetailLoading(true)
     try {
-      const d = await getJson<StatementDetailResponse>(`/api/statements/${id}`)
+      const d = await getJson<StatementDetailResponse>(`/api/accounts/statements/${id}`)
       setDetail(d)
       setSelectedId(id)
     } catch (e) {
@@ -156,7 +149,7 @@ export function StatementsPage() {
       setSubmitting(true)
       try {
         const created = await postJson<{ data: AccountStatement }>(
-          '/api/statements',
+          '/api/accounts/statements',
           {
             accountId,
             periodStart: formPeriodStart,
@@ -204,7 +197,7 @@ export function StatementsPage() {
     async (id: number, explanation?: string) => {
       try {
         const d = await postJson<StatementDetailResponse>(
-          `/api/statements/${id}/reconcile`,
+          `/api/accounts/statements/${id}/reconcile`,
           explanation != null ? { varianceExplanation: explanation } : {},
         )
         setDetail(d)
@@ -224,7 +217,7 @@ export function StatementsPage() {
     async (id: number) => {
       try {
         const d = await postJson<StatementDetailResponse>(
-          `/api/statements/${id}/unreconcile`,
+          `/api/accounts/statements/${id}/unreconcile`,
         )
         setDetail(d)
         showToast({ title: 'Reconciliation cleared', variant: 'success' })
@@ -243,7 +236,7 @@ export function StatementsPage() {
     async (id: number, explanation: string) => {
       try {
         const d = await patchJson<StatementDetailResponse>(
-          `/api/statements/${id}`,
+          `/api/accounts/statements/${id}`,
           { varianceExplanation: explanation },
         )
         setDetail(d)
@@ -262,7 +255,7 @@ export function StatementsPage() {
     async (id: number) => {
       if (!window.confirm('Delete this statement? This cannot be undone.')) return
       try {
-        await deleteReq(`/api/statements/${id}`)
+        await deleteReq(`/api/accounts/statements/${id}`)
         setDetail(null)
         setSelectedId(null)
         showToast({ title: 'Statement deleted', variant: 'success' })
@@ -535,8 +528,8 @@ function StatementDetailPanel({
   const variance = reconciliation.variance
   const varianceColorClass =
     Math.abs(variance) <= 0.01
-      ? 'text-emerald-600 dark:text-emerald-400'
-      : 'text-amber-600 dark:text-amber-400'
+      ? 'text-positive'
+      : 'text-warning'
 
   return (
     <CollapsibleCard

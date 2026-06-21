@@ -16,6 +16,7 @@ export interface CsvProfile {
   creditAmountHeaders?: string[];
   currencyHeaders?: string[];
   referenceHeaders?: string[];
+  accountNumberHeaders?: string[];
   dateFormat: string;
   amountConvention: AmountConvention;
 }
@@ -83,8 +84,26 @@ const rbc: CsvProfile = {
   merchantHeaders: ['Description 1', 'Description 2'],
   amountHeaders: ['CAD$', 'USD$'],
   referenceHeaders: ['Cheque Number'],
+  accountNumberHeaders: ['Account Number'],
   dateFormat: 'M/d/yyyy',
   amountConvention: 'invert_sign',
+};
+
+/**
+ * RBC personal banking (chequing/savings). Identical column layout to the `rbc`
+ * credit-card profile (Description 1/2, CAD$), but the CAD$ column is already
+ * signed (negative = withdrawal/debit, positive = deposit/credit), so it must
+ * NOT be inverted — using `rbc` here flips every sign. Auto-detect picks between
+ * the two via the "Account Type" column (see inferProfile.ts).
+ */
+const rbc_banking: CsvProfile = {
+  dateHeaders: ['Transaction Date'],
+  merchantHeaders: ['Description 1', 'Description 2'],
+  amountHeaders: ['CAD$', 'USD$'],
+  referenceHeaders: ['Cheque Number'],
+  accountNumberHeaders: ['Account Number'],
+  dateFormat: 'M/d/yyyy',
+  amountConvention: 'passthrough',
 };
 
 /**
@@ -197,7 +216,8 @@ const cibc: CsvProfile = {
  * Tangerine (personal banking and credit card).
  * Export: Date, Transaction, Name, Memo, Amount
  * Amount is pre-signed: negative = charge/withdrawal, positive = deposit/credit.
- * Direction inference handles common cases; passthrough preserves the sign otherwise.
+ * Passthrough preserves the source sign (direction heuristics never override
+ * pre-signed amounts).
  */
 const tangerine: CsvProfile = {
   dateHeaders: ['Date'],
@@ -318,6 +338,7 @@ export const profiles: Record<string, CsvProfile> = {
   wealthsimple_cash,
   // Canadian banks
   rbc,
+  rbc_banking,
   td_credit_card,
   td_banking,
   scotiabank_credit_card,
@@ -337,7 +358,7 @@ const profileHints: Record<string, { label: string; hint: string }> = {
   },
   generic_simple: {
     label: 'Generic (ISO dates)',
-    hint: 'yyyy-MM-dd dates; single Amount column, negative = charge.',
+    hint: 'yyyy-MM-dd dates; single Amount column, positive = charge (credits detected from description). For pre-signed files use Generic (pre-signed).',
   },
   generic_amex: {
     label: 'Generic (Amex-style)',
@@ -352,8 +373,12 @@ const profileHints: Record<string, { label: string; hint: string }> = {
     hint: 'Monthly statement CSV (date,transaction,description,amount,balance,currency). Amount pre-signed — positive = inflow.',
   },
   rbc: {
-    label: 'RBC',
-    hint: 'Credit card & banking. Columns: Description 1/2, CAD$.',
+    label: 'RBC — Credit Card',
+    hint: 'RBC credit cards (e.g. Avion). Columns: Description 1/2, CAD$ — positive = charge.',
+  },
+  rbc_banking: {
+    label: 'RBC — Banking',
+    hint: 'RBC chequing/savings. Columns: Description 1/2, CAD$ — already signed (negative = withdrawal).',
   },
   td_credit_card: {
     label: 'TD — Credit Card',
@@ -453,4 +478,26 @@ export function pickColumn(
     }
   }
   return undefined;
+}
+
+export function extractAccountNumber(
+  records: Record<string, string>[],
+  headers: string[],
+  profile: CsvProfile
+): string | null {
+  if (!profile.accountNumberHeaders || profile.accountNumberHeaders.length === 0) {
+    return null;
+  }
+
+  const headerMap = normalizeHeaderMap(headers);
+
+  // Scan first 10 rows for first non-empty account number
+  for (let i = 0; i < Math.min(10, records.length); i++) {
+    const value = pickColumn(records[i], headerMap, profile.accountNumberHeaders);
+    if (value && value.trim() !== '') {
+      return value.trim();
+    }
+  }
+
+  return null;
 }

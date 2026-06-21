@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { Button } from '@connor-adams/designsystem'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
+import { todayDateInputValue } from '@/lib/dateInput';
 
 interface KeyDef {
   key: string;
@@ -66,12 +69,12 @@ export function OverrideEditor({ overrides, onChange }: Props) {
       {present.length === 0 ? (
         <p className="muted">No overrides — using actuals.</p>
       ) : (
-        <ul>
+        <ul className="m-0 list-none p-0 space-y-2">
           {present.map((k) => {
             const def = KEY_DEFS.find((d) => d.key === k);
             const v = overrides[k];
             return (
-              <li key={k} style={{ marginBottom: '0.5rem' }}>
+              <li key={k}>
                 <strong>{def?.label ?? k}</strong>{' '}
                 {def?.inputType === 'array_capgain_dispositions' ? (
                   <DispositionArrayEditor
@@ -86,20 +89,20 @@ export function OverrideEditor({ overrides, onChange }: Props) {
                     onChange={(e) => setValue(k, Number(e.target.value))}
                   />
                 )}
-                <button onClick={() => removeKey(k)} style={{ marginLeft: '0.5rem' }}>×</button>
+                <Button variant="ghost" size="sm" onClick={() => removeKey(k)} className="ml-2">×</Button>
               </li>
             );
           })}
         </ul>
       )}
       {available.length > 0 && (
-        <div style={{ marginTop: '0.5rem' }}>
+        <div className="mt-2 flex items-center gap-2">
           <select value={pendingKey} onChange={(e) => setPendingKey(e.target.value)}>
             {available.map((d) => (
               <option key={d.key} value={d.key}>{d.label}</option>
             ))}
           </select>
-          <button onClick={addKey} style={{ marginLeft: '0.5rem' }}>+ Add override</button>
+          <Button variant="secondary" size="sm" onClick={addKey}>+ Add override</Button>
         </div>
       )}
     </section>
@@ -115,56 +118,61 @@ function DispositionArrayEditor({ value, onChange }: {
     onChange(next);
   }
   function addRow() {
-    onChange([...value, { proceeds: 0, acb: 0, date: new Date().toISOString().slice(0, 10) }]);
+    onChange([...value, { proceeds: 0, acb: 0, date: todayDateInputValue() }]);
   }
   function removeRow(i: number) {
     onChange(value.filter((_, idx) => idx !== i));
   }
   return (
-    <div style={{ display: 'inline-block', marginLeft: '0.5rem' }}>
-      <table>
-        <thead>
-          <tr>
-            <th>Proceeds</th>
-            <th>ACB</th>
-            <th>Date</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
+    <div className="mt-2 inline-block">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Proceeds</TableHead>
+            <TableHead>ACB</TableHead>
+            <TableHead>Date</TableHead>
+            <TableHead />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {value.map((row, i) => (
-            <tr key={i}>
-              <td>
+            <TableRow key={i}>
+              <TableCell>
                 <input
                   type="number"
                   step="0.01"
                   value={row.proceeds}
                   onChange={(e) => setRow(i, { proceeds: Number(e.target.value) })}
                 />
-              </td>
-              <td>
+              </TableCell>
+              <TableCell>
                 <input
                   type="number"
                   step="0.01"
                   value={row.acb}
                   onChange={(e) => setRow(i, { acb: Number(e.target.value) })}
                 />
-              </td>
-              <td>
+              </TableCell>
+              <TableCell>
                 <input
                   type="date"
                   value={row.date}
                   onChange={(e) => setRow(i, { date: e.target.value })}
                 />
-              </td>
-              <td>
-                <button onClick={() => removeRow(i)}>×</button>
-              </td>
-            </tr>
+              </TableCell>
+              <TableCell>
+                <Button variant="ghost" size="sm" onClick={() => removeRow(i)}>×</Button>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
-      <button onClick={addRow}>+ Add disposition</button>
+        </TableBody>
+      </Table>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {value.length > 0
+          ? `${value.length} disposition${value.length === 1 ? '' : 's'} · gain = proceeds − ACB for each row`
+          : null}
+      </p>
+      <Button variant="secondary" size="sm" onClick={addRow}>+ Add disposition</Button>
     </div>
   );
 }

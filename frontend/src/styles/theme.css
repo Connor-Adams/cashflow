@@ -1,0 +1,89 @@
+/* App-owned Tailwind theme + token-compat layer.
+ *
+ * Sourced from @connor-adams/tokens raw CSS variables (imported in index.css).
+ * Replaces the former `@import "@cashflow/ui/theme.css"`. Two jobs:
+ *   1. @theme inline — surface the semantic tokens as Tailwind v4 utilities the
+ *      pages already use (bg-card, text-muted-foreground, border-border, …).
+ *   2. :root compat aliases — define the legacy raw vars the app still
+ *      references in inline styles + App.css (--fg, --accent-warm, --bg, …)
+ *      that @connor-adams/tokens does not ship, mapped to the nearest DS token.
+ *
+ * Authored fresh against @connor-adams/tokens — nothing copied from @cashflow/ui.
+ */
+
+@theme inline {
+  /* surfaces */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  /* brand / accents */
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-brand: var(--primary);
+  --color-brand-foreground: var(--primary-foreground);
+  --color-link: var(--text-link);
+
+  /* lines / focus */
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* signals (base + -bg + -foreground variants the pages use) */
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-success-foreground: var(--success-foreground);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --color-info-foreground: var(--info-foreground);
+  --color-positive: var(--positive);
+  --color-positive-foreground: var(--positive-foreground);
+  --color-negative: var(--negative);
+  --color-negative-bg: var(--negative-bg);
+
+  /* charts (recharts utilities) */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+}
+
+/* Note: radius (--radius-*) and --breakpoint-3xl ship as raw vars from
+ * @connor-adams/tokens; rounded-* utilities pick them up directly. They are
+ * intentionally NOT re-mapped here (same name → would self-reference). */
+
+/* ── Legacy raw-var compat aliases ───────────────────────────────────────────
+ * The app still references these directly in inline styles and App.css.
+ * @connor-adams/tokens does not define them; alias to the nearest DS token.
+ * TODO(reconcile): migrate these call sites to the canonical tokens, then drop.
+ */
+:root,
+:root[data-theme="light"],
+:root[data-theme="dark"] {
+  --fg: var(--foreground);
+  --bg: var(--background);
+  --bg2: var(--card);
+  --bg3: var(--muted);
+  --accent-soft: var(--accent);
+  --accent-warm: var(--warning);
+  --accent-green: var(--success);
+  --accent-positive: var(--positive);
+}

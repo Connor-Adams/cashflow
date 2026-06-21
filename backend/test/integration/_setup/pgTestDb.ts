@@ -58,7 +58,7 @@ export async function setupPgTestDb(testName: string): Promise<PgTestDb> {
   const databaseUrl = urlWithDb(ADMIN_URL, databaseName);
   process.env.DATABASE_URL = databaseUrl;
 
-  execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
+  execFileSync('yarn', ['db:migrate'], {
     cwd: backendRoot,
     env: { ...process.env, DATABASE_URL: databaseUrl, NODE_ENV: 'development' },
     stdio: 'pipe',

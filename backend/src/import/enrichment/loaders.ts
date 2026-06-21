@@ -1,5 +1,5 @@
-import { QueryTypes } from 'sequelize';
-import { sequelize, Account, ExternalOrder, ExternalOrderItem } from '../../models';
+import { QueryTypes, type Transaction as SequelizeTransaction } from 'sequelize';
+import { sequelize, Account, ExternalOrder, ExternalOrderItem, HouseholdMember, User, Contact } from '../../models';
 import type { ExternalOrderItem as ExternalOrderItemType } from '../../models/ExternalOrderItem';
 import type { LinkItemsCandidateOrder } from './linkItemsStage';
 import type { RecurringHistoryRow } from './detectRecurringStage';
@@ -45,10 +45,47 @@ export async function loadHouseholdAccountIds(accountId: number, householdId: nu
   return ids;
 }
 
+/**
+ * Owner-side names for a household: the display names of its member Users PLUS
+ * the names of any partner Contacts (contacts.is_partner). Fed to the detect-type
+ * stage so an external payroll direct deposit (income) is told apart from a
+ * self-deposit made under an owner's or partner's own name (transfer). Returns []
+ * when the household is unknown or has no members/partners.
+ */
+export async function loadHouseholdOwnerNames(householdId: number | null): Promise<string[]> {
+  if (householdId == null) return [];
+  const members = await HouseholdMember.findAll({
+    where: { householdId },
+    attributes: ['userId'],
+  });
+  const userIds = members.map((m) => m.userId);
+  const users = userIds.length
+    ? await User.findAll({ where: { id: userIds }, attributes: ['displayName'] })
+    : [];
+  // Partners modelled as a Contact (contacts.is_partner) are household-internal:
+  // a "direct deposit from <partner>" is a self/internal transfer, not external
+  // income. Include their names so the own-name exclusion covers partners too.
+  const partnerContacts = await Contact.findAll({
+    where: { householdId, isPartner: true },
+    attributes: ['name'],
+  });
+  const names = [
+    ...users.map((u) => u.displayName),
+    ...partnerContacts.map((c) => c.name),
+  ].filter((n): n is string => Boolean(n));
+  return Array.from(new Set(names));
+}
+
 export async function loadRecurringHistory(
   householdId: number | null,
   merchantClean: string,
   beforeDate: string,
+  /**
+   * Thread the import transaction when calling from inside one: on Postgres a
+   * raw query without it runs on a separate pooled connection and cannot see
+   * rows inserted earlier in the same import (READ COMMITTED).
+   */
+  transaction?: SequelizeTransaction,
 ): Promise<RecurringHistoryRow[]> {
   if (!merchantClean) return [];
   const rows = await sequelize.query<{ date: string; amount: number; finalCategory: string | null }>(
@@ -61,6 +98,7 @@ export async function loadRecurringHistory(
     {
       replacements: [householdId, householdId, merchantClean, beforeDate],
       type: QueryTypes.SELECT,
+      transaction,
     },
   );
   return rows.map((r) => ({ date: r.date, amount: Number(r.amount), finalCategory: r.finalCategory }));
@@ -72,6 +110,8 @@ export async function loadRelationshipCandidates(
   merchantClean: string,
   date: string,
   refundWindowDays: number,
+  /** Same rationale as loadRecurringHistory — see its doc comment. */
+  transaction?: SequelizeTransaction,
 ): Promise<RelationshipCandidate[]> {
   if (householdAccountIds.length === 0) return [];
   const windowStart = new Date(`${date}T00:00:00Z`);
@@ -128,6 +168,7 @@ export async function loadRelationshipCandidates(
     {
       replacements: [...householdAccountIds, windowStartStr, windowEndStr, ...householdReplacements],
       type: QueryTypes.SELECT,
+      transaction,
     },
   );
   return rows.map((r) => ({

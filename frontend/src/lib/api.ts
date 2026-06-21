@@ -1,4 +1,12 @@
 import { clientLogger } from './clientLogger'
+import type {
+  ContactLedgerResponse,
+  TransferLinkResult,
+  SelfSuggestionsResponse,
+  SimplefinConnectResponse,
+  SimplefinDisconnectResponse,
+  SimplefinStatusResponse,
+} from '@cashflow/shared'
 
 const base = import.meta.env.VITE_API_BASE ?? ''
 
@@ -66,6 +74,17 @@ export async function patchJson<T>(path: string, body: unknown): Promise<T> {
   return parseJson<T>(r)
 }
 
+export async function putJson<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(`${base}${path}`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) throw await apiError(r, path)
+  return parseJson<T>(r)
+}
+
 export async function deleteReq(path: string): Promise<void> {
   const r = await fetch(`${base}${path}`, { method: 'DELETE', credentials: 'include' })
   if (!r.ok && r.status !== 204) throw await apiError(r, path)
@@ -79,6 +98,41 @@ export async function postFormData<T>(path: string, form: FormData): Promise<T> 
   })
   if (!r.ok) throw await apiError(r, path)
   return parseJson<T>(r)
+}
+
+// ── Per-person loan ledger client functions ──────────────────────────────────
+
+export function getContactLedger(id: number): Promise<ContactLedgerResponse> {
+  return getJson<ContactLedgerResponse>(`/api/contacts/${id}/ledger`)
+}
+export function previewTransferLink(): Promise<TransferLinkResult> {
+  return postJson<TransferLinkResult>('/api/transfer-link/preview')
+}
+export function commitTransferLink(): Promise<TransferLinkResult> {
+  return postJson<TransferLinkResult>('/api/transfer-link/commit')
+}
+export function markTransactionAsLoan(txnId: number, contactId: number): Promise<unknown> {
+  return postJson(`/api/transactions/${txnId}/reimbursable`, { contactId })
+}
+export function setTransactionContact(txnId: number, contactId: number): Promise<unknown> {
+  return patchJson(`/api/transactions/${txnId}`, { counterpartyContactId: contactId })
+}
+export function getSelfSuggestions(): Promise<SelfSuggestionsResponse> {
+  return getJson<SelfSuggestionsResponse>('/api/contacts/self-suggestions')
+}
+export function setContactSelf(id: number, isSelf: boolean): Promise<unknown> {
+  return patchJson(`/api/contacts/${id}`, { isSelf })
+}
+
+// SimpleFIN Bridge bank connection (issue #790)
+export function getSimplefinStatus(): Promise<SimplefinStatusResponse> {
+  return getJson<SimplefinStatusResponse>('/api/simplefin/status')
+}
+export function connectSimplefin(setupToken: string): Promise<SimplefinConnectResponse> {
+  return postJson<SimplefinConnectResponse>('/api/simplefin/connect', { setupToken })
+}
+export function disconnectSimplefin(): Promise<SimplefinDisconnectResponse> {
+  return postJson<SimplefinDisconnectResponse>('/api/simplefin/disconnect')
 }
 
 async function apiError(res: Response, path: string): Promise<ApiError> {

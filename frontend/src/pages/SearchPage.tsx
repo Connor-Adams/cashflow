@@ -6,12 +6,12 @@
  * into a SearchIntent on the backend, then renders chips for each active
  * filter, a result table, and a saved-search dropdown.
  */
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Search as SearchIcon, Bookmark, Save, X, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Badge } from '@/components/ui/badge'
+import { Button } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
 import { getJson, postJson, patchJson, deleteReq } from '@/lib/api'
 import { formatMoney } from '@/lib/formatMoney'
 
@@ -117,8 +117,18 @@ export function SearchPage() {
   const [saved, setSaved] = useState<SavedSearch[]>([])
   const [savingName, setSavingName] = useState('')
   const [savingBusy, setSavingBusy] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const chips = useMemo(() => buildChips(response?.intent ?? null), [response])
+
+  /** Reset to the empty search box and focus it — wired to the "no matches"
+   *  CTA so the user can try a different term (#799). */
+  function clearAndFocus() {
+    setQuery('')
+    setResponse(null)
+    setErr(null)
+    inputRef.current?.focus()
+  }
 
   useEffect(() => {
     void refreshSaved()
@@ -222,13 +232,14 @@ export function SearchPage() {
 
       <form onSubmit={onSubmit} className="flex gap-2">
         <div className="relative flex-1">
-          <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <Input
+          <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            ref={inputRef}
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder='Try "category:Groceries amount:>100 has:receipt"'
-            className="pl-9"
+            className="h-9 w-full rounded-md border border-input bg-background/70 px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 pl-9"
             aria-label="Search transactions"
           />
         </div>
@@ -239,7 +250,7 @@ export function SearchPage() {
 
       {saved.length > 0 && (
         <section className="space-y-2">
-          <h2 className="text-sm font-medium muted flex items-center gap-2">
+          <h2 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
             <Bookmark className="h-4 w-4" />
             Saved searches
           </h2>
@@ -247,32 +258,38 @@ export function SearchPage() {
             {saved.map((s) => (
               <li
                 key={s.id}
-                className="inline-flex items-center gap-1 border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1 text-sm"
+                className="inline-flex items-center gap-1 border border-border rounded-md px-2 py-1 text-sm"
               >
-                <button
+                <Button
                   type="button"
+                  variant="link"
+                  size="sm"
                   onClick={() => loadSaved(s)}
-                  className="font-medium hover:underline"
+                  className="font-medium"
                   title={s.query}
                 >
                   {s.name}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   aria-label={`Rename ${s.name}`}
                   onClick={() => void renameSaved(s)}
-                  className="text-slate-400 hover:text-slate-700"
+                  className="text-muted-foreground hover:text-foreground"
                 >
                   ✎
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   aria-label={`Delete ${s.name}`}
                   onClick={() => void deleteSaved(s)}
-                  className="text-slate-400 hover:text-red-600"
+                  className="text-muted-foreground hover:text-danger"
                 >
                   <Trash2 className="h-3 w-3" />
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -280,18 +297,33 @@ export function SearchPage() {
       )}
 
       {!response && !err && (
-        <section className="space-y-2">
-          <h2 className="text-sm font-medium muted">Try one of these</h2>
+        <section className="space-y-3">
+          <EmptyState
+            title="Search your transactions"
+            description="Combine filters like category:Groceries amount:>100 has:receipt, or pick an example below."
+            actions={
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => applyExample(EXAMPLES[0])}
+              >
+                Try an example
+              </Button>
+            }
+          />
+          <h2 className="text-sm font-medium text-muted-foreground">Try one of these</h2>
           <ul className="flex flex-wrap gap-2">
             {EXAMPLES.map((ex) => (
               <li key={ex}>
-                <button
+                <Button
                   type="button"
-                  className="inline-flex items-center gap-1 border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1 text-xs hover:border-slate-400"
+                  variant="outline"
+                  size="sm"
+                  className="text-xs"
                   onClick={() => applyExample(ex)}
                 >
                   {ex}
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -300,7 +332,7 @@ export function SearchPage() {
 
       {err && (
         <div
-          className="border border-red-300 bg-red-50 dark:bg-red-950 dark:border-red-900 rounded-md p-3 text-sm"
+          className="border border-danger bg-danger-bg rounded-md p-3 text-sm"
           role="alert"
         >
           {err}
@@ -311,50 +343,66 @@ export function SearchPage() {
         <section className="space-y-3">
           {chips.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs muted">Active filters:</span>
+              <span className="text-xs text-muted-foreground">Active filters:</span>
               {chips.map((c) => (
                 <Badge key={c.key} variant="secondary">
                   {c.label}
                 </Badge>
               ))}
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   setQuery('')
                   setResponse(null)
                 }}
-                className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900"
+                className="text-xs text-muted-foreground hover:text-foreground"
               >
                 <X className="h-3 w-3" /> Clear
-              </button>
+              </Button>
             </div>
           )}
 
           {response.intent.errors.length > 0 && (
-            <ul className="border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-900 rounded-md p-3 text-sm space-y-1">
+            <ul className="border border-warning bg-warning-bg rounded-md p-3 text-sm space-y-1">
               {response.intent.errors.map((m, i) => (
                 <li key={i}>{m}</li>
               ))}
             </ul>
           )}
 
-          {response.intent.isEmpty && response.message && (
+          {response.intent.isEmpty && (
             <EmptyState
-              title="Type a search to get started"
-              description={response.message}
+              title="Search your transactions"
+              description="Combine filters like category:Groceries amount:>100 has:receipt, or pick an example below."
+              actions={
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => applyExample(EXAMPLES[0])}
+                >
+                  Try an example
+                </Button>
+              }
             />
           )}
 
           {!response.intent.isEmpty && response.results.length === 0 && (
             <EmptyState
               title="No matches"
-              description="Try widening your filters or removing the most specific ones."
+              description="Nothing matched those filters. Try a different term or widen the most specific ones."
+              actions={
+                <Button type="button" size="sm" variant="outline" onClick={clearAndFocus}>
+                  Try a different term
+                </Button>
+              }
             />
           )}
 
           {response.results.length > 0 && (
             <>
-              <p className="text-sm muted">
+              <p className="text-sm leading-6 text-muted-foreground">
                 {response.total} match{response.total === 1 ? '' : 'es'} ·{' '}
                 showing {response.results.length}
               </p>
@@ -381,7 +429,7 @@ export function SearchPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="text-left">
-                    <tr className="border-b border-slate-200 dark:border-slate-700">
+                    <tr className="border-b border-border">
                       <th className="py-2 pr-4">Date</th>
                       <th className="py-2 pr-4">Merchant</th>
                       <th className="py-2 pr-4 text-right">Amount</th>
@@ -391,7 +439,7 @@ export function SearchPage() {
                   </thead>
                   <tbody>
                     {response.results.map((r) => (
-                      <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800">
+                      <tr key={r.id} className="border-b border-border">
                         <td className="py-1 pr-4 whitespace-nowrap">{r.date}</td>
                         <td className="py-1 pr-4">{r.merchantClean}</td>
                         <td className="py-1 pr-4 text-right whitespace-nowrap">

@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Button } from '@connor-adams/designsystem'
 import { BentoTile } from './BentoTile'
 import { useSafeToSpend } from '@/hooks/useSafeToSpend'
 import { formatMoney } from '@/lib/formatMoney'
+import { payoffVsInvestSentence } from '@/lib/surplusCopy'
+import type { Surplus } from '@/types/api'
 
 type Props = {
   /**
@@ -34,10 +37,22 @@ type BreakdownRow = {
  */
 export function SafeToSpendTile({ currency = 'CAD' }: Props) {
   const [showBreakdown, setShowBreakdown] = useState(false)
+  // #654 — "Keep it as headroom" collapses the actions for the session. No
+  // persistence: a reload brings the hub back.
+  const [headroomDismissed, setHeadroomDismissed] = useState(false)
   const safeToSpend = useSafeToSpend({ currency: currency ?? null })
 
   const data = safeToSpend.data
   const isNegative = data?.isNegative ?? false
+  // Positive safe-to-spend is the dashboard's one deliberate gradient hero.
+  const onGradient = !!data && !isNegative
+
+  // #654 — the surplus is the actionable amount beyond the buffer. The actions
+  // row only renders when there's genuinely money to deploy and the user hasn't
+  // chosen to keep it as headroom this session.
+  const surplus = data?.surplus ?? null
+  const showSurplus =
+    !!surplus && surplus.amount > 0 && !isNegative && !headroomDismissed
 
   const rows: BreakdownRow[] = data
     ? [
@@ -72,7 +87,7 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
     <BentoTile
       span={6}
       rows={2}
-      variant={isNegative ? 'destructive' : 'default'}
+      variant={isNegative ? 'destructive' : 'gradient'}
       aria-busy={safeToSpend.loading}
       label="Safe to spend"
       description={
@@ -83,7 +98,11 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
       actions={
         <Link
           to="/settings"
-          className="text-xs font-semibold text-muted-foreground hover:text-foreground hover:underline"
+          className={
+            onGradient
+              ? 'text-xs font-semibold text-white/85 hover:text-white hover:underline'
+              : 'text-xs font-semibold text-muted-foreground hover:text-foreground hover:underline'
+          }
         >
           Settings
         </Link>
@@ -105,30 +124,47 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
             <div
               className={
                 isNegative
-                  ? 'text-4xl font-semibold tabular-nums text-destructive'
-                  : 'text-4xl font-semibold tabular-nums'
+                  ? 'text-4xl font-bold tabular-nums text-destructive'
+                  : 'text-5xl font-extrabold tracking-tight tabular-nums'
               }
             >
               {formatMoney(data.value, data.currency)}
             </div>
-            <div className="text-xs text-muted-foreground">
+            <div className={onGradient ? 'text-xs text-white/85' : 'text-xs text-muted-foreground'}>
               {isNegative
                 ? 'You are committed past your cash on hand for this window. Trim a planned expense or raise more cash.'
                 : `Safe to spend in ${data.currency} over the next ${data.windowDays} days.`}
             </div>
           </div>
 
-          <button
+          {showSurplus && surplus ? (
+            <SurplusActions
+              surplus={surplus}
+              currency={data.currency}
+              onGradient={onGradient}
+              onKeepAsHeadroom={() => setHeadroomDismissed(true)}
+            />
+          ) : null}
+
+          <Button
             type="button"
+            variant="link"
+            size="sm"
+            className={onGradient ? 'text-white hover:text-white' : undefined}
             onClick={() => setShowBreakdown((s) => !s)}
             aria-expanded={showBreakdown}
-            className="text-xs font-semibold text-muted-foreground hover:text-foreground hover:underline"
           >
             {showBreakdown ? 'Hide breakdown' : 'Show breakdown'}
-          </button>
+          </Button>
 
           {showBreakdown ? (
-            <ul className="space-y-1 rounded-md border border-border bg-muted/40 p-2 text-sm">
+            <ul
+              className={
+                onGradient
+                  ? 'space-y-1 rounded-md border border-white/20 bg-card p-2 text-sm text-foreground'
+                  : 'space-y-1 rounded-md border border-border bg-muted/40 p-2 text-sm'
+              }
+            >
               {rows.map((row) => (
                 <li
                   key={row.label}
@@ -159,5 +195,85 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
         </div>
       )}
     </BentoTile>
+  )
+}
+
+/**
+ * #654 — the surplus decision hub. Rendered below the safe-to-spend value when
+ * there's investable surplus beyond the buffer. Advises only: a goal CTA
+ * (navigation), a static payoff-vs-invest comparison, and a "keep as headroom"
+ * affordance. Moves no money.
+ *
+ * The parent tile is a gradient hero when positive (which is exactly when this
+ * shows), so the default styling targets the gradient with light-on-dark text;
+ * `onGradient=false` falls back to the muted palette for safety.
+ */
+function SurplusActions({
+  surplus,
+  currency,
+  onGradient,
+  onKeepAsHeadroom,
+}: {
+  surplus: Surplus
+  currency: string
+  onGradient: boolean
+  onKeepAsHeadroom: () => void
+}) {
+  const panelClass = onGradient
+    ? 'rounded-md border border-white/20 bg-card p-2 text-sm text-foreground'
+    : 'rounded-md border border-border bg-muted/40 p-2 text-sm'
+
+  return (
+    <div
+      className={
+        onGradient
+          ? 'space-y-2 border-t border-white/20 pt-2'
+          : 'space-y-2 border-t border-border pt-2'
+      }
+    >
+      <div>
+        <div
+          className={
+            onGradient
+              ? 'text-2xl font-semibold tabular-nums text-white'
+              : 'text-2xl font-semibold tabular-nums text-success'
+          }
+        >
+          {formatMoney(surplus.amount, currency)} surplus
+        </div>
+        <div className={onGradient ? 'text-xs text-white/85' : 'text-xs text-muted-foreground'}>
+          Beyond your {formatMoney(surplus.buffer, currency)} buffer — here&apos;s what you
+          could do with it.
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {surplus.topGoal ? (
+          <Link to="/goals">
+            <Button
+              variant={onGradient ? 'secondary' : 'outline'}
+              size="sm"
+            >
+              Put it toward {surplus.topGoal.name}
+            </Button>
+          </Link>
+        ) : null}
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className={onGradient ? 'text-white hover:text-white' : undefined}
+          onClick={onKeepAsHeadroom}
+        >
+          Keep it as headroom
+        </Button>
+      </div>
+
+      {surplus.payoffVsInvest ? (
+        <p className={panelClass}>
+          {payoffVsInvestSentence(surplus.payoffVsInvest, currency)}
+        </p>
+      ) : null}
+    </div>
   )
 }

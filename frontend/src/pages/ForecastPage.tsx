@@ -1,28 +1,17 @@
 import { useCallback, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, Calendar } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { EmptyState } from '@/components/ui/empty-state'
+  Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
+import {
+  AlertTriangle, ArrowDownRight, ArrowUpRight, Calendar, ChevronDown, ChevronRight, } from 'lucide-react'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
+import { StatCard } from '@connor-adams/designsystem'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { formatMoney } from '../lib/formatMoney'
 import {
@@ -30,6 +19,11 @@ import {
   useForecast,
   type ForecastRange,
 } from '../hooks/useForecast'
+import {
+  MAX_VISIBLE_DRIVERS,
+  deriveDipDrivers,
+  driverLinkTarget,
+} from './forecastDrivers'
 import type {
   ForecastEvent,
   ForecastEventDirection,
@@ -43,9 +37,9 @@ const RANGE_ORDER: ForecastRange[] = ['7d', '30d', '90d']
 // Tailwind v4 JIT needs literal classes, so we look up colours per direction
 // via a table rather than building strings dynamically.
 const DIRECTION_TONE: Record<ForecastEventDirection, string> = {
-  in: 'text-emerald-600 dark:text-emerald-300',
-  out: 'text-rose-600 dark:text-rose-300',
-  neutral: 'text-zinc-500 dark:text-zinc-400',
+  in: 'text-positive',
+  out: 'text-negative',
+  neutral: 'text-muted-foreground',
 }
 
 const DIRECTION_PREFIX: Record<ForecastEventDirection, string> = {
@@ -91,7 +85,9 @@ function eventKey(e: ForecastEvent): string {
 }
 
 function buildEventDescription(e: ForecastEvent): string {
-  if (e.sourceType === 'recurring_detection') return 'Recurring (detected)'
+  if (e.sourceType === 'recurring_detection') {
+    return e.direction === 'in' ? 'Recurring income (detected)' : 'Recurring (detected)'
+  }
   return 'Planned event'
 }
 
@@ -235,20 +231,25 @@ export function ForecastPage() {
 
       {/* Lowest-balance warning */}
       {goesBelowZero && data ? (
-        <Card className="mb-4 border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-900/30">
+        <Card className="mb-4 border-warning bg-warning-bg p-4">
           <div className="flex gap-3">
             <AlertTriangle
-              className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-300"
+              className="mt-0.5 size-5 shrink-0 text-warning"
               aria-hidden="true"
             />
-            <div>
-              <p className="font-semibold text-amber-900 dark:text-amber-100">
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold text-warning-foreground">
                 Balance dips below {formatMoney(0, currency)}
               </p>
-              <p className="mb-0 text-sm text-amber-800 dark:text-amber-200">
+              <p className="mb-0 text-sm text-warning">
                 Projected to reach {formatMoney(data.lowestProjectedBalance, currency)} on{' '}
                 {data.lowestProjectedBalanceDate}. Consider shifting expenses or planning a transfer.
               </p>
+              <DipDrivers
+                events={data.events}
+                lowestProjectedBalanceDate={data.lowestProjectedBalanceDate}
+                currency={currency}
+              />
             </div>
           </div>
         </Card>
@@ -263,8 +264,8 @@ export function ForecastPage() {
               <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="forecastFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.4} />
-                    <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--chart-income)" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="var(--chart-income)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -285,11 +286,11 @@ export function ForecastPage() {
                   }}
                   labelFormatter={(label) => (typeof label === 'string' ? label : String(label ?? ''))}
                 />
-                <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" />
+                <ReferenceLine y={0} stroke="var(--chart-danger-line)" strokeDasharray="4 4" />
                 <Area
                   type="monotone"
                   dataKey="balance"
-                  stroke="#059669"
+                  stroke="var(--chart-income-stroke)"
                   fill="url(#forecastFill)"
                   strokeWidth={2}
                 />
@@ -297,7 +298,7 @@ export function ForecastPage() {
             </ResponsiveContainer>
           ) : (
             <div className="grid h-full place-items-center">
-              <p className="muted">
+              <p className="text-sm leading-6 text-muted-foreground">
                 {loading ? 'Loading forecast…' : 'No projection available.'}
               </p>
             </div>
@@ -335,19 +336,24 @@ export function ForecastPage() {
                     <div className="flex items-center gap-2">
                       {e.direction === 'in' ? (
                         <ArrowUpRight
-                          className="size-4 text-emerald-600 dark:text-emerald-300"
+                          className="size-4 text-positive"
                           aria-hidden="true"
                         />
                       ) : e.direction === 'out' ? (
                         <ArrowDownRight
-                          className="size-4 text-rose-600 dark:text-rose-300"
+                          className="size-4 text-negative"
                           aria-hidden="true"
                         />
                       ) : null}
-                      <span>{e.sourceName}</span>
+                      <Link
+                        to={driverLinkTarget(e.sourceType, e.sourceId)}
+                        className="hover:underline"
+                      >
+                        {e.sourceName}
+                      </Link>
                     </div>
                   </TableCell>
-                  <TableCell className="text-xs muted">
+                  <TableCell className="text-xs text-muted-foreground">
                     {buildEventDescription(e)}
                   </TableCell>
                   <TableCell
@@ -377,7 +383,7 @@ export function ForecastPage() {
                         </Button>
                       </div>
                     ) : (
-                      <span className="muted text-xs">—</span>
+                      <span className="text-muted-foreground text-xs">—</span>
                     )}
                   </TableCell>
                 </TableRow>
@@ -391,6 +397,18 @@ export function ForecastPage() {
                       loading
                         ? 'Loading…'
                         : 'Add a planned event or wait until recurring charges are detected.'
+                    }
+                    actions={
+                      !loading && (
+                        <div className="flex gap-2 flex-wrap justify-center">
+                          <Link to="/planned">
+                            <Button size="sm">Add planned event</Button>
+                          </Link>
+                          <Link to="/recurring">
+                            <Button size="sm" variant="outline">View recurring</Button>
+                          </Link>
+                        </div>
+                      )
                     }
                   />
                 </TableCell>
@@ -411,18 +429,131 @@ type SummaryTileProps = {
   loading?: boolean
 }
 
-function SummaryTile({ label, value, description, tone, loading }: SummaryTileProps) {
+type DipDriversProps = {
+  events: ForecastEvent[]
+  lowestProjectedBalanceDate: string | null
+  currency: string
+}
+
+/**
+ * Expandable "What's driving this dip?" disclosure inside the lowest-balance
+ * warning Card. Derives the dip drivers client-side from the already-fetched
+ * forecast occurrences (no extra request) — every `out` occurrence dated on
+ * or before the lowest-balance date, sorted by amount desc. Caps the visible
+ * list at MAX_VISIBLE_DRIVERS with a "+N more" reveal.
+ */
+function DipDrivers({
+  events,
+  lowestProjectedBalanceDate,
+  currency,
+}: DipDriversProps) {
+  const [open, setOpen] = useState(false)
+  const [showAll, setShowAll] = useState(false)
+
+  const drivers = useMemo(
+    () => deriveDipDrivers(events, lowestProjectedBalanceDate),
+    [events, lowestProjectedBalanceDate],
+  )
+
+  const overflow = Math.max(0, drivers.length - MAX_VISIBLE_DRIVERS)
+  const visible = showAll ? drivers : drivers.slice(0, MAX_VISIBLE_DRIVERS)
+
   return (
-    <Card className="p-3">
-      <p className="muted mb-1 text-xs uppercase tracking-wide">{label}</p>
-      <p
-        className={`mb-0 text-lg font-semibold tabular-nums ${
-          tone === 'warn' ? 'text-amber-700 dark:text-amber-300' : ''
-        }`}
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 text-sm font-medium text-warning-foreground hover:underline"
       >
-        {loading ? '…' : value}
-      </p>
-      {description ? <p className="muted mb-0 text-xs">{description}</p> : null}
-    </Card>
+        {open ? (
+          <ChevronDown className="size-4" aria-hidden="true" />
+        ) : (
+          <ChevronRight className="size-4" aria-hidden="true" />
+        )}
+        {open ? 'Hide drivers' : "What's driving this dip?"}
+      </button>
+
+      {open ? (
+        <div
+          role="region"
+          aria-label="Dip drivers"
+          className="mt-2 flex flex-col gap-1"
+        >
+          {drivers.length === 0 ? (
+            <p className="mb-0 text-sm text-warning">
+              No individual charges to attribute — the dip comes from low
+              projected income.
+            </p>
+          ) : (
+            <>
+              {visible.map((e) => (
+                <DipDriverRow key={eventKey(e)} event={e} currency={currency} />
+              ))}
+              {overflow > 0 && !showAll ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAll(true)}
+                  className="self-start text-sm font-medium text-warning-foreground hover:underline"
+                >
+                  +{overflow} more
+                </button>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function DipDriverRow({
+  event,
+  currency,
+}: {
+  event: ForecastEvent
+  currency: string
+}) {
+  const detected = event.sourceType === 'recurring_detection'
+  return (
+    <div className="flex items-center justify-between gap-3 text-sm">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="shrink-0 text-xs text-warning tabular-nums">
+          {event.date}
+        </span>
+        <Link
+          to={driverLinkTarget(event.sourceType, event.sourceId)}
+          className="truncate text-warning-foreground hover:underline"
+        >
+          {event.sourceName}
+        </Link>
+        {detected ? (
+          <Badge variant="secondary" className="shrink-0 text-[0.65rem]">
+            Detected charge
+          </Badge>
+        ) : null}
+      </div>
+      <span className={`shrink-0 tabular-nums ${DIRECTION_TONE[event.direction]}`}>
+        {DIRECTION_PREFIX[event.direction]}
+        {formatMoney(event.amount, currency)}
+      </span>
+    </div>
+  )
+}
+
+function SummaryTile({ label, value, description, tone, loading }: SummaryTileProps) {
+  const display = loading ? '…' : value
+  return (
+    <StatCard
+      label={label}
+      value={
+        tone === 'warn' ? (
+          <span className="text-warning">{display}</span>
+        ) : (
+          display
+        )
+      }
+      hint={description}
+    />
   )
 }

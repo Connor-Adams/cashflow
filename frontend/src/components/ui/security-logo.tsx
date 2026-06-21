@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { LetterAvatar, type LetterAvatarSize } from './letter-avatar'
+import { LetterAvatar, type LetterAvatarSize } from '@connor-adams/designsystem'
 import { securityLogoUrl } from '../../lib/securityLogo'
 
 const SIZE_PX: Record<LetterAvatarSize, number> = {
@@ -42,7 +42,7 @@ export function SecurityLogo({
         height: `${px}px`,
         borderRadius: 6,
         objectFit: 'contain',
-        backgroundColor: '#FFFFFF',
+        backgroundColor: 'var(--zinc-50)',
         border: '1px solid var(--border)',
         flexShrink: 0,
       }}

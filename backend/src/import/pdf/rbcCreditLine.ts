@@ -1,26 +1,39 @@
-import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader, PdfTextSpan } from './types';
+import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader } from './types';
 import { normalizeMerchant } from '../normalizeMerchant';
 import { dayMonthToIso, parseLongDate, parseMoney, type Period } from './dateHelpers';
 
 /**
  * RBC Royal Credit Line statement parser.
  *
+ * Handles monthly statements (e.g. "From July 8, 2025 to August 4, 2025").
+ * Does NOT handle the annual summary statement format (no transaction rows).
+ *
  * Layout markers:
- *   Title:    "Your Royal Credit Line® Statement"
+ *   Title:    "Your Royal Credit Line® Statement" OR "Your Royal Credit Line Statement"
+ *             Also sniffed via " Statement" after "Your Royal Credit Line"
  *   Period:   "From November 4, 2025 to December 3, 2025"
  *   Account:  "Your loan account number: 73772650-001"  (last 4 = "0001")
  *   Section:  "Details of your account activity"
  *   Columns:  Date | Description | Interest/Fees/Insurance ($) | Withdrawals ($) | Payments ($) | Balance owing ($)
+ *   Termination: "Your LoanProtector insurance coverage summary" OR "Rate History"
  *
- * Sign convention (cashflow side):
- *   Withdrawals (loan draw) → negative
- *   Payments (paydown)      → positive
- *   Interest/Fees/Insurance → negative
+ * Balance column semantics:
+ *   - SIGNED: negative = amount owed (e.g. -4,000.00 = $4,000 owed)
+ *   - Withdrawals increase debt (balance more negative) → cashflow negative
+ *   - Payments decrease debt (balance less negative) → cashflow positive
+ *   - Interest/fees do NOT change principal balance (processed separately to payment account)
+ *     → delta = 0 → detected as interest/fee → cashflow negative
  *
- * Account type: `loan` (new enum value).
+ * Opening/closing balance:
+ *   - From summary section: "Principal balance on <date>   $X.XX" (POSITIVE; internally negated)
  *
- * Multi-line rows: "WWW PMT TIN0-02134 (550.00) / Principal 550.00 -2,000.00"
- * — the description spans two lines; the amount + balance live on the second.
+ * pdfjs note: pdfjs v5 glues all row items into a SINGLE positioned span. The
+ * original column-midpoint (findColumnAnchors) approach found 0 money items.
+ * Fix: split each row on 2+ spaces, extract trailing money tokens, use
+ * running-balance delta to determine sign. Mirror rbcBusinessBanking approach.
+ *
+ * Reconciliation gate: |opening_principal + Σsigned_principal_impact| - closing_principal| ≤ 0.015.
+ * Interest rows do not impact principal, so they are excluded from the sum.
  */
 
 const ACCOUNT_RE = /Your loan account number:\s*([\d-]+)/;
@@ -70,104 +83,104 @@ export function parseRbcCreditLineHeader(lines: PdfLine[]): PdfStatementHeader {
   };
 }
 
-type CreditLineRow = {
-  date: string;
-  description: string;
-  amount: number; // signed: + payment, - withdrawal/interest
-};
+function isMoneyToken(s: string): boolean {
+  return MONEY_RE.test(s.trim());
+}
 
-type ColumnAnchors = {
-  interestMid: number;
-  withdrawalMid: number;
-  paymentMid: number;
-  balanceMin: number;
-};
+const DATE_PREFIX = /^(\d{1,2}\s+[A-Z][a-z]{2})\b/;
 
-function findColumnAnchors(lines: PdfLine[]): ColumnAnchors | null {
-  for (const l of lines) {
-    if (!/Withdrawals\s*\(\$\)/.test(l.text)) continue;
-    if (!/Payments\s*\(\$\)/.test(l.text)) continue;
-    const items = l.items ?? [];
-    let interestX: number | null = null;
-    let withdrawalX: number | null = null;
-    let paymentX: number | null = null;
-    let balanceX: number | null = null;
-    for (const it of items) {
-      if (/^Interest\b/.test(it.str)) interestX = it.x;
-      if (/^Withdrawals$/.test(it.str)) withdrawalX = it.x;
-      if (/^Payments$/.test(it.str)) paymentX = it.x;
-      if (/^Balance\b/.test(it.str)) balanceX = it.x;
+/**
+ * Extract trailing money tokens from a row of text.
+ * Splits on 2+ spaces (column separator in glued pdfjs output).
+ * Strips the date prefix first to avoid day number matching as a token.
+ */
+function extractTrailingMoneyTokens(text: string): number[] {
+  const stripped = text.replace(DATE_PREFIX, '').trim();
+  const parts = stripped.split(/\s{2,}/);
+  const values: number[] = [];
+  for (const part of parts) {
+    const t = part.trim();
+    if (isMoneyToken(t)) {
+      values.push(parseMoney(t));
     }
-    if (withdrawalX != null && paymentX != null) {
-      return {
-        interestMid: interestX != null ? (interestX + withdrawalX) / 2 : -Infinity,
-        withdrawalMid: (withdrawalX + paymentX) / 2,
-        paymentMid: balanceX != null ? (paymentX + balanceX) / 2 : paymentX + 50,
-        balanceMin: balanceX ?? Number.POSITIVE_INFINITY,
-      };
+  }
+  return values;
+}
+
+/**
+ * Extract the opening balance from the summary section.
+ * Format: "Principal balance on [period-start-date]   $X.XX" (positive value).
+ * Returns the positive principal balance (we track it as negative internally),
+ * or null when the line is missing or carries no dollar figure (e.g. the
+ * amount wrapped to the next line). Only money-shaped tokens count — a bare
+ * "2025" from the date must not parse as a $2,025.00 balance. The caller
+ * treats null as a hard parse error: signing is delta-based from the opening,
+ * so defaulting to 0 silently flips leading payment rows.
+ */
+function extractOpeningPrincipal(lines: PdfLine[]): number | null {
+  // The FIRST "Principal balance on" line is the opening one — do NOT fall
+  // through to later lines (the next one is the closing balance).
+  for (const l of lines) {
+    if (/Principal balance on\b/i.test(l.text)) {
+      const tokens = l.text.trim().split(/\s+/);
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        if (!isMoneyToken(tokens[i])) continue;
+        const v = parseMoney(tokens[i]);
+        if (Number.isFinite(v)) return Math.abs(v);
+      }
+      return null;
     }
   }
   return null;
 }
 
-function isMoneyToken(s: string): boolean {
-  return MONEY_RE.test(s.trim());
-}
-
-function moneySpans(line: PdfLine): PdfTextSpan[] {
-  const items = line.items;
-  if (!items || items.length === 0) {
-    const tokens = line.text.split(/\s{2,}/);
-    const out: PdfTextSpan[] = [];
-    let xOffset = 0;
-    for (const t of tokens) {
-      if (isMoneyToken(t)) out.push({ x: xOffset, width: t.length * 5, str: t.trim() });
-      xOffset += (t.length + 2) * 5;
-    }
-    return out;
-  }
-  return items.filter((it) => isMoneyToken(it.str));
-}
-
-function classifyRow(
-  spans: PdfTextSpan[],
-  cols: ColumnAnchors | null,
-): { interest: number | null; withdrawal: number | null; payment: number | null; balance: number | null } {
-  let interest: number | null = null;
-  let withdrawal: number | null = null;
-  let payment: number | null = null;
-  let balance: number | null = null;
-  for (const s of spans) {
-    const val = parseMoney(s.str);
-    if (!Number.isFinite(val)) continue;
-    if (cols && s.x >= cols.balanceMin - 5) {
-      balance = val;
-    } else if (cols && s.x < cols.interestMid) {
-      // Left of interest column — treat as part of description (e.g. inline amount in PMT label).
-      continue;
-    } else if (cols && s.x < cols.withdrawalMid) {
-      interest = val;
-    } else if (cols && s.x < cols.paymentMid) {
-      withdrawal = val;
-    } else if (cols) {
-      payment = val;
+/**
+ * Extract the closing balance from the summary section.
+ * Format: "Principal balance on [period-end-date]   $X.XX" (positive value).
+ * Returns the positive principal balance, or null if not found.
+ */
+function extractClosingPrincipal(lines: PdfLine[]): number | null {
+  // The LAST "Principal balance on" line is the closing balance.
+  let closing: number | null = null;
+  for (const l of lines) {
+    if (/Principal balance on\b/i.test(l.text)) {
+      const tokens = l.text.trim().split(/\s+/);
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        if (!isMoneyToken(tokens[i])) continue;
+        const v = parseMoney(tokens[i]);
+        if (Number.isFinite(v)) {
+          closing = Math.abs(v);
+          break;
+        }
+      }
     }
   }
-  return { interest, withdrawal, payment, balance };
+  return closing;
 }
 
-const DATE_PREFIX = /^(\d{1,2}\s+[A-Z][a-z]{2})\b/;
+type PendingRow = {
+  date: string;           // ISO yyyy-mm-dd
+  description: string;
+  rawAmount: number;      // absolute value from PDF
+  signedBalance: number | null;  // balance column value (negative = owed), null if absent
+};
+
+type CreditLineRow = {
+  date: string;
+  description: string;
+  amount: number;           // signed: negative = withdrawal/interest, positive = payment
+  isPrincipalChange: boolean; // false for interest/fee rows that don't move principal
+};
 
 export function parseRbcCreditLineActivity(
   lines: PdfLine[],
   period: Period,
+  openingPrincipal: number,
 ): { rows: CreditLineRow[]; parseErrors: { rowIndex: number; message: string }[] } {
-  const rows: CreditLineRow[] = [];
   const parseErrors: { rowIndex: number; message: string }[] = [];
-  const cols = findColumnAnchors(lines);
 
-  // Activity section: between "Details of your account activity" and the
-  // first "Your LoanProtector insurance coverage summary" or "Rate History".
+  // Activity section: between "Details of your account activity" and
+  // "Your LoanProtector insurance coverage summary" or "Rate History".
   let inSection = false;
   const activityLines: PdfLine[] = [];
   for (const l of lines) {
@@ -179,55 +192,188 @@ export function parseRbcCreditLineActivity(
     if (/Your LoanProtector insurance/i.test(l.text)) break;
     if (/Rate History for your Statement Period/i.test(l.text)) break;
     if (/Important information about your account/i.test(l.text)) break;
-    if (/Details of your account activity - continued/i.test(l.text)) continue;
+    if (/Details of your account activity\s*-\s*continued/i.test(l.text)) continue;
     activityLines.push(l);
   }
 
+  // Collect pending rows.
+  const pending: PendingRow[] = [];
   let currentDate: string | null = null;
   let descBuffer: string[] = [];
 
   for (let i = 0; i < activityLines.length; i++) {
-    const line = activityLines[i];
-    const text = line.text.trim();
+    const l = activityLines[i];
+    const text = l.text.trim();
     if (!text) continue;
     if (/^Date\s+Description/i.test(text)) continue;
 
-    const dm = DATE_PREFIX.exec(text);
-    if (dm) {
+    const moneyTokens = extractTrailingMoneyTokens(text);
+    const dateMatch = DATE_PREFIX.exec(text);
+
+    if (dateMatch) {
+      // New dated row.
+      descBuffer = [];
       try {
-        currentDate = dayMonthToIso(dm[1], period);
+        currentDate = dayMonthToIso(dateMatch[1], period);
       } catch (err) {
         parseErrors.push({ rowIndex: i + 1, message: (err as Error).message });
         continue;
       }
+
+      // Extract description: strip date prefix and money tokens.
+      let desc = text.replace(DATE_PREFIX, '').trim();
+      for (const part of desc.split(/\s{2,}/)) {
+        if (isMoneyToken(part.trim())) {
+          desc = desc.replace(part, '').trim();
+        }
+      }
+      desc = desc.replace(/\s{2,}/g, ' ').trim();
+
+      if (moneyTokens.length === 0) {
+        // Description-only row (amount on subsequent dateless row).
+        descBuffer = desc ? [desc] : [];
+        continue;
+      }
+
+      // Signed balance is the LAST money token (negative = owed).
+      // Raw amount is second-to-last if 2+ tokens, otherwise the only token.
+      const signedBalance = moneyTokens.length >= 2 ? moneyTokens[moneyTokens.length - 1] : null;
+      const rawAmount = moneyTokens.length >= 2
+        ? Math.abs(moneyTokens[moneyTokens.length - 2])
+        : Math.abs(moneyTokens[0]);
+
+      pending.push({
+        date: currentDate,
+        description: desc || text.replace(DATE_PREFIX, '').replace(/\s{2,}/g, ' ').trim(),
+        rawAmount,
+        signedBalance,
+      });
+    } else {
+      // Dateless row — continuation or amount row.
+      if (moneyTokens.length === 0) {
+        descBuffer.push(text);
+        continue;
+      }
+
+      if (!currentDate) {
+        parseErrors.push({ rowIndex: i + 1, message: `Dateless amount row with no current date: ${text}` });
+        continue;
+      }
+
+      let desc = text;
+      for (const part of desc.split(/\s{2,}/)) {
+        if (isMoneyToken(part.trim())) {
+          desc = desc.replace(part, '').trim();
+        }
+      }
+      desc = desc.replace(/\s{2,}/g, ' ').trim();
+
+      const fullDesc = [...descBuffer, desc].filter((s) => s.length > 0).join(' ').trim();
       descBuffer = [];
+
+      const signedBalance = moneyTokens.length >= 2 ? moneyTokens[moneyTokens.length - 1] : null;
+      const rawAmount = moneyTokens.length >= 2
+        ? Math.abs(moneyTokens[moneyTokens.length - 2])
+        : Math.abs(moneyTokens[0]);
+
+      pending.push({
+        date: currentDate,
+        description: fullDesc || desc,
+        rawAmount,
+        signedBalance,
+      });
     }
+  }
 
-    const spans = moneySpans(line);
-    const { interest, withdrawal, payment, balance: _balance } = classifyRow(spans, cols);
-    void _balance;
+  // Sign transactions using running-balance delta.
+  // The balance column is SIGNED NEGATIVE (amount owed), e.g. -4000 = $4000 owed.
+  // runningSignedBalance tracks the signed balance column value.
+  const rows: CreditLineRow[] = [];
+  // Opening principal is positive (e.g. 4000 owed = -4000 in balance column).
+  let runningSignedBalance = -openingPrincipal;
 
-    // Strip date prefix + money tokens from line text to get description.
-    let desc = text.replace(DATE_PREFIX, '').trim();
-    for (const s of spans) desc = desc.replace(s.str, '').trim();
-    desc = desc.replace(/\s{2,}/g, ' ').trim();
-    if (desc) descBuffer.push(desc);
+  for (let i = 0; i < pending.length; i++) {
+    const row = pending[i];
 
-    const hasMonetaryAction = interest != null || withdrawal != null || payment != null;
-    if (!hasMonetaryAction) continue;
+    if (row.signedBalance !== null) {
+      const delta = row.signedBalance - runningSignedBalance;
+      // delta < 0 → withdrawal (debt increased) → cashflow negative
+      // delta > 0 → payment (debt decreased) → cashflow positive
+      // delta ≈ 0 → interest/fee (no principal change) → cashflow negative (it's a cost)
 
-    if (!currentDate) {
-      parseErrors.push({ rowIndex: i + 1, message: 'Credit Line row with amount but no date' });
-      descBuffer = [];
-      continue;
+      const EPSILON = 0.015;
+      let amount: number;
+      let isPrincipalChange: boolean;
+
+      if (Math.abs(delta) < EPSILON) {
+        // Zero delta: interest/fee row. Amount is the raw value, sign is negative.
+        amount = -row.rawAmount;
+        isPrincipalChange = false;
+      } else if (delta < 0) {
+        // Withdrawal: debt increased.
+        amount = -row.rawAmount;
+        isPrincipalChange = true;
+      } else {
+        // Payment: debt decreased.
+        amount = row.rawAmount;
+        isPrincipalChange = true;
+      }
+
+      rows.push({ date: row.date, description: row.description, amount, isPrincipalChange });
+      runningSignedBalance = row.signedBalance;
+    } else {
+      // No balance column: look ahead for sign resolution.
+      let nextBalance: number | null = null;
+      let unknownsBetween = 0;
+      for (let j = i + 1; j < pending.length; j++) {
+        if (pending[j].signedBalance !== null) {
+          nextBalance = pending[j].signedBalance;
+          break;
+        }
+        unknownsBetween++;
+      }
+
+      if (nextBalance !== null && unknownsBetween === 0) {
+        const nextRow = pending.find((p, j) => j > i && p.signedBalance !== null)!;
+        const nextNextBalance = nextRow.signedBalance!;
+        const totalDelta = nextNextBalance - runningSignedBalance;
+        const r1 = row.rawAmount;
+        const r2 = nextRow.rawAmount;
+
+        const candidates: [number, number][] = [
+          [r1, r2], [r1, -r2], [-r1, r2], [-r1, -r2],
+        ];
+        const matching = candidates.filter(([s1, s2]) => Math.abs(s1 + s2 - totalDelta) < 0.015);
+
+        if (matching.length > 1) {
+          const [s1, s2] = matching[0];
+          rows.push({ date: row.date, description: row.description, amount: s1, isPrincipalChange: true });
+          runningSignedBalance += s1;
+          rows.push({ date: nextRow.date, description: nextRow.description, amount: s2, isPrincipalChange: true });
+          runningSignedBalance = nextNextBalance;
+          i++;
+          parseErrors.push({
+            rowIndex: i,
+            message: `ambiguous sign for no-balance row pair: ${matching.length} combinations match delta ${totalDelta.toFixed(2)}; best-guess used`,
+          });
+        } else if (matching.length === 1) {
+          const [s1, s2] = matching[0];
+          rows.push({ date: row.date, description: row.description, amount: s1, isPrincipalChange: true });
+          runningSignedBalance += s1;
+          rows.push({ date: nextRow.date, description: nextRow.description, amount: s2, isPrincipalChange: true });
+          runningSignedBalance = nextNextBalance;
+          i++;
+        } else {
+          rows.push({ date: row.date, description: row.description, amount: -row.rawAmount, isPrincipalChange: true });
+          parseErrors.push({ rowIndex: i + 1, message: `Could not determine sign for no-balance row: ${row.description}` });
+          runningSignedBalance -= row.rawAmount;
+        }
+      } else {
+        rows.push({ date: row.date, description: row.description, amount: -row.rawAmount, isPrincipalChange: true });
+        parseErrors.push({ rowIndex: i + 1, message: `No-balance row, defaulting to withdrawal: ${row.description}` });
+        runningSignedBalance -= row.rawAmount;
+      }
     }
-    let amount = 0;
-    if (interest != null) amount -= Math.abs(interest);
-    if (withdrawal != null) amount -= Math.abs(withdrawal);
-    if (payment != null) amount += Math.abs(payment);
-    const fullDesc = descBuffer.filter((s) => s.length > 0).join(' ').trim();
-    rows.push({ date: currentDate, description: fullDesc || 'Credit Line transaction', amount });
-    descBuffer = [];
   }
 
   return { rows, parseErrors };
@@ -241,7 +387,18 @@ export const rbcCreditLineParser: PdfParser = {
   parse: (lines, ctx): PdfParseResult => {
     const header = parseRbcCreditLineHeader(lines);
     const period: Period = { start: header.periodStart, end: header.periodEnd };
-    const { rows, parseErrors } = parseRbcCreditLineActivity(lines, period);
+
+    const openingPrincipal = extractOpeningPrincipal(lines);
+    if (openingPrincipal === null) {
+      throw new Error(
+        'RBC Credit Line: could not extract opening principal balance ' +
+          '("Principal balance on …" line missing or without a dollar figure) — ' +
+          'transaction signs would be unverifiable',
+      );
+    }
+    const closingPrincipal = extractClosingPrincipal(lines);
+
+    const { rows, parseErrors } = parseRbcCreditLineActivity(lines, period, openingPrincipal);
 
     const transactions: PdfParseResult['transactions'] = rows.map((row) => ({
       date: row.date,
@@ -251,6 +408,35 @@ export const rbcCreditLineParser: PdfParser = {
       currency: ctx.defaultCurrency,
       sourceReference: null,
     }));
+
+    // ── Reconciliation gate ─────────────────────────────────────────────────
+    // Reconcile principal balance: opening + Σ(principal-change amounts) ≈ closing.
+    // Interest/fee rows (isPrincipalChange=false) are excluded from the principal sum.
+    if (closingPrincipal === null) {
+      parseErrors.push({
+        rowIndex: -1,
+        message: 'reconciliation: could not extract closing balance from statement; gate skipped',
+      });
+    } else {
+      const principalDelta = rows
+        .filter((r) => r.isPrincipalChange)
+        .reduce((acc, r) => acc + r.amount, 0);
+      // For a credit line, closing principal = opening principal - principalDelta.
+      // This is because:
+      //   - Withdrawal cashflow is NEGATIVE (money flows out), but INCREASES principal owed.
+      //   - Payment cashflow is POSITIVE (money flows in), but DECREASES principal owed.
+      // So: closing = opening - (sum of principal cashflow amounts)
+      // e.g., opening=0, withdrawals sum to -9000 (delta=-9000), payments sum to +5000 (delta=+5000)
+      //   closing = 0 - (-9000 + 5000) = 0 - (-4000) = 4000 ✓
+      const recomputed2 = openingPrincipal - principalDelta;
+      if (Math.abs(recomputed2 - closingPrincipal) > 0.015) {
+        parseErrors.push({
+          rowIndex: -1,
+          message: `statement does not reconcile: opening ${openingPrincipal} - principal changes ${principalDelta.toFixed(2)} = ${recomputed2.toFixed(2)}, expected closing ${closingPrincipal}`,
+        });
+      }
+    }
+    // ───────────────────────────────────────────────────────────────────────
 
     return {
       transactions,

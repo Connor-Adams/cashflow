@@ -1,4 +1,5 @@
 import React, { Component, useState, type ErrorInfo, type ReactNode } from 'react'
+import { Button } from '@connor-adams/designsystem'
 import { clientLogger } from '../lib/clientLogger'
 
 void React
@@ -56,25 +57,27 @@ function ErrorBoundaryFallback({
           {truncated}
         </p>
         <div className="errorBoundaryActions">
-          <button
+          <Button
             type="button"
+            variant="secondary"
             onClick={handleReload}
             className="errorBoundaryPrimary"
           >
             Reload page
-          </button>
+          </Button>
           <a href="/" className="errorBoundarySecondary">
             Go to Dashboard
           </a>
         </div>
         <div className="errorBoundaryFooter">
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => void handleCopy()}
             className="errorBoundaryCopyLink"
           >
             Copy error details
-          </button>
+          </Button>
           {copyFailed && (
             <span className="errorBoundaryCopyFailed" role="status">
               Couldn't copy

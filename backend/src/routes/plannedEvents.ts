@@ -402,7 +402,7 @@ async function checkTransactionInHousehold(
 
 router.get('/', async (req, res, next) => {
   try {
-    const where: Record<string, unknown> = { ...householdWhere(req) };
+    const where: Record<string, unknown> = { ...householdWhere(req), kind: 'planned' };
 
     if (req.query.type) {
       const typeRaw = String(req.query.type);
@@ -464,7 +464,7 @@ router.get('/:id', async (req, res, next) => {
       return;
     }
     const row = await PlannedEvent.findOne({
-      where: { id, ...householdWhere(req) },
+      where: { id, kind: 'planned', ...householdWhere(req) },
     });
     if (!row) {
       res.status(404).json({ error: 'Not found' });
@@ -533,7 +533,7 @@ router.put('/:id', async (req, res, next) => {
       return;
     }
     const row = await PlannedEvent.findOne({
-      where: { id, ...householdWhere(req) },
+      where: { id, kind: 'planned', ...householdWhere(req) },
     });
     if (!row) {
       res.status(404).json({ error: 'Not found' });
@@ -603,7 +603,7 @@ router.delete('/:id', async (req, res, next) => {
       return;
     }
     const row = await PlannedEvent.findOne({
-      where: { id, ...householdWhere(req) },
+      where: { id, kind: 'planned', ...householdWhere(req) },
     });
     if (!row) {
       res.status(404).json({ error: 'Not found' });

@@ -1,26 +1,15 @@
 import { useMemo, useRef, useState } from 'react'
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+  Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
 import {
-  useNetWorthCurrent,
-  useNetWorthSeries,
-  updateOpeningBalance,
-} from '@/hooks/useNetWorth'
+  useNetWorthCurrent, useNetWorthSeries, updateOpeningBalance, } from '@/hooks/useNetWorth'
 import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableHead,
-  TableRow,
-  TableCell,
-} from '@/components/ui/table'
+  Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { EmptyState } from '@connor-adams/designsystem'
+import { Skeleton } from '@connor-adams/designsystem'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Link } from 'react-router-dom'
 import { formatMoney } from '@/lib/formatMoney'
 import {
   fromDateInputValue,
@@ -106,14 +95,75 @@ export function NetWorthPage() {
   }
 
   if (current.loading && !current.data) {
-    return <div className="p-6">Loading net worth…</div>
+    return (
+      <div className="p-6 space-y-6">
+        <header className="flex items-center justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-40" />
+            <Skeleton className="h-4 w-28" />
+          </div>
+          <div className="flex gap-1">
+            {['1M', '3M', '1Y', 'All'].map((_, i) => (
+              <Skeleton key={`networth-skeleton-range-${i}`} className="h-8 w-10" />
+            ))}
+          </div>
+        </header>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {[0, 1, 2].map((i) => (
+            <div key={`networth-skeleton-card-${i}`} className="rounded border p-4 space-y-2">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-8 w-32" />
+            </div>
+          ))}
+        </div>
+
+        <div className="rounded border p-4 space-y-2">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-[280px] w-full" />
+        </div>
+
+        <div className="rounded border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Source</TableHead>
+                <TableHead>Currency</TableHead>
+                <TableHead className="text-right">Native</TableHead>
+                <TableHead className="text-right">CAD value</TableHead>
+                <TableHead>Notes</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <SkeletonRow key={`networth-skeleton-${i}`} cols={5} />
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+    )
   }
 
   const cur = current.data
   if (!cur) {
     return (
       <div className="p-6">
-        <p>No data{current.error ? `: ${current.error.message}` : ''}.</p>
+        {current.error ? (
+          <p className="error text-sm" role="alert">
+            Could not load net worth: {current.error.message}
+          </p>
+        ) : (
+          <EmptyState
+            title="No accounts yet"
+            description="Connect or add an account so we can track your assets and liabilities over time."
+            actions={
+              <Link to="/settings/accounts">
+                <Button size="sm">Add an account</Button>
+              </Link>
+            }
+          />
+        )}
       </div>
     )
   }
@@ -146,16 +196,15 @@ export function NetWorthPage() {
         </div>
         <div className="flex gap-1">
           {(['1M', '3M', '1Y', 'All'] as Range[]).map((r) => (
-            <button
+            <Button
               key={r}
               type="button"
+              variant={range === r ? 'default' : 'outline'}
+              size="sm"
               onClick={() => setRange(r)}
-              className={`px-3 py-1 text-sm rounded ${
-                range === r ? 'bg-primary text-primary-foreground' : 'border'
-              }`}
             >
               {r}
-            </button>
+            </Button>
           ))}
         </div>
       </header>
@@ -163,7 +212,7 @@ export function NetWorthPage() {
       {needsOpeningCount > 0 && (
         <div
           role="alert"
-          className="rounded border border-amber-400 bg-amber-50 text-amber-900 p-3 text-sm flex items-center justify-between gap-3"
+          className="rounded border border-warning bg-warning-bg text-warning p-3 text-sm flex items-center justify-between gap-3"
         >
           <div>
             <strong>{needsOpeningCount}</strong> account
@@ -171,20 +220,22 @@ export function NetWorthPage() {
             {needsOpeningCount === 1 ? 's' : 've'} no opening balance set —
             derived totals will be off until you set them.
           </div>
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={openEditorAndScroll}
-            className="rounded border border-amber-600 px-3 py-1 text-sm font-medium"
+            className="border-warning"
           >
             Set opening balances
-          </button>
+          </Button>
         </div>
       )}
 
       {negativeAssetCount > 0 && (
         <div
           role="alert"
-          className="rounded border border-amber-400 bg-amber-50 text-amber-900 p-3 text-sm"
+          className="rounded border border-warning bg-warning-bg text-warning p-3 text-sm"
         >
           <strong>{negativeAssetCount}</strong> asset account
           {negativeAssetCount === 1 ? '' : 's'} had a negative derived
@@ -196,7 +247,7 @@ export function NetWorthPage() {
       {gapCurrencies.length > 0 && (
         <div
           role="alert"
-          className="rounded border border-amber-400 bg-amber-50 text-amber-900 p-3 text-sm"
+          className="rounded border border-warning bg-warning-bg text-warning p-3 text-sm"
         >
           Missing FX rate{gapCurrencies.length === 1 ? '' : 's'} for{' '}
           <strong>{gapCurrencies.join(', ')}</strong> → CAD on {cur.asOf}.
@@ -275,21 +326,21 @@ export function NetWorthPage() {
                     {row.native != null
                       ? formatMoney(row.native, row.currency)
                       : row.source === 'account' && !row.openingBalanceSet
-                        ? <span className="text-xs text-amber-700">(unset)</span>
+                        ? <span className="text-xs text-warning">(unset)</span>
                         : '—'}
                   </TableCell>
                   <TableCell className="text-right">
                     {row.cadValue != null
                       ? formatMoney(row.cadValue, 'CAD')
                       : row.source === 'account' && !row.openingBalanceSet
-                        ? <span className="text-xs text-amber-700">(unset)</span>
+                        ? <span className="text-xs text-warning">(unset)</span>
                         : '—'}
                   </TableCell>
                   <TableCell>
                     {badges.length === 0 ? (
                       ''
                     ) : (
-                      <span className="text-xs text-amber-700">
+                      <span className="text-xs text-warning">
                         {badges.join(' · ')}
                       </span>
                     )}
@@ -302,13 +353,14 @@ export function NetWorthPage() {
       </div>
 
       <div ref={editorRef} className="rounded border">
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={() => setEditorOpen((v) => !v)}
           className="w-full text-left p-4 font-medium"
         >
           Opening balances {editorOpen ? '−' : '+'}
-        </button>
+        </Button>
         {editorOpen && (
           <div className="p-4 space-y-3 border-t">
             {editableAccounts.length === 0 ? (
@@ -326,7 +378,7 @@ export function NetWorthPage() {
                     >
                       {row.label}
                       {!row.openingBalanceSet && (
-                        <span className="ml-2 text-xs text-amber-700">(unset)</span>
+                        <span className="ml-2 text-xs text-warning">(unset)</span>
                       )}
                     </label>
                     <input
@@ -347,19 +399,20 @@ export function NetWorthPage() {
                         }))
                       }
                     />
-                    <button
+                    <Button
                       type="button"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => saveOpening(row.accountId)}
                       aria-label={`Save ${row.label}`}
-                      className="rounded border px-3 py-1 text-sm"
                     >
                       Save
-                    </button>
+                    </Button>
                   </div>
                   {openingErrors[row.accountId] && (
                     <span
                       id={`opening-error-${row.accountId}`}
-                      className="error text-sm text-red-600 ml-40"
+                      className="error text-sm text-danger ml-40"
                       role="alert"
                     >
                       {openingErrors[row.accountId]}

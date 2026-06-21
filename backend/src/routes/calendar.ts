@@ -134,7 +134,7 @@ router.get('/events', async (req, res, next) => {
     //     occurrences inside [from, to] even when expectedDate is
     //     before `from`. So we pull *every* recurring row whose anchor
     //     date is ≤ `to`, then filter occurrences in JS.
-    const where: Record<string, unknown> = { ...householdWhere(req) };
+    const where: Record<string, unknown> = { ...householdWhere(req), kind: 'planned' };
 
     if (req.query.type) {
       const typeRaw = String(req.query.type);

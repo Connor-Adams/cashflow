@@ -71,6 +71,14 @@ router.get('/', async (req, res, next) => {
       }
       where.status = statusParam;
     }
+    // Optional `type` filter. `type` is an open STRING column (not a PG enum),
+    // so no strict validation — an unknown type simply matches no rows and
+    // returns []. Consumers (e.g. the subscriptions/money-leaks views) use this
+    // to pull a single Insight kind such as subscription_price_increase.
+    const typeParam = req.query.type;
+    if (typeof typeParam === 'string' && typeParam.length > 0) {
+      where.type = typeParam;
+    }
 
     const rows = await Insight.findAll({ where });
     rows.sort((a, b) => {

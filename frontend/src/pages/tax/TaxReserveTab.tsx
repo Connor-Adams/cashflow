@@ -16,15 +16,11 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import {
-  deleteReserveSetting,
-  putReserveSetting,
-  useTaxReserveSettings,
-  useTaxReserveSummary,
-  PERIODICITY_LABELS,
-  type Periodicity,
-  type ReserveSettingDto,
-} from '../../hooks/useTaxReserve';
+  deleteReserveSetting, putReserveSetting, useTaxReserveSettings, useTaxReserveSummary, PERIODICITY_LABELS, type Periodicity, type ReserveSettingDto, } from '../../hooks/useTaxReserve';
+import { Button } from '@connor-adams/designsystem'
 import { fmtCurrency, fmtPct } from './util/format';
+import {
+  Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@connor-adams/designsystem'
 
 interface Props {
   year: number;
@@ -52,10 +48,7 @@ export function TaxReserveTab({ year }: Props) {
   };
 
   return (
-    <div
-      className="tax-reserve-tab"
-      style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}
-    >
+    <div className="tax-reserve-tab flex flex-col gap-6">
       <Disclaimer text={summary.data?.disclaimer} />
       <PeriodicityBar
         periodicity={periodicity}
@@ -86,14 +79,7 @@ function Disclaimer({ text }: { text?: string }) {
     <aside
       role="note"
       aria-label="Reserve calculator disclaimer"
-      style={{
-        border: '1px solid var(--warning-border, #f59e0b)',
-        background: 'var(--warning-bg, #fffbeb)',
-        color: 'var(--warning-fg, #92400e)',
-        borderRadius: '6px',
-        padding: '0.5rem 0.75rem',
-        fontSize: '0.875rem',
-      }}
+      className="rounded-[6px] border border-warning bg-warning-bg px-3 py-2 text-sm text-warning-foreground"
     >
       <strong>Note:</strong> {body}
     </aside>
@@ -110,33 +96,19 @@ function PeriodicityBar({
   onChange: (p: Periodicity) => void;
 }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        gap: '0.5rem',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-      }}
-    >
+    <div className="flex flex-wrap items-center gap-2">
       <span className="muted">Bucket by:</span>
       {PERIODICITIES.map((p) => (
-        <button
+        <Button
           key={p}
           type="button"
+          variant={periodicity === p ? 'primary' : 'outline'}
+          size="sm"
           onClick={() => onChange(p)}
           aria-pressed={periodicity === p}
-          style={{
-            padding: '0.25rem 0.75rem',
-            border: '1px solid var(--border-color, #ccc)',
-            background:
-              periodicity === p ? 'var(--accent, #2563eb)' : 'transparent',
-            color: periodicity === p ? 'white' : 'inherit',
-            borderRadius: '4px',
-            cursor: 'pointer',
-          }}
         >
           {PERIODICITY_LABELS[p]}
-        </button>
+        </Button>
       ))}
     </div>
   );
@@ -170,21 +142,21 @@ function SettingsSection({
           below.
         </p>
       ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              <th style={{ textAlign: 'left' }}>Currency</th>
-              <th style={{ textAlign: 'right' }}>Reserve %</th>
-              <th style={{ textAlign: 'left' }}>Rationale</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Currency</TableHead>
+              <TableHead className="text-right">Reserve %</TableHead>
+              <TableHead>Rationale</TableHead>
+              <TableHead></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {rows.map((r) => (
               <SettingsRow key={r.currency} row={r} onChanged={onChanged} />
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
     </section>
   );
@@ -248,16 +220,16 @@ function SettingsRow({
   };
 
   return (
-    <tr style={{ borderBottom: '1px solid var(--border-color, #eee)' }}>
-      <td>
+    <TableRow>
+      <TableCell>
         <strong>{row.currency}</strong>
         {row.isDefault && (
-          <span className="muted" style={{ marginLeft: '0.25rem' }}>
+          <span className="muted ml-1">
             (default)
           </span>
         )}
-      </td>
-      <td style={{ textAlign: 'right' }}>
+      </TableCell>
+      <TableCell className="text-right">
         <input
           type="number"
           min="0"
@@ -265,43 +237,45 @@ function SettingsRow({
           step="0.5"
           value={percent}
           onChange={(e) => setPercent(e.target.value)}
-          style={{ width: '5rem', textAlign: 'right' }}
+          className="w-20 text-right"
           aria-label={`Reserve percent for ${row.currency}`}
         />
-        <span style={{ marginLeft: '0.25rem' }}>%</span>
-      </td>
-      <td>
+        <span className="ml-1">%</span>
+      </TableCell>
+      <TableCell>
         <input
           type="text"
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="e.g. Federal + ON sole prop"
-          style={{ width: '100%' }}
+          className="w-full"
           aria-label={`Note for ${row.currency}`}
         />
-      </td>
-      <td style={{ whiteSpace: 'nowrap' }}>
-        <button type="button" onClick={handleSave} disabled={saving}>
+      </TableCell>
+      <TableCell className="whitespace-nowrap">
+        <Button type="button" variant="primary" size="sm" onClick={handleSave} disabled={saving}>
           Save
-        </button>
+        </Button>
         {!row.isDefault && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={handleReset}
             disabled={saving}
-            style={{ marginLeft: '0.25rem' }}
+            className="ml-1"
             title="Revert to the default 25% reserve"
           >
             Reset
-          </button>
+          </Button>
         )}
         {errorMsg && (
-          <span className="error" style={{ marginLeft: '0.5rem' }}>
+          <span className="error ml-2">
             {errorMsg}
           </span>
         )}
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -343,56 +317,50 @@ function SummarySection({ rows, loading, error }: SummarySectionProps) {
   return (
     <section>
       <h2>Reserve targets</h2>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr>
-            <th style={{ textAlign: 'left' }}>Period</th>
-            <th style={{ textAlign: 'left' }}>Currency</th>
-            <th style={{ textAlign: 'right' }}>Income</th>
-            <th style={{ textAlign: 'right' }}>Deductible exp.</th>
-            <th style={{ textAlign: 'right' }}>Net income</th>
-            <th style={{ textAlign: 'right' }}>Net HST/GST</th>
-            <th style={{ textAlign: 'right' }}>Reserve %</th>
-            <th style={{ textAlign: 'right' }}>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Period</TableHead>
+            <TableHead>Currency</TableHead>
+            <TableHead className="text-right">Income</TableHead>
+            <TableHead className="text-right">Deductible exp.</TableHead>
+            <TableHead className="text-right">Net income</TableHead>
+            <TableHead className="text-right">Net HST/GST</TableHead>
+            <TableHead className="text-right">Reserve %</TableHead>
+            <TableHead className="text-right">
               <strong>Reserve target</strong>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {rows.map((r) => (
-            <tr
-              key={`${r.currency}-${r.period}`}
-              style={{ borderBottom: '1px solid var(--border-color, #eee)' }}
-            >
-              <td>{r.period}</td>
-              <td>{r.currency}</td>
-              <td style={{ textAlign: 'right' }}>
+            <TableRow key={`${r.currency}-${r.period}`}>
+              <TableCell>{r.period}</TableCell>
+              <TableCell>{r.currency}</TableCell>
+              <TableCell className="text-right">
                 {fmtCurrency(r.components.businessIncome)}
-              </td>
-              <td style={{ textAlign: 'right' }}>
+              </TableCell>
+              <TableCell className="text-right">
                 {fmtCurrency(r.components.deductibleExpenses)}
-              </td>
-              <td
-                style={{
-                  textAlign: 'right',
-                  color: r.netBusinessIncome < 0 ? 'var(--danger, #b91c1c)' : 'inherit',
-                }}
+              </TableCell>
+              <TableCell
+                className={`text-right${r.netBusinessIncome < 0 ? ' text-danger' : ''}`}
               >
                 {fmtCurrency(r.netBusinessIncome)}
-              </td>
-              <td style={{ textAlign: 'right' }}>
+              </TableCell>
+              <TableCell className="text-right">
                 {fmtCurrency(r.netHstGst)}
-              </td>
-              <td style={{ textAlign: 'right' }}>
+              </TableCell>
+              <TableCell className="text-right">
                 {fmtPct(r.reservePercent)}
-              </td>
-              <td style={{ textAlign: 'right' }}>
+              </TableCell>
+              <TableCell className="text-right">
                 <strong>{fmtCurrency(r.reserveTarget)}</strong>
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </section>
   );
 }

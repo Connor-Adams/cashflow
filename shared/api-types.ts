@@ -11,6 +11,33 @@ export type Account = {
   shortCode: string | null
   defaultCurrency: string | null
   closedAt: string | null
+  /** Credit limit (#437). Set for revolving credit (credit cards and `loan`
+   *  lines of credit); null otherwise. */
+  creditLimit?: number | null
+  /** Current owed balance, derived from the transaction stream. Revolving
+   *  credit only (credit cards / lines of credit). Positive number. Null for
+   *  non-revolving accounts. */
+  currentBalance?: number | null
+  /** currentBalance / creditLimit × 100, or null when either is missing or
+   *  the account is closed. Frontend renders the badge tier from this. */
+  utilizationPct?: number | null
+  /** Free-form notes (max 4000 chars). Markdown rendered on the detail view. */
+  notes?: string | null
+  /** Account merge / consolidation (#287). When set, this account is a merged
+   *  source: its transactions + planned events were reassigned to the account
+   *  with this id, and it is hidden from the default account list. */
+  mergedIntoId?: number | null
+  /** ISO timestamp the merge happened, or null for an un-merged account. */
+  mergedAt?: string | null
+}
+
+/** Result of POST /api/accounts/:sourceId/merge-into/:targetId (#287). */
+export type AccountMergeResult = {
+  source: Account
+  target: Account
+  movedTransactions: number
+  movedPlannedEvents: number
+  movedTotal: number
 }
 
 /**
@@ -125,6 +152,11 @@ export type StatementListResponse = {
   total: number
 }
 
+export type ItemizedSummary = {
+  itemCount: number
+  stragglerCount: number
+}
+
 export type Transaction = {
   id: number
   accountId: number
@@ -147,9 +179,12 @@ export type Transaction = {
   autoCategory: string | null
   categoryOverride: string | null
   finalCategory: string | null
+  categoryOverrideId: number | null
+  finalCategoryId: number | null
   autoBusiness: boolean | null
   businessOverride: boolean | null
   finalBusiness: boolean
+  taxTreatmentOverride: TaxTreatment | null
   autoSplitType: string | null
   splitOverride: string | null
   finalSplitType: string
@@ -212,6 +247,13 @@ export type Transaction = {
    */
   counterpartyContactId: number | null
   account?: Pick<Account, 'id' | 'name' | 'shortCode'>
+  /**
+   * Labels applied to this transaction (issue #270). Present on list/detail
+   * responses; an empty array when the transaction has no labels.
+   */
+  labels?: TransactionLabelRef[]
+  /** Itemized summary for transactions with line items (e.g. receipts). */
+  itemized?: ItemizedSummary | null
 }
 
 /**
@@ -364,6 +406,19 @@ export type EnrichmentStats = {
   transferLinkedCount: number
   topCanonicalMerchants: Array<{ name: string; count: number }>
   topRules: Array<{ ruleId: number; pattern: string; category: string | null; count: number }>
+  uncategorizedCount: number
+  merchantsMissingCanonical: number
+  deadRules: Array<{ ruleId: number; pattern: string; category: string | null }>
+}
+
+export type EnrichmentCoverage = {
+  bucket: 'month' | 'week'
+  series: Array<{
+    period: string
+    total: number
+    cleared: number
+    withCanonical: number
+  }>
 }
 
 export type EnrichmentBackfillProgress =
@@ -435,6 +490,55 @@ export type Contact = {
    * Fairness dashboard's partner_inflows / non_partner_inflows split.
    */
   isPartner: boolean
+  /**
+   * True when this contact has been confirmed as the user's own account
+   * (e.g. "Connor Adams RBC"). Self-accounts are excluded from the
+   * per-person loan ledger and the transfer-link pass.
+   */
+  isSelf: boolean
+}
+
+/**
+ * A contact suggested as a potential self-account (the household user's own
+ * account appearing as a counterparty). Returned by GET /api/contacts/self-suggestions.
+ */
+export type SelfSuggestion = {
+  id: number
+  name: string
+  /** Human-readable explanation of why this contact looks like a self-account. */
+  reason: string
+}
+
+/** Response shape for GET /api/contacts/self-suggestions. */
+export type SelfSuggestionsResponse = {
+  suggestions: SelfSuggestion[]
+}
+
+export const TAX_TREATMENTS = [
+  'none',
+  'employment_income',
+  'donations',
+  'rrsp_contribution',
+  'fhsa_contribution',
+  'eligible_dividend',
+  'non_eligible_dividend',
+  'salary',
+  'loan_advance',
+  'loan_repayment',
+  'not_income',
+  'rental_income',
+  'rental_expense',
+  'pension_income',
+  'medical_expense',
+] as const
+
+export type TaxTreatment = (typeof TAX_TREATMENTS)[number]
+
+export function isTaxTreatment(value: unknown): value is TaxTreatment {
+  return (
+    typeof value === 'string' &&
+    (TAX_TREATMENTS as readonly string[]).includes(value)
+  )
 }
 
 export type Category = {
@@ -442,8 +546,60 @@ export type Category = {
   householdId: number
   name: string
   icon: string | null
+  taxTreatment: TaxTreatment
   createdAt: string
   updatedAt: string
+}
+
+export type CategoryTreeNode = {
+  id: number
+  name: string
+  parentId: number | null
+  icon: string | null
+  taxTreatment: TaxTreatment
+  children: CategoryTreeNode[]
+}
+
+export type RollupRow = {
+  categoryId: number
+  currency: string
+  name: string
+  path: string
+  parentId: number | null
+  depth: number
+  directTotal: number
+  rolledTotal: number
+}
+
+export type ResolvedCategoryPath = {
+  id: number
+  name: string | null
+  path: string
+  createdIds: number[]
+}
+
+/**
+ * A free-text transaction label (issue #270). Household-scoped, max 32 chars,
+ * case-insensitively unique per household. `usageCount` is the number of
+ * transactions tagged with it; present on the GET /api/labels list response.
+ */
+export type Label = {
+  id: number
+  name: string
+  /**
+   * Optional chip color (issue #794), a 6-digit hex string (`#RRGGBB`), or
+   * `null` for the neutral chip. Always present on the GET /api/labels list.
+   */
+  color: string | null
+  usageCount?: number
+}
+
+/** The shape a transaction carries for each applied label (id + name + color). */
+export type TransactionLabelRef = {
+  id: number
+  name: string
+  /** Chip color (issue #794): a `#RRGGBB` hex string, or `null` for neutral. */
+  color: string | null
 }
 
 export type AuthUser = {
@@ -458,6 +614,18 @@ export type AuthUser = {
   } | null
 }
 
+/**
+ * A rule's composable effect (issue #795). The scalar columns below mirror the
+ * `set_category` / `set_business` / `set_split` actions for backward compat;
+ * `set_label` / `set_alert` live only in the actions list.
+ */
+export type RuleAction =
+  | { type: 'set_category'; payload: { category: string | null } }
+  | { type: 'set_business'; payload: { isBusiness: boolean } }
+  | { type: 'set_split'; payload: { splitType: string; pctMe: string | null; pctPartner: string | null } }
+  | { type: 'set_label'; payload: { labelId: number } }
+  | { type: 'set_alert'; payload: { severity: 'info' | 'warn' | 'critical'; title?: string; body?: string } }
+
 export type Rule = {
   id: number
   merchantPattern: string
@@ -470,7 +638,9 @@ export type Rule = {
   pctPartner: string | null
   effectiveFrom: string | null
   effectiveTo: string | null
+  actions?: RuleAction[]
   usageCount?: number
+  updatedAt?: string
 }
 
 export type Paginated<T> = {
@@ -882,6 +1052,16 @@ export type ExternalOrderItemView = {
   id: number;
   externalOrderId: number;
   title: string;
+  /** AI-expanded human-readable product name; null = show `title`. */
+  displayName?: string | null;
+  /** Vendor item/article number (e.g. Costco), when captured. */
+  itemNumber?: string | null;
+  /** Verified Costco product image URL; null = no verified match (show text card). */
+  imageUrl?: string | null;
+  /** Verified Costco product page URL (thumbnail links here). */
+  costcoUrl?: string | null;
+  /** false = best-effort guess (e.g. Google image), not item-number-verified. */
+  imageVerified?: boolean;
   quantity: number;
   unitPrice: string | null;
   totalPrice: string | null;
@@ -889,6 +1069,19 @@ export type ExternalOrderItemView = {
   categoryOverride: string | null;
   businessUsePercent: string | null;
   businessUseOverride: string | null;
+  /** AI categorization confidence score (DECIMAL stored as string); null on legacy rows. */
+  confidence: string | null;
+};
+
+export type TripDetailView = {
+  pickupAddress: string | null;
+  dropoffAddress: string | null;
+  distance: number | null;
+  distanceUnit: 'km' | 'mi' | null;
+  durationMinutes: number | null;
+  requestedAt: string | null;
+  driver: string | null;
+  surgeMultiplier: number | null;
 };
 
 export type ExternalOrderView = {
@@ -899,6 +1092,7 @@ export type ExternalOrderView = {
   shipping: string | null;
   total: string | null;
   currency: string;
+  trip?: TripDetailView | null;
 };
 
 export type ReceiptWithItems = {
@@ -1029,6 +1223,7 @@ export type ItemRow = {
   qty: number
   unitPrice: number | null
   totalPrice: number | null
+  currency: string
   taxShare: number
   categoryEffective: string | null
   categoryOverride: string | null
@@ -1182,7 +1377,7 @@ export type PortfolioByAccountTypeRow = {
 }
 
 export type PortfolioByAccountTypeBucket = {
-  taxStatus: 'registered_tfsa' | 'registered_rrsp' | 'registered_fhsa' | 'registered_rrif' | 'non_registered' | 'n_a'
+  taxStatus: 'registered_tfsa' | 'registered_rrsp' | 'registered_fhsa' | 'registered_rrif' | 'registered_rdsp' | 'registered_resp' | 'non_registered' | 'n_a'
   label: string
   accounts: Array<{ id: number; name: string; currency: string }>
   holdingsCount: number
@@ -1249,7 +1444,7 @@ export type PortfolioForwardIncomeRow = {
 export type PortfolioForwardIncomeTaxBucket = {
   taxStatus:
     | 'registered_rrsp' | 'registered_tfsa' | 'registered_fhsa'
-    | 'registered_rrif' | 'non_registered' | 'n_a';
+    | 'registered_rrif' | 'registered_rdsp' | 'registered_resp' | 'non_registered' | 'n_a';
   byCurrency: Array<{ currency: string; amount: number }>;
   totalCad: number;
 };
@@ -1345,3 +1540,467 @@ export type PortfolioPerformance = {
   byAccount: PortfolioPerformanceByAccount[];
   caveats: PortfolioPerformanceCaveats;
 };
+
+// ---------------------------------------------------------------------------
+// Debt payoff planner (issue #202)
+// ---------------------------------------------------------------------------
+
+export type DebtPayoffStrategy = 'avalanche' | 'snowball' | 'custom'
+
+/** A liability account joined with its debt profile + derived owed balance. */
+export type DebtLiability = {
+  accountId: number
+  name: string
+  accountType: string
+  currency: string
+  /** Amount currently owed, as a positive number. */
+  balance: number
+  /** APR as a percent (e.g. 19.99). */
+  interestRate: number
+  minimumPayment: number
+  /** Optional owed-balance override; null when derived from transactions. */
+  statementBalance: number | null
+  /** Optional day-of-month (1-31) the payment is due. */
+  dueDay: number | null
+}
+
+/** One debt's line within a payoff month. */
+export type PayoffMonthDebtLine = {
+  debtId: number
+  payment: number
+  interest: number
+  principal: number
+  endingBalance: number
+}
+
+/** One month of the amortization schedule. */
+export type PayoffMonth = {
+  month: number
+  perDebt: PayoffMonthDebtLine[]
+  totalPaid: number
+  totalInterest: number
+}
+
+/** A single scheduled monthly debt outflow (for the forecast). */
+export type PayoffScheduledPayment = {
+  date: string
+  amount: number
+}
+
+/** The full computed payoff plan returned by the debt endpoints. */
+export type DebtPayoffPlan = {
+  strategy: DebtPayoffStrategy
+  /** Debt (account) ids in the order they are targeted. */
+  order: number[]
+  months: PayoffMonth[]
+  /** payoffMonthByDebt[id] = 1-based month the debt cleared, or null. */
+  payoffMonthByDebt: Record<number, number | null>
+  totalMonths: number
+  totalInterest: number
+  totalPaid: number
+  scheduledPayments: PayoffScheduledPayment[]
+  /** True when minimum payments cannot keep pace with interest. */
+  stalled: boolean
+}
+
+/** avalanche-vs-snowball comparison returned by GET /api/debt. */
+export type DebtPayoffComparison = {
+  avalanche: DebtPayoffPlan
+  snowball: DebtPayoffPlan
+  /** snowball.totalInterest - avalanche.totalInterest (>= 0). */
+  interestSaved: number
+}
+
+/** Response shape of GET /api/debt. */
+export type DebtOverview = {
+  currency: string
+  totalOwed: number
+  totalMinimumPayment: number
+  extraMonthlyPayment: number
+  liabilities: DebtLiability[]
+  comparison: DebtPayoffComparison | null
+}
+
+/** A persisted saved scenario row. */
+export type DebtPayoffScenario = {
+  id: number
+  householdId: number
+  userId: number | null
+  name: string
+  strategy: DebtPayoffStrategy
+  extraMonthlyPayment: string
+  payloadJson: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** Response shape of POST /api/debt/scenarios and GET /api/debt/scenarios/:id. */
+export type DebtScenarioResponse = {
+  scenario: DebtPayoffScenario
+  plan: DebtPayoffPlan
+  liabilities?: DebtLiability[]
+}
+
+/** A liability profile row returned by PUT /api/debt/accounts/:accountId. */
+export type DebtLiabilityProfile = {
+  accountId: number
+  interestRate: number
+  minimumPayment: number
+  statementBalance: number | null
+  dueDay: number | null
+}
+
+// ── Dividend payout reconciliation (issue #305) ──────────────────────────────
+
+export type DividendReconciliationStatus = 'upcoming' | 'matched' | 'unmatched'
+
+/** A matched or unmatched dividend reconciliation row. */
+export type DividendReconciliationRow = {
+  reconciliationId: number
+  securityDividendId: number
+  accountId: number
+  accountName: string | null
+  symbol: string | null
+  securityName: string | null
+  exDividendDate: string
+  paymentDate: string | null
+  /** per-share amount (string decimal). */
+  perShareAmount: string
+  shares: string | null
+  expectedAmount: number | null
+  actualAmount: number | null
+  currency: string | null
+  matchedTransactionId: number | null
+  matchedAt: string | null
+  matchSource: string
+  variancePct: number | null
+  varianceFlag: boolean
+}
+
+/** An upcoming (future-payment) dividend on a held security. */
+export type DividendUpcomingRow = {
+  securityDividendId: number
+  symbol: string | null
+  securityName: string | null
+  exDividendDate: string
+  paymentDate: string | null
+  perShareAmount: string
+  currency: string
+}
+
+/** GET /api/dividends response (the `data` shape depends on `status`). */
+export type DividendListResponse = {
+  status: DividendReconciliationStatus
+  windowMonths: number
+  data: DividendReconciliationRow[] | DividendUpcomingRow[]
+}
+
+/** A candidate transaction for the manual-match modal. */
+export type DividendCandidate = {
+  id: number
+  accountId: number
+  amount: number
+  date: string
+  merchant: string | null
+  currency: string
+  score: number | null
+  warning: 'debit' | 'wrong_account' | null
+}
+
+/** GET /api/dividends/:id/candidates response. */
+export type DividendCandidatesResponse = {
+  candidates: DividendCandidate[]
+}
+// ---------------------------------------------------------------------------
+// Credit-card payment planner (#243) — operational bill management.
+// ---------------------------------------------------------------------------
+
+/** How a planned card payment sizes its amount. */
+export type CardPaymentStrategy = 'statement' | 'minimum' | 'current'
+
+/** How much autopay draws each cycle. */
+export type CardAutopayType = 'full' | 'minimum' | 'fixed'
+
+/** One credit card returned by GET /api/credit-cards. */
+export type CreditCard = {
+  accountId: number
+  name: string
+  accountType: string
+  currency: string
+  /** Transaction-derived amount currently owed, as a positive number. */
+  currentBalance: number
+  /** User-entered statement-balance snapshot, or null. */
+  statementBalance: number | null
+  minimumPayment: number
+  /** Day-of-month (1-31) the payment is due, or null. */
+  dueDay: number | null
+  /** YYYY-MM-DD the current statement closed, or null. */
+  statementDate: string | null
+  autopayEnabled: boolean
+  autopayType: CardAutopayType | null
+  autopayAmount: number | null
+  /** The cash account the bill is paid from, or null. */
+  paymentAccountId: number | null
+  /** User-entered credit limit (#437), or null. */
+  creditLimit: number | null
+  /** currentBalance / creditLimit × 100, or null when either is missing or
+   *  the card is closed. */
+  utilizationPct: number | null
+  /** Next calendar due date derived from dueDay, or null. */
+  nextDueDate: string | null
+  /** Whole days until nextDueDate (>= 0), or null when no dueDay set. */
+  daysUntilDue: number | null
+  /** True when a payment is due within the warning window. */
+  dueSoon: boolean
+}
+
+/** Response shape of GET /api/credit-cards. */
+export type CreditCardsOverview = {
+  currency: string
+  asOfDate: string
+  cards: CreditCard[]
+}
+
+/** The profile row returned by PUT /api/credit-cards/:accountId. */
+export type CreditCardProfile = {
+  accountId: number
+  statementBalance: number | null
+  minimumPayment: number
+  dueDay: number | null
+  statementDate: string | null
+  autopayEnabled: boolean
+  autopayType: CardAutopayType | null
+  autopayAmount: number | null
+  paymentAccountId: number | null
+  creditLimit: number | null
+}
+
+/**
+ * Per-currency credit-utilization summary returned by
+ * GET /api/networth/credit-utilization (#437).
+ */
+export type CreditUtilizationByCurrency = {
+  currency: string
+  utilizationPct: number
+  cardCount: number
+  totalBalance: number
+  totalLimit: number
+  byCard: Array<{
+    accountId: number
+    name: string
+    currentBalance: number
+    creditLimit: number
+    utilizationPct: number
+  }>
+}
+
+/** The planned-event summary returned by the payment / mark-paid endpoints. */
+export type CardPaymentPlannedEvent = {
+  id: number
+  accountId: number | null
+  type?: string
+  name?: string
+  amount?: string
+  currency?: string
+  expectedDate?: string
+  source?: string
+  status: string
+  linkedTransactionId: number | null
+}
+
+/**
+ * Safe-to-spend impact echoed back when a card payment is planned, so the UI
+ * can warn without a follow-up request. A structural subset of the backend's
+ * full safe-to-spend result (extra fields are ignored).
+ */
+export type CardSafeToSpendImpact = {
+  currency: string
+  value: number
+  isNegative: boolean
+}
+
+/** Response shape of POST /api/credit-cards/:accountId/payment. */
+export type CreditCardPaymentResponse = {
+  plannedEvent: CardPaymentPlannedEvent
+  safeToSpend: CardSafeToSpendImpact | null
+}
+
+/**
+ * Household-level settings. `timezone` is the IANA zone (e.g.
+ * 'America/Toronto') driving server-side "today" derivation; `null` means the
+ * server falls back to its default. `effectiveTimezone` is that resolved
+ * value so the client never has to know the default itself.
+ *
+ * GET /api/household/settings returns this (with `benchmarkSymbol`);
+ * PATCH /api/household/timezone returns just the `timezone` pair.
+ */
+export type HouseholdSettings = {
+  benchmarkSymbol: string
+  timezone: string | null
+  effectiveTimezone: string
+}
+
+/** Response shape of PATCH /api/household/timezone. */
+export type HouseholdTimezoneResponse = {
+  timezone: string | null
+  effectiveTimezone: string
+}
+
+export type PeriodInsightCurrency = {
+  currency: string;
+  netSpend: number;
+  realCost: number; // netSpend - owedBack
+  owedBack: number;
+  owedBackBreakdown: { reimbursable: number; partnerShare: number };
+  peerLending: { lent: number; received: number };
+  totalSpend: number;
+  totalCredits: number;
+  totalIncome: number;
+  totalPayments: number;
+};
+
+export type PeriodInsightResp = {
+  byCurrency: PeriodInsightCurrency[];
+};
+
+// ── Per-person loan ledger (per-person loan ledger feature) ──────────────────
+
+export interface LedgerTransferRow {
+  id: number;
+  date: string;
+  amount: string;
+  currency: string;
+  merchant: string | null;
+  direction: 'out' | 'in';
+  isLoan: boolean;
+}
+
+export interface TransferNet {
+  currency: string;
+  sent: string;
+  received: string;
+  net: string;
+}
+
+export interface ContactLedgerResponse {
+  contactId: number;
+  name: string;
+  transferNet: TransferNet[];
+  trackedOutstandingByCurrency: Record<string, string>;
+  transfers: LedgerTransferRow[];
+}
+
+export interface TransferLinkAmbiguous {
+  txnId: number;
+  merchantText: string;
+  contactIds: number[];
+}
+
+export interface TransferLinkResult {
+  processed: number;
+  linked: number;
+  ambiguous: TransferLinkAmbiguous[];
+  dryRun: boolean;
+  elapsedMs: number;
+}
+
+// ── Merchant-cleanup review surface (issue #793) ──────────────────────────
+
+export interface MerchantClusterCategorySpread {
+  category: string | null;
+  count: number;
+}
+
+export interface MerchantCluster {
+  merchantClean: string;
+  canonical: string | null;
+  count: number;
+  /** Sum of absolute negative-amount (spend) rows, fixed(2) string. */
+  totalSpend: string;
+  currency: string;
+  dominantCategory: string | null;
+  categorySpread: MerchantClusterCategorySpread[];
+  sampleDescriptions: string[];
+}
+
+export interface MerchantClustersResponse {
+  clusters: MerchantCluster[];
+}
+
+export interface MerchantBulkRecategorizeResponse {
+  recategorized: number;
+  ruleCreated: boolean;
+  ruleId: number | null;
+}
+
+export interface MerchantMergeResponse {
+  reassigned: number;
+  survivor: string;
+}
+
+// ---------------------------------------------------------------------------
+// SimpleFIN Bridge connection (issue #790)
+// ---------------------------------------------------------------------------
+
+/** Lifecycle of a stored SimpleFIN connection. */
+export type SimplefinStatus = 'connected' | 'error' | 'disconnected';
+
+/** Request body for POST /api/simplefin/connect. */
+export interface SimplefinConnectRequest {
+  /** One-time base64 setup token pasted from SimpleFIN Bridge. */
+  setupToken: string;
+}
+
+/** A SimpleFIN account discovered at connect time that matched no Account row. */
+export interface SimplefinUnlinkedAccount {
+  simplefinId: string;
+  name: string;
+}
+
+/** Success body for POST /api/simplefin/connect. */
+export interface SimplefinConnectResponse {
+  status: SimplefinStatus;
+  accountsFound: number;
+  accountsLinked: number;
+  unlinkedAccounts: SimplefinUnlinkedAccount[];
+}
+
+/** Body for GET /api/simplefin/status. Never carries credentials. */
+export interface SimplefinStatusResponse {
+  connected: boolean;
+  status: SimplefinStatus;
+  statusReason: string | null;
+  lastSyncedAt: string | null;
+  /** Masked host of the access URL (never the credentials), or null. */
+  host: string | null;
+  accountsLinked?: number | null;
+}
+
+/** Body for POST /api/simplefin/disconnect. */
+export interface SimplefinDisconnectResponse {
+  status: 'disconnected';
+}
+
+// ---------------------------------------------------------------------------
+// SimpleFIN daily transaction sync (issue #791)
+// ---------------------------------------------------------------------------
+
+/** Request body for POST /api/simplefin/sync (manual "Sync now"). */
+export interface SimplefinSyncRequest {
+  /** Limit the sync to one integration; omitted syncs the caller's connection. */
+  integrationId?: number;
+}
+
+/** Per-account result of a single integration sync. */
+export interface SimplefinSyncRun {
+  integrationId: number;
+  accountId: number;
+  inserted: number;
+  skippedDuplicate: number;
+  status: SimplefinStatus;
+}
+
+/** Success body for POST /api/simplefin/sync. */
+export interface SimplefinSyncResponse {
+  runs: SimplefinSyncRun[];
+}

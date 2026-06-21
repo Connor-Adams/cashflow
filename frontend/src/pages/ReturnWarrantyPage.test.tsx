@@ -146,6 +146,35 @@ describe('ReturnWarrantyPage', () => {
     })
   })
 
+  it('renders a value amount in en-CA and a missing amount as —', async () => {
+    // AC #2 + #3: real amount renders $1,234.56 (en-CA); a null amount renders
+    // the em-dash placeholder, never a misleading $0.00.
+    vi.mocked(api.getJson).mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/return-warranty/active')) {
+        return {
+          data: [
+            { ...ACTIVE_ROW, id: 1, merchant: 'Has Amount', amount: '1234.56' },
+            {
+              ...ACTIVE_ROW,
+              id: 2,
+              merchant: 'No Amount',
+              amount: null as unknown as string,
+            },
+          ],
+          count: 2,
+          today: '2026-05-26',
+        }
+      }
+      return { data: [], count: 0, today: '2026-05-26' }
+    })
+    renderPage()
+    const valueRow = (await screen.findByText('Has Amount')).closest('tr')!
+    expect(within(valueRow).getByText('$1,234.56')).toBeInTheDocument()
+    const missingRow = screen.getByText('No Amount').closest('tr')!
+    expect(within(missingRow).getByText('—')).toBeInTheDocument()
+    expect(within(missingRow).queryByText('$0.00')).not.toBeInTheDocument()
+  })
+
   it('passes ?days when switching to Expiring soon and changing the window', async () => {
     const user = userEvent.setup()
     renderPage()

@@ -6,7 +6,7 @@ import { SettingsPage } from './SettingsPage'
 
 vi.mock('../../lib/useAuth', () => ({
   useAuth: () => ({
-    user: { household: { name: 'Test HH' }, email: 't@x.io', globalRole: null },
+    user: { household: { name: 'Test HH', role: 'owner' }, email: 't@x.io', globalRole: null },
   }),
 }))
 
@@ -16,7 +16,7 @@ function renderAt(path: string) {
       <Routes>
         <Route path="/settings" element={<SettingsPage />}>
           <Route path="display" element={<div>display-marker</div>} />
-          <Route path="imports" element={<div>imports-marker</div>} />
+          <Route path="categories" element={<div>categories-marker</div>} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -29,37 +29,16 @@ describe('SettingsPage shell', () => {
     expect(screen.getByRole('heading', { name: /settings/i })).toBeInTheDocument()
   })
 
-  it('renders the non-superadmin top tabs in expected order', () => {
+  it('renders the sidebar with grouped sections', () => {
     renderAt('/settings/display')
-    const tabs = screen.getAllByRole('tab')
-    expect(tabs.map((t) => t.textContent)).toEqual([
-      'Settings',
-      'Imports',
-      'Enrichment',
-      'Contacts',
-      'Budgets',
-      'Categories',
-      'Notifications',
-      'Jobs',
-    ])
-  })
-
-  it('marks Settings tab active for /settings/display', () => {
-    renderAt('/settings/display')
-    const settingsTab = screen.getByRole('tab', { name: 'Settings' })
-    expect(settingsTab).toHaveAttribute('aria-selected', 'true')
-  })
-
-  it('marks Imports tab active for /settings/imports', () => {
-    renderAt('/settings/imports')
-    expect(screen.getByRole('tab', { name: 'Imports' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    )
+    expect(screen.getByRole('navigation', { name: 'Settings sections' })).toBeInTheDocument()
+    expect(screen.getByText('Configuration')).toBeInTheDocument()
+    expect(screen.getByText('Library')).toBeInTheDocument()
+    expect(screen.getByText('Advanced')).toBeInTheDocument()
   })
 
   it('renders child outlet content', () => {
-    renderAt('/settings/imports')
-    expect(screen.getByText('imports-marker')).toBeInTheDocument()
+    renderAt('/settings/categories')
+    expect(screen.getByText('categories-marker')).toBeInTheDocument()
   })
 })

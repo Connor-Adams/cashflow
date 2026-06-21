@@ -426,7 +426,8 @@ type InboxItem = {
     | 'transaction_audit'
     | 'financial_insight'
     | 'rule_proposal'
-    | 'counterparty_promotion';
+    | 'counterparty_promotion'
+    | 'counterparty_email_match';
   createdAt: string;
   transactionId: number | null;
   summary: string;
@@ -509,9 +510,14 @@ router.get('/inbox', async (req, res, next) => {
     const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
     const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
     const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
-    const [rows, ruleProposals, counterpartyPromotions] = await Promise.all([
+    const [rows, emailMatchRows, ruleProposals, counterpartyPromotions] = await Promise.all([
       AiSuggestion.findAll({
         where: { ...where, kind: ['transaction_audit', 'financial_insight'] },
+        order: [['id', 'DESC']],
+        limit,
+      }),
+      AiSuggestion.findAll({
+        where: { ...where, kind: 'counterparty_email_match' },
         order: [['id', 'DESC']],
         limit,
       }),
@@ -556,6 +562,23 @@ router.get('/inbox', async (req, res, next) => {
       confidence: null,
       output: p,
     }));
+    const emailMatchItems: InboxItem[] = emailMatchRows.map((row) => {
+      const out = row.output as { name?: string; isSelf?: boolean } | null;
+      const name = out?.name ?? '';
+      const isSelf = out?.isSelf ?? false;
+      return {
+        id: row.id,
+        kind: 'counterparty_email_match',
+        createdAt: row.createdAt.toISOString(),
+        transactionId: row.transactionId,
+        summary: isSelf
+          ? `Interac transfer identified as sent to yourself`
+          : `Interac transfer from ${name}`,
+        severity: null,
+        confidence: null,
+        output: row.output,
+      };
+    });
     // Synthesized ids for counterparty_promotion go below rule_proposal's
     // range to avoid collisions in the frontend `${kind}:${id}` key. Pick
     // an offset comfortably larger than any expected ruleProposals.length.
@@ -569,7 +592,7 @@ router.get('/inbox', async (req, res, next) => {
       confidence: null,
       output: p,
     }));
-    res.json({ items: [...persistedItems, ...proposalItems, ...counterpartyItems] });
+    res.json({ items: [...persistedItems, ...emailMatchItems, ...proposalItems, ...counterpartyItems] });
   } catch (e) {
     next(e);
   }

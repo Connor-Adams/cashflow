@@ -1,14 +1,9 @@
 import type { ReactNode } from 'react'
 import {
-  Cell,
-  Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-} from 'recharts'
-import { Card } from './card'
+  Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, } from 'recharts'
+import { Card } from '@connor-adams/designsystem'
 import { formatMoney } from '../../lib/formatMoney'
+import { safePct } from '../../lib/num'
 
 export type DonutSlice = {
   key: string
@@ -86,7 +81,7 @@ export function AllocationDonut({
                 if (!Number.isFinite(v)) return ''
                 const slice = (ctx?.payload ?? {}) as DonutSlice
                 return [
-                  `${formatMoney(v, slice.currency || 'CAD')} (${slice.percentage?.toFixed(1) ?? '0.0'}%)`,
+                  `${formatMoney(v, slice.currency || 'CAD')} (${safePct(slice.percentage)})`,
                   slice.name ?? '',
                 ]
               }}

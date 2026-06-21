@@ -1,4 +1,6 @@
 import { Op } from 'sequelize';
+import { latestActivePositions } from '../portfolio/latestHoldings';
+import { resolveHoldingMarketValue } from '../portfolio/valuation';
 
 export type PortfolioRow = {
   accountId: number;
@@ -25,6 +27,65 @@ function n(raw: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** Minimal shape of a HoldingSnapshot row needed to value a position. */
+type ValuableHolding = {
+  accountId: number;
+  securityId: number;
+  quantity: string;
+  price: string | null;
+  marketValue: string | null;
+  currency: string;
+};
+
+/** Minimal shape of a SecurityPrice row needed to value a position. */
+type ValuablePrice = { price: string | null; currency: string };
+
+/**
+ * Pure valuation of a set of current positions at `asOf`, given the resolved
+ * latest price per security. Shared by `portfolioMarketValueAt` (single date)
+ * and the vectorized net-worth series (one call per bucket over prefetched
+ * data) so both paths value holdings identically — the quote-vs-broker guard,
+ * the imported-value fallback, the currency fallback, and the
+ * `price_unavailable` gap all live here once.
+ */
+export function valuePositionsAsOf(
+  latest: ValuableHolding[],
+  priceBySecurity: Map<number, ValuablePrice | undefined>,
+  asOf: string,
+): PortfolioMarketValueResult {
+  const rows: PortfolioRow[] = [];
+  const gaps: PortfolioGap[] = [];
+  for (const h of latest) {
+    const price = priceBySecurity.get(h.securityId);
+    const quantity = n(h.quantity) ?? 0;
+    const quotePrice = n(price?.price);
+    const importedValue = n(h.marketValue);
+    const currency = price?.currency || h.currency;
+
+    // Quote-vs-broker sanity guard (issue #549): a live quote that diverges
+    // implausibly from the broker per-unit price is a symbol→ticker collision
+    // and must not override the broker-imported value. When neither a usable
+    // quote nor an imported value exists, emit a price_unavailable gap.
+    let marketValue: number | null = null;
+    if (quotePrice != null || importedValue != null) {
+      marketValue = resolveHoldingMarketValue({
+        quantity,
+        importedValue,
+        importedPrice: n(h.price),
+        quotePrice,
+      }).marketValue;
+    }
+
+    if (marketValue == null) {
+      gaps.push({ date: asOf, currency, reason: 'price_unavailable', securityId: h.securityId });
+      continue;
+    }
+
+    rows.push({ accountId: h.accountId, securityId: h.securityId, marketValue, currency });
+  }
+  return { rows, gaps };
+}
+
 /**
  * For each (accountId, securityId) pair within the given account scope, compute
  * market value at `asOf`. Value resolution order, matching the existing
@@ -40,7 +101,9 @@ function n(raw: unknown): number | null {
  * holdings without quotes still show a sensible currency.
  *
  * Pairs with no qualifying holding (statementDate ≤ asOf) are treated as zero
- * positions (no row, no gap).
+ * positions (no row, no gap). Likewise, a pair whose latest snapshot predates
+ * the account's newest statement ≤ asOf was absent from that statement
+ * (fully sold) and is treated as zero from that date onward.
  *
  * SecurityPrice.pricedAt is a DATETIME, so we compare against
  * `${asOf}T23:59:59.999Z` to include same-day prices. HoldingSnapshot.statementDate
@@ -72,19 +135,26 @@ export async function portfolioMarketValueAt(
       accountId: activeIds,
       statementDate: { [Op.lte]: asOf },
     },
-    order: [['statementDate', 'DESC']],
+    // id DESC tiebreaker so same-day duplicate snapshots (corrected
+    // re-imports) resolve deterministically to the newest row, matching
+    // routes/portfolio.ts.
+    order: [
+      ['statementDate', 'DESC'],
+      ['id', 'DESC'],
+    ],
   });
 
-  const latest = new Map<string, (typeof allHoldings)[number]>();
-  for (const h of allHoldings) {
-    const key = `${h.accountId}:${h.securityId}`;
-    if (!latest.has(key)) latest.set(key, h);
-  }
-  if (latest.size === 0) return { rows: [], gaps: [] };
+  // Current position per (account, security) pair within the asOf-capped
+  // scope. A position whose own latest snapshot predates the account's
+  // newest statement ≤ asOf was absent from that statement — i.e. fully
+  // sold — so it contributes zero from that date onward instead of carrying
+  // its last pre-sale value forward forever. The inference lives in
+  // portfolio/latestHoldings.ts, shared with routes/portfolio.ts so the
+  // Portfolio page and net worth always agree.
+  const latest = latestActivePositions(allHoldings);
+  if (latest.length === 0) return { rows: [], gaps: [] };
 
-  const securityIds = Array.from(
-    new Set(Array.from(latest.values(), (h) => h.securityId))
-  );
+  const securityIds = Array.from(new Set(latest.map((h) => h.securityId)));
   const asOfEndOfDay = `${asOf}T23:59:59.999Z`;
   const allPrices = await SecurityPrice.findAll({
     where: {
@@ -93,45 +163,10 @@ export async function portfolioMarketValueAt(
     },
     order: [['pricedAt', 'DESC']],
   });
-  const priceBySecurity = new Map<number, (typeof allPrices)[number]>();
+  const priceBySecurity = new Map<number, (typeof allPrices)[number] | undefined>();
   for (const p of allPrices) {
     if (!priceBySecurity.has(p.securityId)) priceBySecurity.set(p.securityId, p);
   }
 
-  const rows: PortfolioRow[] = [];
-  const gaps: PortfolioGap[] = [];
-
-  for (const h of latest.values()) {
-    const price = priceBySecurity.get(h.securityId);
-    const quantity = n(h.quantity) ?? 0;
-    const quotePrice = n(price?.price);
-    const importedValue = n(h.marketValue);
-    const currency = price?.currency || h.currency;
-
-    let marketValue: number | null = null;
-    if (quotePrice != null) {
-      marketValue = quantity * quotePrice;
-    } else if (importedValue != null) {
-      marketValue = importedValue;
-    }
-
-    if (marketValue == null) {
-      gaps.push({
-        date: asOf,
-        currency,
-        reason: 'price_unavailable',
-        securityId: h.securityId,
-      });
-      continue;
-    }
-
-    rows.push({
-      accountId: h.accountId,
-      securityId: h.securityId,
-      marketValue,
-      currency,
-    });
-  }
-
-  return { rows, gaps };
+  return valuePositionsAsOf(latest, priceBySecurity, asOf);
 }

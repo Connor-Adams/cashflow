@@ -30,6 +30,13 @@ import { Account, Transaction, sequelize } from '../models';
 import { serializeTransaction } from '../util/serializeTransaction';
 import { visibleTransactionWhere } from '../auth/scope';
 import { logger } from '../observability/logger';
+import { isTaxTreatment, type TaxTreatment } from '@cashflow/shared';
+import {
+  aggregateMoneyMovement,
+  summarizeReciprocity,
+  type MovementRow,
+  type ReciprocityLeg,
+} from '../transfers/reciprocity';
 
 /**
  * Valid `transfer_purpose` values. Mirrors {@link TransferPurpose} in
@@ -362,16 +369,17 @@ router.post('/link', async (req, res, next) => {
     }
 
     const result = await sequelize.transaction(async (t) => {
-      const [a, b] = await Promise.all([
-        Transaction.findOne({
-          where: { id: idA, ...visibleTransactionWhere(req) },
-          transaction: t,
-        }),
-        Transaction.findOne({
-          where: { id: idB, ...visibleTransactionWhere(req) },
-          transaction: t,
-        }),
-      ]);
+      // Both reads share transaction `t` (one pg connection), so they must run
+      // sequentially — Promise.all pipelines queries on the same client
+      // ("already executing a query", a hard error in pg@9).
+      const a = await Transaction.findOne({
+        where: { id: idA, ...visibleTransactionWhere(req) },
+        transaction: t,
+      });
+      const b = await Transaction.findOne({
+        where: { id: idB, ...visibleTransactionWhere(req) },
+        transaction: t,
+      });
       if (!a || !b) {
         const err = new Error('Transaction not found') as Error & { status?: number };
         err.status = 404;
@@ -582,6 +590,70 @@ router.patch('/:id/purpose', async (req, res, next) => {
 });
 
 /**
+ * PATCH /api/transfers/:id/tax-treatment
+ *
+ * Sets `tax_treatment` on a transaction. If the row is linked (a transfer
+ * pair), both legs get the same value. Unlinked rows (e.g. a payroll deposit)
+ * are allowed — only that row is updated. null/'' clears the treatment.
+ */
+router.patch('/:id/tax-treatment', async (req, res, next) => {
+  try {
+    const id = asNumberId(req.params.id);
+    if (id == null) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const body = (req.body || {}) as Record<string, unknown>;
+    const raw = body.taxTreatmentOverride;
+    let treatment: TaxTreatment | null;
+    if (raw === null || raw === undefined || raw === '') {
+      treatment = null;
+    } else if (isTaxTreatment(raw)) {
+      treatment = raw;
+    } else {
+      res.status(400).json({ error: 'invalid taxTreatment' });
+      return;
+    }
+
+    const result = await sequelize.transaction(async (t) => {
+      const a = await Transaction.findOne({
+        where: { id, ...visibleTransactionWhere(req) },
+        transaction: t,
+      });
+      if (!a) {
+        const err = new Error('Not found') as Error & { status?: number };
+        err.status = 404;
+        throw err;
+      }
+      const reviewedAt = new Date();
+      a.set('taxTreatmentOverride', treatment);
+      a.set('reviewedAt', reviewedAt);
+      await a.save({ transaction: t });
+      let b = null;
+      if (a.linkedTransactionId != null) {
+        b = await Transaction.findOne({
+          where: { id: a.linkedTransactionId, ...visibleTransactionWhere(req) },
+          transaction: t,
+        });
+        if (b) {
+          b.set('taxTreatmentOverride', treatment);
+          b.set('reviewedAt', reviewedAt);
+          await b.save({ transaction: t });
+        }
+      }
+      return { a, b };
+    });
+
+    res.json({
+      a: serializeTransaction(result.a),
+      b: result.b ? serializeTransaction(result.b) : null,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * GET /api/transfers/money-movement
  *
  * Aggregates linked transfers into a "money movement map" — a list of
@@ -628,76 +700,51 @@ router.get('/money-movement', async (req, res, next) => {
       order: [['date', 'ASC']],
     });
 
-    // Build pair table keyed by the unordered (idA, idB) tuple so each pair
-    // contributes exactly one row to the aggregate, regardless of which side
-    // is the source.
-    type PairAcc = {
-      sourceAccountId: number;
-      sourceAccountName: string;
-      destAccountId: number;
-      destAccountName: string;
-      sourceCurrency: string;
-      destCurrency: string;
-      purpose: TransferPurpose | null;
-      totalSourceAmount: number;
-      totalDestAmount: number;
-      count: number;
-    };
-    const byPair = new Map<string, PairAcc>();
-    const seenPair = new Set<string>();
-
     type RowWithAccount = (typeof rows)[number] & {
       account?: { id: number; name: string; shortCode: string | null };
     };
-    const txnById = new Map<number, RowWithAccount>();
-    for (const r of rows as RowWithAccount[]) txnById.set(r.id, r);
 
-    for (const r of rows as RowWithAccount[]) {
-      const linkedId = r.linkedTransactionId;
-      if (linkedId == null) continue;
-      const sibling = txnById.get(linkedId);
-      if (!sibling) continue; // sibling out of date range; skip pair
-      const pairKey = r.id < linkedId ? `${r.id}-${linkedId}` : `${linkedId}-${r.id}`;
-      if (seenPair.has(pairKey)) continue;
-      seenPair.add(pairKey);
+    const toMovementRow = (r: RowWithAccount): MovementRow => ({
+      id: r.id,
+      accountId: r.accountId,
+      accountName: r.account?.name ?? `Account #${r.accountId}`,
+      amount: Number(r.amount),
+      currency: r.currency,
+      linkedTransactionId: r.linkedTransactionId,
+      transferPurpose: r.transferPurpose ?? null,
+    });
 
-      // Source is the negative leg, destination is the positive leg. Ties
-      // (e.g. amount=0 oddity) treat `r` as source.
-      const rAmt = Number(r.amount);
-      const sAmt = Number(sibling.amount);
-      const source = rAmt <= sAmt ? r : sibling;
-      const dest = source === r ? sibling : r;
-      const sourceAmount = Math.abs(Number(source.amount));
-      const destAmount = Math.abs(Number(dest.amount));
+    const anchors = (rows as RowWithAccount[]).map(toMovementRow);
 
-      const groupKey = `${source.accountId}-${dest.accountId}-${source.currency}-${dest.currency}-${r.transferPurpose ?? ''}`;
-      const acc = byPair.get(groupKey);
-      if (acc) {
-        acc.totalSourceAmount += sourceAmount;
-        acc.totalDestAmount += destAmount;
-        acc.count += 1;
-      } else {
-        byPair.set(groupKey, {
-          sourceAccountId: source.accountId,
-          sourceAccountName: source.account?.name ?? `Account #${source.accountId}`,
-          destAccountId: dest.accountId,
-          destAccountName: dest.account?.name ?? `Account #${dest.accountId}`,
-          sourceCurrency: source.currency,
-          destCurrency: dest.currency,
-          purpose: (r.transferPurpose as TransferPurpose | null) ?? null,
-          totalSourceAmount: sourceAmount,
-          totalDestAmount: destAmount,
-          count: 1,
-        });
+    // When a date window is applied a leg's reciprocating sibling may fall
+    // outside the window; without it the pair would be mis-classified as
+    // dangling. Load those siblings (no date filter) purely to resolve
+    // reciprocity — they are not aggregated as anchors.
+    let siblingLookup: MovementRow[] | undefined;
+    if (req.query.dateFrom || req.query.dateTo) {
+      const siblingIds = anchors
+        .map((a) => a.linkedTransactionId)
+        .filter((id): id is number => id != null);
+      if (siblingIds.length > 0) {
+        const siblingRows = (await Transaction.findAll({
+          where: {
+            ...visibleTransactionWhere(req),
+            txnType: 'transfer',
+            id: { [Op.in]: siblingIds },
+          },
+          include: [
+            { model: Account, as: 'account', attributes: ['id', 'name', 'shortCode'] },
+          ],
+        })) as RowWithAccount[];
+        siblingLookup = siblingRows.map(toMovementRow);
       }
     }
 
-    const flows = Array.from(byPair.values()).sort(
-      (a, b) => b.totalSourceAmount - a.totalSourceAmount,
-    );
+    const { flows, dangling } = aggregateMoneyMovement(anchors, siblingLookup);
 
     res.json({
       flows,
+      dangling,
       unmatchedCount: await Transaction.count({
         where: {
           ...visibleTransactionWhere(req),
@@ -714,8 +761,16 @@ router.get('/money-movement', async (req, res, next) => {
 /**
  * GET /api/transfers/stats
  *
- * Quick scalar summary for the page header: matched/unmatched counts,
- * by-purpose breakdown. Cheap to render — uses COUNT only, no joins.
+ * Quick scalar summary for the page header:
+ *   - `matched`   — count of RECIPROCAL pairs (A↔B), counted once per pair.
+ *   - `unmatched` — transfer legs with no link at all.
+ *   - `dangling`  — legs with a one-way / broken link (A→B but not B→A).
+ *                   Previously these inflated `matched`; issue #553.
+ *   - `byPurpose` — reciprocal-pair count keyed by purpose (one per pair).
+ *
+ * Loads the linked legs (id + link + purpose) to evaluate reciprocity in
+ * memory via {@link summarizeReciprocity}; the link column is indexed so the
+ * scan is cheap.
  */
 router.get('/stats', async (req, res, next) => {
   try {
@@ -724,26 +779,25 @@ router.get('/stats', async (req, res, next) => {
       txnType: 'transfer',
     } as Record<string, unknown>;
 
-    const [matched, unmatched, linkedRows] = await Promise.all([
-      Transaction.count({
-        where: { ...baseWhere, linkedTransactionId: { [Op.ne]: null } },
-      }),
-      Transaction.count({
-        where: { ...baseWhere, linkedTransactionId: null },
-      }),
-      Transaction.findAll({
-        where: { ...baseWhere, linkedTransactionId: { [Op.ne]: null } },
-        attributes: ['transferPurpose'],
-        raw: true,
-      }),
-    ]);
+    const linkedRows = (await Transaction.findAll({
+      where: { ...baseWhere, linkedTransactionId: { [Op.ne]: null } },
+      attributes: ['id', 'linkedTransactionId', 'transferPurpose'],
+      raw: true,
+    })) as unknown as ReciprocityLeg[];
 
-    const byPurpose: Record<string, number> = {};
-    for (const row of linkedRows as unknown as Array<{ transferPurpose: string | null }>) {
-      const key = row.transferPurpose ?? 'unclassified';
-      byPurpose[key] = (byPurpose[key] ?? 0) + 1;
-    }
-    res.json({ matched, unmatched, byPurpose });
+    const summary = summarizeReciprocity(linkedRows);
+
+    // Legs with no link at all are not in `linkedRows`; count them directly.
+    const unmatched = await Transaction.count({
+      where: { ...baseWhere, linkedTransactionId: null },
+    });
+
+    res.json({
+      matched: summary.matched,
+      unmatched,
+      dangling: summary.dangling,
+      byPurpose: summary.byPurpose,
+    });
   } catch (e) {
     next(e);
   }

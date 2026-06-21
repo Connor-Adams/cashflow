@@ -1,4 +1,4 @@
-import { num } from '../util/numbers';
+import { num, toUnits, fromUnits } from '../util/numbers';
 import { classifyPositiveAmount, isNonCategorical } from './classifyTransactionFlow';
 import { splitTxnByItems } from '../import/splitTxnByItems';
 import type { ItemAllocationContext } from './loadItemAllocations';
@@ -17,6 +17,7 @@ export type MonthlyTxnRow = {
   merchantRaw: string | null;
   merchantClean: string | null;
   finalCategory: string | null;
+  finalCategoryId?: number | null;
   finalBusiness: boolean;
   finalSplitType: string;
   amount: unknown;
@@ -29,6 +30,7 @@ export type MonthlyCategoryPoint = {
   month: string;
   currency: string;
   category: string | null;
+  categoryId: number | null;
   sumAmount: number;
 };
 export type MonthlyResult = {
@@ -44,14 +46,19 @@ export type MonthlyResult = {
  * line-item categories into the monthly trend instead of the txn category.
  *
  * Excluded:
- *  - statement payments (positive amount with txnType resolving to 'payment'
- *    via `classifyPositiveAmount` — not category data, would inflate)
+ *  - statement payments, both legs (any txnType='payment' row, plus positive
+ *    amounts resolving to 'payment' via `classifyPositiveAmount` merchant
+ *    text — not category data, would double count the card spend they cover)
  *  - non-categorical money movement (transfer / investment / dividend, plus
  *    anything on an investment account — see `classifyTransactionFlow`)
+ *  - income (txnType='income', either sign) — inflow is not category spend
+ *    or a category-offsetting credit; peeled from BOTH points and
+ *    categoryPoints so a paycheck doesn't inflate the null/Uncategorized
+ *    bucket or the activity curve (matches the dashboard income peel)
  *
  * Included:
- *  - refunds / rewards / income — they net against the same month's spend
- *    in the UI, which is what users expect
+ *  - refunds / rewards — they net against the same month's spend in the UI,
+ *    which is what users expect
  *  - rows whose `num()` parse fails are silently skipped (legacy data)
  *
  * Sorting is left to the route so this stays a pure data transform.
@@ -67,6 +74,18 @@ export function aggregateMonthly(
     const amount = num(row.amount);
     if (amount == null) continue;
     const accountType = accountTypeById.get(row.accountId);
+    // Income (txnType='income') is inflow, not category spend nor a
+    // category-offsetting credit. Peel it out entirely so it inflates
+    // neither the activity curve (points) nor any category bucket
+    // (categoryPoints) — both signs dropped (a negative income reversal is
+    // money-movement, not spend). Keeps points == Σ categoryPoints intact.
+    if (row.txnType === 'income') continue;
+    // Statement payments are money movement, not category data — BOTH legs:
+    // the positive card-side leg (txnType or merchant-text via
+    // classifyPositiveAmount) and the negative checking-side leg
+    // (txnType='payment'). The card purchases the payment covers are already
+    // summed, so keeping either leg would double count the month.
+    if (row.txnType === 'payment') continue;
     if (
       amount > 0 &&
       classifyPositiveAmount({
@@ -93,7 +112,7 @@ export function aggregateMonthly(
       currency: row.currency,
       sumAmount: 0,
     };
-    existing.sumAmount += amount;
+    existing.sumAmount += toUnits(amount);
     points.set(key, existing);
 
     const allocations = itemContext
@@ -103,6 +122,7 @@ export function aggregateMonthly(
             amount: String(row.amount),
             currency: row.currency,
             finalCategory: row.finalCategory,
+            finalCategoryId: row.finalCategoryId ?? null,
             finalBusiness: row.finalBusiness,
             finalSplitType: row.finalSplitType,
             businessAmount: row.businessAmount ?? '0',
@@ -114,6 +134,7 @@ export function aggregateMonthly(
       : [
           {
             category: row.finalCategory,
+            categoryId: row.finalCategoryId ?? null,
             amount,
             businessAmount: 0,
             currency: row.currency,
@@ -126,12 +147,21 @@ export function aggregateMonthly(
         month,
         currency: row.currency,
         category: alloc.category,
+        categoryId: alloc.categoryId ?? null,
         sumAmount: 0,
       };
-      catExisting.sumAmount += alloc.amount;
+      catExisting.sumAmount += toUnits(alloc.amount);
       categoryPoints.set(catKey, catExisting);
     }
   }
+  // Finalize: convert integer-unit accumulators back to dollars.
+  for (const v of points.values()) {
+    v.sumAmount = fromUnits(v.sumAmount);
+  }
+  for (const v of categoryPoints.values()) {
+    v.sumAmount = fromUnits(v.sumAmount);
+  }
+
   return {
     points: Array.from(points.values()),
     categoryPoints: Array.from(categoryPoints.values()),

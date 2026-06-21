@@ -4,7 +4,7 @@
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import request from 'supertest';
+import { testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -24,7 +24,7 @@ after(async () => {
 });
 
 test('returns publishable config without leaking secrets', async () => {
-  const res = await request(app).get('/api/config');
+  const res = await testRequest(app).get('/api/config');
   assert.equal(res.status, 200);
   assert.equal(res.body.logoDevToken, 'pk_test_logo');
   assert.equal(res.body.quoteProviderConfigured, true);

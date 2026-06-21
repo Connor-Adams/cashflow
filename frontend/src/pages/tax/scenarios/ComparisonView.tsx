@@ -1,20 +1,21 @@
+import { Button } from '@connor-adams/designsystem'
 import { useScenarioComparison } from '../../../hooks/useScenarioComparison';
+import { fmtCurrency } from '../util/format';
+import {
+  Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 
 interface Props {
   ids: number[];
   onClose: () => void;
   /**
    * Optional override for the compare endpoint. Defaults to the personal
-   * scenarios endpoint. Corp scenarios pass `/api/tax/corp-scenarios/compare`.
+   * scenarios endpoint. Corp scenarios pass `/api/tax/scenarios/corp/compare`.
    * The hook returns the same `ScenarioWithComputed[]` shape either way.
    */
   endpoint?: string;
 }
 
-// NOTE: TOTAL_KEYS is hard-coded to personal-tax line codes (totalIncome,
-// federalTax, …). For corp scenarios those keys aren't present in the totals
-// payload, so the rows render blank under each corp column. Acceptable for
-// P8a v1 — P8b can add a corp-aware variant or make this prop-driven.
+// NOTE: corp scenarios render blank here — TOTAL_KEYS lists personal line keys only. Pre-existing, out of scope for the restyle (see spec).
 const TOTAL_KEYS = [
   'totalIncome', 'netIncome', 'taxableIncome',
   'federalTax', 'provincialTax', 'cppContrib', 'eiPremium',
@@ -28,38 +29,31 @@ export function ComparisonView({ ids, onClose, endpoint }: Props) {
   if (data.length === 0) return null;
 
   return (
-    <div className="card" style={{ marginTop: '1rem' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <h3>Comparing {data.length} scenario{data.length === 1 ? '' : 's'}</h3>
-        <button onClick={onClose}>Close</button>
+    <div className="mt-4 rounded-md border border-border">
+      <header className="flex items-baseline justify-between px-4 py-3 border-b border-border">
+        <h3 className="text-base font-semibold">Comparing {data.length} scenario{data.length === 1 ? '' : 's'}</h3>
+        <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
       </header>
-      <table>
-        <thead>
-          <tr>
-            <th>Line</th>
-            {data.map((row) => <th key={row.scenario.id}>{row.scenario.name}</th>)}
-          </tr>
-        </thead>
-        <tbody>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Line</TableHead>
+            {data.map((row) => <TableHead key={row.scenario.id}>{row.scenario.name}</TableHead>)}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {TOTAL_KEYS.map((k) => (
-            <tr key={k}>
-              <td><strong>{k}</strong></td>
+            <TableRow key={k}>
+              <TableCell className="font-medium">{k}</TableCell>
               {data.map((row) => (
-                <td key={row.scenario.id}>
-                  {formatCell(row.computed.totals[k])}
-                </td>
+                <TableCell key={row.scenario.id} className="text-right tabular-nums">
+                  {fmtCurrency(row.computed.totals[k] as string | number | null | undefined)}
+                </TableCell>
               ))}
-            </tr>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
-}
-
-function formatCell(value: unknown): string {
-  if (value == null) return '—';
-  const n = typeof value === 'string' ? Number(value) : (value as number);
-  if (!Number.isFinite(n)) return String(value);
-  return n.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }

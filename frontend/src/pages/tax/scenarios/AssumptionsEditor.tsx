@@ -63,10 +63,10 @@ export function AssumptionsEditor({ assumptions, onChange }: Props) {
   }
 
   return (
-    <section className="rounded-md border border-gray-200 bg-white p-3">
-      <h3 className="mb-2 text-sm font-semibold text-gray-800">Assumptions</h3>
+    <section className="rounded-md border bg-card p-3">
+      <h3 className="mb-2 text-sm font-semibold text-foreground">Assumptions</h3>
       <div className="flex flex-col gap-2">
-        <label className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+        <label className="flex flex-wrap items-center gap-2 text-sm text-foreground">
           <span className="min-w-[10rem]">Inflation (%)</span>
           <input
             type="number"
@@ -74,14 +74,14 @@ export function AssumptionsEditor({ assumptions, onChange }: Props) {
             value={fractionToPctDisplay(assumptions.inflation)}
             onChange={(e) => setField('inflation', e.target.value)}
             placeholder="0"
-            className="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+            className="w-24 rounded border px-2 py-1 text-sm focus:border-ring focus:outline-none"
           />
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-muted-foreground">
             Applied uniformly to projected income lines for year+1.
           </span>
         </label>
 
-        <label className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+        <label className="flex flex-wrap items-center gap-2 text-sm text-foreground">
           <span className="min-w-[10rem]">Investment return (%)</span>
           <input
             type="number"
@@ -89,9 +89,9 @@ export function AssumptionsEditor({ assumptions, onChange }: Props) {
             value={fractionToPctDisplay(assumptions.investmentReturn)}
             onChange={(e) => setField('investmentReturn', e.target.value)}
             placeholder="0"
-            className="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+            className="w-24 rounded border px-2 py-1 text-sm focus:border-ring focus:outline-none"
           />
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-muted-foreground">
             Stored for future retirement modelling; not yet applied to projections.
           </span>
         </label>

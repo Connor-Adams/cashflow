@@ -25,6 +25,41 @@ const USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 export const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 export const OPENID_EMAIL_SCOPE = 'openid email';
 
+/**
+ * A failed Google OAuth token request. Carries the HTTP status and the parsed
+ * `error` code from Google's response body so callers can distinguish a dead
+ * token (`invalid_grant`) from a transient failure.
+ */
+export class GoogleOAuthError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string | null,
+  ) {
+    super(message);
+    this.name = 'GoogleOAuthError';
+  }
+}
+
+/** Pull the oauth `error` code out of a Google error body, or null if absent/unparseable. */
+export function parseOauthErrorCode(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown };
+    return typeof parsed.error === 'string' ? parsed.error : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when an error means the user's Google grant is dead (token expired or
+ * revoked) and they must re-consent — as opposed to a transient/other failure.
+ * Google returns `invalid_grant` for revoked or expired refresh tokens.
+ */
+export function isReauthRequiredError(err: unknown): boolean {
+  return err instanceof GoogleOAuthError && err.code === 'invalid_grant';
+}
+
 export interface OauthTokenResponse {
   access_token: string;
   expires_in: number;
@@ -43,6 +78,7 @@ export interface GmailMessageFull {
   id: string;
   threadId: string;
   internalDate: string; // ms since epoch
+  labelIds?: string[];
   payload: GmailPayload;
 }
 
@@ -116,7 +152,11 @@ export async function refreshAccessToken(refreshToken: string): Promise<OauthTok
   });
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(`Google refresh failed (${res.status}): ${t.slice(0, 400)}`);
+    throw new GoogleOAuthError(
+      `Google refresh failed (${res.status}): ${t.slice(0, 400)}`,
+      res.status,
+      parseOauthErrorCode(t),
+    );
   }
   return (await res.json()) as OauthTokenResponse;
 }
@@ -209,9 +249,37 @@ export async function fetchMessage(opts: {
   return (await res.json()) as GmailMessageFull;
 }
 
+/**
+ * Download a single message attachment by its attachmentId. Gmail returns
+ * `{ size, data }` where `data` is base64url; we return the decoded bytes.
+ * Mirrors fetchMessage's auth + error handling.
+ */
+export async function fetchAttachment(opts: {
+  accessToken: string;
+  messageId: string;
+  attachmentId: string;
+}): Promise<Buffer> {
+  const url = `${GMAIL_API}/messages/${encodeURIComponent(opts.messageId)}/attachments/${encodeURIComponent(opts.attachmentId)}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${opts.accessToken}` },
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`Gmail attachment get failed (${res.status}): ${t.slice(0, 400)}`);
+  }
+  const j = (await res.json()) as { size?: number; data?: string };
+  return base64UrlToBuffer(j.data ?? '');
+}
+
 function base64UrlDecodeToUtf8(b64url: string): string {
   const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
   return Buffer.from(b64, 'base64').toString('utf8');
+}
+
+/** Decode a base64url string to raw bytes (binary-safe, unlike the utf8 variant). */
+export function base64UrlToBuffer(b64url: string): Buffer {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  return Buffer.from(b64, 'base64');
 }
 
 /**

@@ -10,15 +10,17 @@
  */
 import { logger } from '../observability/logger';
 import * as env from '../config/env';
-import { Household } from '../models';
+import { Household, TransactionOrderLink } from '../models';
 import { runBackfill, type BackfillResult } from './runEnrichmentBackfill';
 import { isBackfillInFlight } from './backfillCoordinator';
+import { recomputeTransactionsReviewFromItems } from './enrichment/recomputeTransactionReviewFromItems';
 
 export interface EnrichmentBackfillTickResult {
   status: 'skipped_disabled' | 'ran' | 'error';
   householdsProcessed?: number;
   householdsSkipped?: number;
   totals?: BackfillResult;
+  itemReview?: { recomputed: number };
   error?: string;
 }
 
@@ -44,6 +46,7 @@ export async function runEnrichmentBackfillTick(
       reviewFlagCleared: 0,
       signalsWritten: 0,
       skipped: 0,
+      aiEnhanced: 0,
     };
     let householdsProcessed = 0;
     let householdsSkipped = 0;
@@ -67,12 +70,15 @@ export async function runEnrichmentBackfillTick(
           batchSize: 100,
           dateFrom: null,
           dateTo: null,
+          // ai intentionally omitted: nightly cron stays deterministic (no
+          // recurring OpenAI cost); AI runs only on manual backfill.
         });
         totals.processed += result.processed;
         totals.updated += result.updated;
         totals.reviewFlagCleared += result.reviewFlagCleared;
         totals.signalsWritten += result.signalsWritten;
         totals.skipped += result.skipped;
+        totals.aiEnhanced += result.aiEnhanced;
         householdsProcessed += 1;
       } catch (err) {
         logger.error(
@@ -82,10 +88,23 @@ export async function runEnrichmentBackfillTick(
       }
     }
 
-    return { status: 'ran', householdsProcessed, householdsSkipped, totals };
+    const itemReview = await backfillItemReviewClears();
+    return { status: 'ran', householdsProcessed, householdsSkipped, totals, itemReview };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'unknown error';
     return { status: 'error', error: msg };
   }
+}
+
+/** Recompute item-based review-clear for every transaction with an accepted
+ *  itemized link. Idempotent. Returns count of transactions recomputed. */
+export async function backfillItemReviewClears(): Promise<{ recomputed: number }> {
+  const links = await TransactionOrderLink.findAll({
+    where: { status: 'accepted' },
+    attributes: ['transactionId'],
+  });
+  const ids = [...new Set(links.map((l) => (l as unknown as { transactionId: number }).transactionId))];
+  await recomputeTransactionsReviewFromItems(ids);
+  return { recomputed: ids.length };
 }
 

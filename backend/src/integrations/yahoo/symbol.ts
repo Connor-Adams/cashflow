@@ -31,6 +31,16 @@ export interface SymbolContext {
 const CDR_NAME_RE = /\bCDR\b/i;
 const CASH_SENTINELS = new Set(['CASH', '$$', '$$$']);
 
+/**
+ * Bullion / commodity holdings (e.g. Wealthsimple's "Physically backed gold",
+ * asset_type `precious_metal`) have no clean Yahoo ticker. Their bare symbol
+ * collides with unrelated equities — "GOLD" maps to GoldMining Inc. (GOLD.TO),
+ * a penny stock — so resolving them produces wildly wrong prices. We return no
+ * candidate; the quote picker then skips them and the portfolio route falls
+ * back to the broker-imported market value, which is correct for bullion.
+ */
+const NON_RESOLVABLE_ASSET_TYPES = new Set(['precious_metal', 'commodity']);
+
 export function isCashPlaceholder(symbol: string, currency: string): boolean {
   const upperSymbol = symbol.trim().toUpperCase();
   if (upperSymbol === '') return false;
@@ -45,10 +55,13 @@ export function enumerateYahooSymbols(
   const trimmed = symbol.trim();
   if (trimmed === '') return [];
   if (isCashPlaceholder(trimmed, ctx.currency)) return [];
+
+  const assetType = ctx.assetType?.toLowerCase() ?? null;
+  if (assetType != null && NON_RESOLVABLE_ASSET_TYPES.has(assetType)) return [];
+
   if (trimmed.includes('.') || trimmed.includes('-')) return [trimmed];
 
   const currency = ctx.currency.trim().toUpperCase();
-  const assetType = ctx.assetType?.toLowerCase() ?? null;
   const isCrypto = assetType === 'cryptocurrency';
   const isCdr = ctx.name != null && CDR_NAME_RE.test(ctx.name);
 

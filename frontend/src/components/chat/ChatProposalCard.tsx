@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Button } from '@connor-adams/designsystem'
+import { Badge } from '@connor-adams/designsystem'
 import type { ChatProposal, ChatProposalKind, ChatProposalStatus } from '@cashflow/shared'
 
 type Props = {
@@ -39,7 +39,7 @@ export function ChatProposalCard({ proposal, onApply, onReject, busy, error }: P
       </div>
       <ProposalBody proposal={proposal} />
       {error ? (
-        <p className="mt-2 text-xs" style={{ color: 'var(--danger)' }}>
+        <p className="mt-2 text-xs text-danger">
           {error}
         </p>
       ) : null}
@@ -104,14 +104,15 @@ function BulkPatchBody({ preview }: { preview: Preview }) {
       ) : null}
       {sample.length > 0 ? (
         <div>
-          <button
+          <Button
             type="button"
-            className="text-xs underline underline-offset-2"
+            variant="link"
+            size="sm"
             aria-expanded={expanded}
             onClick={() => setExpanded((v) => !v)}
           >
             {expanded ? 'Hide' : `Show ${sample.length} sample rows`}
-          </button>
+          </Button>
           {expanded ? (
             <ul className="mt-2 space-y-1 text-xs">
               {sample.slice(0, 10).map((row, idx) => (

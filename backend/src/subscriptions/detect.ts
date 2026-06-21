@@ -4,69 +4,37 @@
  * The actual recurring-charge detection lives in routes/recurring.ts —
  * detectRecurring() groups transactions by merchant+currency, classifies
  * cadence, and returns one RecurringItem per group. This module takes that
- * raw detector output, annualizes the cost, optionally flags a price
- * increase given the prior amount, and merges with already-persisted
+ * raw detector output, annualizes the cost, and merges with already-persisted
  * subscription rows so user-edited fields (status, cancellationUrl, notes)
  * are preserved across refresh-on-read.
  *
- * Keeping these helpers pure (no DB, no Express) makes the price-change
- * heuristic and merge logic trivially unit-testable.
+ * The subscription price-increase signal now lives in an Insight
+ * (type='subscription_price_increase'), emitted by
+ * detectSubscriptionPriceChanges against a 90-day median — not in this merge
+ * path. See src/subscriptions/detectSubscriptionPriceChanges.ts.
+ *
+ * Keeping these helpers pure (no DB, no Express) makes the merge logic
+ * trivially unit-testable.
  */
 import type { RecurringItem } from '../routes/recurring';
-import type {
-  SubscriptionCadence,
-  SubscriptionStatus,
-} from '../models/Subscription';
-
-const WEEKS_PER_YEAR = 52;
-const MONTHS_PER_YEAR = 12;
-
-/**
- * Conservative threshold for "price went up". Real-world subscriptions
- * commonly drift by ±5¢ over time as merchants adjust microtransaction fees
- * or apply rounding, and FX-pegged services swing as exchange rates move.
- * Requiring a >10% increase keeps the flag meaningful — Netflix going from
- * $15.99 to $17.99 (~12.5%) trips it, but a $9.99 → $10.20 round trip
- * (~2%) does not.
- *
- * TODO(#205-followup): move this into per-household settings once we know
- * how users want to tune the noise floor.
- */
-export const PRICE_INCREASE_THRESHOLD = 0.1;
+import type { SubscriptionCadence } from '../models/PlannedEvent';
+import type { SubscriptionStatus } from '../expectations/subscriptionMapper';
+import { periodsPerYear } from './cancelImpact';
 
 /**
  * Annualize a cadence-aware recurring amount. Returns the absolute annual
  * total a user would spend at the current cadence and amount. Amounts come
  * in as negative numbers for charges per the codebase convention; we take
  * the absolute value so callers don't have to remember the sign.
+ *
+ * Multiplies the per-period charge by the cadence's occurrences-per-year
+ * (52 weekly, 12 monthly, 4 quarterly, 2 semiannual, 1 annual).
  */
 export function annualizeCost(
   amount: number,
   cadence: SubscriptionCadence,
 ): number {
-  const abs = Math.abs(amount);
-  if (cadence === 'weekly') return abs * WEEKS_PER_YEAR;
-  return abs * MONTHS_PER_YEAR;
-}
-
-/**
- * Decide whether the current amount is enough higher than a prior amount
- * to count as a meaningful price increase. Uses absolute values so the
- * caller need not normalize signs.
- *
- * Returns false if priorAmount is missing or zero — we cannot meaningfully
- * compute a percentage change in either case.
- */
-export function detectPriceIncrease(
-  currentAmount: number,
-  priorAmount: number | null,
-): boolean {
-  if (priorAmount == null) return false;
-  const prior = Math.abs(priorAmount);
-  if (prior === 0) return false;
-  const current = Math.abs(currentAmount);
-  const delta = (current - prior) / prior;
-  return delta > PRICE_INCREASE_THRESHOLD;
+  return Math.abs(amount) * periodsPerYear(cadence);
 }
 
 /** Normalized lookup key used to match a detected item to a persisted row. */
@@ -99,7 +67,6 @@ export type SubscriptionMergeOp =
       status: SubscriptionStatus;
       category: string | null;
       annualizedCost: string;
-      priceChangeDetected: boolean;
     }
   | {
       kind: 'update';
@@ -112,17 +79,16 @@ export type SubscriptionMergeOp =
         nextExpectedDate: string | null;
         category: string | null;
         annualizedCost: string;
-        priceChangeDetected: boolean;
       };
     };
 
 /**
  * Reconcile freshly detected recurring items against the persisted
  * subscription rows for a household. Detection-derived fields (amount,
- * cadence, lastChargeDate, nextExpectedDate, category, annualizedCost,
- * priceChangeDetected) get overwritten on every refresh; user-curated
- * fields (status, cancellationUrl, notes) are NEVER touched here — they
- * live only in the DB and survive untouched.
+ * cadence, lastChargeDate, nextExpectedDate, category, annualizedCost) get
+ * overwritten on every refresh; user-curated fields (status, cancellationUrl,
+ * notes) are NEVER touched here — they live only in the DB and survive
+ * untouched.
  *
  * If no existing row matches a detected item, we propose an INSERT with
  * status='active'. If a detected item is missing from the existing set
@@ -149,8 +115,6 @@ export function mergeDetectionWithExisting(
     const amountAbs = Math.abs(item.avgAmount);
     const match = existingByKey.get(key);
     if (match) {
-      const priorAmount = Number(match.amount);
-      const priceChange = detectPriceIncrease(amountAbs, priorAmount);
       ops.push({
         kind: 'update',
         id: match.id,
@@ -162,7 +126,6 @@ export function mergeDetectionWithExisting(
           nextExpectedDate: item.nextExpected ?? null,
           category: item.category,
           annualizedCost: annualized.toFixed(4),
-          priceChangeDetected: priceChange,
         },
       });
     } else {
@@ -178,7 +141,6 @@ export function mergeDetectionWithExisting(
         status: 'active',
         category: item.category,
         annualizedCost: annualized.toFixed(4),
-        priceChangeDetected: false,
       });
     }
   }

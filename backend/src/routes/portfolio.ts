@@ -1,5 +1,5 @@
 import { Router, type Request } from 'express';
-import { Op } from 'sequelize';
+import { Op, col, fn } from 'sequelize';
 import { logger } from '../observability/logger';
 import {
   Account,
@@ -20,7 +20,11 @@ import {
 } from '../portfolio/metrics';
 import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
+import { resolveHouseholdToday } from '../time/householdToday';
+import { apiReadLimiter } from './apiRateLimit';
 import { computeAcb, type AcbActivity, type AcbResult } from '../portfolio/acb';
+import { latestActivePositions } from '../portfolio/latestHoldings';
+import { resolveHoldingMarketValue } from '../portfolio/valuation';
 import { normalizeActivitiesToCad } from '../portfolio/normalizeActivitiesCurrency';
 import { ensureFxRate } from '../fx/bankOfCanada';
 import {
@@ -132,12 +136,16 @@ async function buildUnifiedCadTotal(
  * Pull the most-recent HoldingSnapshot row for every (account, security)
  * tuple in the caller's visible scope. Returns the rows AND a parallel
  * map of accountId → Account so callers can attach an account name.
+ *
+ * Positions absent from their account's newest statement are excluded
+ * (fully sold — see latestActivePositions), matching net worth's
+ * portfolioMarketValueAt so the Portfolio page never disagrees with it.
  */
 async function loadVisibleLatestHoldings(req: Request): Promise<{
   accounts: Account[];
   latestHoldings: HoldingSnapshot[];
 }> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = resolveHouseholdToday(currentAuth(req).household);
   const accounts = await Account.findAll({
     where: {
       ...visibleAccountWhere(req),
@@ -156,18 +164,10 @@ async function loadVisibleLatestHoldings(req: Request): Promise<{
       ['id', 'DESC'],
     ],
   });
-  const seen = new Set<string>();
-  const latestHoldings: HoldingSnapshot[] = [];
-  for (const row of snapshots) {
-    const key = `${row.accountId}:${row.securityId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    latestHoldings.push(row);
-  }
-  return { accounts, latestHoldings };
+  return { accounts, latestHoldings: latestActivePositions(snapshots) };
 }
 
-router.get('/', async (req, res, next) => {
+router.get('/', apiReadLimiter, async (req, res, next) => {
   try {
     const { accounts, latestHoldings } = await loadVisibleLatestHoldings(req);
     const accountIds = accounts.map((row) => row.id);
@@ -193,8 +193,12 @@ router.get('/', async (req, res, next) => {
       const quantity = n(holding.quantity) ?? 0;
       const importedValue = n(holding.marketValue);
       const quotePrice = n(latestPrice?.price);
-      const marketValue =
-        quotePrice != null ? quantity * quotePrice : importedValue ?? 0;
+      const { marketValue } = resolveHoldingMarketValue({
+        quantity,
+        importedValue,
+        importedPrice: n(holding.price),
+        quotePrice,
+      });
       const cur = latestPrice?.currency || holding.currency;
       totals.set(cur, (totals.get(cur) ?? 0) + marketValue);
       const rowMetrics = computeRowMetrics({
@@ -261,7 +265,7 @@ router.get('/', async (req, res, next) => {
       marketValue,
     }));
 
-    const todayDate = new Date().toISOString().slice(0, 10);
+    const todayDate = resolveHouseholdToday(currentAuth(req).household);
     const unifiedTotal = await buildUnifiedCadTotal(totalsByCurrency, todayDate);
 
     // Per-row weight pct now that unifiedTotal is known.
@@ -347,8 +351,12 @@ function valueHolding(
   const quantity = n(holding.quantity) ?? 0;
   const quotePrice = n(latestPrice?.price);
   const importedValue = n(holding.marketValue);
-  const marketValue =
-    quotePrice != null ? quantity * quotePrice : importedValue ?? 0;
+  const { marketValue } = resolveHoldingMarketValue({
+    quantity,
+    importedValue,
+    importedPrice: n(holding.price),
+    quotePrice,
+  });
   const currency = latestPrice?.currency || holding.currency;
   return { marketValue, currency };
 }
@@ -445,12 +453,37 @@ router.get('/allocation', async (req, res, next) => {
         });
       }
     }
-    const bySecurity = [...securityBuckets.values()]
-      .map((row) => ({
-        ...row,
-        percentage: pct(row.currency, row.marketValue),
-      }))
-      .sort((a, b) => b.marketValue - a.marketValue);
+    const ALLOC_SORT_FIELDS = ['symbol', 'marketValue', 'pctOfPortfolio'] as const;
+    type AllocSortField = typeof ALLOC_SORT_FIELDS[number];
+
+    const sortParam = req.query.sort as string | undefined;
+    const dirParam = req.query.dir as string | undefined;
+
+    if (sortParam !== undefined && !ALLOC_SORT_FIELDS.includes(sortParam as AllocSortField)) {
+      res.status(400).json({ error: 'INVALID_SORT_FIELD' });
+      return;
+    }
+    if (dirParam !== undefined && dirParam !== 'asc' && dirParam !== 'desc') {
+      res.status(400).json({ error: 'INVALID_SORT_FIELD' });
+      return;
+    }
+
+    const allocSortField = sortParam as AllocSortField | undefined;
+    const allocDir = (dirParam ?? 'desc') as 'asc' | 'desc';
+    const allocMul = allocDir === 'asc' ? 1 : -1;
+
+    const bySecurityRaw = [...securityBuckets.values()].map((row) => ({
+      ...row,
+      percentage: pct(row.currency, row.marketValue),
+    }));
+
+    const bySecurity = allocSortField
+      ? bySecurityRaw.sort((a, b) => {
+          if (allocSortField === 'symbol') return a.symbol.localeCompare(b.symbol) * allocMul;
+          if (allocSortField === 'pctOfPortfolio') return (a.percentage - b.percentage) * allocMul;
+          return (a.marketValue - b.marketValue) * allocMul;
+        })
+      : bySecurityRaw.sort((a, b) => b.marketValue - a.marketValue);
 
     // By account.
     const accountBuckets = new Map<
@@ -556,7 +589,9 @@ router.get('/income', async (req, res, next) => {
     const totalsMap = new Map<string, { currency: string } & IncomeBucket>();
 
     for (const row of activities) {
-      const amount = Math.abs(n(row.amount) ?? 0);
+      // Preserve sign: interest *charges* (e.g. margin interest) arrive as
+      // negative amounts and must NOT be flipped into positive income (#554).
+      const amount = n(row.amount) ?? 0;
       if (amount === 0) continue;
       const security = row.get('security') as Security | undefined;
       const currency = row.currency;
@@ -623,7 +658,7 @@ router.get('/income', async (req, res, next) => {
  * Sums quantity, cost basis, and market value across every account
  * that currently holds the security.
  */
-router.get('/by-security', async (req, res, next) => {
+router.get('/by-security', apiReadLimiter, async (req, res, next) => {
   try {
     const { accounts, latestHoldings } = await loadVisibleLatestHoldings(req);
     const accountById = new Map(accounts.map((a) => [a.id, a]));
@@ -748,12 +783,13 @@ router.get('/by-security', async (req, res, next) => {
         activityType: a.activityType,
         tradeDate: a.tradeDate,
         quantity: n(a.quantity),
-        price: n(a.price),
         amount: n(a.amount),
         fees: n(a.fees),
         currency: a.currency,
+        splitRatio: n(a.splitRatio),
       }));
-      const acb = computeAcb(acbInput);
+      const { normalized } = await normalizeActivitiesToCad(acbInput);
+      const acb = computeAcb(normalized);
       metricsCtx.realizedBySec.set(row.securityId, acb.realizedTotal);
     }
 
@@ -766,7 +802,7 @@ router.get('/by-security', async (req, res, next) => {
       currency,
       marketValue,
     }));
-    const todayDate = new Date().toISOString().slice(0, 10);
+    const todayDate = resolveHouseholdToday(currentAuth(req).household);
     const unifiedTotal = await buildUnifiedCadTotal(totalsByCurrency, todayDate);
 
     // Per-row metrics + weightPct + totalReturnPct
@@ -1485,6 +1521,32 @@ router.get('/security/:id', async (req, res, next) => {
       if (!latestByAccount.has(h.accountId)) latestByAccount.set(h.accountId, h);
     }
 
+    // allHoldings is scoped to this one security, so the account's newest
+    // statement date is not in that result set — load it across ALL
+    // securities. A position whose latest snapshot predates its account's
+    // newest statement was absent from that statement, i.e. fully sold
+    // (imports write no zero-quantity tombstones; same inference as
+    // latestActivePositions). Judged per account so a newer statement on one
+    // account never zeroes another's position.
+    const staleAccountIds = new Set<number>();
+    if (latestByAccount.size > 0) {
+      const newestRows = (await HoldingSnapshot.findAll({
+        attributes: [
+          'accountId',
+          [fn('MAX', col('statement_date')), 'maxStatementDate'],
+        ],
+        where: { accountId: [...latestByAccount.keys()] },
+        group: ['account_id'],
+        raw: true,
+      })) as unknown as Array<{ accountId: number; maxStatementDate: string }>;
+      for (const row of newestRows) {
+        const latest = latestByAccount.get(row.accountId);
+        if (latest && latest.statementDate < row.maxStatementDate) {
+          staleAccountIds.add(row.accountId);
+        }
+      }
+    }
+
     // Group activities by account.
     const actsByAccount = new Map<number, InvestmentActivity[]>();
     for (const a of allActivities) {
@@ -1518,7 +1580,10 @@ router.get('/security/:id', async (req, res, next) => {
 
     for (const accId of involvedAccountIds) {
       const acctName = accountById.get(accId)?.name ?? String(accId);
-      const latestHolding = latestByAccount.get(accId);
+      // Fully sold → no current holding; ACB history below still applies.
+      const latestHolding = staleAccountIds.has(accId)
+        ? undefined
+        : latestByAccount.get(accId);
       const acts = actsByAccount.get(accId) ?? [];
       const acbInput: AcbActivity[] = acts.map((r) => ({
         id: r.id,
@@ -1563,7 +1628,8 @@ router.get('/security/:id', async (req, res, next) => {
       combinedRealized += acb.realizedTotal;
       if (holdingCurrency) combinedCurrency = holdingCurrency;
       for (const r of acts) {
-        const amt = Math.abs(n(r.amount) ?? 0);
+        // Preserve sign so interest charges aren't counted as income (#554).
+        const amt = n(r.amount) ?? 0;
         if (r.activityType === 'dividend') combinedDividend += amt;
         else if (r.activityType === 'interest') combinedInterest += amt;
       }
@@ -1620,7 +1686,9 @@ router.get('/security/:id', async (req, res, next) => {
       where: { securityId, exDividendDate: { [Op.gte]: cutoff30 } },
     });
     const divPerUnit30 = divs30.reduce((s, d) => s + Number(d.amount), 0);
-    const price30Val = price30 ? Number(price30.adjClose) : null;
+    // Base must be the raw close: adjClose is already deflated by the window's
+    // dividends, and divPerUnit30 adds them explicitly (double count otherwise).
+    const price30Val = price30 ? Number(price30.close) : null;
     const todayForReturn = todayPriceQuote ?? (dailyForToday[0] ? Number(dailyForToday[0].adjClose) : null);
     const thirtyDayReturnPct =
       price30Val != null && price30Val !== 0 && todayForReturn != null
@@ -2144,7 +2212,25 @@ router.get('/forward-income', async (req, res, next) => {
     for (const r of rows) {
       if (r.currency !== 'CAD' && !fxByCurrency.has(r.currency)) {
         const fx = await ensureFxRate(r.currency, 'CAD', asOfDate);
-        fxByCurrency.set(r.currency, fx ? Number(fx.rate) : 1);
+        let rate = fx ? Number(fx.rate) : null;
+        if (rate == null) {
+          // BoC unreachable + nothing in the recency window: a stale cached
+          // rate still beats silently valuing the currency at parity (1.0).
+          const nearest = await FxRate.findOne({
+            where: { fromCurrency: r.currency, toCurrency: 'CAD' },
+            order: [['ratedDate', 'DESC']],
+          });
+          rate = nearest ? Number(nearest.rate) : null;
+        }
+        if (rate == null) {
+          logger.warn(
+            { fromCurrency: r.currency, toCurrency: 'CAD', asOfDate, module: 'portfolio' },
+            'portfolio_forward_income_missing_fx_rate',
+          );
+          res.status(502).json({ error: `FX rate unavailable for ${r.currency}→CAD` });
+          return;
+        }
+        fxByCurrency.set(r.currency, rate);
       }
     }
 
@@ -2287,7 +2373,7 @@ router.get('/performance', async (req, res, next) => {
     const benchmarkSymbol = householdRow?.benchmarkSymbol ?? 'SPY';
 
     const range = (req.query.range as PortfolioPerformanceRange) || '1Y';
-    const today = new Date().toISOString().slice(0, 10);
+    const today = resolveHouseholdToday(auth.household);
 
     function addDaysIso(iso: string, days: number): string {
       const d = new Date(iso);
@@ -2302,14 +2388,32 @@ router.get('/performance', async (req, res, next) => {
       '1Y': { from: addDaysIso(today, -365), to: today },
       'All': { from: '1970-01-01', to: today },
     };
+    // Case-insensitive lookup so 'ALL', 'all', 'All' (etc.) all resolve to the
+    // canonical preset key. Without this, an unrecognized-casing range yielded
+    // `undefined` and the downstream `.from` access threw a 500 (issue #552).
+    const presetKeyByLower = new Map(
+      (Object.keys(presetRanges) as Array<keyof typeof presetRanges>).map((k) => [k.toLowerCase(), k]),
+    );
+
     let selectedRange = { from: '', to: '' };
-    if (range === 'custom') {
+    // The canonical range echoed back in the response (normalized casing).
+    let resolvedRange: PortfolioPerformanceRange;
+    if (typeof range === 'string' && range.toLowerCase() === 'custom') {
       const from = req.query.from as string | undefined;
       const to = req.query.to as string | undefined;
       if (!from || !to) { res.status(400).json({ error: 'from and to required for custom range' }); return; }
       selectedRange = { from, to };
+      resolvedRange = 'custom';
     } else {
-      selectedRange = presetRanges[range as keyof typeof presetRanges];
+      const matchedKey = typeof range === 'string' ? presetKeyByLower.get(range.toLowerCase()) : undefined;
+      if (!matchedKey) {
+        res.status(400).json({
+          error: `Unrecognized range '${String(range)}'. Expected one of: 1M, 3M, YTD, 1Y, All, custom.`,
+        });
+        return;
+      }
+      selectedRange = presetRanges[matchedKey];
+      resolvedRange = matchedKey;
     }
 
     const widestFrom = (['1M', '3M', 'YTD', '1Y', 'All'] as const).reduce(
@@ -2468,7 +2572,7 @@ router.get('/performance', async (req, res, next) => {
     };
 
     const response: PortfolioPerformance = {
-      range,
+      range: resolvedRange,
       stats: selectedStats,
       presetStats,
       series,

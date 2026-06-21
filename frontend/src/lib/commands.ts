@@ -176,6 +176,13 @@ export const COMMANDS: Command[] = [
     keywords: ['projection', 'future'],
   },
   {
+    id: 'nav-debt',
+    label: 'Go to Debt payoff',
+    category: 'Navigate',
+    destination: '/debt',
+    keywords: ['debt', 'payoff', 'avalanche', 'snowball', 'loan', 'credit card'],
+  },
+  {
     id: 'nav-net-worth',
     label: 'Go to Net worth',
     category: 'Navigate',
@@ -208,10 +215,16 @@ export const COMMANDS: Command[] = [
     destination: '/money-leaks',
   },
   {
-    id: 'nav-amazon',
-    label: 'Go to Amazon',
+    id: 'nav-receipts',
+    label: 'Go to Receipts',
     category: 'Navigate',
-    destination: '/amazon',
+    destination: '/receipts',
+  },
+  {
+    id: 'nav-amazon',
+    label: 'Go to Amazon orders',
+    category: 'Navigate',
+    destination: '/receipts?vendor=amazon',
   },
   {
     id: 'nav-items',

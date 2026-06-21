@@ -1,4 +1,4 @@
-import { Card } from '@/components/ui/card'
+import { Card } from '@connor-adams/designsystem'
 import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import type { PortfolioPerformancePoint } from '../../types/api'
 
@@ -33,7 +33,7 @@ export function PerformanceChart({ points }: PerformanceChartProps) {
           type="monotone"
           dataKey="portfolioValueCad"
           name="Portfolio"
-          stroke="#2563eb"
+          stroke="var(--chart-portfolio)"
           dot={false}
           isAnimationActive={false}
         />
@@ -41,7 +41,7 @@ export function PerformanceChart({ points }: PerformanceChartProps) {
           type="monotone"
           dataKey="benchmarkValueCad"
           name="Benchmark"
-          stroke="#94a3b8"
+          stroke="var(--chart-reference)"
           strokeDasharray="5 5"
           dot={false}
           isAnimationActive={false}

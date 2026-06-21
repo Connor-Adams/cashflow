@@ -53,6 +53,9 @@
  *   - Receipt        (the `linked_receipt` blocker rules out receipts with
  *                    external order links — remaining receipts are deleted)
  *   - PlannedEvent.linked_transaction_id is nulled (PlannedEvents survive)
+ *   - InvestmentActivity + HoldingSnapshot rows stamped with the batch label
+ *     (statement bundle imports write these alongside the cash transactions;
+ *     a batch may contain ONLY investment rows and must still roll back)
  *   - Transactions themselves
  *   - ImportHistory row flipped to status='rolled_back' (preserves audit
  *     trail; row is NOT deleted)
@@ -67,7 +70,9 @@ import type { WhereOptions } from 'sequelize';
 import {
   AiSuggestion,
   BudgetExclusion,
+  HoldingSnapshot,
   ImportHistory,
+  InvestmentActivity,
   PlannedEvent,
   Receipt,
   Transaction,
@@ -114,6 +119,8 @@ export interface RollbackImpact {
     transactionTaxMetadata: number;
     budgetExclusions: number;
     plannedEventsUnlinked: number;
+    investmentActivities: number;
+    holdingSnapshots: number;
   };
   /** Small sample of the affected transactions (≤5) for the preview UI. */
   sample: Array<{
@@ -194,7 +201,24 @@ export async function previewRollback(
       count: totalInBatch - visibleTxns.length,
     });
   }
-  if (visibleTxns.length === 0 && totalInBatch === 0 && history.status !== 'rolled_back') {
+
+  // Investment-side rows of the batch. Statement bundle imports stamp
+  // InvestmentActivity + HoldingSnapshot rows with the same batch label as
+  // the cash transactions — and a batch may consist of ONLY these (e.g. a
+  // brokerage statement with no cash movements), so they both feed the
+  // not_found check and get cleaned up by executeRollback.
+  const investmentBatchWhere = { ...householdScope, importBatch: batchLabel };
+  const [investmentActivityCount, holdingSnapshotCount] = await Promise.all([
+    InvestmentActivity.count({ where: investmentBatchWhere }),
+    HoldingSnapshot.count({ where: investmentBatchWhere }),
+  ]);
+  if (
+    visibleTxns.length === 0 &&
+    totalInBatch === 0 &&
+    investmentActivityCount === 0 &&
+    holdingSnapshotCount === 0 &&
+    history.status !== 'rolled_back'
+  ) {
     blockers.push({
       code: 'not_found',
       message: `Batch "${batchLabel}" has no transactions to roll back.`,
@@ -273,10 +297,11 @@ export async function previewRollback(
     });
   }
 
-  const dependentCounts =
-    txnIds.length === 0
-      ? emptyDependentCounts()
-      : await countDependentRows(txnIds);
+  const dependentCounts = {
+    ...(txnIds.length === 0 ? emptyDependentCounts() : await countDependentRows(txnIds)),
+    investmentActivities: investmentActivityCount,
+    holdingSnapshots: holdingSnapshotCount,
+  };
 
   return {
     batchLabel,
@@ -309,6 +334,8 @@ export interface ExecuteRollbackResult {
   deletedTransactionTaxMetadata: number;
   deletedBudgetExclusions: number;
   unlinkedPlannedEvents: number;
+  deletedInvestmentActivities: number;
+  deletedHoldingSnapshots: number;
 }
 
 /**
@@ -344,11 +371,23 @@ export async function executeRollback(
     });
     const txnIds = txns.map((t) => t.id);
 
+    // Investment-side rows are stamped with the same batch label as the cash
+    // transactions (commitStatementImport). They are cleaned up regardless of
+    // the transaction count — a brokerage-statement batch may contain ONLY
+    // investment rows, and leaving them behind would keep feeding portfolio
+    // valuation and household net worth after a "successful" rollback.
+    const investmentBatchWhere = { ...householdScope, importBatch: batchLabel };
+    const deletedInvestmentActivities = await InvestmentActivity.destroy({
+      where: investmentBatchWhere,
+      transaction: sqlTx,
+    });
+    const deletedHoldingSnapshots = await HoldingSnapshot.destroy({
+      where: investmentBatchWhere,
+      transaction: sqlTx,
+    });
+
     if (txnIds.length === 0) {
-      // Nothing to delete — but still flip the history row so the user can
-      // see the attempt in history. (canRollback === true with 0 txns is
-      // already filtered out as `not_found` above; this branch is defence in
-      // depth.)
+      // No cash transactions to delete — flip the history row and finish.
       await ImportHistory.update(
         {
           status: 'rolled_back',
@@ -369,6 +408,8 @@ export async function executeRollback(
         deletedTransactionTaxMetadata: 0,
         deletedBudgetExclusions: 0,
         unlinkedPlannedEvents: 0,
+        deletedInvestmentActivities,
+        deletedHoldingSnapshots,
       };
     }
 
@@ -412,7 +453,7 @@ export async function executeRollback(
     const unlinkedPlannedEvents = await PlannedEvent.update(
       { linkedTransactionId: null },
       {
-        where: { linkedTransactionId: { [Op.in]: txnIds } },
+        where: { kind: 'planned', linkedTransactionId: { [Op.in]: txnIds } },
         transaction: sqlTx,
       },
     ).then(([count]) => count);
@@ -450,6 +491,8 @@ export async function executeRollback(
         deletedTransactionTaxMetadata,
         deletedBudgetExclusions,
         unlinkedPlannedEvents,
+        deletedInvestmentActivities,
+        deletedHoldingSnapshots,
       },
       'import_rollback_executed',
     );
@@ -463,6 +506,8 @@ export async function executeRollback(
       deletedTransactionTaxMetadata,
       deletedBudgetExclusions,
       unlinkedPlannedEvents,
+      deletedInvestmentActivities,
+      deletedHoldingSnapshots,
     };
   });
 }
@@ -491,12 +536,18 @@ function emptyDependentCounts(): RollbackImpact['dependentCounts'] {
     transactionTaxMetadata: 0,
     budgetExclusions: 0,
     plannedEventsUnlinked: 0,
+    investmentActivities: 0,
+    holdingSnapshots: 0,
   };
 }
 
+/**
+ * Transaction-scoped dependent counts. Investment-side counts (batch-scoped,
+ * not txn-scoped) are filled in by the caller.
+ */
 async function countDependentRows(
   txnIds: number[],
-): Promise<RollbackImpact['dependentCounts']> {
+): Promise<Omit<RollbackImpact['dependentCounts'], 'investmentActivities' | 'holdingSnapshots'>> {
   const filter = { transactionId: { [Op.in]: txnIds } };
   const [
     receipts,
@@ -512,7 +563,7 @@ async function countDependentRows(
     TransactionTaxMetadata.count({ where: filter }),
     BudgetExclusion.count({ where: filter }),
     PlannedEvent.count({
-      where: { linkedTransactionId: { [Op.in]: txnIds } },
+      where: { kind: 'planned', linkedTransactionId: { [Op.in]: txnIds } },
     }),
   ]);
   return {

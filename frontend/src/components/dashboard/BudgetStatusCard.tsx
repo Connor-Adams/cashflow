@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Skeleton } from '@/components/ui/skeleton'
+import { Link } from 'react-router-dom'
+import { Skeleton } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
 import { getJson } from '@/lib/api'
 import { CategoryIcon } from '../CategoryIcon'
 import { BentoTile } from './BentoTile'
 import type { BudgetProgress, BudgetStatusResponse } from '@/types/api'
+import { safePct, safeNum } from '@/lib/num'
 
 type Props = {
   /**
@@ -70,7 +73,18 @@ export function BudgetStatusCard({ currency = 'CAD' }: Props) {
       </BentoTile>
     )
   }
-  if (!items || items.length === 0) return null
+  if (!items || items.length === 0) {
+    return (
+      <BentoTile span={6} rows={1} label="Budget status">
+        <div className="flex flex-col items-start gap-2" data-testid="budget-status-empty">
+          <p className="text-sm text-muted-foreground">Set a budget to see pacing here.</p>
+          <Link to="/budgets">
+            <Button size="sm">Set a budget</Button>
+          </Link>
+        </div>
+      </BentoTile>
+    )
+  }
 
   return (
     <BentoTile
@@ -84,20 +98,23 @@ export function BudgetStatusCard({ currency = 'CAD' }: Props) {
         data-testid="budget-status-list"
       >
         {items.map((item) => {
-          const pct = item.percentUsed
+          const pctFinite = safeNum(item.percentUsed)
           // Status mirrors the alert vocabulary (80, 100). Anything past
           // 100 is "over"; anything at-or-past 80 is "at risk"; below is
-          // "on track".
-          const status: 'ok' | 'risk' | 'over' =
-            pct >= 100 ? 'over' : pct >= 80 ? 'risk' : 'ok'
+          // "on track". Suppress colour-threshold when data is missing.
+          const status: 'ok' | 'risk' | 'over' | null =
+            pctFinite === null ? null
+            : pctFinite >= 100 ? 'over'
+            : pctFinite >= 80 ? 'risk'
+            : 'ok'
           // Lookup table for JIT-safe Tailwind classes — `status` is a
           // runtime string so we can't template the class names.
-          const pillClass: Record<typeof status, string> = {
-            ok: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
-            risk: 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200',
-            over: 'bg-rose-100 text-rose-900 dark:bg-rose-950 dark:text-rose-200',
+          const pillClass: Record<'ok' | 'risk' | 'over', string> = {
+            ok: 'bg-success-bg text-positive',
+            risk: 'bg-warning-bg text-warning',
+            over: 'bg-danger-bg text-danger',
           }
-          const pillLabel: Record<typeof status, string> = {
+          const pillLabel: Record<'ok' | 'risk' | 'over', string> = {
             ok: 'On track',
             risk: 'At risk',
             over: 'Over',
@@ -114,15 +131,17 @@ export function BudgetStatusCard({ currency = 'CAD' }: Props) {
                 <span className="truncate">{label}</span>
               </span>
               <span className="inline-flex items-center gap-2 shrink-0">
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {Math.round(pct)}%
+                <span className="text-xs text-muted-foreground">
+                  {safePct(item.percentUsed, { digits: 0 })}
                 </span>
-                <span
-                  className={`px-2 py-0.5 text-xs rounded-full ${pillClass[status]}`}
-                  data-testid={`budget-status-pill-${item.budgetId}`}
-                >
-                  {pillLabel[status]}
-                </span>
+                {status !== null ? (
+                  <span
+                    className={`px-2 py-0.5 text-xs rounded-full ${pillClass[status]}`}
+                    data-testid={`budget-status-pill-${item.budgetId}`}
+                  >
+                    {pillLabel[status]}
+                  </span>
+                ) : null}
               </span>
             </li>
           )

@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { LogIn, UserPlus } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { Input } from '@connor-adams/designsystem'
 import { useAuth } from '../lib/useAuth'
 
 export function AuthPage() {
@@ -87,7 +87,7 @@ export function AuthPage() {
           )}
           <label>
             Email
-            <Input name="email" type="email" autoComplete="email" required />
+            <Input name="email" type="email" autoComplete="username" required />
           </label>
           <label>
             Password

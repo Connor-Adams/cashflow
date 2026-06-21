@@ -18,9 +18,46 @@ import {
 // under "moduleResolution": "node". Use the string literal directly.
 const ATTR_DEPLOYMENT_ENVIRONMENT_NAME = 'deployment.environment.name';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+import { RuntimeNodeInstrumentation } from '@opentelemetry/instrumentation-runtime-node';
+import {
+  BatchSpanProcessor,
+  type SpanExporter,
+  type SpanProcessor,
+} from '@opentelemetry/sdk-trace-base';
+import { AlsSpanProcessor } from './alsSpanProcessor';
 
 const otlpEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
 const otlpEnabled = !!otlpEndpoint && process.env.OTEL_SDK_DISABLED !== 'true';
+
+/**
+ * Build the span processor chain for the NodeSDK.
+ *
+ * NodeSDK uses this array verbatim and IGNORES its `traceExporter` option when
+ * `spanProcessors` is supplied — so the exporting processor MUST live here, or
+ * spans are enriched but never shipped (Tempo gets zero traces; see #420).
+ * AlsSpanProcessor first (enriches onStart), then the batch exporter.
+ */
+export function buildSpanProcessors(traceExporter: SpanExporter): SpanProcessor[] {
+  return [new AlsSpanProcessor(), new BatchSpanProcessor(traceExporter)];
+}
+
+/**
+ * Auto-instrumentation toggles. HTTP + Express + Sequelize + Undici stay on
+ * (enabled by default). The rest are noise or duplicates:
+ * - fs/dns/net: high-cardinality noise.
+ * - runtime-node: registered explicitly below to avoid double registration.
+ * - pino: the backend already ships logs to Loki via its own pino.multistream
+ *   OTLP stream (loggerOtlpTransport). Leaving this enabled emits every log a
+ *   second time through the OTel Logs SDK → 2x Loki ingestion and a split
+ *   severity casing (INFO vs info). Keep it OFF — single path via the transport.
+ */
+export const autoInstrumentationConfig = {
+  '@opentelemetry/instrumentation-fs': { enabled: false },
+  '@opentelemetry/instrumentation-dns': { enabled: false },
+  '@opentelemetry/instrumentation-net': { enabled: false },
+  '@opentelemetry/instrumentation-runtime-node': { enabled: false },
+  '@opentelemetry/instrumentation-pino': { enabled: false },
+} as const;
 
 if (otlpEnabled) {
   const sdk = new NodeSDK({
@@ -29,17 +66,14 @@ if (otlpEnabled) {
       [ATTR_SERVICE_VERSION]: process.env.GIT_SHA ?? 'dev',
       [ATTR_DEPLOYMENT_ENVIRONMENT_NAME]: process.env.NODE_ENV ?? 'development',
     }),
-    traceExporter: new OTLPTraceExporter({
-      url: `${otlpEndpoint.replace(/\/$/, '')}/v1/traces`,
-    }),
-    instrumentations: [
-      getNodeAutoInstrumentations({
-        // Filter noisy/unwanted auto-instrumentations.
-        '@opentelemetry/instrumentation-fs': { enabled: false },
-        '@opentelemetry/instrumentation-dns': { enabled: false },
-        '@opentelemetry/instrumentation-net': { enabled: false },
-        // HTTP + Express + Sequelize + Undici are what we care about; they're enabled by default.
+    spanProcessors: buildSpanProcessors(
+      new OTLPTraceExporter({
+        url: `${otlpEndpoint.replace(/\/$/, '')}/v1/traces`,
       }),
+    ),
+    instrumentations: [
+      getNodeAutoInstrumentations(autoInstrumentationConfig),
+      new RuntimeNodeInstrumentation(),
     ],
   });
 

@@ -11,6 +11,7 @@
 //  - Rename uses window.prompt; Delete confirms via window.confirm. Good enough
 //    for v1; future iterations can swap in a modal if the rough edges bite.
 //  - On delete, we clear activePlanId so the parent doesn't dangle a stale id.
+import { Button } from '@connor-adams/designsystem'
 import { useHouseholdPlans } from '@/hooks/useHouseholdPlans';
 
 type Plan = { id: number; name: string };
@@ -91,9 +92,9 @@ export function HouseholdPlanPicker({ activePlanId, onChange }: Props) {
         disabled={loading}
         onChange={handleSelectChange}
       />
-      <button onClick={handleNewPlan} disabled={loading}>
+      <Button variant="secondary" size="sm" onClick={handleNewPlan} disabled={loading}>
         + New
-      </button>
+      </Button>
       {activePlan !== null && (
         <PlanActions onRename={handleRename} onDelete={handleDelete} />
       )}
@@ -136,8 +137,8 @@ interface PlanActionsProps {
 function PlanActions({ onRename, onDelete }: PlanActionsProps) {
   return (
     <>
-      <button onClick={onRename}>Rename</button>
-      <button onClick={onDelete}>Delete</button>
+      <Button variant="ghost" size="sm" onClick={onRename}>Rename</Button>
+      <Button variant="destructive" size="sm" onClick={onDelete}>Delete</Button>
     </>
   );
 }

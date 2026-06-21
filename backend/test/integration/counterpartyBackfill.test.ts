@@ -17,6 +17,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { seedHousehold } from '../helpers/seedHousehold.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -84,7 +85,7 @@ before(async () => {
   // Register bootstrap superadmin (first registered user) — we won't
   // actually use this agent for any assertions but the app expects at
   // least one superadmin to exist before /auth/register requires invites.
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const reg = await bootstrap.post('/api/auth/register').send({
     email: 'boot@example.com',
     displayName: 'Boot',
@@ -99,9 +100,9 @@ before(async () => {
   userAId = seedA.userId;
   userBId = seedB.userId;
 
-  agentA = request.agent(app);
+  agentA = testAgent(app);
   agentA.jar.setCookie(`cashflow_session=${seedA.token}; Path=/`);
-  agentB = request.agent(app);
+  agentB = testAgent(app);
   agentB.jar.setCookie(`cashflow_session=${seedB.token}; Path=/`);
 });
 
@@ -295,4 +296,93 @@ test('POST /counterparty/backfill: non-streaming returns a single JSON summary',
   // Household B now sees nextAllowedAt populated.
   const statusB = await agentB.get('/api/transactions/counterparty/backfill/status');
   assert.ok(statusB.body.nextAllowedAt);
+});
+
+// ---------------------------------------------------------------------------
+// Task 1 — Contact linking tests
+// ---------------------------------------------------------------------------
+
+test('backfill links a person counterparty Contact on a raw-null row', async () => {
+  const models = await import('../../src/models');
+  const { runCounterpartyBackfill, _resetCounterpartyBackfillInFlightForTest } = await import('../../src/import/counterpartyBackfill.js');
+  _resetCounterpartyBackfillInFlightForTest();
+  await models.Transaction.destroy({ where: {}, force: true });
+  await models.Account.destroy({ where: {}, force: true });
+  await models.ProviderJobLog.destroy({ where: {}, force: true });
+  await models.Contact.destroy({ where: {}, force: true });
+  const acc = await makeAccount({ householdId: householdAId, userId: userAId, name: 'Chk', accountType: 'checking' });
+  const id = await makeTxn({ accountId: acc, householdId: householdAId, merchantRaw: 'INTERAC E-TRANSFER FROM JANE DOE REF 9' });
+  const res = await runCounterpartyBackfill({ householdId: householdAId });
+  assert.ok(res.linked >= 1);
+  const row = await models.Transaction.findByPk(id);
+  assert.equal(row!.counterpartyRaw, 'JANE DOE');
+  assert.ok(row!.counterpartyContactId, 'contact linked');
+  const contact = await models.Contact.findByPk(row!.counterpartyContactId!);
+  assert.equal(contact!.normalizedName, 'jane doe');
+});
+
+test('backfill links a row that already has counterpartyRaw but no contact', async () => {
+  const models = await import('../../src/models');
+  const { runCounterpartyBackfill, _resetCounterpartyBackfillInFlightForTest } = await import('../../src/import/counterpartyBackfill.js');
+  _resetCounterpartyBackfillInFlightForTest();
+  await models.Transaction.destroy({ where: {}, force: true });
+  await models.Account.destroy({ where: {}, force: true });
+  await models.ProviderJobLog.destroy({ where: {}, force: true });
+  await models.Contact.destroy({ where: {}, force: true });
+  const acc = await makeAccount({ householdId: householdAId, userId: userAId, name: 'Chk2', accountType: 'checking' });
+  const id = await makeTxn({ accountId: acc, householdId: householdAId, merchantRaw: 'ZELLE PAYMENT TO MIKE SMITH', counterpartyRaw: 'MIKE SMITH' });
+  await runCounterpartyBackfill({ householdId: householdAId });
+  const row = await models.Transaction.findByPk(id);
+  assert.ok(row!.counterpartyContactId, 'existing-raw row got linked');
+});
+
+test('backfill leaves payroll rows raw-only (no contact)', async () => {
+  const models = await import('../../src/models');
+  const { runCounterpartyBackfill, _resetCounterpartyBackfillInFlightForTest } = await import('../../src/import/counterpartyBackfill.js');
+  _resetCounterpartyBackfillInFlightForTest();
+  await models.Transaction.destroy({ where: {}, force: true });
+  await models.Account.destroy({ where: {}, force: true });
+  await models.ProviderJobLog.destroy({ where: {}, force: true });
+  await models.Contact.destroy({ where: {}, force: true });
+  const acc = await makeAccount({ householdId: householdAId, userId: userAId, name: 'Chk3', accountType: 'checking' });
+  const id = await makeTxn({ accountId: acc, householdId: householdAId, merchantRaw: 'PAYROLL DEPOSIT ACME CORP' });
+  await runCounterpartyBackfill({ householdId: householdAId });
+  const row = await models.Transaction.findByPk(id);
+  assert.equal(row!.counterpartyRaw, 'ACME CORP');
+  assert.equal(row!.counterpartyContactId, null);
+});
+
+test('backfill is idempotent and dedupes across rows', async () => {
+  const models = await import('../../src/models');
+  const { runCounterpartyBackfill, _resetCounterpartyBackfillInFlightForTest } = await import('../../src/import/counterpartyBackfill.js');
+  _resetCounterpartyBackfillInFlightForTest();
+  await models.Transaction.destroy({ where: {}, force: true });
+  await models.Account.destroy({ where: {}, force: true });
+  await models.ProviderJobLog.destroy({ where: {}, force: true });
+  await models.Contact.destroy({ where: {}, force: true });
+  const acc = await makeAccount({ householdId: householdAId, userId: userAId, name: 'Chk4', accountType: 'checking' });
+  await makeTxn({ accountId: acc, householdId: householdAId, merchantRaw: 'INTERAC E-TRANSFER TO JOHN DOE REF 1' });
+  await makeTxn({ accountId: acc, householdId: householdAId, merchantRaw: 'INTERAC E-TRANSFER TO JOHN DOE REF 2' });
+  await runCounterpartyBackfill({ householdId: householdAId });
+  _resetCounterpartyBackfillInFlightForTest();
+  await runCounterpartyBackfill({ householdId: householdAId });
+  const count = await models.Contact.count({ where: { householdId: householdAId, normalizedName: 'john doe' } });
+  assert.equal(count, 1, 'one contact for both rows, no duplicate on re-run');
+});
+
+test('backfill dryRun writes nothing', async () => {
+  const models = await import('../../src/models');
+  const { runCounterpartyBackfill, _resetCounterpartyBackfillInFlightForTest } = await import('../../src/import/counterpartyBackfill.js');
+  _resetCounterpartyBackfillInFlightForTest();
+  await models.Transaction.destroy({ where: {}, force: true });
+  await models.Account.destroy({ where: {}, force: true });
+  await models.ProviderJobLog.destroy({ where: {}, force: true });
+  await models.Contact.destroy({ where: {}, force: true });
+  const acc = await makeAccount({ householdId: householdAId, userId: userAId, name: 'Chk5', accountType: 'checking' });
+  const id = await makeTxn({ accountId: acc, householdId: householdAId, merchantRaw: 'VENMO FROM SARAH LEE' });
+  const before = await models.Contact.count({ where: { householdId: householdAId } });
+  await runCounterpartyBackfill({ householdId: householdAId, dryRun: true });
+  const row = await models.Transaction.findByPk(id);
+  assert.equal(row!.counterpartyContactId, null);
+  assert.equal(await models.Contact.count({ where: { householdId: householdAId } }), before);
 });

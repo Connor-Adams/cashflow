@@ -90,26 +90,42 @@ function normalizeText(parts: Array<string | null | undefined>): string {
 }
 
 /**
- * Merchant-text-only classifier. Used as a fallback when txnType is missing
- * or ambiguous. Returns 'credit' by default.
+ * Merchant-text match: 'credit' for an explicit refund/credit keyword,
+ * 'payment' for a statement-payment keyword, or null when neither fires.
+ * Returning null (rather than a default) lets each caller pick its own default
+ * for an unsignaled positive — both classifyPositiveFlow and
+ * classifyPositiveAmount default to 'skip'.
  */
-export function classifyPositiveFlow(input: {
+function matchPositiveText(input: {
   merchantRaw?: string | null;
   merchantClean?: string | null;
   category?: string | null;
-}): PositiveFlowKind {
+}): PositiveFlowKind | null {
   const text = normalizeText([
     input.merchantRaw,
     input.merchantClean,
     input.category,
   ]);
-  if (!text) return 'credit';
+  if (!text) return null;
   // Refund/reversal/credit signals are explicit user-money-back intent and
   // override payment-substring matches like /\bpayment\b/. A row "PAYMENT
   // REVERSAL" matches both pattern sets — the reversal must win.
   if (CREDIT_PATTERNS.some((re) => re.test(text))) return 'credit';
   if (PAYMENT_PATTERNS.some((re) => re.test(text))) return 'payment';
-  return 'credit';
+  return null;
+}
+
+/**
+ * Merchant-text-only classifier. Used as a fallback when txnType is missing
+ * or ambiguous. Defaults to 'skip' for unrecognized positive deposits so they
+ * contribute to nothing rather than deflating net spend as false credits.
+ */
+export function classifyPositiveFlow(input: {
+  merchantRaw?: string | null;
+  merchantClean?: string | null;
+  category?: string | null;
+}): PositiveBucket {
+  return matchPositiveText(input) ?? 'skip';
 }
 
 /**
@@ -142,5 +158,11 @@ export function classifyPositiveAmount(input: {
   ) {
     return 'credit';
   }
-  return classifyPositiveFlow(input);
+  // No explicit money-back/payment txnType. A refund/payment KEYWORD still
+  // routes via merchant text; but an unsignaled positive inflow (deposit,
+  // transfer, government benefit, loan-principal movement) is NOT a refund
+  // against spend — default to 'skip' so it contributes to nothing rather than
+  // deflating net spend (= totalSpend - totalCredits). This is the fix for the
+  // ~$108k Net understatement from txnType='unknown' deposits.
+  return matchPositiveText(input) ?? 'skip';
 }

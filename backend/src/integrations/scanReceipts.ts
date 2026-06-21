@@ -26,19 +26,27 @@ import { decryptSecret, encryptSecret } from '../util/symmetricEncryption';
 import {
   buildAuthUrl,
   exchangeCodeForTokens,
-  fetchMessage,
+  fetchMessage as realFetchMessage,
   fetchUserEmail,
   extractMessageBody,
   getHeader,
-  listMessageIds,
+  listMessageIds as realListMessageIds,
   refreshAccessToken,
   revokeToken,
+  isReauthRequiredError,
   GMAIL_READONLY_SCOPE,
   OPENID_EMAIL_SCOPE,
   type OauthTokenResponse,
 } from './gmail';
 import { extractReceiptFromText } from '../ai/extractReceiptItems';
+import { collectPdfParts, extractPdfReceiptText as realExtractPdfReceiptText } from './pdfAttachments';
+import { defaultCurrency } from '../config/env';
+import { uberVendorOverride } from './parsers/uber';
+import { categorizeUberTrip } from '../ai/aiCategorizeUberTrip';
 import { logger } from '../observability/logger';
+import { runInteracCounterpartySync } from './interacCounterparty';
+import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
+import { categorizeAndApplyReceiptItems } from '../import/categorizeReceiptItems';
 
 /**
  * Default sender allowlist baked into the app. Every household gets these
@@ -67,9 +75,9 @@ export const DEFAULT_RECEIPT_SENDERS: Array<{ address: string; vendorHint: strin
   { address: 'no-reply@primevideo.com', vendorHint: 'amazon', label: 'Prime Video' },
   { address: 'noreply@audible.com', vendorHint: 'amazon', label: 'Audible' },
   // Rides / food
-  { address: 'receipts@uber.com', vendorHint: 'other', label: 'Uber receipts' },
-  { address: 'noreply@uber.com', vendorHint: 'other', label: 'Uber' },
-  { address: 'no-reply@uber.com', vendorHint: 'other', label: 'Uber' },
+  { address: 'receipts@uber.com', vendorHint: 'uber', label: 'Uber receipts' },
+  { address: 'noreply@uber.com', vendorHint: 'uber', label: 'Uber' },
+  { address: 'no-reply@uber.com', vendorHint: 'uber', label: 'Uber' },
   { address: 'no-reply@lyftmail.com', vendorHint: 'other', label: 'Lyft' },
   { address: 'no-reply@doordash.com', vendorHint: 'other', label: 'DoorDash' },
   { address: 'no-reply@grubhub.com', vendorHint: 'other', label: 'Grubhub' },
@@ -78,9 +86,6 @@ export const DEFAULT_RECEIPT_SENDERS: Array<{ address: string; vendorHint: strin
   { address: 'info@netflix.com', vendorHint: 'other', label: 'Netflix' },
   { address: 'no-reply@spotify.com', vendorHint: 'other', label: 'Spotify' },
 ];
-
-/** Backward-compat: a flat list of just the addresses. */
-export const RECEIPT_SENDER_ALLOWLIST: string[] = DEFAULT_RECEIPT_SENDERS.map((d) => d.address);
 
 /** Returns the effective allowlist for a household (defaults + DB additions),
  *  filtered to enabled entries. Addresses are normalised to lowercase. */
@@ -108,7 +113,84 @@ export function buildGmailQuery(opts: { sinceDate: Date | null; senders: string[
   return parts.join(' ');
 }
 
-async function ensureFreshAccessToken(integ: UserEmailIntegration): Promise<string> {
+/** Receipt-ish subject keywords for the discovery net. Quoted phrases are kept
+ *  as Gmail exact-phrase matches. */
+export const DISCOVERY_SUBJECT_KEYWORDS = [
+  'receipt',
+  'invoice',
+  '"order confirmation"',
+  '"your order"',
+  '"payment received"',
+  '"tax invoice"',
+];
+
+/** Builds the broad discovery query: Gmail's purchases category OR receipt
+ *  subject keywords (OR PDF-attachment invoices when enabled), minus senders we
+ *  already handle, within the date window. */
+export function buildDiscoveryQuery(opts: {
+  sinceDate: Date | null;
+  excludeSenders: string[];
+  includePdfAttachments?: boolean;
+}): string {
+  const signals = [
+    'category:purchases',
+    `subject:(${DISCOVERY_SUBJECT_KEYWORDS.join(' OR ')})`,
+  ];
+  if (opts.includePdfAttachments) {
+    signals.push('(has:attachment filename:pdf subject:(invoice OR receipt))');
+  }
+  const parts = [`(${signals.join(' OR ')})`];
+  for (const addr of opts.excludeSenders) {
+    parts.push(`-from:${addr}`);
+  }
+  if (opts.sinceDate) {
+    const y = opts.sinceDate.getUTCFullYear();
+    const m = String(opts.sinceDate.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(opts.sinceDate.getUTCDate()).padStart(2, '0');
+    parts.push(`after:${y}/${m}/${d}`);
+  }
+  return parts.join(' ');
+}
+
+/**
+ * Parse receipt text (an email body OR PDF-extracted text) into a structured
+ * order: try the cheap deterministic vendor parsers first, then fall back to AI.
+ * `extractFromText` is injected so callers (and tests) can supply the real AI
+ * extractor or a fake. `usedAi` lets callers track AI-call counts.
+ */
+export async function parseReceiptText(opts: {
+  fromAddress: string | null;
+  subject: string | null;
+  text: string;
+  extractFromText: (text: string) => Promise<ExtractedReceiptOrder>;
+}): Promise<{ extracted: ExtractedReceiptOrder; parser: string; usedAi: boolean }> {
+  const det = tryDeterministicParse({ fromAddress: opts.fromAddress, subject: opts.subject, body: opts.text });
+  if (det.ok) return { extracted: det.order, parser: det.parser, usedAi: false };
+  const extracted = await opts.extractFromText(opts.text);
+  return { extracted, parser: 'ai', usedAi: true };
+}
+
+/** Senders the household explicitly dismissed during discovery — excluded from
+ *  future discovery queries so they never re-surface. */
+export async function getDismissedSenders(householdId: number): Promise<string[]> {
+  const rows = await ReceiptSenderAllowlist.findAll({
+    where: { householdId, status: 'dismissed' },
+    attributes: ['emailAddress'],
+  });
+  return rows.map((r) => r.emailAddress.toLowerCase());
+}
+
+/** Everything the discovery query should exclude: senders the fast scan already
+ *  covers (enabled allowlist + baked-in defaults) plus dismissed senders. */
+export async function getDiscoveryExclusions(householdId: number): Promise<string[]> {
+  const [allowed, dismissed] = await Promise.all([
+    getEffectiveAllowlist(householdId),
+    getDismissedSenders(householdId),
+  ]);
+  return [...new Set([...allowed, ...dismissed])];
+}
+
+export async function ensureFreshAccessToken(integ: UserEmailIntegration): Promise<string> {
   const now = Date.now();
   const expiresAt = integ.expiresAt ? integ.expiresAt.getTime() : 0;
   const expiringSoon = expiresAt - now < 60_000;
@@ -118,9 +200,33 @@ async function ensureFreshAccessToken(integ: UserEmailIntegration): Promise<stri
   if (!integ.refreshTokenEncrypted) {
     throw new Error('Access token expired and no refresh token available');
   }
-  const refreshed = await refreshAccessToken(decryptSecret(integ.refreshTokenEncrypted));
-  await applyTokenResponseTo(integ, refreshed, { keepRefreshIfMissing: true });
-  return refreshed.access_token;
+  try {
+    const refreshed = await refreshAccessToken(decryptSecret(integ.refreshTokenEncrypted));
+    await applyTokenResponseTo(integ, refreshed, { keepRefreshIfMissing: true });
+    return refreshed.access_token;
+  } catch (err) {
+    await markReauthIfRevoked(integ, err);
+    throw err;
+  }
+}
+
+/**
+ * If `err` means the Google grant is dead (revoked/expired refresh token),
+ * mark the integration as needing reconnection so the UI can prompt a re-link
+ * instead of silently failing every scan. Returns true if it flagged the row.
+ * Any other error is left untouched (it may be transient).
+ */
+export async function markReauthIfRevoked(
+  integ: UserEmailIntegration,
+  err: unknown,
+): Promise<boolean> {
+  if (!isReauthRequiredError(err)) return false;
+  integ.set({
+    status: 'reconnect_needed',
+    statusReason: 'Google access was revoked or expired. Reconnect Gmail to resume scanning.',
+  });
+  await integ.save();
+  return true;
 }
 
 /**
@@ -227,6 +333,16 @@ export async function disconnect(userId: number): Promise<void> {
   await integ.destroy();
 }
 
+/**
+ * ExternalOrder.currency is NOT NULL, but AI extraction legitimately returns
+ * currency null when the receipt shows none. Default to the app's currency
+ * (CAD), never a hardcoded 'USD': a fabricated USD makes the receipt matcher's
+ * -40 currency penalty kill otherwise-perfect matches against CAD card rows.
+ */
+export function receiptCurrencyOrDefault(extractedCurrency: string | null | undefined): string {
+  return extractedCurrency ?? defaultCurrency;
+}
+
 export interface ScanResultMessage {
   messageId: string;
   from: string | null;
@@ -270,6 +386,13 @@ export interface ScanCallbacks {
   onMessage?: (msg: ScanResultMessage) => void;
 }
 
+export interface ScanDeps {
+  listMessageIds: typeof realListMessageIds;
+  fetchMessage: typeof realFetchMessage;
+  extractFromText: (text: string) => Promise<ExtractedReceiptOrder>;
+  extractPdfReceiptText: typeof realExtractPdfReceiptText;
+}
+
 export async function scanInbox(
   opts: {
     userId: number;
@@ -279,7 +402,13 @@ export async function scanInbox(
     sinceDateOverride?: Date | null;
   },
   callbacks: ScanCallbacks = {},
+  deps: Partial<ScanDeps> = {},
 ): Promise<ScanResult> {
+  const listMessageIds = deps.listMessageIds ?? realListMessageIds;
+  const fetchMessage = deps.fetchMessage ?? realFetchMessage;
+  const extractFromText = deps.extractFromText ?? extractReceiptFromText;
+  const extractPdfReceiptText = deps.extractPdfReceiptText ?? realExtractPdfReceiptText;
+
   const integ = await UserEmailIntegration.findOne({
     where: { userId: opts.userId, provider: 'google' },
   });
@@ -416,7 +545,32 @@ export async function scanInbox(
       }
 
       const body = extractMessageBody(full.payload);
-      if (!body.trim()) {
+
+      let extracted: ExtractedReceiptOrder | null = null;
+      let parser: string = 'ai';
+      let fromPdf = false;
+      if (body.trim()) {
+        const parsed = await parseReceiptText({ fromAddress: result.from, subject: result.subject, text: body, extractFromText });
+        extracted = parsed.extracted;
+        parser = parsed.parser;
+        if (parsed.usedAi) aiExtractions++;
+      }
+
+      const bodyClean = extracted != null && extracted.total != null && extracted.items.length > 0;
+      if (!bodyClean && collectPdfParts(full.payload).length > 0) {
+        const pdfText = await extractPdfReceiptText({ accessToken, messageId: summary.id, payload: full.payload });
+        if (pdfText.trim()) {
+          const parsed = await parseReceiptText({ fromAddress: result.from, subject: result.subject, text: pdfText, extractFromText });
+          if (parsed.extracted.total != null && parsed.extracted.items.length > 0) {
+            extracted = parsed.extracted;
+            parser = parsed.parser;
+            fromPdf = true;
+            if (parsed.usedAi) aiExtractions++;
+          }
+        }
+      }
+
+      if (extracted == null) {
         result.status = 'extraction_failed';
         result.error = 'empty body';
         failed++;
@@ -431,22 +585,12 @@ export async function scanInbox(
         return result;
       }
 
-      // 1) Try the cheap deterministic vendor parser first.
-      let extracted: ExtractedReceiptOrder | null = null;
-      let parser: string = 'ai';
-      const detResult = tryDeterministicParse({
-        fromAddress: result.from,
-        subject: result.subject,
-        body,
-      });
-      if (detResult.ok) {
-        extracted = detResult.order;
-        parser = detResult.parser;
-      } else {
-        // 2) Fall back to AI extraction.
-        extracted = await extractReceiptFromText(body);
-        parser = 'ai';
-        aiExtractions++;
+      // Uber rides and Uber Eats both arrive from uber.com but the AI returns
+      // vendor 'other'. The sender is authoritative for the vendor family;
+      // subject/body picks ride vs eats.
+      const uberVendor = uberVendorOverride(result.from, result.subject, body);
+      if (uberVendor) {
+        extracted.vendor = uberVendor;
       }
 
       result.parser = parser;
@@ -468,6 +612,21 @@ export async function scanInbox(
           fromAddr: result.from,
         });
         return result;
+      }
+
+      // For Uber rides, infer business-use from trip context and stamp it on
+      // the single synthetic trip item so it propagates via linkItemsStage.
+      if (extracted.vendor === 'uber' && extracted.trip && extracted.items[0]) {
+        try {
+          const cat = await categorizeUberTrip(extracted.trip);
+          extracted.items[0].inferredCategory = cat.category;
+          extracted.items[0].businessUsePercent = cat.businessUsePercent;
+        } catch (err) {
+          logger.warn(
+            { messageId: summary.id, error: err instanceof Error ? err.message : String(err) },
+            'uber_trip_categorize_failed',
+          );
+        }
       }
 
       const dedupeKey = [
@@ -499,10 +658,10 @@ export async function scanInbox(
             tax: null,
             shipping: null,
             total: extracted!.total != null ? String(extracted!.total) : null,
-            currency: extracted!.currency ?? 'USD',
+            currency: receiptCurrencyOrDefault(extracted!.currency),
             paymentLast4: extracted!.paymentLast4,
-            source: `gmail-scan:${parser}`,
-            rawPayload: { extracted, gmailMessageId: summary.id, parser } as unknown,
+            source: `gmail-scan:${parser}${fromPdf ? '-pdf' : ''}`,
+            rawPayload: { extracted, gmailMessageId: summary.id, parser, trip: extracted!.trip ?? null } as unknown,
           } as never,
           transaction: t,
         });
@@ -517,8 +676,9 @@ export async function scanInbox(
               unitPrice: it.unitPrice != null ? String(it.unitPrice) : null,
               totalPrice: it.totalPrice != null ? String(it.totalPrice) : null,
               inferredCategory: it.inferredCategory,
-              businessUsePercent: null,
+              businessUsePercent: it.businessUsePercent != null ? String(it.businessUsePercent) : null,
               confidence: null,
+              itemNumber: it.vendorItemId ?? null,
               rawPayload: it as unknown,
             })) as never[],
             { transaction: t },
@@ -529,6 +689,25 @@ export async function scanInbox(
       result.status = result.orderCreated ? 'extracted' : 'duplicate';
       if (result.orderCreated) created++;
       else dupes++;
+
+      // Auto-link new orders to card transactions. Runs AFTER the DB transaction
+      // commits so the order row is visible. A match failure must never fail the scan.
+      if (result.orderCreated === true && result.orderId != null && opts.householdId != null) {
+        try {
+          await matchReceiptOrderToTransactions({
+            externalOrderId: result.orderId,
+            householdId: opts.householdId,
+          });
+        } catch (err) {
+          logger.warn({ err, orderId: result.orderId }, 'gmail_scan_match_failed');
+        }
+        // Categorize regardless of match outcome: items need a confidence (so the
+        // SP1 review-clear bar can pass) even if no transaction matched yet. It is
+        // itself best-effort (never throws) and runs last so its recompute sees the
+        // accepted link (if match made one) plus the confidences it just wrote.
+        await categorizeAndApplyReceiptItems({ householdId: opts.householdId, orderId: result.orderId });
+      }
+
       await recordProcessed({
         messageId: summary.id,
         status: result.status,
@@ -562,6 +741,16 @@ export async function scanInbox(
 
   integ.set({ lastScanAt: new Date() });
   await integ.save();
+
+  // Best-effort: after the receipt pass, refresh e-transfer counterparty names
+  // from Interac emails. Never let it fail the scan.
+  if (opts.householdId != null) {
+    try {
+      await runInteracCounterpartySync({ householdId: opts.householdId, userId: opts.userId });
+    } catch (e) {
+      logger.warn({ err: e, module: 'interac_sync' }, 'post_scan_interac_sync_failed');
+    }
+  }
 
   return {
     scannedMessages: summaries.length,

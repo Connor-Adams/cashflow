@@ -65,15 +65,32 @@ function mockApi(items: FakeInsight[]) {
 }
 
 describe('InsightsPage', () => {
-  it('renders an empty state when there are no items', async () => {
+  it('renders the "No insights yet" EmptyState with a Run detectors CTA when there are no items (#799)', async () => {
     mockApi([])
     render(
       <MemoryRouter>
         <InsightsPage />
       </MemoryRouter>,
     )
-    await waitFor(() => expect(screen.getByText(/Nothing here yet/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('No insights yet')).toBeTruthy())
+    // CTA lives inside the empty state (there is also a header "Run detectors"
+    // button — the empty state adds a second one in its actions slot).
+    expect(
+      screen.getAllByRole('button', { name: /run detectors/i }).length,
+    ).toBeGreaterThan(0)
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Insights')
+  })
+
+  it('renders a "Nothing matches this filter" EmptyState when data exists but the active tab is empty (#799)', async () => {
+    // One resolved row → the default "open" tab is empty even though data exists.
+    mockApi([makeRow({ id: 1, status: 'resolved', title: 'Done one' })])
+    render(
+      <MemoryRouter>
+        <InsightsPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('Nothing matches this filter')).toBeTruthy())
+    expect(screen.getByRole('button', { name: /clear filters/i })).toBeTruthy()
   })
 
   it('sorts items by severity (critical, warning, info)', async () => {

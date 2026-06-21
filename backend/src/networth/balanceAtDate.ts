@@ -13,7 +13,16 @@ export async function balanceAtDate(
   const { Transaction } = await import('../models');
 
   const where: WhereOptions = { accountId: account.id };
-  if (account.openingBalanceDate) {
+  // The opening balance anchors the account at openingBalanceDate. For asOf
+  // on/after the anchor, roll forward: opening + txns in (anchor, asOf].
+  // For asOf BEFORE the anchor, derive backward instead: opening − txns in
+  // (asOf, anchor] — otherwise every pre-anchor date would report the anchor
+  // balance verbatim, ignoring known history.
+  let sign = 1;
+  if (account.openingBalanceDate && asOf < account.openingBalanceDate) {
+    where.date = { [Op.gt]: asOf, [Op.lte]: account.openingBalanceDate };
+    sign = -1;
+  } else if (account.openingBalanceDate) {
     where.date = { [Op.gt]: account.openingBalanceDate, [Op.lte]: asOf };
   } else {
     where.date = { [Op.lte]: asOf };
@@ -26,7 +35,7 @@ export async function balanceAtDate(
 
   const byCurrency = new Map<string, number>();
   for (const t of txns) {
-    byCurrency.set(t.currency, (byCurrency.get(t.currency) ?? 0) + Number(t.amount));
+    byCurrency.set(t.currency, (byCurrency.get(t.currency) ?? 0) + sign * Number(t.amount));
   }
 
   const defCcy = account.defaultCurrency ?? 'CAD';

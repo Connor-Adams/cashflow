@@ -1,4 +1,4 @@
-import { Card } from '@/components/ui/card'
+import { Card } from '@connor-adams/designsystem'
 import { useLayoutWidth, layoutWidthOptions } from '@/lib/layoutWidth'
 
 export function DisplaySection() {

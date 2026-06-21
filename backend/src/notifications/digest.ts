@@ -21,9 +21,17 @@
  * Investment-account rows are excluded entirely.
  */
 import { Op } from 'sequelize';
-import { Account, BudgetTarget, HouseholdMember, Transaction } from '../models';
+import {
+  Account,
+  BudgetTarget,
+  HouseholdMember,
+  Insight,
+  PlannedEvent,
+  Transaction,
+} from '../models';
 import { num } from '../util/numbers';
 import { NON_SPEND_TXN_TYPES } from '../summary/classifyTransactionFlow';
+import { gatherPlannedOccurrences } from '../forecast/gatherOccurrences';
 
 export interface DigestTxnRow {
   id: number;
@@ -55,6 +63,24 @@ export interface DigestCategoryDelta {
   delta: number;
 }
 
+/** A single open insight surfaced in the digest (issue #796). */
+export interface DigestInsight {
+  id: number;
+  type: string;
+  severity: string;
+  title: string;
+}
+
+/** A planned-event occurrence due inside the digest's look-ahead (issue #796). */
+export interface DigestUpcomingExpectation {
+  id: number;
+  name: string;
+  /** YYYY-MM-DD of the in-window occurrence. */
+  dueDate: string;
+  amount: number;
+  currency: string;
+}
+
 export interface WeeklyDigestData {
   /** ISO date (inclusive). Monday of the reporting week. */
   weekStart: string;
@@ -65,7 +91,24 @@ export interface WeeklyDigestData {
   priorTotalSpend: number;
   totalIncome: number;
   priorTotalIncome: number;
+  /**
+   * Week net cash change (issue #796) = income inflow − spend outflow over the
+   * reporting week, in the chosen currency. Positive = the week added cash.
+   */
+  netChange: number;
   topCategories: DigestCategoryDelta[];
+  /**
+   * The FULL per-category spend delta array vs the prior week (issue #796),
+   * not just the top 3. `topCategories` remains the capped view used by the
+   * email template; `categoryDeltas` is what we persist on the Notification.
+   */
+  categoryDeltas: DigestCategoryDelta[];
+  /** Count of the household's open insights (issue #796). */
+  openInsightCount: number;
+  /** Top 3 open insights by severity then recency (issue #796). */
+  topInsights: DigestInsight[];
+  /** Expectations due in the next 7 days of the send date (issue #796). */
+  upcomingExpectations: DigestUpcomingExpectation[];
   biggestTransaction: {
     id: number;
     date: string;
@@ -163,6 +206,14 @@ export interface AggregateDigestOpts {
    * to 'CAD' so the empty-week branch still has a label for the in-app row.
    */
   fallbackCurrency?: string;
+  /**
+   * Enriched fields (issue #796) computed by the IO wrapper and passed through
+   * the pure aggregator so they ride on the persisted payload. All optional so
+   * the existing unit tests (and the email template) keep working unchanged.
+   */
+  openInsightCount?: number;
+  topInsights?: DigestInsight[];
+  upcomingExpectations?: DigestUpcomingExpectation[];
 }
 
 export function aggregateDigest(
@@ -215,7 +266,7 @@ export function aggregateDigest(
       (priorByCategory.get(cat) ?? 0) + Math.abs(num(r.amount) ?? 0),
     );
   }
-  const topCategories: DigestCategoryDelta[] = Array.from(byCategory.entries())
+  const categoryDeltas: DigestCategoryDelta[] = Array.from(byCategory.entries())
     .map(([category, total]) => {
       const priorTotal = priorByCategory.get(category) ?? 0;
       return {
@@ -226,8 +277,10 @@ export function aggregateDigest(
         delta: total - priorTotal,
       };
     })
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 3);
+    .sort((a, b) => b.total - a.total);
+  // The email template + in-app title use the capped top-3 view; the full
+  // array is persisted on the Notification for the expandable card (#796).
+  const topCategories = categoryDeltas.slice(0, 3);
 
   // Biggest transaction (most negative single row in the chosen currency).
   let biggestTransaction: WeeklyDigestData['biggestTransaction'] = null;
@@ -249,6 +302,12 @@ export function aggregateDigest(
     }
   }
 
+  // Net cash change for the week, in the chosen currency: income inflow minus
+  // spend outflow (#796 AC1). Both totals already exclude investment-account
+  // rows and the NON_SPEND_TXN_TYPES set, matching safeToSpend's cash-bearing
+  // exclusions for the week-scoped flow.
+  const netChange = round2(totalIncome - totalSpend);
+
   return {
     weekStart: opts.weekStart,
     weekEnd: opts.weekEnd,
@@ -257,13 +316,23 @@ export function aggregateDigest(
     priorTotalSpend,
     totalIncome,
     priorTotalIncome,
+    netChange,
     topCategories,
+    categoryDeltas,
+    openInsightCount: opts.openInsightCount ?? 0,
+    topInsights: opts.topInsights ?? [],
+    upcomingExpectations: opts.upcomingExpectations ?? [],
     biggestTransaction,
     pendingCount: opts.pendingCount,
     budgets: opts.budgets ?? [],
     hasAnyHistory: opts.hasAnyHistory,
     isEmptyWeek: current.length === 0,
   };
+}
+
+function round2(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100) / 100;
 }
 
 // ---- IO wrapper --------------------------------------------------------
@@ -386,13 +455,120 @@ export async function buildDigestForUser(
   // "spent" figure — that's a single, easy snapshot suitable for an email.
   const budgets = await loadBudgetSnapshots(ctx, weekEnd);
 
+  // Enriched payload (#796): open-insight rollup + the expectations falling due
+  // within the next 7 days of the send date. Both are read-only — the digest
+  // never mutates insight or expectation state.
+  const [insightRollup, upcomingExpectations] = await Promise.all([
+    loadOpenInsightRollup(ctx),
+    loadUpcomingExpectations(ctx, asOf),
+  ]);
+
   return aggregateDigest(current, prior, {
     weekStart,
     weekEnd,
     hasAnyHistory: true,
     pendingCount,
     budgets,
+    openInsightCount: insightRollup.openInsightCount,
+    topInsights: insightRollup.topInsights,
+    upcomingExpectations,
   });
+}
+
+/** Severity rank for ordering top insights — critical first, info last. */
+const INSIGHT_SEVERITY_RANK: Record<string, number> = {
+  critical: 0,
+  warning: 1,
+  info: 2,
+};
+
+/**
+ * Open-insight rollup (#796 AC3): the count of the household's `status='open'`
+ * insights plus the top 3 ordered by severity (critical → info) then recency
+ * (most-recently detected first), sourced the same way as
+ * `GET /api/insights?status=open`. Read-only.
+ */
+async function loadOpenInsightRollup(
+  ctx: DigestUserContext,
+): Promise<{ openInsightCount: number; topInsights: DigestInsight[] }> {
+  if (ctx.householdIds.length === 0) {
+    return { openInsightCount: 0, topInsights: [] };
+  }
+  const rows = await Insight.findAll({
+    where: {
+      householdId: { [Op.in]: ctx.householdIds },
+      status: 'open',
+    },
+  });
+  const sorted = [...rows].sort((a, b) => {
+    const diff =
+      (INSIGHT_SEVERITY_RANK[a.severity] ?? 99) -
+      (INSIGHT_SEVERITY_RANK[b.severity] ?? 99);
+    if (diff !== 0) return diff;
+    return b.detectedAt.getTime() - a.detectedAt.getTime();
+  });
+  return {
+    openInsightCount: rows.length,
+    topInsights: sorted.slice(0, 3).map((r) => ({
+      id: r.id,
+      type: r.type,
+      severity: r.severity,
+      title: r.title,
+    })),
+  };
+}
+
+/**
+ * Upcoming expectations (#796 AC4): planned-event / subscription occurrences
+ * due within [asOf, asOf+7d]. Reuses the forecast occurrence pipeline so
+ * recurrence expansion matches the rest of the app. Scoped to the household,
+ * across every currency the household plans in. Sorted by due date ascending.
+ */
+async function loadUpcomingExpectations(
+  ctx: DigestUserContext,
+  asOf: Date,
+): Promise<DigestUpcomingExpectation[]> {
+  if (ctx.householdIds.length === 0) return [];
+  const from = asOf.toISOString().slice(0, 10);
+  const to = new Date(asOf.getTime() + 7 * DAY_MS).toISOString().slice(0, 10);
+
+  // gatherPlannedOccurrences is currency-scoped, so collect the distinct
+  // currencies the household has planned events in, then gather per-currency.
+  const events = await PlannedEvent.findAll({
+    where: {
+      householdId: { [Op.in]: ctx.householdIds },
+      kind: { [Op.in]: ['planned', 'subscription'] },
+      status: 'planned',
+    },
+    attributes: ['currency'],
+    raw: true,
+  });
+  const currencies = Array.from(
+    new Set((events as unknown as { currency: string }[]).map((e) => e.currency)),
+  );
+
+  const out: DigestUpcomingExpectation[] = [];
+  for (const householdId of ctx.householdIds) {
+    for (const currency of currencies) {
+      const occurrences = await gatherPlannedOccurrences({
+        householdId,
+        currency,
+        from,
+        to,
+      });
+      for (const { date, row } of occurrences) {
+        out.push({
+          id: row.id,
+          name: row.name,
+          dueDate: date,
+          amount: num(row.amount) ?? 0,
+          currency: row.currency,
+        });
+      }
+    }
+  }
+  out.sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0));
+  return out;
 }
 
 async function loadBudgetSnapshots(

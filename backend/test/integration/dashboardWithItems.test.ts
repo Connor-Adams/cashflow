@@ -9,6 +9,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { seedHousehold } from '../helpers/seedHousehold.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -27,7 +28,7 @@ before(async () => {
   app = (await import('../../src/app.js')).default;
 
   // Bootstrap a superadmin (required as first user).
-  const superAgent = request.agent(app);
+  const superAgent = testAgent(app);
   const reg = await superAgent.post('/api/auth/register').send({
     email: 'super-dashboard-items@example.com',
     displayName: 'Super User',
@@ -39,7 +40,7 @@ before(async () => {
   const h = await seedHousehold('DashboardItemsA', 'A Partner');
   householdId = h.householdId;
   userId = h.userId;
-  agent = request.agent(app);
+  agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${h.token}; Path=/`);
 
   // Create an account for the household.
@@ -170,7 +171,7 @@ test('dashboard: splits txn across item categories with pro-rated tax', async ()
     externalOrderId: order.id,
     confidence: '95',
     matchReason: 'test',
-    status: 'confirmed',
+    status: 'accepted',
     linkedAmount: '105.00',
   });
 
@@ -411,7 +412,7 @@ test('dashboard: netSpendByBusiness splits across buckets via item business%', a
     externalOrderId: order.id,
     confidence: '95',
     matchReason: 'test',
-    status: 'confirmed',
+    status: 'accepted',
     linkedAmount: '100.00',
   });
 

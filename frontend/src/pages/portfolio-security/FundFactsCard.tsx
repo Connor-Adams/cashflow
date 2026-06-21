@@ -1,13 +1,7 @@
-import { Card } from '@/components/ui/card'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Card } from '@connor-adams/designsystem'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import type { PortfolioSecurityOverview } from '../../types/api'
+import { clampPct } from '../../lib/num'
 
 export type FundFactsCardProps = {
   overview: PortfolioSecurityOverview | null
@@ -54,7 +48,7 @@ function formatCompactNumber(value: number, currencyCode?: string): string {
   const digits = abs >= 100 ? 1 : 2
   if (currencyCode) {
     try {
-      const formatted = new Intl.NumberFormat(undefined, {
+      const formatted = new Intl.NumberFormat('en-CA', {
         style: 'currency',
         currency: currencyCode.toUpperCase(),
         maximumFractionDigits: digits,
@@ -174,7 +168,7 @@ export function FundFactsCard({ overview, currency }: FundFactsCardProps) {
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
             Top holdings
           </h3>
-          <Table className="table">
+          <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Symbol</TableHead>
@@ -207,17 +201,15 @@ export function FundFactsCard({ overview, currency }: FundFactsCardProps) {
               <div key={r.label} className="flex flex-col">
                 <dt className="muted text-xs">{r.label}</dt>
                 <dd
-                  className="font-medium tabular-nums"
+                  className={
+                    r.value > 0
+                      ? 'font-medium tabular-nums text-positive'
+                      : r.value < 0
+                        ? 'font-medium tabular-nums text-warning'
+                        : 'font-medium tabular-nums'
+                  }
                   data-positive={r.value > 0 ? 'true' : undefined}
                   data-negative={r.value < 0 ? 'true' : undefined}
-                  style={{
-                    color:
-                      r.value > 0
-                        ? 'var(--accent-positive)'
-                        : r.value < 0
-                          ? 'var(--accent-warm)'
-                          : undefined,
-                  }}
                 >
                   {formatPercent(r.value)}
                 </dd>
@@ -242,6 +234,8 @@ function FactRow({ label, value }: { label: string; value: string }) {
 
 type AllocationRow = { label: string; fraction: number; color: string }
 
+// Swatch colors fed to inline style.background for the allocation bar; mixes
+// unregistered --chart-line-N tokens with --positive — keep raw var() (no utility).
 function buildAllocations(o: PortfolioSecurityOverview): AllocationRow[] {
   const rows: AllocationRow[] = []
   if (o.stockPosition != null && o.stockPosition > 0)
@@ -249,7 +243,7 @@ function buildAllocations(o: PortfolioSecurityOverview): AllocationRow[] {
   if (o.bondPosition != null && o.bondPosition > 0)
     rows.push({ label: 'Bonds', fraction: o.bondPosition, color: 'var(--chart-line-2)' })
   if (o.cashPosition != null && o.cashPosition > 0)
-    rows.push({ label: 'Cash', fraction: o.cashPosition, color: 'var(--accent-positive)' })
+    rows.push({ label: 'Cash', fraction: o.cashPosition, color: 'var(--positive)' })
   return rows
 }
 
@@ -262,7 +256,7 @@ function AllocationBar({ rows }: { rows: AllocationRow[] }) {
         <div
           key={row.label}
           style={{
-            width: `${(row.fraction / total) * 100}%`,
+            width: `${clampPct((row.fraction / total) * 100)}%`,
             background: row.color,
           }}
           title={`${row.label}: ${formatPercent(row.fraction)}`}

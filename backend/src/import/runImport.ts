@@ -1,7 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { logger } from '../observability/logger';
-import { Op } from 'sequelize';
+import { Op, fn, col, where as sqlWhere } from 'sequelize';
 import type { Account as AccountModel } from '../models/Account';
 import {
   sequelize,
@@ -23,10 +22,11 @@ import { loadAllRules } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { resolveProfileIdForImport } from './inferProfile';
 import { parseCsvRecords } from './csvParse';
-import { mapCsvRow } from './mapRow';
+import { inferCsvDateOrdering, mapCsvRow } from './mapRow';
 import { parseStatementFilename } from './parseStatementFilename';
 import {
   parseWealthsimpleFilename,
+  parseWsCreditCardPdfWsid,
   type WsProductHint,
 } from './parseWealthsimpleFilename';
 import { parseStatementFile } from './parseStatementFile';
@@ -35,10 +35,13 @@ import {
   findOrCreateSecurity,
 } from './commitStatementImport';
 import { parseWsHoldingsCsv } from './wealthsimpleHoldingsParse';
+import { wsRecordsHaveSecurityActivity } from './wealthsimpleInvestParse';
 import { assertUnderRoot } from './pathUtils';
 import { findMerchantMemory } from '../ai/merchantMemory';
+import { upsertSuggestedOrderLink } from '../amazon/matcher';
 import * as env from '../config/env';
 import { enrichTransaction } from './enrich';
+import { applyRuleSideEffects, findRuleActionsSignal } from '../rules/applyRuleSideEffects';
 import {
   computeImportConfidence,
   serializeFlags,
@@ -48,23 +51,28 @@ import {
   enrichmentAmazonLinkThreshold,
   enrichmentRefundWindowDays,
   enrichmentTransferWindowDays,
-  enrichmentAiEnabled,
-  enrichmentAiMaxMerchants,
-  enrichmentAiPerRowConcurrency,
 } from '../config/env';
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
+  loadHouseholdOwnerNames,
   loadRecurringHistory,
   loadRelationshipCandidates,
 } from './enrichment/loaders';
-import { runAiBatchStage, type AiBatchCandidate, type AiBatchSuggestion } from './enrichment/aiBatchStage';
-import { mergeSignals } from './enrichment/computeReviewFlag';
-import { openaiJson } from '../ai/openaiJson';
-import { getOpenAiConfig } from '../config/openai';
-import { loadCategoryHints } from '../ai/suggestTransaction';
-import type { MerchantMemoryMatch } from '../ai/merchantMemory';
-import type { Signal } from './enrichment/types';
+// Stage 8 ai-batch over cold rows lives in a shared module so the import path
+// and the enrichment backfill path use one implementation. aiSuggestionToSignal
+// and dedupeColdRowsByMerchantKey are re-exported below because existing unit
+// tests import them from this module.
+import {
+  maybeRunAiBatchOverColdRows,
+  type ColdRow,
+} from './enrichment/aiBatchOverColdRows';
+import { maybeRunEmbeddingMatchOverColdRows } from './enrichment/embeddingMatchOverColdRows';
+export { aiSuggestionToSignal, dedupeColdRowsByMerchantKey } from './enrichment/aiBatchOverColdRows';
+import { logger } from '../observability/logger';
+import { findOrCreateAccount } from './accountLookup';
+import { extractAccountNumber } from './csvProfiles';
+import { applyCreditCardStatementSummary } from '../cards/applyStatementSummary';
 
 /** Max row-level parse diagnostics returned on a single import response */
 export const PARSE_ERRORS_MAX = 50;
@@ -101,6 +109,30 @@ export async function resolveAccount(cardToken: string, householdId?: number | n
       ],
     },
   });
+}
+
+/** Try to resolve account via auto-match on CSV Account Number. Returns [account, 'matched' | 'created'] or null. */
+async function tryAutoMatchAccount(
+  records: Record<string, string>[],
+  headers: string[],
+  profileId: string,
+  householdId: number | null
+): Promise<{ account: AccountModel; matchedBy: string } | null> {
+  try {
+    const { profiles } = await import('./csvProfiles');
+    const profile = profiles[profileId] || profiles.generic_simple;
+    const csvAccountNumber = extractAccountNumber(records, headers, profile);
+
+    if (!csvAccountNumber) {
+      return null; // No account number in CSV
+    }
+
+    const result = await findOrCreateAccount(csvAccountNumber, profileId, householdId);
+    return { account: result.account, matchedBy: result.matchedBy };
+  } catch (err) {
+    logger.debug(`Auto-match account failed: ${err}`);
+    return null;
+  }
 }
 
 export type ImportCsvFileOpts = {
@@ -201,10 +233,49 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   const rules = await loadAllRules(opts.householdId);
   const amazonOrdersCache = await loadAmazonOrdersCache(opts.householdId ?? null);
   const startedAt = new Date();
+
+  // Parse CSV early so we can use it for auto-match
+  const text = buf.toString('utf8');
+  const parsed = parseCsvRecords(text);
+  if (!parsed.ok) {
+    const msg = parsed.error;
+    await ImportHistory.create({
+      fileName: name,
+      filePathSafe: name,
+      contentHash,
+      batchLabel: 'parse-error',
+      status: 'failed',
+      rowCount: 0,
+      errorMessage: msg,
+      startedAt,
+      finishedAt: new Date(),
+      householdId: opts.householdId ?? null,
+      createdByUserId: opts.userId ?? null,
+    });
+    return {
+      file: name,
+      skipped: true,
+      reason: 'parse_error',
+      message: msg || 'Could not parse CSV (wrong delimiter or invalid file?)',
+    };
+  }
+  const { records, headers } = parsed;
+
+  // Infer profile early for auto-match
+  const { profileId, inferred: profileInferred } = resolveProfileIdForImport(
+    opts.profileId ?? undefined,
+    process.env.CSV_PROFILE_ID,
+    headers,
+    records,
+    env.defaultCurrency || 'CAD',
+  );
+
+  // Resolve account with three fallback paths: accountId, filename, auto-match
   let account: AccountModel;
   let importBatch: string;
 
   if (opts.accountId != null && opts.accountId !== '') {
+    // Path 1: Explicit accountId
     const id = Number(opts.accountId);
     if (Number.isNaN(id)) {
       await ImportHistory.create({
@@ -252,83 +323,64 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
       (opts.batchLabel && String(opts.batchLabel).trim()) ||
       `${ym} ${token}`;
   } else {
+    // Path 2: Try filename match
     const meta = parseStatementFilename(name);
-    if (!meta) {
-      await ImportHistory.create({
-        fileName: name,
-        filePathSafe: name,
-        contentHash,
-        batchLabel: 'invalid-filename',
-        status: 'failed',
-        rowCount: 0,
-        errorMessage:
-          'Filename must match CardName_YYYY_MM.csv (e.g. Amex_2025_01.csv), or pass accountId when uploading from the web',
-        startedAt,
-        finishedAt: new Date(),
-        householdId: opts.householdId ?? null,
-        createdByUserId: opts.userId ?? null,
-      });
-      return { file: name, skipped: true, reason: 'bad_filename' };
-    }
-    const resolved = await resolveAccount(meta.cardToken, opts.householdId);
+    let resolved = meta ? await resolveAccount(meta.cardToken, opts.householdId) : null;
+
+    // Path 3: If filename match failed, try auto-match on CSV Account Number
+    let autoMatched: { account: AccountModel; matchedBy: string } | null = null;
     if (!resolved) {
+      autoMatched = await tryAutoMatchAccount(records, headers, profileId, opts.householdId ?? null);
+      resolved = autoMatched?.account ?? null;
+    }
+
+    // All paths failed
+    if (!resolved) {
+      const errorMsg = meta
+        ? `No account matches token "${meta.cardToken}" (short_code or name), and CSV has no Account Number for auto-match`
+        : 'Filename must match CardName_YYYY_MM.csv (e.g. Amex_2025_01.csv), pass accountId, or CSV must have Account Number column for auto-match';
+
       await ImportHistory.create({
         fileName: name,
         filePathSafe: name,
         contentHash,
-        batchLabel: meta.batchLabel,
+        batchLabel: meta?.batchLabel || 'no-account',
         status: 'failed',
         rowCount: 0,
-        errorMessage: `No account matches token "${meta.cardToken}" (short_code or name)`,
+        errorMessage: errorMsg,
         startedAt,
         finishedAt: new Date(),
         householdId: opts.householdId ?? null,
         createdByUserId: opts.userId ?? null,
       });
-      return { file: name, skipped: true, reason: 'unknown_account' };
+      return { file: name, skipped: true, reason: 'unknown_account', message: errorMsg };
     }
+
+    // Set importBatch based on which path succeeded
     account = resolved;
-    importBatch = meta.batchLabel;
-  }
+    const d = new Date();
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const token = account.shortCode || account.name || 'account';
 
-  const householdAccountIds = await loadHouseholdAccountIds(account.id, opts.householdId ?? account.householdId ?? null);
-
-  const text = buf.toString('utf8');
-  const parsed = parseCsvRecords(text);
-  if (!parsed.ok) {
-    const msg = parsed.error;
-    await ImportHistory.create({
-      fileName: name,
-      filePathSafe: name,
-      contentHash,
-      batchLabel: 'parse-error',
-      status: 'failed',
-      rowCount: 0,
-      errorMessage: msg,
-      startedAt,
-      finishedAt: new Date(),
-      householdId: opts.householdId ?? null,
-      createdByUserId: opts.userId ?? null,
-    });
-    return {
-      file: name,
-      skipped: true,
-      reason: 'parse_error',
-      message: msg || 'Could not parse CSV (wrong delimiter or invalid file?)',
-    };
+    if (meta && !autoMatched) {
+      // Filename match succeeded
+      importBatch = meta.batchLabel;
+    } else {
+      // Auto-match succeeded (or filename match was used as fallback)
+      importBatch =
+        (opts.batchLabel && String(opts.batchLabel).trim()) ||
+        `${ym} ${token}`;
+      if (autoMatched) {
+        logger.info(`Auto-matched account via bank account number: ${account.id}`);
+      }
+    }
   }
-  const { records, headers } = parsed;
 
   const defaultCurrency =
     account.defaultCurrency || env.defaultCurrency || 'CAD';
 
-  const { profileId, inferred: profileInferred } = resolveProfileIdForImport(
-    opts.profileId ?? undefined,
-    process.env.CSV_PROFILE_ID,
-    headers,
-    records,
-    defaultCurrency,
-  );
+  const householdAccountIds = await loadHouseholdAccountIds(account.id, opts.householdId ?? account.householdId ?? null);
+  const ownerNames = await loadHouseholdOwnerNames(opts.householdId ?? account.householdId ?? null);
 
   let inserted = 0;
   let skippedDup = 0;
@@ -338,10 +390,14 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   // here, then a single AI batch (or per-row fallback) enhances them after commit.
   const coldRows: ColdRow[] = [];
 
+  // One day/month ordering for the whole file: unambiguous rows ('15/03')
+  // decide how ambiguous ones ('03/04') parse instead of per-row fallback.
+  const dateOrdering = inferCsvDateOrdering(records, headers, profileId);
+
   await sequelize.transaction(async (t) => {
     for (let i = 0; i < records.length; i++) {
       const row = records[i];
-      const mapped = mapCsvRow(row, headers, profileId, defaultCurrency);
+      const mapped = mapCsvRow(row, headers, profileId, defaultCurrency, dateOrdering);
       if ('error' in mapped) {
         rowErrors += 1;
         appendParseError(parseErrors, i + 1, mapped.error);
@@ -369,22 +425,38 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         sourceIdentityFingerprint: identityFp,
         sourceReference: v.sourceReference ?? null,
         t,
+        // CSV-imported rows default to status 'posted' (see Transaction model).
+        // Threading the posted-row context lets the cross-parser merchant-drift
+        // fallback in findExistingForDedup catch a statement re-imported in a
+        // different format (CSV then PDF) where the same charge's merchantRaw is
+        // reconstructed slightly differently and flips the identity fingerprint.
+        incomingStatus: 'posted',
+        incomingDate: v.date,
+        incomingAmount: v.amount,
+        incomingCurrency: v.currency,
+        incomingMerchantRaw: v.merchantRaw,
       });
       if (dedup.kind !== 'no-match') {
         skippedDup += 1;
         continue;
       }
 
+      // All three reads thread `t`: on Postgres an un-threaded raw query runs
+      // on a separate pooled connection and cannot see rows inserted earlier
+      // in this same import (READ COMMITTED), so same-statement refund or
+      // transfer pairs would link on SQLite tests but not in prod.
       const memory = await findMerchantMemory(
         opts.householdId ?? account.householdId ?? null,
         v.merchantClean,
         v.amount,
+        { transaction: t },
       );
 
       const recurringHistory = await loadRecurringHistory(
         opts.householdId ?? account.householdId ?? null,
         v.merchantClean,
         v.date,
+        t,
       );
       const relationshipCandidates = await loadRelationshipCandidates(
         opts.householdId ?? account.householdId ?? null,
@@ -392,6 +464,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         v.merchantClean,
         v.date,
         enrichmentRefundWindowDays,
+        t,
       );
 
       const enriched = await enrichTransaction({
@@ -405,6 +478,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         accountId: account.id,
         householdId: opts.householdId ?? account.householdId ?? null,
         householdAccountIds,
+        ownerNames,
         rules,
         amazonOrders: amazonOrdersCache,
         memory,
@@ -499,6 +573,30 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
               { transaction: sp },
             );
           }
+
+          // Persist the item-link match through the canonical TransactionOrderLink
+          // join table (status 'suggested') so imports auto-surface suggested links.
+          const orderLink = enriched.signals.find((s) => s.orderLink)?.orderLink;
+          if (orderLink) {
+            await upsertSuggestedOrderLink({
+              transactionId: txn.id,
+              externalOrderId: orderLink.externalOrderId,
+              confidence: orderLink.confidence,
+              matchReason: orderLink.matchReason,
+              transaction: sp,
+            });
+          }
+
+          // Rule actions side-effects (issue #795): set_label / set_alert.
+          const ruleActions = findRuleActionsSignal(enriched.signals);
+          if (ruleActions) {
+            await applyRuleSideEffects({
+              ruleActions,
+              transactionId: txn.id,
+              householdId: opts.householdId ?? account.householdId ?? null,
+              transaction: sp,
+            });
+          }
         });
         inserted += 1;
         if (enriched.fields.reviewFlag) {
@@ -564,11 +662,22 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     );
   });
 
-  // === Phase 2: stage 8 ai-batch over cold rows ===
+  // === Phase 2a: stage 5.5 embedding-match over cold rows (#792) ===
+  // Local, offline-capable semantic match against the household's reviewed
+  // merchants. Runs BEFORE the OpenAI batch; rows it matches are persisted here
+  // and removed from the AI-batch candidate set, so OpenAI stays the strict
+  // below-threshold fallback. Runs outside the import transaction.
+  const enrichHouseholdId = opts.householdId ?? account.householdId ?? null;
+  const embeddingMatch = await maybeRunEmbeddingMatchOverColdRows(coldRows, enrichHouseholdId);
+
+  // === Phase 2b: stage 8 ai-batch over the rows embedding-match left cold ===
   // Runs OUTSIDE the import transaction so OpenAI latency doesn't hold DB locks.
   // Each enhancement is an independent update; partial enhancement is acceptable
   // (cold rows still have phase-1 fields and review_flag=true).
-  const aiEnhanced = await maybeRunAiBatchOverColdRows(coldRows, opts.householdId ?? account.householdId ?? null);
+  const aiEnhanced = await maybeRunAiBatchOverColdRows(
+    embeddingMatch.remainingColdRows,
+    enrichHouseholdId,
+  );
 
   const out: Record<string, unknown> = {
     file: name,
@@ -590,6 +699,13 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     out.warning =
       'Every row matched an existing transaction (duplicate) — nothing new to add.';
   }
+  if (embeddingMatch.summary.attempted) {
+    out.embeddingMatch = {
+      coldRows: embeddingMatch.summary.coldRowCount,
+      priorMerchants: embeddingMatch.summary.priorMerchants,
+      matched: embeddingMatch.summary.matched,
+    };
+  }
   if (aiEnhanced.attempted) {
     out.aiBatch = {
       coldRows: aiEnhanced.coldRowCount,
@@ -601,196 +717,6 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     };
   }
   return out;
-}
-
-type AiBatchSummary = {
-  attempted: boolean;
-  coldRowCount: number;
-  merchantsConsidered: number;
-  enhanced: number;
-  capped: boolean;
-  usedBatch: boolean;
-  fellBackToPerRow: boolean;
-};
-
-type ColdRow = {
-  txnId: number;
-  signals: Signal[];
-  merchantKey: string;
-  merchantRaw: string;
-  merchantClean: string;
-  merchantCanonical: string | null;
-  amount: number;
-  date: string;
-  currency: string;
-  memory: MerchantMemoryMatch | null;
-  /** Captured at insert-time so post-AI confidence reclassification doesn't
-   *  need to round-trip through the DB. */
-  accountVisibility: 'private' | 'shared';
-  txnType: string;
-};
-
-export function dedupeColdRowsByMerchantKey(coldRows: ColdRow[]): ColdRow[] {
-  const groups = new Map<string, ColdRow>();
-  for (const c of coldRows) {
-    const existing = groups.get(c.merchantKey);
-    if (existing == null || c.date > existing.date) groups.set(c.merchantKey, c);
-  }
-  return [...groups.values()];
-}
-
-function coldRowToCandidate(c: ColdRow): AiBatchCandidate {
-  return {
-    merchantKey: c.merchantKey,
-    sampleMerchantRaw: c.merchantRaw,
-    sampleMerchantClean: c.merchantClean,
-    sampleMerchantCanonical: c.merchantCanonical,
-    sampleAmount: c.amount,
-    sampleDate: c.date,
-    sampleCurrency: c.currency,
-    similarPriors: [],
-    memoryMatch: c.memory ? { category: c.memory.category, supportCount: c.memory.supportCount } : null,
-  };
-}
-
-export function aiSuggestionToSignal(sug: {
-  category: string | null;
-  business: boolean | null;
-  splitType: 'me' | 'partner' | 'shared' | null;
-  pctMe: number | null;
-  pctPartner: number | null;
-  confidence: 'high' | 'medium' | 'low';
-  rationale: string | null;
-}): Signal {
-  return {
-    source: 'ai',
-    confidence: sug.confidence,
-    fields: {
-      autoCategory: sug.category,
-      autoBusiness: sug.business,
-      autoSplitType: sug.splitType,
-      autoPctMe: sug.pctMe != null ? String(sug.pctMe) : null,
-      autoPctPartner: sug.pctPartner != null ? String(sug.pctPartner) : null,
-    },
-    ...(sug.rationale ? { rationale: sug.rationale } : {}),
-  };
-}
-
-async function persistAiEnhancement(c: ColdRow, aiSignal: Signal, householdId: number | null): Promise<boolean> {
-  const merged = mergeSignals([...c.signals, aiSignal]);
-  // Re-classify import confidence with the merged enrichment fields. An AI
-  // suggestion that fills a category and turns reviewFlag off should move
-  // the row from 'needs_review' back to 'clean' on the dashboard.
-  const confidence = computeImportConfidence({
-    reviewFlag: merged.fields.reviewFlag,
-    finalCategory: merged.fields.autoCategory,
-    autoCategory: merged.fields.autoCategory,
-    autoSplitType: merged.fields.autoSplitType,
-    finalSplitType:
-      merged.fields.autoSplitType === 'partner' ||
-      merged.fields.autoSplitType === 'shared'
-        ? merged.fields.autoSplitType
-        : 'me',
-    txnType: c.txnType,
-    accountVisibility: c.accountVisibility,
-    linkedTransactionId: merged.fields.linkedTransactionId,
-    amount: c.amount,
-  });
-  try {
-    await Transaction.update(
-      {
-        autoCategory: merged.fields.autoCategory,
-        autoBusiness: merged.fields.autoBusiness,
-        autoSplitType: merged.fields.autoSplitType,
-        autoPctMe: merged.fields.autoPctMe,
-        autoPctPartner: merged.fields.autoPctPartner,
-        autoSource: merged.fields.autoSource,
-        autoConfidence: merged.fields.autoConfidence,
-        reviewFlag: merged.fields.reviewFlag,
-        importConfidence: confidence.state,
-        importConfidenceFlags: serializeFlags(confidence.flags),
-      },
-      { where: { id: c.txnId } },
-    );
-    await TransactionSignal.create({
-      transactionId: c.txnId,
-      source: 'ai',
-      confidence: aiSignal.confidence,
-      fields: aiSignal.fields,
-      rationale: aiSignal.rationale ?? null,
-    });
-    if (householdId != null) {
-      const { ensureCategory } = await import('../util/ensureCategory');
-      await ensureCategory(householdId, merged.fields.autoCategory);
-    }
-    return true;
-  } catch (err) {
-    logger.warn({ err, txnId: c.txnId, module: 'enrichment' }, 'enrichment_ai_batch_post_update_failed');
-    return false;
-  }
-}
-
-function emptyAiSummary(coldRowCount: number): AiBatchSummary {
-  return {
-    attempted: false,
-    coldRowCount,
-    merchantsConsidered: 0,
-    enhanced: 0,
-    capped: false,
-    usedBatch: false,
-    fellBackToPerRow: false,
-  };
-}
-
-function aiBatchPossible(coldRows: ColdRow[]): boolean {
-  if (!enrichmentAiEnabled) return false;
-  if (coldRows.length === 0) return false;
-  return getOpenAiConfig() != null;
-}
-
-async function tryEnhanceColdRow(c: ColdRow, sug: AiBatchSuggestion | undefined, householdId: number | null): Promise<boolean> {
-  if (sug == null || sug.category == null) return false;
-  return persistAiEnhancement(c, aiSuggestionToSignal(sug), householdId);
-}
-
-async function applyAiSuggestionsToColdRows(
-  coldRows: ColdRow[],
-  suggestions: Map<string, AiBatchSuggestion>,
-  householdId: number | null,
-): Promise<number> {
-  let enhanced = 0;
-  for (const c of coldRows) {
-    if (await tryEnhanceColdRow(c, suggestions.get(c.merchantKey), householdId)) enhanced += 1;
-  }
-  return enhanced;
-}
-
-async function maybeRunAiBatchOverColdRows(
-  coldRows: ColdRow[],
-  householdId: number | null,
-): Promise<AiBatchSummary> {
-  if (!aiBatchPossible(coldRows)) return emptyAiSummary(coldRows.length);
-
-  const candidates = dedupeColdRowsByMerchantKey(coldRows).map(coldRowToCandidate);
-  const categoryHints = await loadCategoryHints(householdId);
-  const result = await runAiBatchStage({
-    candidates,
-    categoryHints,
-    maxMerchants: enrichmentAiMaxMerchants,
-    perRowConcurrency: enrichmentAiPerRowConcurrency,
-    openaiCaller: (msgs) => openaiJson(msgs),
-  });
-  const enhanced = await applyAiSuggestionsToColdRows(coldRows, result.suggestions, householdId);
-
-  return {
-    attempted: true,
-    coldRowCount: coldRows.length,
-    merchantsConsidered: candidates.length,
-    enhanced,
-    capped: result.capped,
-    usedBatch: result.usedBatch,
-    fellBackToPerRow: result.fellBackToPerRow,
-  };
 }
 
 export async function runImport(options: {
@@ -947,6 +873,35 @@ export async function importWsBundleFile(opts: {
     },
   });
 
+  // WS corp accounts (Corporate Investing / Chequing / Save for Business) have
+  // no statement accountHolder to resolve, so link them to the household corp
+  // Entity (created by the Wise/RBC importer) when one exists. No-op otherwise.
+  await linkWsAccountToCorpEntity(account, parsed.productHint, opts.householdId);
+
+  // Self-heal a mis-typed account. A monthly WS statement carrying
+  // security-bearing activity (BUY/SELL/DIV/CRYPTORWD) means this is a
+  // brokerage account — even if it was first created as 'checking' because its
+  // filename display name didn't match an investment hint (e.g. "TFSA account"
+  // fails the exact-match check). accountType is otherwise locked on first
+  // findOrCreate, so without this the InvestmentActivity extraction gate in
+  // parseStatementFile (which keys on accountType==='investment') silently
+  // drops every BUY/SELL/DIV and corrupts portfolio valuation. Upgrade BEFORE
+  // parsing so the activities are emitted. Pure-cash codes (CONT/INT/FEE/AFT_*/
+  // P2P_*) never trigger this, so a HISA like "Save for Business" — whose
+  // statements only ever show CONT + Interest — stays 'checking'.
+  const accountTypeWarnings: string[] = [];
+  if (!parsed.isCreditCard && account.accountType !== 'investment') {
+    const parsedCsv = parseCsvRecords(opts.buffer.toString('utf8'));
+    if (parsedCsv.ok && wsRecordsHaveSecurityActivity(parsedCsv.records)) {
+      const from = account.accountType;
+      await account.update({ accountType: 'investment' });
+      accountTypeWarnings.push(
+        `Upgraded account #${account.id} accountType ${from} → investment ` +
+          `(statement carries BUY/SELL/DIV activity)`,
+      );
+    }
+  }
+
   const profileId = parsed.isCreditCard ? 'generic_simple' : 'generic_passthrough';
 
   // Force business flag on every row imported into a corp-typed WS account.
@@ -991,7 +946,7 @@ export async function importWsBundleFile(opts: {
     skippedDuplicates: commit.skippedDuplicates,
     rowErrors: commit.rowErrors,
     parseErrors: commit.parseErrors,
-    warnings: commit.warnings,
+    warnings: [...accountTypeWarnings, ...commit.warnings],
   };
 }
 
@@ -1028,6 +983,7 @@ type PdfAccountTemplate = {
  * eSavings) are ignored at this step.
  */
 const PDF_ACCOUNT_TEMPLATES: Record<string, PdfAccountTemplate> = {
+  'RBC Digital Choice Business': { name: 'RBC Digital Choice Business', accountType: 'checking' },
   'RBC Day to Day Banking': { name: 'RBC Day to Day Banking', accountType: 'checking' },
   'RBC Day to Day Savings': { name: 'RBC Day to Day Savings', accountType: 'savings' },
   'RBC High Interest eSavings': { name: 'RBC High Interest eSavings', accountType: 'savings' },
@@ -1048,6 +1004,14 @@ const PDF_ACCOUNT_TEMPLATES: Record<string, PdfAccountTemplate> = {
   'Wise USD': { name: 'Wise USD', accountType: 'checking' },
   'Wise GBP': { name: 'Wise GBP', accountType: 'checking' },
   'Wise EUR': { name: 'Wise EUR', accountType: 'checking' },
+  'Wealthsimple TFSA': { name: 'Wealthsimple TFSA', accountType: 'investment' },
+  'Wealthsimple FHSA': { name: 'Wealthsimple FHSA', accountType: 'investment' },
+  'Wealthsimple RRSP': { name: 'Wealthsimple RRSP', accountType: 'investment' },
+  'Wealthsimple RESP': { name: 'Wealthsimple RESP', accountType: 'investment' },
+  'Wealthsimple Investing': { name: 'Wealthsimple Investing', accountType: 'investment' },
+  'Wealthsimple Credit Card': { name: 'Wealthsimple Credit Card', accountType: 'credit_card' },
+  'American Express Aeroplan Reserve Card': { name: 'Amex Reserve', accountType: 'credit_card' },
+  'American Express Cobalt Card': { name: 'Amex Cobalt', accountType: 'credit_card' },
 };
 
 // Corp entity suffix patterns (Inc., Corp., Ltd., LLC, GmbH, Pty, S.A.). When a
@@ -1063,8 +1027,15 @@ export async function resolveEntityForHolder(
   if (!holder) return null;
   const trimmed = holder.trim();
   if (!trimmed) return null;
+  // Case-insensitive match within the household so statements that spell the
+  // corp differently ("CDG Labs Inc." vs "CDG LABS INC.") reuse one Entity
+  // instead of forking a duplicate. A same-named entity in another household
+  // must NOT be reused — scope the match by household_id.
   const existing = await Entity.findOne({
-    where: { householdId, legalName: trimmed },
+    where: {
+      householdId,
+      [Op.and]: [sqlWhere(fn('lower', col('legal_name')), trimmed.toLowerCase())],
+    },
   });
   if (existing) return existing;
   if (!CORP_HOLDER_RE.test(trimmed)) return null;
@@ -1073,6 +1044,37 @@ export async function resolveEntityForHolder(
     kind: 'corp',
     legalName: trimmed,
   });
+}
+
+/** Wealthsimple productHints that denote a corporate account. */
+const WS_CORP_PRODUCT_HINTS = new Set([
+  'corporate_investing',
+  'save_for_business',
+  'corporate_chequing',
+]);
+
+/**
+ * Link a Wealthsimple corp account to the household's corp Entity. The WS
+ * bundle importer (unlike the PDF importer) has no statement "accountHolder"
+ * to resolve, so corp WS accounts historically ended up with no corp entity
+ * (NULL or the personal default), silently excluding them from the T2 engine.
+ * When a corp Entity already exists in the household (the Wise/RBC importer
+ * auto-creates "CDG LABS INC." on first upload), point the WS corp account at
+ * it. No-op for non-corp products or when no corp entity exists yet.
+ * Case-insensitive matching lives in resolveEntityForHolder; here the corp
+ * entity is looked up by kind. Idempotent.
+ */
+export async function linkWsAccountToCorpEntity(
+  account: InstanceType<typeof Account>,
+  productHint: string,
+  householdId: number,
+): Promise<void> {
+  if (!WS_CORP_PRODUCT_HINTS.has(productHint)) return;
+  const corp = await Entity.findOne({ where: { householdId, kind: 'corp' } });
+  if (!corp) return;
+  if (account.entityId !== corp.id) {
+    await account.update({ entityId: corp.id });
+  }
 }
 
 function emptyPdfBundleResult(file: string, error: string): PdfBundleFileResult {
@@ -1096,6 +1098,89 @@ function emptyPdfBundleResult(file: string, error: string): PdfBundleFileResult 
 }
 
 /**
+ * Resolve (find-or-create) the Account for a PDF statement from its parsed
+ * header, applying the corp-entity + business-override logic. Shared by the
+ * synchronous bundle path and the async pdfImportProcess worker.
+ */
+export async function resolvePdfAccountFromHeader(
+  header: import('./pdf/types').PdfStatementHeader,
+  householdId: number,
+  userId: number,
+  fileName?: string,
+): Promise<{ account: InstanceType<typeof Account>; accountCreated: boolean; overrideBusiness: boolean }> {
+  const template =
+    PDF_ACCOUNT_TEMPLATES[header.productLabel] ?? { name: header.productLabel, accountType: header.accountType };
+  const headerCurrency = header.currency ?? 'CAD';
+  const entity = await resolveEntityForHolder(header.accountHolder, householdId);
+  const overrideBusiness = entity?.kind === 'corp';
+
+  // Stable match key. WS credit-card statement bodies print only the card last-4
+  // (header.accountSuffix), which is neither unique across cards nor the key the
+  // WS CSV path uses — so it forked a new account every time the existing one was
+  // renamed or carried a different short_code. The WS account id (WSID) lives in
+  // the PDF filename (`<WSID>_YYYY-MM_CREDIT_CARD.pdf`); prefer it when present.
+  const wsCardWsid = fileName ? parseWsCreditCardPdfWsid(fileName) : null;
+  const matchKey = wsCardWsid ?? header.accountSuffix;
+
+  // First try to find account by shortCode (exact match on the stable key).
+  let account = await Account.findOne({
+    where: { householdId, shortCode: matchKey },
+  });
+  let accountCreated = false;
+
+  // Fallback: if shortCode not found, try to find by name + accountType
+  // (accounts from CSV may have different shortCode but same name/type). Scope
+  // the match by corp-vs-personal: a corp statement (corp accountHolder, e.g.
+  // "CDG Labs Inc.") and a personal statement of the same currency produce the
+  // SAME template.name ("Wise USD") but a DIFFERENT account number, so the
+  // shortCode lookup misses and this fallback fires. Keying on name alone here
+  // merged a corporate Wise statement into the same-named personal Wise account
+  // (and vice-versa). Only reuse an account whose corp-ness matches this
+  // statement — a corp account carries an entity with kind='corp'; personal
+  // accounts carry the household's personal entity (or NULL legacy).
+  if (!account) {
+    const candidates = await Account.findAll({
+      where: { householdId, name: template.name, accountType: template.accountType },
+      include: [{ model: Entity, as: 'entity', required: false }],
+    });
+    account =
+      candidates.find((candidate) => {
+        const candidateEntity = candidate.get('entity') as InstanceType<typeof Entity> | null | undefined;
+        return (candidateEntity?.kind === 'corp') === overrideBusiness;
+      }) ?? null;
+    if (account && account.shortCode !== matchKey) {
+      // Update shortCode to reflect the stable account key.
+      await account.update({ shortCode: matchKey });
+    }
+  }
+
+  // If still not found, create new account.
+  if (!account) {
+    account = await Account.create({
+      householdId, name: template.name, accountType: template.accountType,
+      owner: 'me', visibility: 'private', defaultCurrency: headerCurrency,
+      ownerUserId: userId, shortCode: matchKey, entityId: entity?.id ?? null,
+    });
+    accountCreated = true;
+  }
+
+  if (entity && account.entityId !== entity.id) {
+    await account.update({ entityId: entity.id });
+  }
+
+  // Credit-card statement → calendar auto-fill (#243 follow-up). Runs for both
+  // the bundle path and the async pdfImportProcessor worker, since both resolve
+  // their account through this function. Self-guards on accountType.
+  try {
+    await applyCreditCardStatementSummary({ account, header, userId, householdId });
+  } catch (err) {
+    logger.error({ err, accountId: account.id }, 'cc-statement: auto-fill failed (non-fatal)');
+  }
+
+  return { account, accountCreated, overrideBusiness };
+}
+
+/**
  * Import a single PDF statement from a bundle upload. Works with any parser
  * registered via `registerBuiltInPdfParsers` (RBC, CIBC, Questrade today).
  *
@@ -1106,7 +1191,11 @@ function emptyPdfBundleResult(file: string, error: string): PdfBundleFileResult 
  *      The productLabel determines name + accountType from `PDF_ACCOUNT_TEMPLATES`.
  *   4. Run the standard parseStatementFile → commitStatementImport pipeline so
  *      fingerprinting / dedup / enrichment matches single-file uploads.
+ *
+ * Generic multi-parser entry point currently superseded by importWsBundleFile;
+ * kept as the documented seam for re-wiring the non-Wealthsimple bundle path.
  */
+// fallow-ignore-next-line unused-export
 export async function importPdfBundleFile(opts: {
   buffer: Buffer;
   fileName: string;
@@ -1143,33 +1232,9 @@ export async function importPdfBundleFile(opts: {
     return emptyPdfBundleResult(file, `Parser ${parser.id} produced no header for account match`);
   }
   const header = parseOut.header;
-  const template =
-    PDF_ACCOUNT_TEMPLATES[header.productLabel] ?? {
-      name: header.productLabel,
-      accountType: header.accountType,
-    };
-
-  const headerCurrency = header.currency ?? 'CAD';
-  const entity = await resolveEntityForHolder(header.accountHolder, opts.householdId);
-  const overrideBusiness = entity?.kind === 'corp';
-
-  const [account, accountCreated] = await Account.findOrCreate({
-    where: { householdId: opts.householdId, shortCode: header.accountSuffix },
-    defaults: {
-      householdId: opts.householdId,
-      name: template.name,
-      accountType: template.accountType,
-      owner: 'me',
-      visibility: 'private',
-      defaultCurrency: headerCurrency,
-      ownerUserId: opts.userId,
-      shortCode: header.accountSuffix,
-      entityId: entity?.id ?? null,
-    },
-  });
-  if (entity && account.entityId !== entity.id) {
-    await account.update({ entityId: entity.id });
-  }
+  const { account, accountCreated, overrideBusiness } = await resolvePdfAccountFromHeader(
+    header, opts.householdId, opts.userId, file,
+  );
 
   const preview = await parseStatementFile({
     buffer: opts.buffer,
@@ -1177,6 +1242,7 @@ export async function importPdfBundleFile(opts: {
     accountId: account.id,
     householdId: opts.householdId,
     overrideBusiness: overrideBusiness ? true : undefined,
+    preExtractedLines: lines,
   });
   if ('error' in preview) {
     return {

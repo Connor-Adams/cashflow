@@ -1,26 +1,40 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3, Plus, Save, Trash2, X } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Edit3, GitMerge, Plus, Save, Trash2, X } from 'lucide-react'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
-import { useConfirm } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { useConfirm } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Alert } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
+import { SectionHeader } from '@/components/ui/section-header'
+import { Grid } from '@/lib/ds-extras'
+import { StatCard } from '@connor-adams/designsystem'
+import { UtilizationBadge } from '@/components/accounts/UtilizationBadge'
+import { MergeAccountModal } from '@/components/accounts/MergeAccountModal'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
-import type { Account, AccountType } from '../types/api'
+import type { Account, AccountMergeResult, AccountType } from '../types/api'
+
+function formatMoney(value: number | null | undefined, currency: string | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '—'
+  const code = (currency ?? 'CAD').toUpperCase()
+  try {
+    return new Intl.NumberFormat('en-CA', {
+      style: 'currency',
+      currency: code,
+      maximumFractionDigits: 0,
+    }).format(value)
+  } catch {
+    return `${value.toFixed(0)} ${code}`
+  }
+}
 
 const CURRENCY_OPTIONS = ['CAD', 'USD', 'EUR', 'GBP'] as const
 const ACCOUNT_TYPE_OPTIONS: Array<{ value: AccountType; label: string }> = [
@@ -32,6 +46,13 @@ const ACCOUNT_TYPE_OPTIONS: Array<{ value: AccountType; label: string }> = [
   { value: 'cash', label: 'Cash' },
   { value: 'other', label: 'Other' },
 ]
+
+// Revolving credit (credit cards + `loan` lines of credit) carries a credit
+// limit + utilization; mirrors the backend gate in routes/accounts.ts.
+const REVOLVING_CREDIT_TYPES = new Set<AccountType>(['credit_card', 'loan'])
+function isRevolvingCredit(type: AccountType): boolean {
+  return REVOLVING_CREDIT_TYPES.has(type)
+}
 
 export function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -46,6 +67,9 @@ export function AccountsPage() {
   const [editAccountType, setEditAccountType] = useState<AccountType>('checking')
   const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
   const [editClosedAt, setEditClosedAt] = useState<string>('')
+  const [editCreditLimit, setEditCreditLimit] = useState<string>('')
+  const [editNotes, setEditNotes] = useState<string>('')
+  const [mergeSource, setMergeSource] = useState<Account | null>(null)
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -57,7 +81,9 @@ export function AccountsPage() {
     setLoading(true)
     setErr(null)
     try {
-      const nextAccounts = await getJson<Account[]>('/api/accounts')
+      // Fetch the full list (including merged sources) so we can render the
+      // active rows AND the "Hidden / merged" section without a second request.
+      const nextAccounts = await getJson<Account[]>('/api/accounts?includeMerged=true')
       if (loadRequestRef.current === requestId) {
         setAccounts(nextAccounts)
       }
@@ -172,9 +198,25 @@ export function AccountsPage() {
       setErr('Default currency is required')
       return
     }
+    // creditLimit only travels on the wire for revolving credit (credit cards +
+    // lines of credit); sending it for other kinds would 400. Validate > 0 inline.
+    let creditLimitPayload: number | null | undefined = undefined
+    if (isRevolvingCredit(editAccountType)) {
+      const trimmed = editCreditLimit.trim()
+      if (trimmed === '') {
+        creditLimitPayload = null
+      } else {
+        const n = Number(trimmed)
+        if (!Number.isFinite(n) || n <= 0) {
+          setErr('Limit must be greater than 0.')
+          return
+        }
+        creditLimitPayload = n
+      }
+    }
     setErr(null)
     try {
-      await patchJson<Account>(`/api/accounts/${id}`, {
+      const payload: Record<string, unknown> = {
         name,
         owner: editOwner,
         shortCode: editShortCode.trim() || null,
@@ -182,7 +224,10 @@ export function AccountsPage() {
         accountType: editAccountType,
         visibility: editVisibility,
         closedAt: editClosedAt.trim() || null,
-      })
+      }
+      if (creditLimitPayload !== undefined) payload.creditLimit = creditLimitPayload
+      payload.notes = editNotes.trim() || null
+      await patchJson<Account>(`/api/accounts/${id}`, payload)
       setEditingId(null)
       setEditName('')
       setEditOwner('me')
@@ -191,6 +236,9 @@ export function AccountsPage() {
       setEditAccountType('checking')
       setEditVisibility('private')
       setEditClosedAt('')
+      setEditCreditLimit('')
+      setEditNotes('')
+      showToast({ title: 'Account saved.', variant: 'success', durationMs: 2000 })
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not update account')
@@ -206,6 +254,8 @@ export function AccountsPage() {
     setEditAccountType('checking')
     setEditVisibility('private')
     setEditClosedAt('')
+    setEditCreditLimit('')
+    setEditNotes('')
   }
 
   function startEdit(account: Account) {
@@ -217,13 +267,42 @@ export function AccountsPage() {
     setEditAccountType(account.accountType ?? 'checking')
     setEditVisibility(account.visibility ?? 'private')
     setEditClosedAt(account.closedAt ?? '')
+    setEditCreditLimit(account.creditLimit != null ? String(account.creditLimit) : '')
+    setEditNotes(account.notes ?? '')
   }
 
-  const accountCount = accounts.length
-  const shortCodeCount = accounts.filter((account) => account.shortCode).length
-  const jointCount = accounts.filter((account) => account.owner === 'joint').length
+  function onMerged(result: AccountMergeResult) {
+    setMergeSource(null)
+    showToast({
+      title: `Merged ${result.source.name} into ${result.target.name}`,
+      description: `Moved ${result.movedTransactions} transaction${result.movedTransactions === 1 ? '' : 's'}.`,
+      variant: 'success',
+      durationMs: 4000,
+    })
+    void load()
+  }
+
+  // Active accounts drive the main table + stat tiles; merged sources are
+  // pulled out into the collapsible "Hidden / merged" section (#287).
+  const activeAccounts = useMemo(
+    () => accounts.filter((a) => a.mergedIntoId == null),
+    [accounts],
+  )
+  const mergedAccounts = useMemo(
+    () => accounts.filter((a) => a.mergedIntoId != null),
+    [accounts],
+  )
+  const accountNameById = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const a of accounts) map.set(a.id, a.name)
+    return map
+  }, [accounts])
+
+  const accountCount = activeAccounts.length
+  const shortCodeCount = activeAccounts.filter((account) => account.shortCode).length
+  const jointCount = activeAccounts.filter((account) => account.owner === 'joint').length
   const currencyCount = new Set(
-    accounts.map((account) => (account.defaultCurrency ?? 'CAD').toUpperCase())
+    activeAccounts.map((account) => (account.defaultCurrency ?? 'CAD').toUpperCase())
   ).size
 
   return (
@@ -240,42 +319,22 @@ export function AccountsPage() {
         }
       />
 
-      <section className="accountsStats" aria-busy={loading}>
-        <Card className="statCard">
-          <p className="statLabel">Accounts</p>
-          <p className="statValue">{accountCount}</p>
-          <p className="muted statHint">Cards and bank accounts configured</p>
-        </Card>
-        <Card className="statCard">
-          <p className="statLabel">Short codes</p>
-          <p className="statValue">{shortCodeCount}</p>
-          <p className="muted statHint">Ready for folder import matching</p>
-        </Card>
-        <Card className="statCard">
-          <p className="statLabel">Joint</p>
-          <p className="statValue">{jointCount}</p>
-          <p className="muted statHint">Accounts owned together</p>
-        </Card>
-        <Card className="statCard">
-          <p className="statLabel">Currencies</p>
-          <p className="statValue">{currencyCount}</p>
-          <p className="muted statHint">Default currencies in use</p>
-        </Card>
-      </section>
+      <Grid minItemWidth={180} gap="md" responsiveFloor={false} className="mb-4" aria-busy={loading}>
+        <StatCard label="Accounts" value={accountCount} hint="Cards and bank accounts configured" />
+        <StatCard label="Short codes" value={shortCodeCount} hint="Ready for folder import matching" />
+        <StatCard label="Joint" value={jointCount} hint="Accounts owned together" />
+        <StatCard label="Currencies" value={currencyCount} hint="Default currencies in use" />
+      </Grid>
 
-      <Card className="accountsFormCard">
+      <Card className="mb-4">
       <form onSubmit={onCreate}>
-        <div className="accountsCardHeader">
-          <div>
-            <h2>New account</h2>
-            <p className="muted">
-              Short codes are optional, but they make file naming and folder import much cleaner.
-            </p>
-          </div>
-        </div>
-        <div className="formGrid">
+        <SectionHeader
+          title="New account"
+          description="Short codes are optional, but they make file naming and folder import much cleaner."
+        />
+        <Grid minItemWidth={180} fill gap="md" className="mb-3">
           <Label htmlFor="accounts-create-name">
-            Name <span className="req">*</span>
+            Name <span className="text-danger">*</span>
             <Input
               id="accounts-create-name"
               name="name"
@@ -342,7 +401,7 @@ export function AccountsPage() {
               <option value="shared">shared</option>
             </select>
           </Label>
-        </div>
+        </Grid>
         <Button type="submit" disabled={saving}>
           <Plus aria-hidden="true" />
           {saving ? 'Saving…' : 'Create account'}
@@ -350,21 +409,16 @@ export function AccountsPage() {
       </form>
       </Card>
 
-      {err && (
-        <p className="error" id={errorId} role="alert">
-          {err}
-        </p>
-      )}
+      {err ? <Alert variant="error" className="mb-4" id={errorId}>{err}</Alert> : null}
 
       <CollapsibleCard
         id="your-accounts"
-        className="accountsTableCard"
+        className="mb-4"
         title="Your accounts"
         description="Edit the basics here without cramming action buttons into the currency field."
         actions={<Badge variant="secondary">{accountCount} total</Badge>}
       >
-        <div className="tableWrap">
-          <Table className="table">
+        <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
@@ -374,17 +428,21 @@ export function AccountsPage() {
                 <TableHead>Default currency</TableHead>
                 <TableHead>Visibility</TableHead>
                 <TableHead>Closed</TableHead>
+                <TableHead>Credit limit</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 Array.from({ length: 6 }).map((_, i) => (
-                  <SkeletonRow key={`accounts-skeleton-${i}`} cols={8} />
+                  <SkeletonRow key={`accounts-skeleton-${i}`} cols={9} />
                 ))
+              ) : activeAccounts.length === 0 ? (
+                <EmptyTableRow colSpan={9} title="No accounts yet" description="Create one using the form above, then import CSVs under Transactions." />
               ) : (
-                accounts.map((a) => (
-                  <TableRow key={a.id} className={a.closedAt ? 'opacity-60' : undefined}>
+                activeAccounts.map((a) => (
+                  <Fragment key={a.id}>
+                  <TableRow className={a.closedAt ? 'opacity-60' : undefined}>
                     <TableCell>
                       {editingId === a.id ? (
                         <select
@@ -409,7 +467,14 @@ export function AccountsPage() {
                           placeholder="Account name"
                         />
                       ) : (
-                        a.name
+                        <div>
+                          {a.name}
+                          {a.notes && (
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {a.notes.length > 100 ? `${a.notes.slice(0, 100)}…` : a.notes}
+                            </p>
+                          )}
+                        </div>
                       )}
                     </TableCell>
                     <TableCell>
@@ -488,7 +553,44 @@ export function AccountsPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <div className="accountsActionGroup">
+                      {editingId === a.id ? (
+                        isRevolvingCredit(editAccountType) ? (
+                          <Input
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="0.01"
+                            value={editCreditLimit}
+                            onChange={(e) => setEditCreditLimit(e.target.value)}
+                            placeholder="e.g. 5000"
+                            aria-label="Credit limit"
+                          />
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )
+                      ) : !isRevolvingCredit(a.accountType) ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : a.creditLimit == null ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => startEdit(a)}
+                        >
+                          Set credit limit
+                        </Button>
+                      ) : (
+                        <div className="flex flex-col gap-1">
+                          <span className="text-sm">
+                            {formatMoney(a.currentBalance ?? 0, a.defaultCurrency)} /{' '}
+                            {formatMoney(a.creditLimit, a.defaultCurrency)}
+                          </span>
+                          <UtilizationBadge utilizationPct={a.utilizationPct} />
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-2">
                         {editingId === a.id ? (
                           <>
                             <Button type="button" size="sm" onClick={() => void saveCard(a.id)}>
@@ -506,6 +608,31 @@ export function AccountsPage() {
                             Edit
                           </Button>
                         )}
+                        {(() => {
+                          const currency = (a.defaultCurrency ?? 'CAD').toUpperCase()
+                          const hasTarget = activeAccounts.some(
+                            (other) =>
+                              other.id !== a.id &&
+                              (other.defaultCurrency ?? 'CAD').toUpperCase() === currency,
+                          )
+                          return (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => setMergeSource(a)}
+                              disabled={!hasTarget}
+                              title={
+                                hasTarget
+                                  ? undefined
+                                  : 'Need at least two same-currency accounts to merge.'
+                              }
+                            >
+                              <GitMerge aria-hidden="true" />
+                              Merge into…
+                            </Button>
+                          )
+                        })()}
                         <Button
                           type="button"
                           size="sm"
@@ -518,18 +645,88 @@ export function AccountsPage() {
                       </div>
                     </TableCell>
                   </TableRow>
+                  {editingId === a.id && (
+                    <TableRow>
+                      <TableCell colSpan={9}>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-sm font-medium" htmlFor={`notes-${a.id}`}>
+                            Notes
+                          </label>
+                          <textarea
+                            id={`notes-${a.id}`}
+                            value={editNotes}
+                            onChange={(e) => setEditNotes(e.target.value)}
+                            rows={3}
+                            maxLength={4000}
+                            placeholder="Routing number, custodian, tax ID, or any per-account reminder…"
+                            className="w-full resize-y"
+                          />
+                          <span
+                            className={`text-xs ${editNotes.length > 3800 ? 'text-destructive' : 'text-muted-foreground'}`}
+                            aria-live="polite"
+                          >
+                            {editNotes.length}/4000
+                          </span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </Fragment>
                 ))
               )}
             </TableBody>
           </Table>
-          {accounts.length === 0 && !loading && (
-            <p className="emptyState pad">
-              No accounts yet — create one using the form above, then import CSVs under Transactions.
-            </p>
-          )}
-        </div>
       </CollapsibleCard>
+
+      {mergedAccounts.length > 0 ? (
+        <CollapsibleCard
+          id="merged-accounts"
+          className="mb-4"
+          title="Hidden / merged accounts"
+          description="These accounts were merged into another account. They are kept read-only for audit."
+          actions={<Badge variant="secondary">{mergedAccounts.length} merged</Badge>}
+          defaultOpen={false}
+        >
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Default currency</TableHead>
+                <TableHead>Merged into</TableHead>
+                <TableHead>Merged at</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {mergedAccounts.map((a) => (
+                <TableRow key={a.id} className="opacity-60">
+                  <TableCell>{a.name}</TableCell>
+                  <TableCell>
+                    {ACCOUNT_TYPE_OPTIONS.find((o) => o.value === a.accountType)?.label ??
+                      a.accountType}
+                  </TableCell>
+                  <TableCell>{a.defaultCurrency ?? 'CAD'}</TableCell>
+                  <TableCell>
+                    {a.mergedIntoId != null
+                      ? accountNameById.get(a.mergedIntoId) ?? `#${a.mergedIntoId}`
+                      : '—'}
+                  </TableCell>
+                  <TableCell>{a.mergedAt ? a.mergedAt.slice(0, 10) : '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CollapsibleCard>
+      ) : null}
     </div>
+    {mergeSource ? (
+      <MergeAccountModal
+        source={mergeSource}
+        accounts={activeAccounts}
+        onClose={() => setMergeSource(null)}
+        onMerged={onMerged}
+      />
+    ) : null}
     {confirm.dialog}
     </>
   )

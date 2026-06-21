@@ -92,11 +92,11 @@ export function AICleanupPanel({ batchId, currency }: AICleanupPanelProps) {
       <div className="row">
         <Link
           to={`/transactions?${reviewQuery.toString()}`}
-          className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg border px-4 font-semibold transition-colors hover:opacity-90"
+          className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg border border-border px-4 font-semibold transition-colors hover:opacity-90"
+          // --bg2/--fg are legacy aliases with no Tailwind utility; keep inline.
           style={{
             backgroundColor: 'var(--bg2)',
             color: 'var(--fg)',
-            borderColor: 'var(--border)',
           }}
         >
           Review cleanup queue

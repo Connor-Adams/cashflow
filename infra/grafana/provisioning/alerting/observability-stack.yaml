@@ -162,7 +162,11 @@ groups:
               datasource:
                 type: prometheus
                 uid: prometheus
-              expr: 'up{job="cashflow-otel-collector"} == 0'
+              # Query the RAW up gauge — do NOT self-filter with `== 0`. With
+              # noDataState: Alerting, `up == 0` returns an empty series whenever
+              # the collector is healthy (up == 1), which Grafana reads as NoData
+              # and fires permanently. The threshold node below decides instead.
+              expr: 'up{job="cashflow-otel-collector"}'
               intervalMs: 60000
               maxDataPoints: 43200
               instant: true
@@ -175,9 +179,12 @@ groups:
                 type: __expr__
                 uid: __expr__
               conditions:
+                # Fire when up < 1 (i.e. up == 0, collector down). When up == 1
+                # the series is present and the condition is false → OK. NoData
+                # only when the target is genuinely absent from scrape config.
                 - evaluator:
-                    params: [0]
-                    type: gt
+                    params: [1]
+                    type: lt
                   operator:
                     type: and
                   query:
@@ -204,3 +211,288 @@ groups:
         labels:
           severity: critical
           component: otel-collector
+
+      # ── Application-level alerts (issues #417, #418) ───────────────────────
+      # These rules watch the cashflow backend itself, not the observability
+      # pipeline. They depend on metrics pushed by the app through the
+      # otel-collector. If OtelCollectorScrapeDown fires, these rules may
+      # produce no-data; treat that as a dependency outage, not a false
+      # positive.
+
+      - uid: cashflow-backend-down
+        title: BackendDown
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: 'absent(cashflow_up)'
+              intervalMs: 60000
+              maxDataPoints: 43200
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              expression: A
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: 'cashflow backend is not reporting metrics'
+          description: |
+            The cashflow_up heartbeat gauge has been absent from Prometheus for
+            ≥2 minutes. The backend process is likely down or failing to push
+            metrics through the otel-collector.
+
+            Note: if OtelCollectorScrapeDown is also firing, that is the root
+            cause — the collector pipeline is broken, not necessarily the backend.
+          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#backenddown'
+        labels:
+          severity: critical
+          component: cashflow-backend
+
+      - uid: cashflow-high-http-5xx-rate
+        title: HighHttp5xxRate
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: 'sum(rate(cashflow_http_server_requests_total{http_response_status_code=~"5.."}[5m])) / sum(rate(cashflow_http_server_requests_total[5m])) > 0.02'
+              intervalMs: 60000
+              maxDataPoints: 43200
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              expression: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: 'cashflow 5xx error rate exceeds 2% threshold'
+          description: |
+            More than 2% of requests are returning 5xx status codes over the
+            last 5 minutes. Check backend logs for unhandled exceptions, database
+            connectivity issues, or downstream dependency failures.
+          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#highhttp5xxrate'
+        labels:
+          severity: critical
+          component: cashflow-backend
+
+      - uid: cashflow-high-route-latency-p99
+        title: HighRouteLatencyP99
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: 'histogram_quantile(0.99, sum by (le) (rate(cashflow_http_server_duration_milliseconds_bucket[5m]))) > 1000'
+              intervalMs: 60000
+              maxDataPoints: 43200
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              expression: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: 'cashflow p99 request latency exceeds 1000ms'
+          description: |
+            The 99th-percentile HTTP response time has exceeded 1000ms for ≥5
+            minutes. Possible causes: slow database queries, missing indexes,
+            external API timeouts, or memory pressure causing GC pauses.
+            Check slow-query logs and the route breakdown panel in the API health
+            dashboard.
+
+            Threshold rationale: the p99 baseline under normal load is ~150ms;
+            1000ms gives 6× headroom and catches sustained degradation without
+            alerting on transient spikes.
+          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#highroutelatencyp99'
+        labels:
+          severity: warning
+          component: cashflow-backend
+
+      - uid: cashflow-outbound-dependency-failing
+        title: OutboundDependencyFailing
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: 'sum by (server_address) (rate(http_client_request_duration_seconds_count{http_response_status_code=~"5.."}[5m])) > 0'
+              intervalMs: 60000
+              maxDataPoints: 43200
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              expression: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: 'cashflow outbound dependency is returning 5xx errors'
+          description: |
+            An external service (identified by server_address label) has been
+            returning 5xx errors for ≥5 minutes. Likely candidates: Yahoo Finance
+            API, Plaid, email service, or other third-party integrations.
+            Check which server_address is affected and whether the provider has a
+            known outage.
+          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#outbounddependencyfailing'
+        labels:
+          severity: warning
+          component: cashflow-backend
+
+      - uid: cashflow-job-failing
+        title: JobFailing
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: 'increase(cashflow_job_runs_total{result="failure"}[15m]) > 0'
+              intervalMs: 60000
+              maxDataPoints: 43200
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              expression: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: 'a background job has failed at least once in the last 15 minutes'
+          description: |
+            One or more background job ticks reported a failure result in the
+            last 15 minutes. Check the job label to identify which job failed.
+            Recurring failures indicate a persistent error; a single failure may
+            be transient.
+            Review backend logs filtered by job_name for the error details.
+          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#jobfailing'
+        labels:
+          severity: warning
+          component: cashflow-backend

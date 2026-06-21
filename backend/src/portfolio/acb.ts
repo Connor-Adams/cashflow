@@ -22,6 +22,10 @@
  *    in-kind transfer is not a disposition under CRA rules. The
  *    ambiguous bare `transfer` activityType (used for cash CONT-like
  *    rows) stays a no-op.
+ *  - `acb_adjustment` is a synthetic cost-base adjustment: amount is added
+ *    to totalCost with no quantity change. Used by the tax builders to add
+ *    a denied superficial loss back to the substituted shares' ACB
+ *    (ITA s.53(1)(f)). Never produced by brokers/imports.
  *  - Other activity types (dividend, interest, fee, transfer, etc.) are
  *    no-ops in the ACB walk.
  *
@@ -295,6 +299,27 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
         acbPerUnit: newAcb,
       };
       timeline.push(state);
+    } else if (type === 'acb_adjustment') {
+      // Cost-base adjustment with no quantity change. Used for the denied
+      // superficial-loss addback (ITA s.53(1)(f)): callers inject a synthetic
+      // row whose amount is ADDED to the pool's total cost so the substituted
+      // (repurchased) shares carry the deferred loss. Works on a zero-quantity
+      // pool too — a sell-all followed by a repurchase must not lose the
+      // addback to the position-close reset.
+      if (activity.amount == null) {
+        warnings.push(
+          `ACB_ADJUSTMENT activity ${activity.id} on ${activity.tradeDate} missing amount; ignored`
+        );
+        continue;
+      }
+      const newTotalCost = state.totalCost + activity.amount;
+      state = {
+        asOf: activity.tradeDate,
+        quantity: state.quantity,
+        totalCost: newTotalCost,
+        acbPerUnit: state.quantity > EPS ? newTotalCost / state.quantity : 0,
+      };
+      timeline.push(state);
     } else if (type === 'transfer_in') {
       // In-kind transfer in (e.g. DTC delivery from another broker).
       // Treated as a BUY at the supplied book cost — the receiving
@@ -367,6 +392,31 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
         acbPerUnit: newAcb,
       };
       timeline.push(state);
+    } else if (type === 'staking_reward') {
+      // CRA: a staking reward is income at FMV on receipt, and that FMV
+      // becomes the ACB cost base of the newly-received coins. Treat a
+      // VALUED reward (quantity>0 AND amount>0) as a BUY at cost = FMV.
+      // Unvalued rewards (amount null/0, e.g. pre-backfill) are ignored so
+      // the engine degrades safely when a historical price is missing.
+      if (
+        activity.quantity != null &&
+        activity.quantity > EPS &&
+        activity.amount != null &&
+        Math.abs(activity.amount) > EPS
+      ) {
+        const qty = activity.quantity;
+        const cost = Math.abs(activity.amount);
+        const newQuantity = state.quantity + qty;
+        const newTotalCost = state.totalCost + cost;
+        const newAcb = newQuantity > EPS ? newTotalCost / newQuantity : 0;
+        state = {
+          asOf: activity.tradeDate,
+          quantity: newQuantity,
+          totalCost: newTotalCost,
+          acbPerUnit: newAcb,
+        };
+        timeline.push(state);
+      }
     }
     // All other activity types (dividend, interest, fee, ambiguous
     // 'transfer' for cash CONT/withdrawals, other) are intentionally

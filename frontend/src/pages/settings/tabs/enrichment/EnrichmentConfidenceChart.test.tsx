@@ -1,12 +1,15 @@
 import React from 'react'
 import { render, screen } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { describe, it, expect } from 'vitest'
 import { EnrichmentConfidenceChart } from './EnrichmentConfidenceChart'
 
 describe('EnrichmentConfidenceChart', () => {
   it('renders the heading and the total row pill', () => {
     render(
-      <EnrichmentConfidenceChart byConfidence={{ high: 9148, medium: 3812, low: 1525, '(none)': 762 }} />,
+      <MemoryRouter>
+        <EnrichmentConfidenceChart byConfidence={{ high: 9148, medium: 3812, low: 1525, '(none)': 762 }} />
+      </MemoryRouter>,
     )
     expect(screen.getByText(/confidence distribution/i)).toBeInTheDocument()
     // 9148 + 3812 + 1525 + 762 = 15247
@@ -15,7 +18,9 @@ describe('EnrichmentConfidenceChart', () => {
 
   it('renders all four bands with formatted counts', () => {
     render(
-      <EnrichmentConfidenceChart byConfidence={{ high: 9148, medium: 3812, low: 1525, '(none)': 762 }} />,
+      <MemoryRouter>
+        <EnrichmentConfidenceChart byConfidence={{ high: 9148, medium: 3812, low: 1525, '(none)': 762 }} />
+      </MemoryRouter>,
     )
     expect(screen.getByText(/High/)).toBeInTheDocument()
     expect(screen.getByText('9,148')).toBeInTheDocument()
@@ -28,7 +33,11 @@ describe('EnrichmentConfidenceChart', () => {
   })
 
   it('treats a missing band as 0', () => {
-    render(<EnrichmentConfidenceChart byConfidence={{ high: 100 }} />)
+    render(
+      <MemoryRouter>
+        <EnrichmentConfidenceChart byConfidence={{ high: 100 }} />
+      </MemoryRouter>,
+    )
     expect(screen.getByText(/High/)).toBeInTheDocument()
     expect(screen.getByText('100')).toBeInTheDocument()
     expect(screen.getByText(/Med/)).toBeInTheDocument()
@@ -37,7 +46,11 @@ describe('EnrichmentConfidenceChart', () => {
   })
 
   it('renders an empty-row pill when there are no rows', () => {
-    render(<EnrichmentConfidenceChart byConfidence={{}} />)
+    render(
+      <MemoryRouter>
+        <EnrichmentConfidenceChart byConfidence={{}} />
+      </MemoryRouter>,
+    )
     expect(screen.getByText('0 rows')).toBeInTheDocument()
   })
 })

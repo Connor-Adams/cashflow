@@ -1,13 +1,33 @@
 node_modules/
 dist/
+package-lock.json
+
+# Yarn 4 (Berry) — corepack-managed, node-modules linker. No committed release
+# binary (packageManager field + corepack handles the version). Ignore the
+# install-state cache and any PnP artifacts; keep patches/plugins if added.
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.pnp.*
+.expo
+.next
+.turbo
 .env
 *.sqlite
 *.sqlite-journal
 .DS_Store
 .serena/
+.superpowers/
 .claude/worktrees/
 coverage/
 uploads/
 *.log
 backend/test/fixtures/pdf/
 .fallow/
+reports/
+
+# one-off income backfill audit artifacts (backend/scripts/backfill-income-payer-anchored.ts)
+backend/income-backfill-report-*.json

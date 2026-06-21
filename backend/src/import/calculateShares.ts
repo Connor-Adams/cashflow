@@ -32,10 +32,17 @@ export function splitAmount(
   if (finalSplitType === 'partner') {
     return { myShareAmount: 0, partnerShareAmount: a };
   }
-  let pm = pctMe != null && pctMe !== '' ? Number(pctMe) : 0.5;
-  let pp = pctPartner != null && pctPartner !== '' ? Number(pctPartner) : 0.5;
-  if (Number.isNaN(pm)) pm = 0.5;
-  if (Number.isNaN(pp)) pp = 0.5;
+  const pmRaw = pctMe != null && pctMe !== '' ? Number(pctMe) : NaN;
+  const ppRaw = pctPartner != null && pctPartner !== '' ? Number(pctPartner) : NaN;
+  // A single provided side means "the other side gets the remainder" — not a
+  // phantom 0.5 that the sum-normalization below would blend in (0.8/null must
+  // be 80/20, not 0.8/1.3 = 61.5/38.5).
+  let pm = Number.isNaN(pmRaw)
+    ? Number.isNaN(ppRaw) ? 0.5 : Math.max(0, 1 - ppRaw)
+    : pmRaw;
+  let pp = Number.isNaN(ppRaw)
+    ? Number.isNaN(pmRaw) ? 0.5 : Math.max(0, 1 - pmRaw)
+    : ppRaw;
   const sum = pm + pp;
   if (sum > 0) {
     pm /= sum;
@@ -44,10 +51,20 @@ export function splitAmount(
     pm = 0.5;
     pp = 0.5;
   }
+  // Round my share to the DECIMAL(14,4) grid the columns persist at, then
+  // derive the partner share as the complement — computing the two sides
+  // independently (a*pm, a*pp) lets Postgres round each one on its own and
+  // break the myShare + partnerShare = amount invariant by 0.0001 on ties.
+  const myShareAmount = round4(a * pm);
   return {
-    myShareAmount: a * pm,
-    partnerShareAmount: a * pp,
+    myShareAmount,
+    partnerShareAmount: round4(a - myShareAmount),
   };
+}
+
+/** Round to 4 decimal places (the resolution of the DECIMAL(14,4) columns). */
+function round4(n: number): number {
+  return Math.round(n * 10_000) / 10_000;
 }
 
 /** Business amount: full signed amount when marked business, else 0. */

@@ -7,6 +7,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let testDb: PgTestDb;
@@ -91,7 +92,7 @@ before(async () => {
     description: 'Buy XBB', quantity: 10, price: 25, amount: 250, currency: 'CAD',
   });
 
-  authed = request.agent(app);
+  authed = testAgent(app);
   authed.jar.setCookie(`cashflow_session=${seeded.token}; Path=/`);
 });
 

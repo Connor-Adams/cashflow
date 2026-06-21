@@ -15,27 +15,21 @@
 import { useMemo, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { Inbox, Plus, Trash2, X } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { useConfirm } from '@/components/ui/dialog'
-import { EmptyState, EmptyTableRow } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { NativeSelect } from '@/components/ui/native-select'
+import { Badge } from '@connor-adams/designsystem'
+import { Button } from '@connor-adams/designsystem'
+import { Card } from '@connor-adams/designsystem'
+import { useConfirm } from '@/lib/ds-extras'
+import { EmptyState } from '@connor-adams/designsystem'
+import { EmptyTableRow } from '@/lib/ds-extras'
+import { Input } from '@connor-adams/designsystem'
+import { Label } from '@connor-adams/designsystem'
+import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
-import { SkeletonRow } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { Textarea } from '@/components/ui/textarea'
+import { SkeletonRow } from '@/lib/ds-extras'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
+import { Textarea } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
-import { formatMoney } from '../lib/formatMoney'
+import { formatMoney, formatMoneyOr } from '../lib/formatMoney'
 import {
   PURCHASE_FILTERS,
   PURCHASE_RECEIPT_STATUSES,
@@ -52,16 +46,16 @@ import {
 } from '@/hooks/usePurchases'
 
 const RECEIPT_BADGE: Record<PurchaseReceiptStatus, string> = {
-  unknown: 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100',
-  missing: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100',
-  saved: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
+  unknown: 'bg-muted text-muted-foreground',
+  missing: 'bg-warning-bg text-warning-foreground',
+  saved: 'bg-success-bg text-success-foreground',
 }
 
 const WARRANTY_BADGE: Record<PurchaseWarrantyStatus, string> = {
-  unknown: 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100',
-  none: 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100',
-  active: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
-  expired: 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-100',
+  unknown: 'bg-muted text-muted-foreground',
+  none: 'bg-muted text-muted-foreground',
+  active: 'bg-success-bg text-success-foreground',
+  expired: 'bg-danger-bg text-danger',
 }
 
 const DEFAULT_LARGE_THRESHOLD = 500
@@ -221,13 +215,14 @@ export function PurchasesPage() {
                 <TableRow key={p.transactionId}>
                   <TableCell>{p.transaction.date}</TableCell>
                   <TableCell>
-                    <button
+                    <Button
                       type="button"
-                      className="text-left underline-offset-2 hover:underline"
+                      variant="link"
+                      className="text-left"
                       onClick={() => setSelected(p)}
                     >
                       {p.transaction.merchant}
-                    </button>
+                    </Button>
                   </TableCell>
                   <TableCell>{p.transaction.accountName ?? '—'}</TableCell>
                   <TableCell className="text-right tabular-nums">
@@ -350,7 +345,10 @@ function LargeInboxCard({
                 <TableCell>{r.merchant}</TableCell>
                 <TableCell>{r.accountName ?? '—'}</TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {formatMoney(Math.abs(Number(r.amount) || 0), r.currency)}
+                  {formatMoneyOr(
+                    r.amount === '' || r.amount == null ? null : Math.abs(Number(r.amount)),
+                    r.currency,
+                  )}
                 </TableCell>
                 <TableCell>
                   <Button

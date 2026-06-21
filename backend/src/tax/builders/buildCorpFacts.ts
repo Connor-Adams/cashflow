@@ -70,7 +70,7 @@ export async function buildCorpFacts(
 
   for (const a of activity) {
     const { cad } = await toCad(
-      D(a.amount as unknown as string),
+      D(a.amount ?? 0),
       (a as unknown as { currency?: string }).currency ?? 'CAD',
       a.tradeDate as unknown as string,
     );
@@ -78,7 +78,7 @@ export async function buildCorpFacts(
       .security;
     const item: IncomeItem = {
       source: `${sec?.symbol ?? '?'} ${a.activityType} ${a.tradeDate}`,
-      amount: D(a.amount as unknown as string),
+      amount: D(a.amount ?? 0),
       cadAmount: cad,
     };
     if (a.activityType === 'interest') {
@@ -93,29 +93,62 @@ export async function buildCorpFacts(
     }
   }
 
-  // Capital gains via ACB (same pattern as personal)
+  // Capital gains via ACB (same pattern as personal). ACB is a weighted-average
+  // running balance (ITA s.47), so computeAcb needs the FULL per-security
+  // history up to fiscal year end — NOT just this fiscal year's rows. A
+  // fiscal-windowed feed makes prior-year buys invisible, collapsing ACB to ~0
+  // and overstating realized gains as near-$0-cost dispositions. Walk all
+  // activity through endDate, then keep only the dispositions that settled
+  // DURING the fiscal year (income items above stay fiscal-windowed: income is
+  // reported in the year received).
+  const acbActivity = accountIds.length
+    ? await InvestmentActivity.findAll({
+        where: {
+          accountId: accountIds,
+          tradeDate: { [Op.lte]: endDate },
+        },
+      })
+    : [];
+
   const capitalGainEvents: CapGainEvent[] = [];
   const securityIds = Array.from(
     new Set(
-      activity
+      acbActivity
         .map((a) => a.securityId)
         .filter((x): x is number => x != null),
     ),
   );
   for (const sid of securityIds) {
-    const acts = activity.filter((a) => a.securityId === sid);
-    const acb = computeAcb(
-      acts.map((a) => ({
+    const acts = acbActivity.filter((a) => a.securityId === sid);
+    // CRA requires per-leg FX conversion: each buy/sell/fee leg converts at its
+    // own trade-date rate, so the ACB walk — and the CapGainEvent the T2 engine
+    // feeds into AAII / CDA / RDTOH math — is genuinely in CAD.
+    const acbInput = [];
+    for (const a of acts) {
+      const currency = (a as unknown as { currency?: string }).currency ?? 'CAD';
+      const tradeDate = a.tradeDate as unknown as string;
+      let amount = a.amount != null ? Number(a.amount) : null;
+      let fees = a.fees != null ? Number(a.fees) : null;
+      if (currency !== 'CAD') {
+        if (amount != null) amount = (await toCad(D(amount), currency, tradeDate)).cad.toNumber();
+        if (fees != null) fees = (await toCad(D(fees), currency, tradeDate)).cad.toNumber();
+      }
+      acbInput.push({
         id: a.id as number,
         activityType: a.activityType as string,
-        tradeDate: a.tradeDate as unknown as string,
+        tradeDate,
         quantity: a.quantity != null ? Number(a.quantity) : null,
-        amount: a.amount != null ? Number(a.amount) : null,
-        currency: (a as unknown as { currency?: string }).currency ?? 'CAD',
-        fees: a.fees != null ? Number(a.fees) : null,
-      })),
-    );
+        amount,
+        currency: 'CAD',
+        fees,
+        splitRatio: a.splitRatio != null ? Number(a.splitRatio) : null,
+      });
+    }
+    const acb = computeAcb(acbInput);
     for (const realized of acb.realizedEvents) {
+      // Prior-fiscal-year dispositions are already reported on their own year's
+      // return; here they only serve to advance the ACB state.
+      if (realized.tradeDate < startDate || realized.tradeDate > endDate) continue;
       capitalGainEvents.push({
         source: `Security ${sid} sell ${realized.tradeDate}`,
         securityId: sid,
@@ -161,6 +194,46 @@ export async function buildCorpFacts(
       });
     } else if (loan.kind === 'salary_credit') {
       salaryPaid = salaryPaid.plus(D(loan.amount));
+    }
+  }
+
+  // Classified corp→personal distributions (income-queue actuals). The corp
+  // leg is an outflow (negative); distributions/remuneration are positive.
+  for (const t of txns) {
+    const tt = t.taxTreatmentOverride;
+    // 'employment_income' is the synonym of 'salary' in TAX_TREATMENTS; prod tags
+    // corp-paid remuneration with it. buildPersonalFacts treats them as one, so
+    // the corp side must too or the salary (and its deduction) silently vanishes.
+    if (
+      tt !== 'eligible_dividend'
+      && tt !== 'non_eligible_dividend'
+      && tt !== 'salary'
+      && tt !== 'employment_income'
+    )
+      continue;
+    const { cad } = await toCad(
+      D(t.amount as unknown as string),
+      t.currency ?? 'CAD',
+      t.date as unknown as string,
+    );
+    const amt = cad.abs();
+    if (tt === 'eligible_dividend') {
+      dividendsPaid.push({
+        source: `Txn #${t.id} eligible dividend`,
+        date: t.date as unknown as string,
+        amount: amt,
+        kind: 'eligible',
+      });
+    } else if (tt === 'non_eligible_dividend') {
+      dividendsPaid.push({
+        source: `Txn #${t.id} non_eligible dividend`,
+        date: t.date as unknown as string,
+        amount: amt,
+        kind: 'non_eligible',
+      });
+    } else {
+      // salary / employment_income
+      salaryPaid = salaryPaid.plus(amt);
     }
   }
 

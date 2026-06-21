@@ -53,6 +53,8 @@ export const RATES_2024: RateTable = {
     employeeRate: D('0.0166'),
   },
   capitalGainsInclusion: D('0.5'),
+  capitalGainsInclusionHigh: D('0.666667'),
+  capitalGainsInclusionThreshold: D('250000'),
   onSurtaxBands: [
     { threshold: D('5554'), rate: D('0.20') },
     { threshold: D('7108'), rate: D('0.36') },
@@ -95,6 +97,11 @@ export const RATES_2024: RateTable = {
   oasClawbackRate: D('0.15'),
   // FHSA annual deduction limit
   fhsaAnnualLimit: D('8000'),
+  amtRate: D('0.205'),
+  amtExemption: D('173205'),
+  amtCapGainsInclusion: D('1'),
+  amtNonRefCreditFraction: D('0.5'),
+  amtDtcFraction: D('0'), // dividend tax credit fully denied under AMT (gross-up excluded from ATI)
   sources: [
     { name: 'CRA T1-2024 Federal rate schedule', url: 'https://www.canada.ca/en/revenue-agency/services/forms-publications/tax-packages-years/general-income-tax-benefit-package.html' },
     { name: 'ON Min of Finance 2024 personal income tax rates', url: 'https://www.fin.gov.on.ca/en/tax/pit/rates.html' },

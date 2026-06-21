@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { Command as CommandIcon, Menu } from 'lucide-react'
+import { Button } from '@connor-adams/designsystem'
 import { useLayoutWidth } from '../lib/layoutWidth'
 import { useCommandPalette } from '../hooks/useCommandPalette'
 import { CommandPalette } from './CommandPalette'
 import { Sidebar } from './Sidebar'
 import { NotificationBell } from './notifications/NotificationBell'
+import { WhatsNewBell } from './changelog/WhatsNewBell'
+import { FeedbackButton } from './feedback/FeedbackButton'
+import { ImportProgressBadge } from './import/ImportProgressBadge'
+import { useActiveImports } from './import/useActiveImports'
+import { useToast } from './ui/toast'
 
 export function Layout() {
   const [layoutWidth] = useLayoutWidth()
@@ -17,6 +23,19 @@ export function Layout() {
   // the global keydown listener; the toolbar button opens it for mouse
   // users.
   const palette = useCommandPalette()
+
+  // Completion toast: fires when a batch transitions from active → terminal.
+  const { justFinished, clearFinished } = useActiveImports()
+  const { showToast } = useToast()
+  useEffect(() => {
+    if (!justFinished) return
+    showToast({
+      title: 'Import finished',
+      description: `${justFinished.succeeded} imported, ${justFinished.skipped} skipped, ${justFinished.failed} failed`,
+      variant: justFinished.failed > 0 ? 'warning' : 'success',
+    })
+    clearFinished()
+  }, [justFinished, clearFinished, showToast])
 
   // Auto-close on route change so the mobile drawer doesn't linger after
   // the user picks a destination. Desktop ignores `open` so this is a
@@ -40,13 +59,20 @@ export function Layout() {
     }
   }, [sidebarOpen, closeSidebar])
 
+  // Living-gradient backdrop is reserved for the dashboard (index route). It
+  // fades in here and fades out on every other route, so switching tabs reads
+  // as a soft transition rather than a hard cut.
+  const onDashboard = location.pathname === '/'
+
   return (
     <div className="layout" data-sidebar-open={sidebarOpen}>
+      <div className="livingBg" data-active={onDashboard} aria-hidden="true" />
       <Sidebar open={sidebarOpen} onClose={closeSidebar} />
 
       {/* Mobile backdrop. Hidden via CSS on desktop. */}
       <button
         type="button"
+        data-slot="backdrop"
         aria-label="Close navigation"
         className="sidebarBackdrop"
         onClick={closeSidebar}
@@ -55,8 +81,9 @@ export function Layout() {
 
       <div className="layoutMain">
         <header className="topBar" aria-label="Top bar">
-          <button
+          <Button
             type="button"
+            variant="ghost"
             className="hamburger"
             onClick={openSidebar}
             aria-label="Open navigation"
@@ -64,11 +91,14 @@ export function Layout() {
             aria-controls="primary-navigation"
           >
             <Menu size={20} aria-hidden="true" />
-          </button>
+          </Button>
           <span className="topBar__wordmark">Cashflow</span>
           <div className="topBar__right ml-auto flex items-center gap-2">
-            <button
+            <ImportProgressBadge />
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => palette.setOpen(true)}
               aria-label="Open command palette"
               title="Command palette (⌘K / Ctrl+K)"
@@ -80,8 +110,10 @@ export function Layout() {
               <kbd className="ml-1 hidden font-mono text-[10px] sm:inline">
                 ⌘K
               </kbd>
-            </button>
+            </Button>
+            <WhatsNewBell />
             <NotificationBell />
+            <FeedbackButton />
           </div>
         </header>
 

@@ -4,7 +4,7 @@
  * Pure function: given a pre-filtered set of transaction rows for a single
  * merchant (the route applies visibility + merchant where clauses upstream),
  * returns the shape powering the merchant detail page —
- *   - lifetime totals (spend, credits, net, count, average, first/last date)
+ *   - lifetime totals (spend, credits, income, net, count, average, first/last date)
  *   - monthly trend (ascending by month)
  *   - per-category breakdown (descending by spend)
  *   - receipt coverage (% of rows with at least one Receipt row)
@@ -46,6 +46,13 @@ export type MerchantTimelineTxnRow = {
 export type MerchantTimelineTotals = {
   totalSpend: number;
   totalCredits: number;
+  /**
+   * Income inflow (txnType='income') peeled out of totalCredits. A paycheck
+   * is inflow, not money-back against this merchant's spend, so it gets its
+   * own line and does NOT net into netSpend — mirrors the dashboard's
+   * per-business income split (aggregateDashboard.ts netSpendByBusiness.income).
+   */
+  totalIncome: number;
   netSpend: number;
   transactionCount: number;
   /** Average size of a spend row (totalSpend / spendCount). 0 if no spend rows. */
@@ -58,6 +65,7 @@ export type MerchantMonthlyBucket = {
   month: string;
   totalSpend: number;
   totalCredits: number;
+  totalIncome: number;
   netSpend: number;
   transactionCount: number;
 };
@@ -110,6 +118,7 @@ export function aggregateMerchantTimeline(
   const totals: MerchantTimelineTotals = {
     totalSpend: 0,
     totalCredits: 0,
+    totalIncome: 0,
     netSpend: 0,
     transactionCount: 0,
     averageTransaction: 0,
@@ -146,6 +155,7 @@ export function aggregateMerchantTimeline(
       month,
       totalSpend: 0,
       totalCredits: 0,
+      totalIncome: 0,
       netSpend: 0,
       transactionCount: 0,
     };
@@ -166,8 +176,17 @@ export function aggregateMerchantTimeline(
       catBucket.totalSpend += spend;
       spendCount += 1;
     } else if (positiveBucket === 'credit') {
-      totals.totalCredits += amount;
-      monthBucket.totalCredits += amount;
+      // Income (txnType='income') is positive and classifies as 'credit', but
+      // a paycheck is inflow — not money-back against this merchant's spend.
+      // Peel it into its own totalIncome line so it doesn't inflate credits or
+      // net against netSpend, matching the dashboard income peel.
+      if (row.txnType === 'income') {
+        totals.totalIncome += amount;
+        monthBucket.totalIncome += amount;
+      } else {
+        totals.totalCredits += amount;
+        monthBucket.totalCredits += amount;
+      }
     }
     // 'payment' (positive statement payment) and other 'skip' branches do
     // not contribute to the merchant's spend/credit totals — matches the

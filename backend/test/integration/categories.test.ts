@@ -9,6 +9,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -54,7 +55,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin-cats@example.com',
     displayName: 'Super Admin Cats',
@@ -64,12 +65,12 @@ before(async () => {
 
   const primary = await seed('PrimaryCat');
   primaryHouseholdId = primary.householdId;
-  primaryAgent = request.agent(app);
+  primaryAgent = testAgent(app);
   primaryAgent.jar.setCookie(`cashflow_session=${primary.token}; Path=/`);
 
   const other = await seed('OtherCat');
   otherHouseholdId = other.householdId;
-  otherAgent = request.agent(app);
+  otherAgent = testAgent(app);
   otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
 });
 
@@ -119,13 +120,13 @@ test('PATCH /api/categories/:id rejects unknown icon name', async () => {
   assert.equal(res.status, 400);
 });
 
-test('PATCH /api/categories/:id 400s when icon field missing', async () => {
+test('PATCH /api/categories/:id 400s when no patchable field present', async () => {
   const row = await seedCategory(primaryHouseholdId, 'NoBody');
   const res = await primaryAgent
     .patch(`/api/categories/${row.id}`)
     .send({});
   assert.equal(res.status, 400);
-  assert.match(res.body.error ?? '', /icon field required/);
+  assert.match(res.body.error ?? '', /name, icon, or taxTreatment required/);
 });
 
 test('PATCH /api/categories/:id 404s for another household', async () => {
@@ -135,4 +136,20 @@ test('PATCH /api/categories/:id 404s for another household', async () => {
     .send({ icon: 'Lock' });
   // Note: 'Lock' not in whitelist either — but the household check fires first.
   assert.equal(res.status, 404);
+});
+
+test('PATCH /api/categories/:id sets taxTreatment and rejects invalid', async () => {
+  const list = await primaryAgent.get('/api/categories').expect(200);
+  const cat = list.body[0];
+
+  const ok = await primaryAgent
+    .patch(`/api/categories/${cat.id}`)
+    .send({ taxTreatment: 'donations' })
+    .expect(200);
+  assert.equal(ok.body.taxTreatment, 'donations');
+
+  await primaryAgent
+    .patch(`/api/categories/${cat.id}`)
+    .send({ taxTreatment: 'not_a_treatment' })
+    .expect(400);
 });

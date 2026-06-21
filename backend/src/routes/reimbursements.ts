@@ -30,17 +30,18 @@ import {
   Reimbursement,
   Contact,
   Account,
+  sequelize,
 } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { visibleTransactionWhere, householdWhere } from '../auth/scope';
+import { resolveHouseholdToday } from '../time/householdToday';
 import { aiSuggestLimiter } from './aiRateLimit';
 import {
   validateMarkReimbursable,
   validateReimbursementPatch,
   serializeReimbursement,
   summarize,
-  computeEffectiveStatus,
-  todayIso,
+  resolveToday,
   parseIsoOrNull,
   type ReimbursementRow,
 } from '../reimbursements/serialize';
@@ -48,6 +49,7 @@ import {
   rankRepaymentCandidates,
   type CandidateTransaction,
 } from '../reimbursements/matching';
+import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
 import {
   REIMBURSEMENT_STATUSES,
   type ReimbursementStatus,
@@ -159,12 +161,130 @@ router.post('/transactions/:id/reimbursable', async (req, res, next) => {
   }
 });
 
+// ----- POST /api/transactions/:id/reimbursable/promote-counterparty -------
+//
+// #374: one-click "Promote and use" — given a transaction whose statement-
+// import populated `counterparty_raw` but no Contact link (#372), atomically:
+//   1. promote the raw text into a Contact (find-or-create in this household
+//      by normalized name — same dedup rule as the standalone
+//      /counterparty/promote endpoint),
+//   2. link `transaction.counterparty_contact_id` to that Contact,
+//   3. create the Reimbursement claim using the new contactId (plus any
+//      amount / dueDate / notes the user supplied in the body).
+// Returns { contact, transaction, reimbursement } so the UI can settle in
+// one round-trip.
+//
+// Rejects when:
+//   - counterpartyRaw is missing (nothing to promote → use the regular
+//     /reimbursable endpoint with partyName instead)
+//   - counterpartyContactId is already populated (the regular /reimbursable
+//     endpoint with contactId pre-fill is the right path — see AC#1).
+
+router.post(
+  '/transactions/:id/reimbursable/promote-counterparty',
+  async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        res.status(400).json({ error: 'Invalid id' });
+        return;
+      }
+      const txn = await Transaction.findOne({
+        where: { id, ...visibleTransactionWhere(req) },
+      });
+      if (!txn) {
+        res.status(404).json({ error: 'Not found' });
+        return;
+      }
+      if (txn.householdId == null) {
+        res.status(400).json({ error: 'Transaction has no household' });
+        return;
+      }
+      if (txn.counterpartyContactId != null) {
+        res.status(400).json({
+          error:
+            'Transaction is already linked to a Contact; use /reimbursable with contactId',
+        });
+        return;
+      }
+      const rawName = (txn.counterpartyRaw ?? '').trim();
+      if (!rawName) {
+        res.status(400).json({
+          error:
+            'Transaction has no counterpartyRaw to promote; use /reimbursable with partyName',
+        });
+        return;
+      }
+      const auth = currentAuth(req);
+      const body = (req.body || {}) as Record<string, unknown>;
+      // Pre-validate the reimbursement body. We force the contactId to the
+      // promoted contact below, so strip any caller-supplied contactId/partyName
+      // from the validation surface — promotion supplies the party.
+      const validationBody: Record<string, unknown> = { ...body, contactId: 1 };
+      delete validationBody.partyName;
+      const v = validateMarkReimbursable(validationBody, {
+        txnAmount: txn.amount,
+        txnCurrency: txn.currency,
+      });
+      if (!v.ok) {
+        res.status(v.status).json({ error: v.error });
+        return;
+      }
+
+      const result = await sequelize.transaction(async (t) => {
+        // Find-or-create dedup, scoped to (householdId, normalized_name) —
+        // same rule as the standalone /counterparty/promote endpoint on the
+        // transactions route, so a user who promotes via either path lands on
+        // the same Contact row.
+        const contact = await findOrCreateContactByName(txn.householdId!, rawName, { transaction: t });
+        txn.counterpartyContactId = contact.id;
+        await txn.save({ transaction: t });
+        const claim = await Reimbursement.create(
+          {
+            householdId: txn.householdId!,
+            transactionId: txn.id,
+            contactId: contact.id,
+            partyName: null,
+            amount: v.value.amount,
+            currency: v.value.currency,
+            dueDate: v.value.dueDate ?? null,
+            status: 'expected',
+            repaymentTransactionId: null,
+            receivedAt: null,
+            createdByUserId: auth.user.id,
+            notes: v.value.notes ?? null,
+          },
+          { transaction: t },
+        );
+        return { contact, claimId: claim.id };
+      });
+
+      const reloaded = await Reimbursement.findByPk(result.claimId, {
+        include: INCLUDE,
+      });
+      res.status(201).json({
+        contact: result.contact,
+        transaction: { id: txn.id, counterpartyContactId: result.contact.id },
+        reimbursement: serializeReimbursement(toRow(reloaded as Reimbursement)),
+      });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 // ----- GET /api/reimbursements --------------------------------------------
 
 router.get('/reimbursements', async (req, res, next) => {
   try {
     currentAuth(req);
-    const today = todayIso();
+    // `today` may be the browser's local date so overdue derivation flips at
+    // the user's midnight rather than UTC's (which is hours early in the
+    // Americas). Invalid/missing values fall back to UTC today.
+    const today = resolveToday(
+      req.query.today,
+      resolveHouseholdToday(currentAuth(req).household),
+    );
     const where: WhereOptions = { ...householdWhere(req) };
     const q = req.query;
 
@@ -229,12 +349,16 @@ router.get('/reimbursements', async (req, res, next) => {
 router.get('/reimbursements/summary', async (req, res, next) => {
   try {
     currentAuth(req);
-    const today = todayIso();
+    const today = resolveToday(
+      req.query.today,
+      resolveHouseholdToday(currentAuth(req).household),
+    );
+    // Full INCLUDE (not just contact): summarize() nets a received claim
+    // against its hydrated same-currency repayment transaction so a partial
+    // repayment doesn't credit the full claim face value.
     const rows = await Reimbursement.findAll({
       where: { ...householdWhere(req) },
-      include: [
-        { model: Contact, as: 'contact', attributes: ['id', 'name'], required: false },
-      ],
+      include: INCLUDE,
     });
     const summary = summarize(rows.map(toRow), today);
     res.json({ ...summary, today });
@@ -248,7 +372,10 @@ router.get('/reimbursements/summary', async (req, res, next) => {
 router.get('/reimbursements/overdue', async (req, res, next) => {
   try {
     currentAuth(req);
-    const today = todayIso();
+    const today = resolveToday(
+      req.query.today,
+      resolveHouseholdToday(currentAuth(req).household),
+    );
     // Candidates: open claims with a due date strictly before today, OR claims
     // explicitly pinned to the 'overdue' status.
     const rows = await Reimbursement.findAll({
@@ -429,10 +556,23 @@ router.post('/reimbursements/:id/link-repayment', async (req, res, next) => {
     }
     const repayment = await Transaction.findOne({
       where: { id: txnId, ...visibleTransactionWhere(req) },
-      attributes: ['id'],
+      attributes: ['id', 'amount', 'currency'],
     });
     if (!repayment) {
       res.status(404).json({ error: 'Repayment transaction not found' });
+      return;
+    }
+    // Mirror the match-candidates eligibility filter: a repayment must be an
+    // inflow (positive) in the claim's currency. Without this, linking an
+    // arbitrary visible transaction silently marks the claim received.
+    if (!(Number(repayment.amount) > 0)) {
+      res.status(400).json({ error: 'Repayment must be a positive inflow' });
+      return;
+    }
+    if (repayment.currency !== r.currency) {
+      res.status(400).json({
+        error: `Repayment currency must match the claim (${r.currency})`,
+      });
       return;
     }
     r.repaymentTransactionId = repayment.id;
@@ -500,7 +640,4 @@ function applyStatus(r: Reimbursement, status: ReimbursementStatus): void {
   }
 }
 
-// Re-export for tests that want to assert on the effective-status helper via
-// the route module's surface.
-export { computeEffectiveStatus };
 export default router;

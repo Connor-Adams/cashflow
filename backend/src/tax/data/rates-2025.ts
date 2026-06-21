@@ -1,13 +1,17 @@
-// ENCODED 2026-05-24 — from model recall of 2025 CRA + ON Finance values. NOT
-// cross-checked against live CRA T1-2025 rate sheet. Engineer MUST verify every
-// constant before filing-grade use.
+// VERIFIED 2026-06-08 — cross-checked against CRA T1-2025 rate schedule,
+// Ontario Finance 2025 personal income tax publications, CRA payroll deduction
+// tables, and RCGT 2025 tax planning guide tables.
+// Bill C-4 middle-class tax cut: lowest federal rate 15% → 14% effective
+// 2025-07-01; blended full-year rate for 2025 is 14.5%.
+// Capital gains inclusion rate increase (to 66.67%) cancelled by PM Carney
+// 2025-03-21; rate remains 50% for all taxpayers with no tiered threshold.
 import { D } from '../util/decimal';
 import type { RateTable } from '../engine/types';
 
 export const RATES_2025: RateTable = {
   year: 2025,
   federalBrackets: [
-    { upTo: D('57375'), rate: D('0.15') },
+    { upTo: D('57375'), rate: D('0.145') },
     { upTo: D('114750'), rate: D('0.205') },
     { upTo: D('177882'), rate: D('0.26') },
     { upTo: D('253414'), rate: D('0.29') },
@@ -26,12 +30,12 @@ export const RATES_2025: RateTable = {
   bpaFederalMin: D('14538'),
   basicPersonalAmountOntario: D('12747'),
   spousalAmountFederal: D('16129'),
-  spousalAmountOntario: D('10818'),
+  spousalAmountOntario: D('10823'),
   ageAmountFederal: D('9028'),
-  ageAmountOntario: D('6078'),
+  ageAmountOntario: D('6223'),
   ageAmountAge: 65,
   ageAmountFederalThreshold: D('45522'),
-  ageAmountOntarioThreshold: D('44323'),
+  ageAmountOntarioThreshold: D('46330'),
   ageAmountFederalClawbackRate: D('0.15'),
   ageAmountOntarioClawbackRate: D('0.15'),
   employmentAmountFederal: D('1471'),
@@ -50,11 +54,15 @@ export const RATES_2025: RateTable = {
   },
   ei: {
     maxInsurable: D('65700'),
-    employeeRate: D('0.0166'),
+    employeeRate: D('0.0164'),
   },
-  // Capital gains inclusion rate: 0.5 — the 66.67% increase announced in 2024 was
-  // deferred/cancelled as of the 2026-05-24 review date; verify with CRA before filing.
+  // Capital gains inclusion rate: proposed increase to 66.67% above $250K was
+  // cancelled by PM Carney on 2025-03-21. Rate remains 50% for all taxpayers.
+  // The high-rate fields are retained at 50% (no tiered bump) so downstream
+  // code that references them still compiles and produces correct results.
   capitalGainsInclusion: D('0.5'),
+  capitalGainsInclusionHigh: D('0.5'),
+  capitalGainsInclusionThreshold: D('250000'),
   onSurtaxBands: [
     { threshold: D('5710'), rate: D('0.20') },
     { threshold: D('7307'), rate: D('0.36') },
@@ -72,31 +80,36 @@ export const RATES_2025: RateTable = {
     { upTo: D('200600'), flat: D('750'), marginalRate: D('0.25') },
     { upTo: null, flat: D('900'), marginalRate: D('0') },
   ],
-  donationLowRate: D('0.15'),
+  donationLowRate: D('0.145'),
   donationHighRateThreshold: D('200'),
   donationHighRateFederal: D('0.29'),
   donationLowRateOntario: D('0.0505'),
   donationHighRateOntario: D('0.1116'),
   medicalThresholdPercent: D('0.03'),
-  medicalThresholdCap: D('2837'),
+  medicalThresholdCap: D('2834'),
   rrspAnnualLimit: D('32490'),
   fhsaLifetimeLimit: D('40000'),
-  // Disability Tax Credit — base amounts × 15% = credit value. 2025 values indexed ~2.7% from 2024.
-  dtcBaseFederal: D('10138'),          // 9872 × 1.027 ≈ 10138; verify vs CRA T2201-2025
-  dtcSupplementFederal: D('5916'),     // 5758 × 1.027 ≈ 5914; rounded to published 5916
-  dtcSupplementThreshold: D('3464'),   // 3373 × 1.027 ≈ 3464
-  dtcBaseOntario: D('9852'),           // 9586 × 1.028 ≈ 9852 (ON indexation ~2.8%)
-  // Caregiver amount L30450 base
-  caregiverAmountFederalInfirmAdult: D('8215'),  // 7999 × 1.027 ≈ 8215
-  caregiverThresholdFederal: D('19290'),          // 18783 × 1.027 ≈ 19290
+  // Disability Tax Credit — base amounts × lowest rate = credit value.
+  dtcBaseFederal: D('10138'),          // CRA Line 31600, 2025
+  dtcSupplementFederal: D('5914'),     // CRA supplement for under 18, 2025
+  dtcSupplementThreshold: D('3464'),   // child care/attendant care threshold for supplement reduction
+  dtcBaseOntario: D('10298'),          // RCGT ON 2025 table
+  // Canada Caregiver Credit L30450 — infirm dependant 18+
+  caregiverAmountFederalInfirmAdult: D('8601'),  // CRA 2025
+  caregiverThresholdFederal: D('20197'),          // dependant net income reduction threshold, 2025
   // Pension income amount
   pensionIncomeAmountCap: D('2000'),
-  pensionIncomeAmountCapOntario: D('1686'),        // 1641 × 1.028 ≈ 1686
-  // OAS clawback threshold 2025 — indexed from 2024
-  oasClawbackThreshold: D('93454'),               // 90997 × 1.027 ≈ 93454; verify vs CRA 2025 schedule
+  pensionIncomeAmountCapOntario: D('1762'),        // RCGT ON 2025 table
+  // OAS clawback threshold 2025 — CRA recovery tax schedule
+  oasClawbackThreshold: D('93454'),               // CRA 2025 minimum income recovery threshold
   oasClawbackRate: D('0.15'),
   // FHSA annual deduction limit (fixed at $8,000 — not indexed)
   fhsaAnnualLimit: D('8000'),
+  amtRate: D('0.205'),
+  amtExemption: D('177882'),
+  amtCapGainsInclusion: D('1'),
+  amtNonRefCreditFraction: D('0.5'),
+  amtDtcFraction: D('0'), // dividend tax credit fully denied under AMT (gross-up excluded from ATI)
   sources: [
     { name: 'CRA T1-2025 Federal rate schedule', url: 'https://www.canada.ca/en/revenue-agency/services/forms-publications/tax-packages-years/general-income-tax-benefit-package.html' },
     { name: 'ON Min of Finance 2025 personal income tax rates', url: 'https://www.fin.gov.on.ca/en/tax/pit/rates.html' },
