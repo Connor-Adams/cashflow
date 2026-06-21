@@ -25,7 +25,7 @@ before(async () => {
     trade_date: { type: DataTypes.DATEONLY, allowNull: false },
   });
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  migration = require('../../src/migrations/20260530000001-corporate-actions.js');
+  migration = require('../20260530000001-corporate-actions.js');
 });
 
 after(async () => {

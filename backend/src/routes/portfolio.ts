@@ -9,7 +9,11 @@ import {
   SecurityPrice,
   SecurityDailyPrice,
   SecurityDividend,
+  sequelize,
 } from '../models';
+import crypto from 'crypto';
+import type { Transaction as SequelizeTransaction } from 'sequelize';
+import { validateCorporateAction } from '../portfolio/corporateActionValidation';
 import { ensureDailyPrices, ensureDividends, ensureOverview } from '../portfolio/backfill';
 import {
   loadMetricsContext,
@@ -787,6 +791,9 @@ router.get('/by-security', apiReadLimiter, async (req, res, next) => {
         fees: n(a.fees),
         currency: a.currency,
         splitRatio: n(a.splitRatio),
+        costBasisAllocationPct: n(a.costBasisAllocationPct),
+        cashComponent: n(a.cashComponent),
+        recipientSecurityId: a.recipientSecurityId ?? null,
       }));
       const { normalized } = await normalizeActivitiesToCad(acbInput);
       const acb = computeAcb(normalized);
@@ -952,6 +959,9 @@ async function runAcbForSells(
       currency: r.currency,
       fees: n(r.fees),
       splitRatio: n(r.splitRatio),
+      costBasisAllocationPct: n(r.costBasisAllocationPct),
+      cashComponent: n(r.cashComponent),
+      recipientSecurityId: r.recipientSecurityId ?? null,
     }));
     const { normalized, warnings: fxWarnings } =
       await normalizeActivitiesToCad(acbInput);
@@ -1594,6 +1604,9 @@ router.get('/security/:id', async (req, res, next) => {
         currency: r.currency,
         fees: n(r.fees),
         splitRatio: n(r.splitRatio),
+        costBasisAllocationPct: n(r.costBasisAllocationPct),
+        cashComponent: n(r.cashComponent),
+        recipientSecurityId: r.recipientSecurityId ?? null,
       }));
       const { normalized, warnings: fxWarnings } =
         await normalizeActivitiesToCad(acbInput);
@@ -1736,6 +1749,250 @@ router.get('/security/:id', async (req, res, next) => {
             currency: latestPrice.currency,
           }
         : null,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Project a security's persisted activities for one account into the ACB
+ * engine and return the resulting cost-base state. Used by the corporate-
+ * action endpoint to size the basis transferred to a recipient security
+ * (spin_off / merger). FX normalization runs so a mixed-currency stream
+ * resolves to a single base before the walk.
+ */
+async function computeAccountSecurityAcb(
+  accountId: number,
+  securityId: number,
+  txn?: SequelizeTransaction
+): Promise<AcbResult> {
+  const acts = await InvestmentActivity.findAll({
+    where: { accountId, securityId },
+    order: [
+      ['tradeDate', 'ASC'],
+      ['id', 'ASC'],
+    ],
+    transaction: txn,
+  });
+  const acbInput: AcbActivity[] = acts.map((r) => ({
+    id: r.id,
+    tradeDate: r.tradeDate,
+    activityType: r.activityType,
+    quantity: n(r.quantity),
+    amount: n(r.amount),
+    currency: r.currency,
+    fees: n(r.fees),
+    splitRatio: n(r.splitRatio),
+    costBasisAllocationPct: n(r.costBasisAllocationPct),
+    cashComponent: n(r.cashComponent),
+    recipientSecurityId: r.recipientSecurityId ?? null,
+  }));
+  const { normalized } = await normalizeActivitiesToCad(acbInput);
+  return computeAcb(normalized);
+}
+
+const CORP_ACTION_LABELS: Record<string, string> = {
+  dividend_in_kind: 'Dividend in kind (stock dividend)',
+  spin_off: 'Spin-off',
+  merger: 'Merger / acquisition',
+  return_of_capital: 'Return of capital',
+};
+
+/**
+ * POST /api/portfolio/activities — manual entry of a corporate action
+ * (issue #301). Accepts the four corporate-action types and persists the
+ * activity with synthesized manual provenance. For the cross-security
+ * actions (spin_off / merger) it also writes a `transfer_in` basis
+ * injection onto the recipient security's stream inside one transaction,
+ * so the single-security ACB engine reflects the moved basis on the next
+ * on-read derivation. ACB itself is never persisted — the drill route
+ * re-derives it — so there is nothing to recompute here beyond the writes.
+ */
+router.post('/activities', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+
+    const accountId = Number(body.accountId);
+    const securityId = Number(body.securityId);
+    const activityType = typeof body.activityType === 'string' ? body.activityType : '';
+    const tradeDate = typeof body.tradeDate === 'string' ? body.tradeDate : '';
+    const quantity = n(body.quantity);
+    const amount = n(body.amount);
+    const recipientSecurityId =
+      body.recipientSecurityId == null ? null : Number(body.recipientSecurityId);
+    const costBasisAllocationPct = n(body.costBasisAllocationPct);
+    const cashComponent = n(body.cashComponent);
+
+    if (!CORP_ACTION_LABELS[activityType]) {
+      res.status(400).json({
+        error: 'Unsupported activity type for manual entry',
+        code: 'UNSUPPORTED_ACTIVITY_TYPE',
+      });
+      return;
+    }
+    if (!Number.isFinite(accountId) || accountId <= 0) {
+      res.status(400).json({ error: 'Invalid account id', code: 'INVALID_ACCOUNT' });
+      return;
+    }
+    if (!Number.isFinite(securityId) || securityId <= 0) {
+      res.status(400).json({ error: 'Invalid security id', code: 'INVALID_SECURITY' });
+      return;
+    }
+    if (!tradeDate) {
+      res.status(400).json({ error: 'Trade date is required', code: 'TRADE_DATE_REQUIRED' });
+      return;
+    }
+
+    // Account must be a visible investment account in the caller's household.
+    const account = await Account.findOne({
+      where: { ...visibleAccountWhere(req), id: accountId, accountType: 'investment' },
+    });
+    if (!account) {
+      res.status(404).json({ error: 'Account not found', code: 'ACCOUNT_NOT_FOUND' });
+      return;
+    }
+
+    // Security must belong to the caller's household.
+    const security = await Security.findOne({
+      where: { id: securityId, householdId: household.id },
+    });
+    if (!security) {
+      res.status(404).json({ error: 'Security not found', code: 'SECURITY_NOT_FOUND' });
+      return;
+    }
+
+    // Per-type field validation (pure; shared with the form's mirror).
+    const verdict = validateCorporateAction({
+      activityType,
+      quantity,
+      amount,
+      recipientSecurityId,
+      costBasisAllocationPct,
+      cashComponent,
+    });
+    if (!verdict.ok) {
+      res.status(400).json({ error: verdict.message, code: verdict.code });
+      return;
+    }
+
+    // Recipient security (spin_off / merger) must also be in the household.
+    let recipientSecurity: Security | null = null;
+    if (recipientSecurityId != null) {
+      recipientSecurity = await Security.findOne({
+        where: { id: recipientSecurityId, householdId: household.id },
+      });
+      if (!recipientSecurity) {
+        res.status(400).json({
+          error: 'Pick the new security.',
+          code: 'RECIPIENT_SECURITY_NOT_FOUND',
+        });
+        return;
+      }
+    }
+
+    const currency = security.currency || 'CAD';
+    const manualFingerprint = `manual:${crypto.randomUUID()}`;
+
+    const result = await sequelize.transaction(async (txn) => {
+      // For the cross-security actions, size the basis to move to the
+      // recipient from the parent's state as of just BEFORE this action.
+      // Read it first — the merger branch on the parent's own stream zeros
+      // the position, so deriving it after the primary write would lose it.
+      let injectedBasis: number | null = null;
+      if (recipientSecurityId != null && quantity != null) {
+        const parentAcb = await computeAccountSecurityAcb(accountId, securityId, txn);
+        const parentBasis = parentAcb.finalState.totalCost;
+        const parentQty = parentAcb.finalState.quantity;
+        if (activityType === 'spin_off') {
+          injectedBasis = parentBasis * (costBasisAllocationPct as number);
+        } else {
+          // merger: residual basis = parentBasis minus the cash proceeds
+          // (cashComponent per source share), floored at zero.
+          const cashProceeds = (cashComponent ?? 0) * parentQty;
+          injectedBasis = Math.max(parentBasis - cashProceeds, 0);
+        }
+      }
+
+      const activity = await InvestmentActivity.create(
+        {
+          accountId,
+          householdId: household.id,
+          securityId,
+          activityType,
+          tradeDate,
+          settlementDate: null,
+          description: CORP_ACTION_LABELS[activityType],
+          quantity: quantity != null ? quantity.toString() : null,
+          price: null,
+          amount: amount != null ? amount.toString() : null,
+          fees: null,
+          splitRatio: null,
+          recipientSecurityId,
+          costBasisAllocationPct:
+            costBasisAllocationPct != null ? costBasisAllocationPct.toString() : null,
+          cashComponent: cashComponent != null ? cashComponent.toString() : null,
+          currency,
+          sourceReference: null,
+          sourceRowFingerprint: manualFingerprint,
+          importBatch: 'manual',
+        },
+        { transaction: txn }
+      );
+
+      // Cross-security basis injection: move the allocated/residual basis to
+      // the recipient security as a `transfer_in` (book cost added, no
+      // realized event). The parent reduction itself is expressed by the
+      // spin_off / merger branch of the ACB engine on the parent's stream.
+      let recipientActivity: InvestmentActivity | null = null;
+      if (recipientSecurityId != null && quantity != null && injectedBasis != null) {
+        recipientActivity = await InvestmentActivity.create(
+          {
+            accountId,
+            householdId: household.id,
+            securityId: recipientSecurityId,
+            activityType: 'transfer_in',
+            tradeDate,
+            settlementDate: null,
+            description: `Basis from ${CORP_ACTION_LABELS[activityType]} of ${security.symbol || securityId}`,
+            quantity: quantity.toString(),
+            price: null,
+            amount: injectedBasis.toString(),
+            fees: null,
+            splitRatio: null,
+            recipientSecurityId: null,
+            costBasisAllocationPct: null,
+            cashComponent: null,
+            currency,
+            sourceReference: manualFingerprint,
+            sourceRowFingerprint: `manual:${crypto.randomUUID()}`,
+            importBatch: 'manual',
+          },
+          { transaction: txn }
+        );
+      }
+
+      return { activity, recipientActivity };
+    });
+
+    const toDto = (a: InvestmentActivity) => ({
+      id: a.id,
+      accountId: a.accountId,
+      securityId: a.securityId,
+      activityType: a.activityType,
+      tradeDate: a.tradeDate,
+      quantity: n(a.quantity),
+      amount: n(a.amount),
+      recipientSecurityId: a.recipientSecurityId ?? null,
+      costBasisAllocationPct: n(a.costBasisAllocationPct),
+      cashComponent: n(a.cashComponent),
+      currency: a.currency,
+    });
+
+    res.status(201).json({
+      activity: toDto(result.activity),
+      recipientActivity: result.recipientActivity ? toDto(result.recipientActivity) : null,
     });
   } catch (e) {
     next(e);
