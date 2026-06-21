@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bookmark, ChevronDown } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { Dialog } from '@connor-adams/designsystem'
 import { Input } from '@connor-adams/designsystem'
 import { Label as FieldLabel } from '@connor-adams/designsystem'
@@ -151,7 +150,7 @@ export function SavedFiltersDropdown({ currentFilter, onApply }: Props) {
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
         >
-          <Bookmark className="size-3.5" aria-hidden />
+          <Icon name="bookmark" className="size-3.5" aria-hidden />
           Saved filters
           {activeFilter && (
             <span className="ml-1 max-w-[100px] truncate text-xs text-muted-foreground">
@@ -159,7 +158,7 @@ export function SavedFiltersDropdown({ currentFilter, onApply }: Props) {
               {isDirty ? ' · modified' : ''}
             </span>
           )}
-          <ChevronDown className="size-3 ml-0.5" aria-hidden />
+          <Icon name="chevron-down" className="size-3 ml-0.5" aria-hidden />
         </Button>
 
         {open && (

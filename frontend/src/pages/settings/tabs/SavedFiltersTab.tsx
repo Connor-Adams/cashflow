@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { ChevronDown, ChevronUp, Edit3, Trash2 } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Edit3 } from 'lucide-react'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Dialog } from '@connor-adams/designsystem'
 import { useConfirm } from '@/lib/ds-extras'
@@ -162,7 +162,7 @@ export function SavedFiltersTab() {
                       disabled={idx === 0}
                       onClick={() => void move(f, 'up')}
                     >
-                      <ChevronUp className="size-3.5" aria-hidden />
+                      <Icon name="chevron-up" className="size-3.5" aria-hidden />
                     </Button>
                     <Button
                       type="button"
@@ -172,7 +172,7 @@ export function SavedFiltersTab() {
                       disabled={idx === filters.length - 1}
                       onClick={() => void move(f, 'down')}
                     >
-                      <ChevronDown className="size-3.5" aria-hidden />
+                      <Icon name="chevron-down" className="size-3.5" aria-hidden />
                     </Button>
                     <Button
                       type="button"
@@ -191,7 +191,7 @@ export function SavedFiltersTab() {
                       aria-label={`Delete ${f.name}`}
                       onClick={() => void remove(f)}
                     >
-                      <Trash2 className="size-3.5" aria-hidden />
+                      <Icon name="trash" className="size-3.5" aria-hidden />
                       Delete
                     </Button>
                   </div>

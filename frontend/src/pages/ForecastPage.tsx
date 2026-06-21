@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom'
 import {
   Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
 import {
-  AlertTriangle, ArrowDownRight, ArrowUpRight, Calendar, ChevronDown, ChevronRight, } from 'lucide-react'
-import { Badge } from '@connor-adams/designsystem'
+  ArrowDownRight, ArrowUpRight, } from 'lucide-react'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
@@ -233,7 +233,8 @@ export function ForecastPage() {
       {goesBelowZero && data ? (
         <Card className="mb-4 border-warning bg-warning-bg p-4">
           <div className="flex gap-3">
-            <AlertTriangle
+            <Icon
+              name="alert-triangle"
               className="mt-0.5 size-5 shrink-0 text-warning"
               aria-hidden="true"
             />
@@ -312,7 +313,7 @@ export function ForecastPage() {
           <h2 className="text-sm font-semibold">Upcoming inflows &amp; outflows</h2>
           {data ? (
             <Badge variant="secondary" className="text-xs">
-              <Calendar className="mr-1 size-3" aria-hidden="true" />
+              <Icon name="calendar" className="mr-1 size-3" aria-hidden="true" />
               {data.dateFrom} → {data.dateTo}
             </Badge>
           ) : null}
@@ -467,9 +468,9 @@ function DipDrivers({
         className="inline-flex items-center gap-1 text-sm font-medium text-warning-foreground hover:underline"
       >
         {open ? (
-          <ChevronDown className="size-4" aria-hidden="true" />
+          <Icon name="chevron-down" className="size-4" aria-hidden="true" />
         ) : (
-          <ChevronRight className="size-4" aria-hidden="true" />
+          <Icon name="chevron-right" className="size-4" aria-hidden="true" />
         )}
         {open ? 'Hide drivers' : "What's driving this dip?"}
       </button>

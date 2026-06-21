@@ -1,7 +1,6 @@
 // frontend/src/pages/settings/tabs/CategoryTreeManager.tsx
 import { useRef, useState } from 'react';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
-import { Button } from '@connor-adams/designsystem'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { Input } from '@connor-adams/designsystem'
 import { Dialog } from '@connor-adams/designsystem'
 import { Tree, TreeGroup, TreeRow } from '@/components/ui/tree';
@@ -95,21 +94,21 @@ function TreeNode({
               aria-label={`Rename ${node.name}`}
               onClick={() => { savedRef.current = false; setRenameValue(node.name); setRenaming(true); }}
             >
-              <Pencil size={14} />
+              <Icon name="pencil" size={14} />
             </Button>
             <Button
               type="button" variant="ghost" size="icon" className="size-7"
               aria-label={`Add subcategory under ${node.name}`}
               onClick={() => setAdding((v) => !v)}
             >
-              <Plus size={14} />
+              <Icon name="plus" size={14} />
             </Button>
             <Button
               type="button" variant="ghost" size="icon" className="size-7 text-destructive hover:text-destructive"
               aria-label={`Delete ${node.name}`}
               onClick={() => void run(() => deleteCategory(node.id))}
             >
-              <Trash2 size={14} />
+              <Icon name="trash" size={14} />
             </Button>
           </>
         }

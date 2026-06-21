@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react'
+import { Icon } from '@connor-adams/designsystem'
 import { LABEL_COLOR_PALETTE } from '../lib/labelColors'
 
 type Props = {
@@ -26,7 +26,7 @@ export function LabelColorPicker({ value, onChange, disabled }: Props) {
         onClick={() => onChange(null)}
         className="flex size-6 items-center justify-center rounded-full border border-border bg-muted text-muted-foreground"
       >
-        {value == null ? <Check className="size-3.5" aria-hidden="true" /> : null}
+        {value == null ? <Icon name="check" className="size-3.5" aria-hidden="true" /> : null}
       </button>
       {LABEL_COLOR_PALETTE.map((color) => {
         const selected = value?.toLowerCase() === color.toLowerCase()
@@ -42,7 +42,7 @@ export function LabelColorPicker({ value, onChange, disabled }: Props) {
             className="flex size-6 items-center justify-center rounded-full border border-black/10"
           >
             {selected ? (
-              <Check className="size-3.5 text-white" aria-hidden="true" />
+              <Icon name="check" className="size-3.5 text-white" aria-hidden="true" />
             ) : null}
           </button>
         )

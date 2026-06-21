@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3, GitMerge, Trash2 } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Edit3, GitMerge } from 'lucide-react'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Dialog } from '@connor-adams/designsystem'
 import { useConfirm } from '@/lib/ds-extras'
@@ -193,7 +193,7 @@ export function LabelsTab() {
                       aria-label={`Delete ${label.name}`}
                       onClick={() => void removeLabel(label)}
                     >
-                      <Trash2 aria-hidden="true" />
+                      <Icon name="trash" aria-hidden="true" />
                       Delete
                     </Button>
                   </div>

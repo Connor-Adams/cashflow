@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Copy, Trash2 } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
@@ -110,7 +109,7 @@ export function ReportingTokensTab() {
               onFocus={(e) => e.target.select()}
             />
             <Button size="sm" variant="outline" onClick={copyPlaintext}>
-              <Copy className="h-3.5 w-3.5 mr-1" />
+              <Icon name="copy" className="h-3.5 w-3.5 mr-1" />
               Copy
             </Button>
           </div>
@@ -167,7 +166,7 @@ export function ReportingTokensTab() {
                       className="text-destructive hover:text-destructive"
                       onClick={() => void revoke(t)}
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Icon name="trash" className="h-3.5 w-3.5" />
                     </Button>
                   </td>
                 </tr>

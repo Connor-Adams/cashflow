@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, TrendingUp } from 'lucide-react'
-import { Alert } from '@connor-adams/designsystem'
+import { Alert, Icon } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -149,7 +148,7 @@ function CurrencyTrendCard({ trend }: { trend: LifestyleCurrencyTrend }) {
           className="mb-3"
         >
           <div className="flex gap-2 items-center mb-1">
-            <AlertTriangle size={18} aria-hidden="true" />
+            <Icon name="alert-triangle" size={18} aria-hidden="true" />
             <Badge variant={SEVERITY_BADGE[trend.insight.severity]}>
               {trend.insight.severity}
             </Badge>
@@ -196,13 +195,13 @@ function OutpacingBadge({ outpacing }: { outpacing: boolean }) {
   if (outpacing) {
     return (
       <Badge variant="destructive">
-        <TrendingUp size={14} aria-hidden="true" /> Spending outpacing income
+        <Icon name="trending-up" size={14} aria-hidden="true" /> Spending outpacing income
       </Badge>
     )
   }
   return (
     <Badge variant="secondary">
-      <CheckCircle2 size={14} aria-hidden="true" /> In check
+      <Icon name="check-circle" size={14} aria-hidden="true" /> In check
     </Badge>
   )
 }

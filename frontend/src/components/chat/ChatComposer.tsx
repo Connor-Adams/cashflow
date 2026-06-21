@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { Send, X } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Button, Icon } from '@connor-adams/designsystem'
 
 type Props = {
   /** Pre-fill the textarea — used by seeded empty-state prompts. */
@@ -91,12 +90,12 @@ export function ChatComposer({
               onClick={onCancel}
               aria-label="Cancel"
             >
-              <X size={16} aria-hidden="true" />
+              <Icon name="x" size={16} aria-hidden="true" />
               <span className="ml-1">Cancel</span>
             </Button>
           ) : (
             <Button type="submit" disabled={!canSend} aria-label="Send">
-              <Send size={16} aria-hidden="true" />
+              <Icon name="send" size={16} aria-hidden="true" />
               <span className="ml-1">Send</span>
             </Button>
           )}

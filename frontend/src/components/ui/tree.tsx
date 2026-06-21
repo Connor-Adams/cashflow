@@ -1,5 +1,6 @@
 import * as React from 'react'
-import { ChevronDown, ChevronRight, GripVertical } from 'lucide-react'
+import { GripVertical } from 'lucide-react'
+import { Icon } from '@connor-adams/designsystem'
 import { cn } from '@/lib/utils'
 
 /**
@@ -71,7 +72,7 @@ function TreeRow({
           className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted"
           onClick={onToggle}
         >
-          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          {expanded ? <Icon name="chevron-down" size={15} /> : <Icon name="chevron-right" size={15} />}
         </button>
       ) : (
         <span className="inline-block size-5 shrink-0" aria-hidden />

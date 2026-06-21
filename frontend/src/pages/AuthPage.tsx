@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { LogIn, UserPlus } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { LogIn } from 'lucide-react'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Input } from '@connor-adams/designsystem'
 import { useAuth } from '../lib/useAuth'
@@ -71,7 +71,7 @@ export function AuthPage() {
             className={mode === 'register' ? 'isActive' : ''}
             onClick={() => setMode('register')}
           >
-            <UserPlus aria-hidden="true" />
+            <Icon name="user-plus" aria-hidden="true" />
             Register
           </Button>
         </div>

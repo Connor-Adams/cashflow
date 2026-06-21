@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Lock } from 'lucide-react'
+import { Icon } from '@connor-adams/designsystem'
 import { cn } from '@/lib/utils'
 import { useAuth } from '../../lib/useAuth'
 
@@ -68,7 +68,7 @@ export function SettingsSidebar() {
                   className={cn(linkBase, 'cursor-not-allowed text-muted-foreground/60')}
                 >
                   {item.label}
-                  <Lock aria-hidden="true" className="size-3.5" />
+                  <Icon name="lock" aria-hidden="true" className="size-3.5" />
                 </span>
               )
             }

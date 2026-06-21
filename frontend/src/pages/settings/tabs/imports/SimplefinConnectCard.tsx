@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { CheckCircle2, Landmark, Loader2 } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Loader2 } from 'lucide-react'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Textarea } from '@connor-adams/designsystem'
 import { useConfirm } from '@/lib/ds-extras'
@@ -112,7 +112,7 @@ export function SimplefinConnectCard() {
       <div className="flex items-baseline justify-between gap-3 mb-2">
         <div>
           <h2 className="text-base font-semibold m-0 flex items-center gap-2">
-            <Landmark aria-hidden="true" className="size-4" />
+            <Icon name="landmark" aria-hidden="true" className="size-4" />
             {connected ? 'Bank connection' : 'Connect a US bank with SimpleFIN'}
           </h2>
           {!connected && (
@@ -137,7 +137,7 @@ export function SimplefinConnectCard() {
       ) : connected ? (
         <div className="mt-2">
           <p className="text-sm flex items-center gap-2 m-0">
-            <CheckCircle2 aria-hidden="true" className="size-4 text-[var(--success,green)]" />
+            <Icon name="check-circle" aria-hidden="true" className="size-4 text-[var(--success,green)]" />
             <strong>Connected</strong>
             {status?.host ? <span className="muted">· {status.host}</span> : null}
           </p>

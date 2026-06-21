@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Calendar, Edit3, Plus, Trash2 } from 'lucide-react'
-import { Badge } from '@connor-adams/designsystem'
+import { Edit3 } from 'lucide-react'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { useConfirm } from '@/lib/ds-extras'
@@ -251,7 +251,7 @@ export function PlannedEventsPage() {
         <SectionHeader
           title={
             <span className="flex items-center gap-2">
-              <Calendar aria-hidden="true" className="h-5 w-5" />
+              <Icon name="calendar" aria-hidden="true" className="h-5 w-5" />
               Upcoming
             </span>
           }
@@ -404,7 +404,7 @@ export function PlannedEventsPage() {
                             variant="destructive"
                             onClick={() => void deleteEvent(row)}
                           >
-                            <Trash2 aria-hidden="true" />
+                            <Icon name="trash" aria-hidden="true" />
                             Delete
                           </Button>
                           <Link to={`/forecast?date=${row.expectedDate}`}>
@@ -431,7 +431,7 @@ export function PlannedEventsPage() {
             showStatus={false}
           />
           <Button type="submit" disabled={submitting}>
-            <Plus aria-hidden="true" />
+            <Icon name="plus" aria-hidden="true" />
             Add planned event
           </Button>
         </form>

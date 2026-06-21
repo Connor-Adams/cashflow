@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3, Plus, Trash2 } from 'lucide-react'
+import { Edit3 } from 'lucide-react'
 import { CategoryIcon } from '../../../components/CategoryIcon'
-import { Button } from '@connor-adams/designsystem'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { useConfirm } from '@/lib/ds-extras'
 import { EmptyState } from '@connor-adams/designsystem'
@@ -607,7 +607,7 @@ export function BudgetsTab() {
                             variant="destructive"
                             onClick={() => void deleteBudget(budget)}
                           >
-                            <Trash2 aria-hidden="true" />
+                            <Icon name="trash" aria-hidden="true" />
                             Delete
                           </Button>
                         </div>
@@ -738,7 +738,7 @@ export function BudgetsTab() {
             />
           </div>
           <Button type="submit" disabled={budgetSubmitting}>
-            <Plus aria-hidden="true" />
+            <Icon name="plus" aria-hidden="true" />
             Add budget
           </Button>
         </form>

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ExternalLink } from 'lucide-react'
-import { Alert } from '@connor-adams/designsystem'
+import { Alert, Icon } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -411,7 +410,7 @@ function SubscriptionRow({
               variant="destructive"
               title="Price has increased since the last refresh"
             >
-              <AlertTriangle size={12} aria-hidden="true" /> price up
+              <Icon name="alert-triangle" size={12} aria-hidden="true" /> price up
             </Badge>
           ) : null}
         </div>
@@ -445,7 +444,7 @@ function SubscriptionRow({
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 text-xs"
           >
-            cancel <ExternalLink size={10} aria-hidden="true" />
+            cancel <Icon name="external-link" size={10} aria-hidden="true" />
           </a>
         )}
       </TableCell>

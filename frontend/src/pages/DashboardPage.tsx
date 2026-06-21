@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
-import { FilterX, Inbox, ShoppingBag, TrendingUp, Wallet } from 'lucide-react'
+import { FilterX } from 'lucide-react'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { Link, useNavigate } from 'react-router-dom'
-import { Alert } from '@connor-adams/designsystem'
+import { Alert, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { CategoryBreakdown } from '@connor-adams/designsystem'
@@ -844,7 +844,7 @@ export function DashboardPage() {
             variant="warning"
             role="status"
             aria-live="polite"
-            icon={<Inbox className="size-5" />}
+            icon={<Icon name="inbox" className="size-5" />}
             label={`${summaryStats.reviewCount} transaction${
               summaryStats.reviewCount === 1 ? '' : 's'
             } flagged for review`}
@@ -861,7 +861,7 @@ export function DashboardPage() {
             variant="destructive"
             role="status"
             aria-live="polite"
-            icon={<TrendingUp className="size-5" />}
+            icon={<Icon name="trending-up" className="size-5" />}
             label={`${priceChangeCount} subscription price change${priceChangeCount === 1 ? '' : 's'} this month`}
             actions={<Link to="/subscriptions?priceChange=unack"><Button size="sm" variant="outline">Review</Button></Link>}
             onDismiss={() => setPriceDismissedAt(priceChangeCount)}
@@ -1085,7 +1085,7 @@ export function DashboardPage() {
           span={6}
           rows={2}
           aria-busy={loading}
-          icon={<Wallet className="size-5" />}
+          icon={<Icon name="wallet" className="size-5" />}
           label="Income · business vs personal"
           description="Earned income split by business vs personal."
         >
@@ -1102,7 +1102,7 @@ export function DashboardPage() {
           span={6}
           rows={2}
           aria-busy={loading}
-          icon={<ShoppingBag className="size-5" />}
+          icon={<Icon name="shopping-bag" className="size-5" />}
           label="Spend · business vs personal"
           description="Spend (gross outflows net of refunds) split by business vs personal."
         >

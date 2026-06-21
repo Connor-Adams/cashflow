@@ -12,8 +12,8 @@
  */
 import { useCallback, useEffect, useMemo, useState, type FormEvent, } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Calendar as CalendarIcon, CalendarPlus, ChevronLeft, ChevronRight, Edit3, Plus, Repeat, Trash2 } from 'lucide-react'
-import { Badge } from '@connor-adams/designsystem'
+import { CalendarPlus, Edit3 } from 'lucide-react'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Grid } from '@/lib/ds-extras'
@@ -403,19 +403,19 @@ export function CalendarPage() {
         <Tabs items={TAB_ITEMS} value={view} onValueChange={(v) => setView(v as ViewMode)} />
         <div className="ml-auto flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={goPrev} aria-label="Previous month">
-            <ChevronLeft aria-hidden="true" />
+            <Icon name="chevron-left" aria-hidden="true" />
           </Button>
           <span className="font-medium min-w-32 text-center">
             {formatMonthHeading(year, month)}
           </span>
           <Button variant="outline" size="sm" onClick={goNext} aria-label="Next month">
-            <ChevronRight aria-hidden="true" />
+            <Icon name="chevron-right" aria-hidden="true" />
           </Button>
           <Button variant="outline" size="sm" onClick={goToday}>
             Today
           </Button>
           <Button size="sm" onClick={() => openCreate()}>
-            <Plus aria-hidden="true" /> New event
+            <Icon name="plus" aria-hidden="true" /> New event
           </Button>
           <Link
             to="/planned"
@@ -476,7 +476,7 @@ export function CalendarPage() {
                   openCreate(iso ?? undefined)
                 }}
               >
-                <Plus aria-hidden="true" /> Add event on this day
+                <Icon name="plus" aria-hidden="true" /> Add event on this day
               </Button>
             </>
           }
@@ -510,7 +510,8 @@ export function CalendarPage() {
                     <div className="flex flex-wrap items-center gap-1">
                       <Badge className={CALENDAR_EVENT_BG_CLASS[ev.type]}>
                         {ev.recurrenceRule ? (
-                          <Repeat
+                          <Icon
+                            name="repeat"
                             aria-hidden="true"
                             className="mr-1 inline-block h-3 w-3"
                           />
@@ -544,7 +545,7 @@ export function CalendarPage() {
                         variant="destructive"
                         onClick={() => void deleteEvent(ev)}
                       >
-                        <Trash2 aria-hidden="true" /> Delete
+                        <Icon name="trash" aria-hidden="true" /> Delete
                       </Button>
                     </div>
                   </li>
@@ -580,7 +581,7 @@ export function CalendarPage() {
                 Cancel
               </Button>
               <Button type="submit" disabled={createSaving}>
-                <Plus aria-hidden="true" />
+                <Icon name="plus" aria-hidden="true" />
                 {createSaving ? 'Saving...' : 'Save event'}
               </Button>
             </div>
@@ -652,7 +653,7 @@ function UpcomingSummaryCard({ summary }: { summary: UpcomingSummary }) {
       <SectionHeader
         title={
           <span className="flex items-center gap-2">
-            <CalendarIcon aria-hidden="true" className="h-5 w-5" />
+            <Icon name="calendar" aria-hidden="true" className="h-5 w-5" />
             Next 14 days
           </span>
         }
@@ -740,7 +741,7 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); navigate(ev.recurrenceRule ? '/recurring' : '/planned') } }}
                 >
                   {ev.recurrenceRule ? (
-                    <Repeat aria-hidden="true" className="mr-0.5 inline-block h-2.5 w-2.5" />
+                    <Icon name="repeat" aria-hidden="true" className="mr-0.5 inline-block h-2.5 w-2.5" />
                   ) : (
                     <CalendarPlus aria-hidden="true" className="mr-0.5 inline-block h-2.5 w-2.5" />
                   )}
@@ -814,7 +815,8 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
                 <div className="flex flex-wrap items-center gap-1">
                   <Badge className={CALENDAR_EVENT_BG_CLASS[ev.type]}>
                     {ev.recurrenceRule ? (
-                      <Repeat
+                      <Icon
+                        name="repeat"
                         aria-hidden="true"
                         className="mr-1 inline-block h-3 w-3"
                       />
@@ -844,7 +846,7 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
                     variant="destructive"
                     onClick={() => onDeleteClick(ev)}
                   >
-                    <Trash2 aria-hidden="true" /> Delete
+                    <Icon name="trash" aria-hidden="true" /> Delete
                   </Button>
                 </div>
               </li>

@@ -17,9 +17,9 @@
  * derived state is warranted.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, Circle, Lock, Unlock } from 'lucide-react'
+import { Unlock } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { Badge } from '@connor-adams/designsystem'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
@@ -442,7 +442,7 @@ export function MonthlyClosePage() {
                       onClick={() => closeMonth(false)}
                       disabled={busy}
                     >
-                      <Lock size={16} aria-hidden="true" />
+                      <Icon name="lock" size={16} aria-hidden="true" />
                       <span className="ml-2">Close month</span>
                     </Button>
                   </>
@@ -514,13 +514,15 @@ export function MonthlyClosePage() {
                       className="rounded-full p-1 disabled:opacity-50"
                     >
                       {task.isComplete ? (
-                        <CheckCircle2
+                        <Icon
+                          name="check-circle"
                           size={22}
                           className="text-positive"
                           aria-hidden="true"
                         />
                       ) : (
-                        <Circle
+                        <Icon
+                          name="circle"
                           size={22}
                           className="text-muted-foreground"
                           aria-hidden="true"

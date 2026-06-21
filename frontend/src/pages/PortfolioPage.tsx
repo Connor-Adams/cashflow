@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { SortableTableHead } from '@/components/table/SortableTableHead'
 import { useUrlSort, type SortDir } from '../hooks/useUrlSort'
-import { RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
   Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
-import { Button } from '@connor-adams/designsystem'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { EmptyTableRow } from '@/lib/ds-extras'
 import { PageHeader } from '@/components/ui/page-header'
@@ -203,7 +202,7 @@ export function PortfolioPage() {
         actions={
           <div className="flex flex-col items-end gap-1">
             <Button type="button" onClick={() => void refreshPrices()} disabled={refreshing}>
-              <RefreshCw aria-hidden="true" />
+              <Icon name="refresh-cw" aria-hidden="true" />
               {refreshing ? 'Refreshing…' : 'Refresh quotes'}
             </Button>
             {freshnessLabel ? (

@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3, GitMerge, Plus, Save, Trash2, X } from 'lucide-react'
-import { Badge } from '@connor-adams/designsystem'
+import { Edit3, GitMerge } from 'lucide-react'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
@@ -403,7 +403,7 @@ export function AccountsPage() {
           </Label>
         </Grid>
         <Button type="submit" disabled={saving}>
-          <Plus aria-hidden="true" />
+          <Icon name="plus" aria-hidden="true" />
           {saving ? 'Saving…' : 'Create account'}
         </Button>
       </form>
@@ -594,11 +594,11 @@ export function AccountsPage() {
                         {editingId === a.id ? (
                           <>
                             <Button type="button" size="sm" onClick={() => void saveCard(a.id)}>
-                              <Save aria-hidden="true" />
+                              <Icon name="save" aria-hidden="true" />
                               Save
                             </Button>
                             <Button type="button" size="sm" variant="secondary" onClick={() => resetEditForm()}>
-                              <X aria-hidden="true" />
+                              <Icon name="x" aria-hidden="true" />
                               Cancel
                             </Button>
                           </>
@@ -639,7 +639,7 @@ export function AccountsPage() {
                           variant="destructive"
                           onClick={() => void removeAccount(a)}
                         >
-                          <Trash2 aria-hidden="true" />
+                          <Icon name="trash" aria-hidden="true" />
                           Delete
                         </Button>
                       </div>

@@ -14,6 +14,12 @@ export default defineConfig({
     },
   },
   test: {
+    // The design system's ESM entry has `import '../styles.css'` as a side effect
+    // (sideEffects: ["*.css"]). vitest externalizes node_modules by default, so
+    // Node's loader hits the bare .css and throws "Unknown file extension".
+    // Inlining lets Vite transform the package; the CSS import resolves to an
+    // empty module under vitest's default `css: false`.
+    server: { deps: { inline: [/@connor-adams[\\/]designsystem/] } },
     environment: 'jsdom',
     environmentOptions: {
       jsdom: {

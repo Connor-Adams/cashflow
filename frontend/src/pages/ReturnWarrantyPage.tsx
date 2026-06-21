@@ -8,8 +8,8 @@
  * edit dialog. Heavier query/filter UX can come later — the bones go in first.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, CalendarClock, ShieldCheck } from 'lucide-react'
-import { Alert } from '@connor-adams/designsystem'
+import { CalendarClock, ShieldCheck } from 'lucide-react'
+import { Alert, Icon } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -402,7 +402,7 @@ function DeadlineCell({
         {days == null ? '' : expired ? `${Math.abs(days)}d ago` : `in ${days}d`}
         {expired && (
           <span className="ml-1 inline-flex items-center gap-1">
-            <AlertTriangle className="inline-block size-3" /> expired
+            <Icon name="alert-triangle" className="inline-block size-3" /> expired
           </span>
         )}
       </div>

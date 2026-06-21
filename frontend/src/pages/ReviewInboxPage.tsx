@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Check, Keyboard, ListChecks, RefreshCw, Search, ShieldCheck, Wand2, } from 'lucide-react'
+  Keyboard, ListChecks, ShieldCheck, Wand2, } from 'lucide-react'
 import type { ImportConfidenceFlagToken } from '@cashflow/shared'
 import { IMPORT_CONFIDENCE_FLAG_TOKENS } from '@cashflow/shared'
-import { Badge } from '@connor-adams/designsystem'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { EmptyTableRow } from '@/lib/ds-extras'
@@ -635,7 +635,7 @@ export function ReviewInboxPage() {
         description="Clear imported transactions by selecting similar rows and applying one decision."
         actions={
           <Button type="button" variant="secondary" onClick={() => void load()}>
-            <RefreshCw aria-hidden="true" />
+            <Icon name="refresh-cw" aria-hidden="true" />
             Refresh
           </Button>
         }
@@ -672,7 +672,7 @@ export function ReviewInboxPage() {
         <Card className="mb-0">
           <div className="mb-3 flex flex-wrap items-end gap-3">
             <Label className="min-w-[220px]">
-              <Search aria-hidden="true" className="mr-1 inline size-4" />
+              <Icon name="search" aria-hidden="true" className="mr-1 inline size-4" />
               Merchant
               <Input
                 value={merchantFilter}
@@ -1072,7 +1072,7 @@ export function ReviewInboxPage() {
               disabled={!canApply || applying}
               onClick={() => void applyDecision()}
             >
-              <Check aria-hidden="true" />
+              <Icon name="check" aria-hidden="true" />
               Apply and mark reviewed
             </Button>
             <Button

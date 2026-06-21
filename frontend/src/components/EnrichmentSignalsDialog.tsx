@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { Dialog } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { getJson, postJson } from '../lib/api'
@@ -141,7 +140,7 @@ export function EnrichmentSignalsDialog({
               disabled={reenriching || loading}
               onClick={() => void reenrich()}
             >
-              <RefreshCw aria-hidden="true" />
+              <Icon name="refresh-cw" aria-hidden="true" />
               {reenriching ? 'Re-enriching…' : 'Re-enrich this row'}
             </Button>
           )}

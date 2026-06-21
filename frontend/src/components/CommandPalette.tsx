@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Search } from 'lucide-react'
+import { Icon } from '@connor-adams/designsystem'
 import { useCommandPalette } from '@/hooks/useCommandPalette'
 import {
   filterCommands,
@@ -242,7 +242,7 @@ export function CommandPalette({
         data-testid="command-palette"
       >
         <div className="flex items-center gap-2 border-b border-border p-3">
-          <Search aria-hidden="true" className="h-4 w-4 opacity-70" />
+          <Icon name="search" aria-hidden="true" className="h-4 w-4 opacity-70" />
           <input
             ref={inputRef}
             type="text"

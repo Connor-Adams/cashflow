@@ -11,8 +11,7 @@
  * rest of the app.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { CheckCircle2, XCircle } from 'lucide-react'
-import { Badge } from '@connor-adams/designsystem'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { EmptyTableRow } from '@/lib/ds-extras'
@@ -377,7 +376,7 @@ function ReviewDialog({
             onClick={onClose}
             aria-label="Close"
           >
-            <XCircle className="h-5 w-5" />
+            <Icon name="x-circle" className="h-5 w-5" />
           </Button>
         </div>
 
@@ -416,7 +415,7 @@ function ReviewDialog({
             onClick={() => onSave('reviewed')}
             disabled={saving}
           >
-            <CheckCircle2 className="h-4 w-4 mr-1" />
+            <Icon name="check-circle" className="h-4 w-4 mr-1" />
             Mark reviewed
           </Button>
           <Button

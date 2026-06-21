@@ -7,8 +7,7 @@
  * filter, a result table, and a saved-search dropdown.
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Search as SearchIcon, Bookmark, Save, X, Trash2 } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { Input } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
@@ -232,7 +231,7 @@ export function SearchPage() {
 
       <form onSubmit={onSubmit} className="flex gap-2">
         <div className="relative flex-1">
-          <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Icon name="search" className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             ref={inputRef}
             type="search"
@@ -251,7 +250,7 @@ export function SearchPage() {
       {saved.length > 0 && (
         <section className="space-y-2">
           <h2 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-            <Bookmark className="h-4 w-4" />
+            <Icon name="bookmark" className="h-4 w-4" />
             Saved searches
           </h2>
           <ul className="flex flex-wrap gap-2">
@@ -288,7 +287,7 @@ export function SearchPage() {
                   onClick={() => void deleteSaved(s)}
                   className="text-muted-foreground hover:text-danger"
                 >
-                  <Trash2 className="h-3 w-3" />
+                  <Icon name="trash" className="h-3 w-3" />
                 </Button>
               </li>
             ))}
@@ -359,7 +358,7 @@ export function SearchPage() {
                 }}
                 className="text-xs text-muted-foreground hover:text-foreground"
               >
-                <X className="h-3 w-3" /> Clear
+                <Icon name="x" className="h-3 w-3" /> Clear
               </Button>
             </div>
           )}
@@ -421,7 +420,7 @@ export function SearchPage() {
                     variant="secondary"
                     disabled={savingBusy || !savingName.trim()}
                   >
-                    <Save className="h-4 w-4 mr-1" />
+                    <Icon name="save" className="h-4 w-4 mr-1" />
                     Save
                   </Button>
                 </form>
