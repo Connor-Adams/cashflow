@@ -13,6 +13,7 @@ import type {
   SimplefinConnectResponse,
   SimplefinStatusResponse,
 } from '@cashflow/shared'
+import { SimplefinAccountLinkStep } from './SimplefinAccountLinkStep'
 
 const GENERIC_ERROR =
   "We couldn't connect your bank. Check that you pasted a fresh setup token and try again."
@@ -147,6 +148,7 @@ export function SimplefinConnectCard() {
               : null}
           </p>
           <p className="text-sm muted mt-1 mb-0">Never synced yet</p>
+          <SimplefinAccountLinkStep />
           <div className="mt-3">
             <Button type="button" variant="outline" onClick={() => void handleDisconnect()}>
               Disconnect

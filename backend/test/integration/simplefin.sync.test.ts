@@ -79,12 +79,23 @@ beforeEach(async () => {
   }) as unknown as typeof globalThis.fetch;
   const res = await authed.post('/api/simplefin/connect').send({ setupToken: SETUP_TOKEN });
   assert.equal(res.status, 200, JSON.stringify(res.body));
+  // #813: sync resolves the target Account ONLY via an explicit
+  // SimplefinAccountLink. Connect ran with empty discovery, so create the link
+  // mapping the remote 'ACT-1' account to the seeded Checking account.
+  const integ = await models.UserSimplefinIntegration.findOne({ where: { userId } });
+  assert.ok(integ);
+  await models.SimplefinAccountLink.create({
+    integrationId: integ.id,
+    simplefinAccountId: 'ACT-1',
+    accountId,
+  } as never);
 });
 
 afterEach(async () => {
   globalThis.fetch = originalFetch;
   await models.Transaction.destroy({ where: {} });
   await models.ImportHistory.destroy({ where: {} });
+  await models.SimplefinAccountLink.destroy({ where: {} });
   await models.UserSimplefinIntegration.destroy({ where: {} });
 });
 

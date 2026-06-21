@@ -18,6 +18,7 @@ import { Op } from 'sequelize';
 import {
   Account,
   HouseholdMember,
+  SimplefinAccountLink,
   UserSimplefinIntegration,
 } from '../models';
 import { decryptSecret } from '../util/symmetricEncryption';
@@ -48,27 +49,20 @@ export interface SimplefinSyncAccountRun {
   status: 'connected' | 'error';
 }
 
-/** Normalize an account identifier for fuzzy matching (case/space-insensitive). */
-function norm(s: string | null | undefined): string {
-  return (s ?? '').trim().toLowerCase();
-}
-
 /**
- * Resolve a SimpleFIN account (id/name) to a single Cashflow Account within a
- * household. Mirrors `mapDiscoveredAccounts` in service.ts: an UNAMBIGUOUS
- * match by name (the `/accounts` transactions payload does not carry an
- * account-number, so name is the available signal) wins; ambiguous matches are
- * left unresolved so we never write to the wrong account. The connection issue
- * (#790) did not persist the discovery-time mapping, so we re-resolve here.
+ * Resolve a SimpleFIN account (by its stable id) to the Cashflow Account it is
+ * EXPLICITLY linked to, via `SimplefinAccountLink` scoped to the integration
+ * (issue #813). There is no name-based fallback: an unlinked discovered account
+ * resolves to null and is skipped (logged), never guessed. This structurally
+ * prevents cross-member writes (a link can only point at an account the linker
+ * chose) and shared-account double-import (UNIQUE(account_id) lets exactly one
+ * integration own a given account).
  */
 export function resolveAccountId(
-  remote: { name: string },
-  accounts: Pick<Account, 'id' | 'name'>[],
+  remote: { id: string },
+  linksBySimplefinId: Map<string, number>,
 ): number | null {
-  const rName = norm(remote.name);
-  if (!rName) return null;
-  const matches = accounts.filter((a) => norm(a.name) === rName);
-  return matches.length === 1 ? matches[0].id : null;
+  return linksBySimplefinId.get(remote.id) ?? null;
 }
 
 /** Convert SimpleFIN posted epoch seconds to a YYYY-MM-DD (UTC) date. */
@@ -180,17 +174,26 @@ export async function syncIntegration(
     throw e;
   }
 
+  // Explicit links for THIS integration are the single source of truth (#813).
+  const links = await SimplefinAccountLink.findAll({
+    where: { integrationId: integration.id },
+    attributes: ['simplefinAccountId', 'accountId'],
+  });
+  const linksBySimplefinId = new Map(
+    links.map((l) => [l.simplefinAccountId, l.accountId]),
+  );
+  const linkedAccountIds = [...linksBySimplefinId.values()];
   const accounts =
-    householdId == null
+    linkedAccountIds.length === 0
       ? []
       : await Account.findAll({
-          where: { householdId, mergedIntoId: { [Op.is]: null } },
-          attributes: ['id', 'name', 'defaultCurrency'],
+          where: { id: { [Op.in]: linkedAccountIds }, mergedIntoId: { [Op.is]: null } },
+          attributes: ['id', 'name', 'defaultCurrency', 'householdId'],
         });
 
   const runs: SimplefinSyncAccountRun[] = [];
   for (const remote of remoteAccounts) {
-    const accountId = resolveAccountId(remote, accounts);
+    const accountId = resolveAccountId(remote, linksBySimplefinId);
     if (accountId == null) {
       logger.warn(
         { integrationId: integration.id, simplefinAccountId: remote.id, name: remote.name },
@@ -198,7 +201,15 @@ export async function syncIntegration(
       );
       continue;
     }
-    const account = accounts.find((a) => a.id === accountId)!;
+    const account = accounts.find((a) => a.id === accountId);
+    if (!account) {
+      // Linked account was merged/deleted out from under the link; skip safely.
+      logger.warn(
+        { integrationId: integration.id, simplefinAccountId: remote.id, accountId },
+        'simplefin_sync_linked_account_missing',
+      );
+      continue;
+    }
     const currency = (remote.currency || account.defaultCurrency || 'CAD').toUpperCase();
     const normalized = remote.transactions.map((tx) =>
       mapSimplefinTransaction(tx, accountId, currency),

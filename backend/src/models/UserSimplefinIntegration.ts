@@ -43,6 +43,10 @@ export function initUserSimplefinIntegration(
         type: DataTypes.INTEGER,
         field: 'user_id',
         allowNull: false,
+        // One integration row per user. The DB UNIQUE index already exists
+        // (migration 20260619000001); this mirrors it at the model layer so a
+        // double-connect race can't orphan a second row (issue #813 AC6).
+        unique: true,
       },
       accessUrlEncrypted: {
         type: DataTypes.TEXT,
