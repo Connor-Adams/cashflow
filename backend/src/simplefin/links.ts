@@ -137,6 +137,103 @@ export async function listDiscoveredAccounts(
   });
 }
 
+/** Validate that exactly one of accountId / create was supplied. */
+function assertOneTarget(accountId?: number, create?: unknown): void {
+  if ((accountId != null) === (create != null)) {
+    throw new SimplefinLinkError(
+      'invalid_request',
+      'Provide exactly one of accountId or create.',
+    );
+  }
+}
+
+/** Resolve an existing household account to its id, or throw. */
+async function resolveExistingAccount(
+  accountId: number,
+  householdId: number | null,
+): Promise<number> {
+  const account = await Account.findByPk(accountId);
+  if (!account || account.mergedIntoId != null) {
+    throw new SimplefinLinkError('account_not_found', 'Account not found.');
+  }
+  if (householdId == null || account.householdId !== householdId) {
+    throw new SimplefinLinkError(
+      'account_not_in_household',
+      'That account is not in your household.',
+    );
+  }
+  return account.id;
+}
+
+/** Create a new household account from the link request and return its id. */
+async function createAccountFromRequest(
+  create: { name: string; defaultCurrency: string },
+  userId: number,
+  householdId: number | null,
+): Promise<number> {
+  const name = (create.name ?? '').trim();
+  const currency = (create.defaultCurrency ?? '').trim().toUpperCase();
+  if (!name) {
+    throw new SimplefinLinkError('invalid_request', 'Account name is required.');
+  }
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw new SimplefinLinkError('invalid_request', 'A valid currency is required.');
+  }
+  const created = await Account.create({
+    name,
+    owner: 'me',
+    ownerUserId: userId,
+    householdId,
+    accountType: 'checking',
+    defaultCurrency: currency,
+  } as never);
+  return created.id;
+}
+
+/**
+ * Guard UNIQUE(account_id): an account already claimed by ANY link may not be
+ * re-claimed — except the idempotent no-op of re-linking the exact same
+ * (integration, simplefinId) pair. A claim by a different integration
+ * (cross-member / shared joint account) or a different simplefinId under this
+ * integration is rejected with 409 already_linked.
+ */
+async function assertAccountUnclaimed(
+  accountId: number,
+  integrationId: number,
+  simplefinId: string,
+): Promise<void> {
+  const claim = await SimplefinAccountLink.findOne({ where: { accountId } });
+  if (
+    claim &&
+    !(claim.integrationId === integrationId && claim.simplefinAccountId === simplefinId)
+  ) {
+    throw new SimplefinLinkError(
+      'already_linked',
+      'That account is already linked to a SimpleFIN account.',
+      claim.integrationId === integrationId,
+    );
+  }
+}
+
+/** Upsert the (integration, simplefinId) link, re-pointing it if needed. */
+async function upsertLink(
+  integrationId: number,
+  simplefinId: string,
+  accountId: number,
+): Promise<void> {
+  const existing = await SimplefinAccountLink.findOne({
+    where: { integrationId, simplefinAccountId: simplefinId },
+  });
+  if (existing) {
+    if (existing.accountId !== accountId) {
+      existing.set({ accountId });
+      await existing.save();
+    }
+    return;
+  }
+  await SimplefinAccountLink.create({ integrationId, simplefinAccountId: simplefinId, accountId });
+}
+
 /**
  * Link a discovered SimpleFIN account to an existing Account, or create a new
  * Account and link it. Enforces the UNIQUE(account_id) and
@@ -151,17 +248,9 @@ export async function linkAccount(params: {
   create?: { name: string; defaultCurrency: string };
 }): Promise<{ simplefinId: string; linkedAccountId: number }> {
   const { userId, householdId, simplefinId } = params;
-  const integration = await requireIntegration(userId);
+  assertOneTarget(params.accountId, params.create);
 
-  // Validate exactly one of accountId / create.
-  const hasExisting = params.accountId != null;
-  const hasCreate = params.create != null;
-  if (hasExisting === hasCreate) {
-    throw new SimplefinLinkError(
-      'invalid_request',
-      'Provide exactly one of accountId or create.',
-    );
-  }
+  const integration = await requireIntegration(userId);
 
   // The simplefinId must be among the caller's discovered accounts.
   const discovered = await discoverForIntegration(integration);
@@ -169,77 +258,13 @@ export async function linkAccount(params: {
     throw new SimplefinLinkError('not_found', 'Unknown SimpleFIN account.');
   }
 
-  // Resolve the target Account.
-  let accountId: number;
-  if (hasExisting) {
-    const account = await Account.findByPk(params.accountId!);
-    if (!account || account.mergedIntoId != null) {
-      throw new SimplefinLinkError('account_not_found', 'Account not found.');
-    }
-    if (householdId == null || account.householdId !== householdId) {
-      throw new SimplefinLinkError(
-        'account_not_in_household',
-        'That account is not in your household.',
-      );
-    }
-    accountId = account.id;
-  } else {
-    const name = (params.create!.name ?? '').trim();
-    const currency = (params.create!.defaultCurrency ?? '').trim().toUpperCase();
-    if (!name) {
-      throw new SimplefinLinkError('invalid_request', 'Account name is required.');
-    }
-    if (!/^[A-Z]{3}$/.test(currency)) {
-      throw new SimplefinLinkError('invalid_request', 'A valid currency is required.');
-    }
-    const created = await Account.create({
-      name,
-      owner: 'me',
-      ownerUserId: userId,
-      householdId,
-      accountType: 'checking',
-      defaultCurrency: currency,
-    } as never);
-    accountId = created.id;
-  }
+  const accountId =
+    params.accountId != null
+      ? await resolveExistingAccount(params.accountId, householdId)
+      : await createAccountFromRequest(params.create!, userId, householdId);
 
-  // Guard UNIQUE(account_id): an account already claimed by ANY link may not be
-  // re-claimed — except the idempotent no-op of re-linking the exact same
-  // (integration, simplefinId) pair to the same account. A claim by a different
-  // integration (cross-member / shared joint account) or a different simplefinId
-  // under this integration is rejected.
-  const accountClaim = await SimplefinAccountLink.findOne({ where: { accountId } });
-  if (
-    accountClaim &&
-    !(
-      accountClaim.integrationId === integration.id &&
-      accountClaim.simplefinAccountId === simplefinId
-    )
-  ) {
-    throw new SimplefinLinkError(
-      'already_linked',
-      'That account is already linked to a SimpleFIN account.',
-      accountClaim.integrationId === integration.id,
-    );
-  }
-
-  // Upsert the link for (integration, simplefinId). If this simplefinId already
-  // points at a different account, re-point it (idempotent confirm/relink).
-  const existing = await SimplefinAccountLink.findOne({
-    where: { integrationId: integration.id, simplefinAccountId: simplefinId },
-  });
-  if (existing) {
-    if (existing.accountId !== accountId) {
-      existing.set({ accountId });
-      await existing.save();
-    }
-  } else {
-    await SimplefinAccountLink.create({
-      integrationId: integration.id,
-      simplefinAccountId: simplefinId,
-      accountId,
-    });
-  }
+  await assertAccountUnclaimed(accountId, integration.id, simplefinId);
+  await upsertLink(integration.id, simplefinId, accountId);
 
   return { simplefinId, linkedAccountId: accountId };
 }
