@@ -24,8 +24,8 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { GitCompare, Pencil, Plus, RefreshCw, Trash2, TrendingDown, TrendingUp } from 'lucide-react'
-import { Alert } from '@connor-adams/designsystem'
+import { GitCompare } from 'lucide-react'
+import { Alert, Icon } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -216,7 +216,7 @@ function AssumptionRow({
           onClick={() => onRemove(index)}
           aria-label={`Remove assumption ${index + 1}`}
         >
-          <Trash2 className="size-4" />
+          <Icon name="trash" className="size-4" />
         </Button>
       </div>
       <div className="flex flex-wrap gap-2">
@@ -386,7 +386,7 @@ function ScenarioEditor({ scenario, onClose, onSaved }: EditorProps) {
             <div className="mb-2 flex items-center justify-between">
               <Label>Assumptions</Label>
               <Button type="button" variant="outline" size="sm" onClick={addOverride}>
-                <Plus className="size-3" /> Add
+                <Icon name="plus" className="size-3" /> Add
               </Button>
             </div>
             {overrides.length === 0 ? (
@@ -433,9 +433,9 @@ function DeltaBadge({ delta, currency }: { delta: number; currency: string }) {
   return (
     <span className={`flex items-center gap-1 font-medium ${deltaClass(delta)}`}>
       {delta > 0 ? (
-        <TrendingUp className="size-3" aria-hidden="true" />
+        <Icon name="trending-up" className="size-3" aria-hidden="true" />
       ) : (
-        <TrendingDown className="size-3" aria-hidden="true" />
+        <Icon name="trending-down" className="size-3" aria-hidden="true" />
       )}
       {delta > 0 ? '+' : ''}
       {formatMoney(delta, currency)}
@@ -495,7 +495,7 @@ function ComparisonPanel({
             disabled={recomputing}
             title="Recompute with today's actual balances and planned events"
           >
-            <RefreshCw className={`size-3 ${recomputing ? 'animate-spin' : ''}`} />
+            <Icon name="refresh-cw" className={`size-3 ${recomputing ? 'animate-spin' : ''}`} />
             {recomputing ? 'Computing…' : 'Recompute'}
           </Button>
           <Button type="button" variant="ghost" size="sm" onClick={onClose}>
@@ -674,7 +674,7 @@ export function ScenariosPage() {
         description="Model hypothetical financial changes without touching real data. Compare projected balances and see how decisions affect your cashflow."
         actions={
           <Button type="button" onClick={() => setEditing('new')}>
-            <Plus className="size-4" /> New scenario
+            <Icon name="plus" className="size-4" /> New scenario
           </Button>
         }
       />
@@ -749,7 +749,7 @@ export function ScenariosPage() {
                           onClick={() => setEditing(s)}
                           title="Edit scenario"
                         >
-                          <Pencil className="size-3" />
+                          <Icon name="pencil" className="size-3" />
                         </Button>
                         <Button
                           type="button"
@@ -759,7 +759,7 @@ export function ScenariosPage() {
                           onClick={() => void handleDelete(s)}
                           title="Delete scenario"
                         >
-                          <Trash2 className="size-3" />
+                          <Icon name="trash" className="size-3" />
                         </Button>
                       </div>
                     </TableCell>

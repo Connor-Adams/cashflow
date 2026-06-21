@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { Link2 } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Input } from '@connor-adams/designsystem'
 import { postJson } from '@/lib/api'
@@ -31,7 +30,7 @@ export function PartnerInviteSection() {
           <p className="muted">Invite links let another user join shared household reporting.</p>
         </div>
         <Button type="button" onClick={createInvite}>
-          <Link2 aria-hidden="true" />
+          <Icon name="link" aria-hidden="true" />
           Create invite
         </Button>
       </div>

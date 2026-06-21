@@ -9,8 +9,7 @@
  * dashboard.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
-import { Card, CardContent } from '@connor-adams/designsystem'
+import { Card, CardContent, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { NativeSelect } from '@connor-adams/designsystem'
@@ -244,9 +243,9 @@ function AuditRow({ row }: { row: AuditLogEntry }) {
               disabled={!hasDetails}
             >
               {open ? (
-                <ChevronDown size={16} />
+                <Icon name="chevron-down" size={16} />
               ) : (
-                <ChevronRight size={16} />
+                <Icon name="chevron-right" size={16} />
               )}
             </Button>
             <div className="flex-1 min-w-0">

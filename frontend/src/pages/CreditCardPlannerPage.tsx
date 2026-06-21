@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
-import { CreditCard, CalendarClock, AlertTriangle, Pencil, Zap } from 'lucide-react'
-import { Badge } from '@connor-adams/designsystem'
+import { CalendarClock } from 'lucide-react'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
@@ -100,7 +100,7 @@ export function CreditCardPlannerPage() {
 
       <Card className="p-3">
         <div className="mb-2 flex items-center gap-2">
-          <CreditCard className="size-4" aria-hidden="true" />
+          <Icon name="credit-card" className="size-4" aria-hidden="true" />
           <h2 className="text-sm font-semibold">Your cards</h2>
         </div>
         {cards.length > 0 ? (
@@ -313,7 +313,7 @@ function CardRow({
           </label>
         ) : card.autopayEnabled ? (
           <Badge variant="secondary" className="gap-1 text-xs">
-            <Zap className="size-3" aria-hidden="true" />
+            <Icon name="zap" className="size-3" aria-hidden="true" />
             {card.autopayType ?? 'on'}
           </Badge>
         ) : (
@@ -352,7 +352,7 @@ function CardRow({
               Paid
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setEditing(true)} aria-label={`Edit ${card.name}`}>
-              <Pencil className="size-3" aria-hidden="true" />
+              <Icon name="pencil" className="size-3" aria-hidden="true" />
             </Button>
           </div>
         )}
@@ -365,7 +365,7 @@ function DueBadge({ label, tone }: { label: string; tone: 'warn' | 'soon' | 'ok'
   if (tone === 'warn') {
     return (
       <Badge variant="destructive" className="gap-1 text-xs">
-        <AlertTriangle className="size-3" aria-hidden="true" />
+        <Icon name="alert-triangle" className="size-3" aria-hidden="true" />
         {label}
       </Badge>
     )

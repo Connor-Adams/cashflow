@@ -1,5 +1,4 @@
-import { ChevronDown, ChevronUp } from 'lucide-react'
-import { TableHead } from '@connor-adams/designsystem'
+import { Icon, TableHead } from '@connor-adams/designsystem'
 import type { SortDir } from '@/hooks/useUrlSort'
 
 type Props = {
@@ -20,7 +19,7 @@ export function SortableTableHead({ field, label, currentSort, dir, onSort }: Pr
     >
       <span className="inline-flex items-center gap-1">
         {label}
-        {active && (dir === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+        {active && (dir === 'asc' ? <Icon name="chevron-up" size={14} /> : <Icon name="chevron-down" size={14} />)}
       </span>
     </TableHead>
   )

@@ -1,7 +1,7 @@
 import * as React from 'react'
-import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
+import { ChevronsUpDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Card } from '@connor-adams/designsystem'
+import { Card, Icon } from '@connor-adams/designsystem'
 import { SectionHeader } from './section-header'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 import { EmptyTableRow } from '@/lib/ds-extras'
@@ -197,9 +197,9 @@ function TableCardData<T>({
                     <span>{column.header}</span>
                     {isSorted ? (
                       sort?.dir === 'asc' ? (
-                        <ChevronUp aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                        <Icon name="chevron-up" aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
                       ) : (
-                        <ChevronDown aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                        <Icon name="chevron-down" aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
                       )
                     ) : (
                       <ChevronsUpDown

@@ -1,6 +1,5 @@
 import * as React from 'react'
-import { X } from 'lucide-react'
-import { Button, CardDescription, CardHeader, CardTitle } from '@connor-adams/designsystem'
+import { Button, CardDescription, CardHeader, CardTitle, Icon } from '@connor-adams/designsystem'
 import { cn } from '@/lib/utils'
 
 export type BentoSpan = 3 | 4 | 6 | 8 | 12
@@ -206,7 +205,7 @@ export function BentoTile({
                   // default 40px icon footprint without re-introducing tokens.
                   style={{ height: 28, width: 28, padding: 0, borderRadius: 9999 }}
                 >
-                  <X className="size-4" aria-hidden="true" />
+                  <Icon name="x" className="size-4" aria-hidden="true" />
                 </Button>
               )}
             </div>

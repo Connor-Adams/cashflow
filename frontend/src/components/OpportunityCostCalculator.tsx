@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Calculator, Info, RotateCcw } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { RotateCcw } from 'lucide-react'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { Card, CardContent, CardHeader, CardTitle } from '@connor-adams/designsystem'
 import { Input } from '@connor-adams/designsystem'
 import { Label } from '@connor-adams/designsystem'
@@ -240,7 +240,7 @@ export function OpportunityCostCalculator({
 
         <div className="flex flex-wrap gap-2">
           <Button type="submit" disabled={loading}>
-            <Calculator aria-hidden="true" />
+            <Icon name="calculator" aria-hidden="true" />
             {loading ? 'Calculating…' : 'Calculate'}
           </Button>
           <Button type="button" variant="ghost" onClick={reset}>
@@ -286,7 +286,7 @@ export function OpportunityCostCalculator({
 
             <div className="rounded-md border border-border bg-muted/40 p-3">
               <p className="mb-1 flex items-center gap-1.5 text-[0.82rem] font-semibold text-muted-foreground">
-                <Info aria-hidden="true" className="h-3.5 w-3.5" />
+                <Icon name="info" aria-hidden="true" className="h-3.5 w-3.5" />
                 Assumptions
               </p>
               <ul className="list-disc space-y-0.5 pl-5 text-sm text-muted-foreground">

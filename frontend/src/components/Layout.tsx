@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
-import { Command as CommandIcon, Menu } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Command as CommandIcon } from 'lucide-react'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { useLayoutWidth } from '../lib/layoutWidth'
 import { useCommandPalette } from '../hooks/useCommandPalette'
 import { CommandPalette } from './CommandPalette'
@@ -90,7 +90,7 @@ export function Layout() {
             aria-expanded={sidebarOpen}
             aria-controls="primary-navigation"
           >
-            <Menu size={20} aria-hidden="true" />
+            <Icon name="menu" size={20} aria-hidden="true" />
           </Button>
           <span className="topBar__wordmark">Cashflow</span>
           <div className="topBar__right ml-auto flex items-center gap-2">

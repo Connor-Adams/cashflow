@@ -10,8 +10,8 @@
  */
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AlertTriangle, UserX, Users } from 'lucide-react'
-import { Badge } from '@connor-adams/designsystem'
+import { UserX } from 'lucide-react'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { EmptyTableRow } from '@/lib/ds-extras'
@@ -444,7 +444,7 @@ export function PeopleLedgerPage() {
       {ambiguous.length > 0 && (
         <Card className="mb-4 p-4">
           <div className="mb-2 flex items-center gap-2">
-            <AlertTriangle className="size-4 text-warning" aria-hidden="true" />
+            <Icon name="alert-triangle" className="size-4 text-warning" aria-hidden="true" />
             <span className="text-sm font-medium">Ambiguous matches — pick the right contact</span>
           </div>
           <div className="flex flex-col gap-2">
@@ -539,7 +539,7 @@ export function PeopleLedgerPage() {
                       >
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            <Users className="size-4 text-muted-foreground" aria-hidden="true" />
+                            <Icon name="users" className="size-4 text-muted-foreground" aria-hidden="true" />
                             <span>{c.name}</span>
                           </div>
                         </TableCell>

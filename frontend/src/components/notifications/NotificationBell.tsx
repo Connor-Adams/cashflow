@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bell } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { useNotifications } from '@/hooks/useNotifications'
 import { NotificationPanel } from './NotificationPanel'
 
@@ -73,7 +72,7 @@ export function NotificationBell() {
         onClick={toggle}
         className="relative inline-flex items-center justify-center rounded-full w-9 h-9"
       >
-        <Bell size={18} aria-hidden="true" />
+        <Icon name="bell" size={18} aria-hidden="true" />
         {showBadge && (
           <span
             className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-danger text-white text-[10px] font-semibold flex items-center justify-center"

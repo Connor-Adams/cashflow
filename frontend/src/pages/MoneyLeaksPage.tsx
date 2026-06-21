@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, Droplet, Repeat, Truck, Users, X } from 'lucide-react'
+import { AlertTriangle, Droplet, Repeat, Truck, Users } from 'lucide-react'
 import { Alert } from '@connor-adams/designsystem'
+import { Icon as DsIcon } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -383,7 +384,7 @@ function LeakGroup({
               }}
               aria-label={`Dismiss ${item.title}`}
             >
-              <X size={14} aria-hidden="true" /> dismiss
+              <DsIcon name="x" size={14} aria-hidden="true" /> dismiss
             </Button>
           </li>
         ))}

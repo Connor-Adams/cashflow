@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, RotateCcw } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { RotateCcw } from 'lucide-react'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
 import { describeCron } from '@/lib/cron'
@@ -263,7 +263,7 @@ export function JobsTab() {
                           onClick={() => void toggleExpanded(j)}
                           className="font-medium"
                         >
-                          {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                          {isExpanded ? <Icon name="chevron-down" size={16} /> : <Icon name="chevron-right" size={16} />}
                           {j.name}
                         </Button>
                       </td>

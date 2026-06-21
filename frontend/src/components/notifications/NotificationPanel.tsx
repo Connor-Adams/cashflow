@@ -1,5 +1,5 @@
-import { AlertTriangle, CheckCircle2, Info, OctagonAlert } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { AlertTriangle, Info, OctagonAlert } from 'lucide-react'
+import { Button, Icon as DsIcon } from '@connor-adams/designsystem'
 import { DigestCard } from './DigestCard'
 import type { Notification, NotificationSeverity } from '@/types/api'
 
@@ -108,7 +108,8 @@ export function NotificationPanel({
 
       {listStatus === 'success' && notifications.length === 0 && (
         <div className="px-4 py-10 text-center">
-          <CheckCircle2
+          <DsIcon
+            name="check-circle"
             size={28}
             className="mx-auto text-muted-foreground mb-3"
             aria-hidden="true"

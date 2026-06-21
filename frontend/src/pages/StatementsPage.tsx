@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Plus, RefreshCw } from 'lucide-react'
-import { Badge } from '@connor-adams/designsystem'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import { EmptyTableRow } from '@/lib/ds-extras'
@@ -294,7 +293,7 @@ export function StatementsPage() {
             onClick={() => void refreshList()}
             aria-label="Refresh statements"
           >
-            <RefreshCw aria-hidden="true" />
+            <Icon name="refresh-cw" aria-hidden="true" />
             Refresh
           </Button>
         }
@@ -382,7 +381,7 @@ export function StatementsPage() {
             />
           </label>
           <Button type="submit" size="sm" disabled={submitting}>
-            <Plus aria-hidden="true" />
+            <Icon name="plus" aria-hidden="true" />
             {submitting ? 'Saving…' : 'Create statement'}
           </Button>
         </form>

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Plus, Pencil, Trash2 } from 'lucide-react'
-import { Badge } from '@connor-adams/designsystem'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Dialog } from '@connor-adams/designsystem'
@@ -400,7 +399,7 @@ export function IncomePage() {
         description="Log and track your income events."
         actions={
           <Button onClick={openCreate}>
-            <Plus className="mr-2 h-4 w-4" />
+            <Icon name="plus" className="mr-2 h-4 w-4" />
             Log income
           </Button>
         }
@@ -484,7 +483,7 @@ export function IncomePage() {
                       variant="ghost"
                       onClick={() => openEdit(entry)}
                     >
-                      <Pencil className="h-3.5 w-3.5" />
+                      <Icon name="pencil" className="h-3.5 w-3.5" />
                       <span className="sr-only">Edit</span>
                     </Button>
                     <Button
@@ -493,7 +492,7 @@ export function IncomePage() {
                       onClick={() => handleDelete(entry)}
                       disabled={deleting === entry.id}
                     >
-                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      <Icon name="trash" className="h-3.5 w-3.5 text-destructive" />
                       <span className="sr-only">Delete</span>
                     </Button>
                   </div>

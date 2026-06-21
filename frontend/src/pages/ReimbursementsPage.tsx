@@ -10,9 +10,8 @@
  * the app.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Clock, Link2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { Alert } from '@connor-adams/designsystem'
+import { Alert, Icon } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -380,7 +379,7 @@ function ReimbursementRow({
           <div className={overdue ? 'text-destructive' : ''}>
             <div>
               {overdue && (
-                <AlertTriangle className="inline-block size-3 align-text-bottom" />
+                <Icon name="alert-triangle" className="inline-block size-3 align-text-bottom" />
               )}{' '}
               {row.dueDate}
             </div>
@@ -412,7 +411,7 @@ function ReimbursementRow({
         )}
         {row.repaymentTransaction && (
           <div className="text-xs mt-1 text-muted-foreground">
-            <Link2 className="inline-block size-3 align-text-bottom" /> repaid{' '}
+            <Icon name="link" className="inline-block size-3 align-text-bottom" /> repaid{' '}
             {row.repaymentTransaction.date}
           </div>
         )}
@@ -446,7 +445,7 @@ function ReimbursementRow({
               onClick={() => onSetStatus(row, 'received')}
               title="Mark as received"
             >
-              <CheckCircle2 className="size-3" /> Received
+              <Icon name="check-circle" className="size-3" /> Received
             </Button>
           )}
           {row.status === 'received' && (
@@ -457,7 +456,7 @@ function ReimbursementRow({
               onClick={() => onUnlink(row)}
               title="Reopen this claim"
             >
-              <Clock className="size-3" /> Reopen
+              <Icon name="clock" className="size-3" /> Reopen
             </Button>
           )}
           {row.status !== 'waived' && row.status !== 'received' && (

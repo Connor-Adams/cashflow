@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { Download, Plus, Trash2 } from 'lucide-react'
-import { Alert } from '@connor-adams/designsystem'
+import { Alert, Icon } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
 import { EmptyTableRow } from '@/lib/ds-extras'
 import { Badge } from '@connor-adams/designsystem'
@@ -625,7 +624,7 @@ export function ReportsPage() {
                     : 'Download the partner split table as CSV'
                 }
               >
-                <Download aria-hidden="true" />
+                <Icon name="download" aria-hidden="true" />
                 Export CSV
               </Button>
               <Button
@@ -640,7 +639,7 @@ export function ReportsPage() {
                     : undefined
                 }
               >
-                <Plus aria-hidden="true" />
+                <Icon name="plus" aria-hidden="true" />
                 Record settlement
               </Button>
             </>
@@ -764,7 +763,7 @@ export function ReportsPage() {
                   : 'Download the business totals table as CSV'
               }
             >
-              <Download aria-hidden="true" />
+              <Icon name="download" aria-hidden="true" />
               Export CSV
             </Button>
           }
@@ -846,7 +845,7 @@ export function ReportsPage() {
                       variant="destructive"
                       onClick={() => void removeSettlement(row)}
                     >
-                      <Trash2 aria-hidden="true" />
+                      <Icon name="trash" aria-hidden="true" />
                       Delete
                     </Button>
                   </TableCell>

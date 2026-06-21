@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { ChevronDown, ChevronRight, Edit3, Plus, Trash2 } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Edit3 } from 'lucide-react'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Dialog } from '@connor-adams/designsystem'
 import { useConfirm } from '@/lib/ds-extras'
@@ -163,7 +163,7 @@ export function ContactsTab() {
             <span>Partner</span>
           </Label>
           <Button type="submit">
-            <Plus aria-hidden="true" />
+            <Icon name="plus" aria-hidden="true" />
             Add contact
           </Button>
         </form>
@@ -300,7 +300,7 @@ function ContactCard({
           Edit
         </Button>
         <Button type="button" size="sm" variant="destructive" onClick={onDelete}>
-          <Trash2 aria-hidden="true" />
+          <Icon name="trash" aria-hidden="true" />
           Delete
         </Button>
         <Button
@@ -313,9 +313,9 @@ function ContactCard({
           title="Open reimbursements tied to this contact"
         >
           {expanded ? (
-            <ChevronDown aria-hidden="true" />
+            <Icon name="chevron-down" aria-hidden="true" />
           ) : (
-            <ChevronRight aria-hidden="true" />
+            <Icon name="chevron-right" aria-hidden="true" />
           )}
           Reimbursements
         </Button>

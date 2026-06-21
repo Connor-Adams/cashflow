@@ -1,5 +1,4 @@
-import { Plus } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { cn } from '@/lib/utils'
 import type { ChatThread } from '@cashflow/shared'
 
@@ -32,7 +31,7 @@ export function ChatThreadList({ threads, selectedId, onSelect, onNew, loading }
           className="w-full justify-center"
           onClick={onNew}
         >
-          <Plus size={16} aria-hidden="true" />
+          <Icon name="plus" size={16} aria-hidden="true" />
           <span className="ml-1">New thread</span>
         </Button>
       </div>

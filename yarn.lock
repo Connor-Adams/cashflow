@@ -910,19 +910,26 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@connor-adams/designsystem@npm:^0.3.0":
-  version: 0.3.0
-  resolution: "@connor-adams/designsystem@npm:0.3.0::__archiveUrl=https%3A%2F%2Fnpm.pkg.github.com%2Fdownload%2F%40connor-adams%2Fdesignsystem%2F0.3.0%2F165f67b76a1454c6bebdc7328fc0b329a1fa52f3"
+"@connor-adams/designsystem@npm:^0.4.0":
+  version: 0.4.0
+  resolution: "@connor-adams/designsystem@npm:0.4.0::__archiveUrl=https%3A%2F%2Fnpm.pkg.github.com%2Fdownload%2F%40connor-adams%2Fdesignsystem%2F0.4.0%2Ffa00a5b5c185e10938955f09b49eabb521c8e1e1"
   dependencies:
-    "@connor-adams/tokens": "npm:0.1.0"
+    "@connor-adams/tokens": "npm:0.1.1"
   peerDependencies:
     react: ">=18"
     react-dom: ">=18"
-  checksum: 10c0/6fbdf4fbea11b8c081a17631dd465b86f70f4367166657619e523021ec08cc78cb8298b520617af0951c7827a7cded2659ebcfe9efde9354ee5bb785ec923ca1
+  checksum: 10c0/3c92c71d8c5b81ecb7e86fcc0936be2d2d0186548a4d582b61092b39ca757c62ebb56bff259294bf4d7f8eb87e019270ac1e15c7ca73f0317095c1eed721ed73
   languageName: node
   linkType: hard
 
-"@connor-adams/tokens@npm:0.1.0, @connor-adams/tokens@npm:^0.1.0":
+"@connor-adams/tokens@npm:0.1.1":
+  version: 0.1.1
+  resolution: "@connor-adams/tokens@npm:0.1.1::__archiveUrl=https%3A%2F%2Fnpm.pkg.github.com%2Fdownload%2F%40connor-adams%2Ftokens%2F0.1.1%2F98325711f1a3aff1d7a77c64e1766dfcf9669720"
+  checksum: 10c0/aa128bd5845ae93d12dfe76a4da4e29b7f00f4837cc6efba7890bd47f236a7f9c695dd1a7b8383b6438e318fe52d682f1c3635b5778be1140376491d921cc489
+  languageName: node
+  linkType: hard
+
+"@connor-adams/tokens@npm:^0.1.0":
   version: 0.1.0
   resolution: "@connor-adams/tokens@npm:0.1.0::__archiveUrl=https%3A%2F%2Fnpm.pkg.github.com%2Fdownload%2F%40connor-adams%2Ftokens%2F0.1.0%2F44c6f91fc83951c31e06af9bb63e9bea354389cd"
   checksum: 10c0/a6af25adc972c895d190a3c2c6bc44c37fe9e64b72857ec7ba839ed085da5769b5accc369ad019c09b702dfa577a37558cfcc22de938e2aa44c485516d846291
@@ -7544,7 +7551,7 @@ __metadata:
   resolution: "frontend@workspace:frontend"
   dependencies:
     "@cashflow/shared": "npm:*"
-    "@connor-adams/designsystem": "npm:^0.3.0"
+    "@connor-adams/designsystem": "npm:^0.4.0"
     "@connor-adams/tokens": "npm:^0.1.0"
     "@eslint/js": "npm:^9.39.4"
     "@radix-ui/react-slot": "npm:^1.2.4"

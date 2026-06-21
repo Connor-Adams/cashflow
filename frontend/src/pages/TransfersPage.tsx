@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowLeftRight, Link2, RefreshCw, Unlink2 } from 'lucide-react'
-import { Alert } from '@connor-adams/designsystem'
+import { Unlink2 } from 'lucide-react'
+import { Alert, Icon } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -250,7 +250,7 @@ export function TransfersPage() {
             onClick={() => void refresh()}
             aria-label="Refresh"
           >
-            <RefreshCw size={14} aria-hidden="true" /> Refresh
+            <Icon name="refresh-cw" size={14} aria-hidden="true" /> Refresh
           </Button>
         </div>
         <MoneyMovementTable
@@ -402,7 +402,7 @@ function UnmatchedRowRender({
             variant={expanded ? 'default' : 'ghost'}
             onClick={onToggleExpand}
           >
-            <Link2 size={12} aria-hidden="true" />
+            <Icon name="link" size={12} aria-hidden="true" />
             {expanded ? ' Hide' : ' Suggest matches'}
           </Button>
         </TableCell>
@@ -579,7 +579,7 @@ function MoneyMovementTable({
             flows.map((flow, i) => (
               <TableRow key={`flow-${i}`}>
                 <TableCell>
-                  <ArrowLeftRight size={12} aria-hidden="true" /> {flow.sourceAccountName}
+                  <Icon name="arrow-right-left" size={12} aria-hidden="true" /> {flow.sourceAccountName}
                 </TableCell>
                 <TableCell>{flow.destAccountName}</TableCell>
                 <TableCell>

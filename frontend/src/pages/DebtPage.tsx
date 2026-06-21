@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { PiggyBank, TrendingDown, Save, Pencil } from 'lucide-react'
-import { Badge } from '@connor-adams/designsystem'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
@@ -264,7 +263,7 @@ function LiabilityRow({
           </div>
         ) : (
           <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-            <Pencil className="mr-1 size-3" aria-hidden="true" />
+            <Icon name="pencil" className="mr-1 size-3" aria-hidden="true" />
             Edit
           </Button>
         )}
@@ -289,7 +288,7 @@ function ComparisonCard({ comparison, liabilities, currency }: ComparisonCardPro
   return (
     <Card className="mb-4 p-3">
       <div className="mb-3 flex items-center gap-2">
-        <TrendingDown className="size-4 text-positive" aria-hidden="true" />
+        <Icon name="trending-down" className="size-4 text-positive" aria-hidden="true" />
         <h2 className="text-sm font-semibold">Avalanche vs snowball</h2>
       </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -410,7 +409,7 @@ function SaveScenarioCard({ extra, onSaved }: { extra: number; onSaved: () => vo
   return (
     <Card className="p-3">
       <div className="mb-3 flex items-center gap-2">
-        <PiggyBank className="size-4" aria-hidden="true" />
+        <Icon name="piggy-bank" className="size-4" aria-hidden="true" />
         <h2 className="text-sm font-semibold">Save a payoff plan</h2>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -452,7 +451,7 @@ function SaveScenarioCard({ extra, onSaved }: { extra: number; onSaved: () => vo
         </label>
         <div className="flex items-end">
           <Button onClick={save} disabled={saving} className="w-full">
-            <Save className="mr-1 size-4" aria-hidden="true" />
+            <Icon name="save" className="mr-1 size-4" aria-hidden="true" />
             {saving ? 'Saving…' : 'Save plan'}
           </Button>
         </div>

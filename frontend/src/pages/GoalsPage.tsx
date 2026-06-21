@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3, Plus, Target, Trash2 } from 'lucide-react'
-import { Badge } from '@connor-adams/designsystem'
+import { Edit3 } from 'lucide-react'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { useConfirm } from '@/lib/ds-extras'
@@ -415,7 +415,7 @@ export function GoalsPage() {
         <SectionHeader
           title={
             <span className="flex items-center gap-2">
-              <Target aria-hidden="true" className="h-5 w-5" />
+              <Icon name="target" aria-hidden="true" className="h-5 w-5" />
               Your goals
             </span>
           }
@@ -647,7 +647,7 @@ export function GoalsPage() {
                             variant="destructive"
                             onClick={() => void deleteGoal(row)}
                           >
-                            <Trash2 aria-hidden="true" />
+                            <Icon name="trash" aria-hidden="true" />
                             Delete
                           </Button>
                         </div>
@@ -670,7 +670,7 @@ export function GoalsPage() {
             showErrors={createAttempted}
           />
           <Button type="submit" disabled={submitting}>
-            <Plus aria-hidden="true" />
+            <Icon name="plus" aria-hidden="true" />
             Add goal
           </Button>
         </form>

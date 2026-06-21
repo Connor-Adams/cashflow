@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  Check, LinkIcon, RefreshCw, Search, Sparkles, Trash2, Upload, X, } from 'lucide-react'
-import { Alert } from '@connor-adams/designsystem'
+import { Sparkles } from 'lucide-react'
+import { Alert, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { useConfirm } from '@/lib/ds-extras'
@@ -340,7 +339,7 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
             </span>
           )}
           <Button type="button" variant="secondary" onClick={runMatching} disabled={loading}>
-            <RefreshCw aria-hidden="true" />
+            <Icon name="refresh-cw" aria-hidden="true" />
             Run matching
           </Button>
           <Button
@@ -385,7 +384,7 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
             />
           </Label>
           <Button type="submit" disabled={loading}>
-            <Upload aria-hidden="true" />
+            <Icon name="upload" aria-hidden="true" />
             Upload CSV
           </Button>
         </form>
@@ -428,19 +427,19 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
                     </div>
                     <div className="flex flex-wrap items-center gap-3">
                       <Button type="button" onClick={() => void linkAction(`/api/amazon/links/${link.id}/accept`)} disabled={loading}>
-                        <Check aria-hidden="true" />
+                        <Icon name="check" aria-hidden="true" />
                         Accept
                       </Button>
                       <Button type="button" variant="secondary" onClick={() => void linkAction(`/api/amazon/links/${link.id}/reject`)} disabled={loading}>
-                        <X aria-hidden="true" />
+                        <Icon name="x" aria-hidden="true" />
                         Reject
                       </Button>
                       <Button type="button" variant="ghost" onClick={() => link.order && setSelectedOrderId(link.order.id)}>
-                        <Search aria-hidden="true" />
+                        <Icon name="search" aria-hidden="true" />
                         View/Edit
                       </Button>
                       <Button type="button" variant="destructive" onClick={() => void unlink(link.id)} disabled={loading}>
-                        <Trash2 aria-hidden="true" />
+                        <Icon name="trash" aria-hidden="true" />
                         Unlink
                       </Button>
                     </div>
@@ -460,7 +459,7 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
                     ))}
                   </NativeSelect>
                   <Button type="button" onClick={() => void manualLink(txn.id)} disabled={loading || !manualOrderByTxn[txn.id]}>
-                    <LinkIcon aria-hidden="true" />
+                    <Icon name="link" aria-hidden="true" />
                     Link
                   </Button>
                 </div>

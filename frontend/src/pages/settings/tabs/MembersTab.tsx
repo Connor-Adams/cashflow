@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Clock, Copy, Trash2, UserPlus } from 'lucide-react'
-import { Badge } from '@connor-adams/designsystem'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { useConfirm } from '@/lib/ds-extras'
@@ -160,7 +159,7 @@ export function MembersTab() {
             </p>
           </div>
           <Button type="button" onClick={() => setInviteOpen(true)}>
-            <UserPlus aria-hidden="true" />
+            <Icon name="user-plus" aria-hidden="true" />
             Invite a member
           </Button>
         </div>
@@ -182,7 +181,7 @@ export function MembersTab() {
           actions={
             <div className="mx-auto">
               <Button type="button" onClick={() => setInviteOpen(true)}>
-                <UserPlus aria-hidden="true" />
+                <Icon name="user-plus" aria-hidden="true" />
                 Invite a member
               </Button>
             </div>
@@ -223,7 +222,7 @@ export function MembersTab() {
                           onClick={() => void removeMember(member)}
                           aria-label={`Remove ${member.displayName}`}
                         >
-                          <Trash2 aria-hidden="true" />
+                          <Icon name="trash" aria-hidden="true" />
                           Remove
                         </Button>
                       )}
@@ -250,7 +249,7 @@ export function MembersTab() {
                       className="flex items-center justify-between gap-3"
                     >
                       <div className="flex min-w-0 items-center gap-3">
-                        <Clock aria-hidden="true" className="text-muted-foreground" />
+                        <Icon name="clock" aria-hidden="true" className="text-muted-foreground" />
                         <div className="min-w-0">
                           <div className="truncate font-mono text-sm">
                             {invite.tokenFragment}…
@@ -275,7 +274,7 @@ export function MembersTab() {
                           }
                           aria-label={`Copy link for invite ${invite.tokenFragment}`}
                         >
-                          <Copy aria-hidden="true" />
+                          <Icon name="copy" aria-hidden="true" />
                           Copy link
                         </Button>
                         <Button
@@ -285,7 +284,7 @@ export function MembersTab() {
                           onClick={() => void revokeInvite(invite)}
                           aria-label={`Revoke invite ${invite.tokenFragment}`}
                         >
-                          <Trash2 aria-hidden="true" />
+                          <Icon name="trash" aria-hidden="true" />
                           Revoke
                         </Button>
                       </div>

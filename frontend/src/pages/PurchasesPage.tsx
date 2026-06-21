@@ -14,8 +14,7 @@
  */
 import { useMemo, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
-import { Inbox, Plus, Trash2, X } from 'lucide-react'
-import { Badge } from '@connor-adams/designsystem'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { useConfirm } from '@/lib/ds-extras'
@@ -300,7 +299,7 @@ function LargeInboxCard({
   return (
     <Card className="flex flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center gap-3">
-        <Inbox aria-hidden="true" className="text-muted-foreground" />
+        <Icon name="inbox" aria-hidden="true" className="text-muted-foreground" />
         <h2 className="text-lg font-semibold">Large purchase inbox</h2>
         <div className="flex items-center gap-2">
           <Label htmlFor="inbox-min" className="text-sm">
@@ -356,7 +355,7 @@ function LargeInboxCard({
                     size="sm"
                     onClick={() => onTrack(r.id)}
                   >
-                    <Plus aria-hidden="true" className="mr-1 h-3 w-3" />
+                    <Icon name="plus" aria-hidden="true" className="mr-1 h-3 w-3" />
                     Track
                   </Button>
                 </TableCell>
@@ -433,7 +432,7 @@ function PurchaseDetailDrawer({
             onClick={onClose}
             aria-label="Close detail panel"
           >
-            <X aria-hidden="true" />
+            <Icon name="x" aria-hidden="true" />
           </Button>
         </div>
 
@@ -566,7 +565,7 @@ function PurchaseDetailDrawer({
               size="sm"
               onClick={() => void onUntrack(purchase.transactionId)}
             >
-              <Trash2 aria-hidden="true" className="mr-1 h-3 w-3" />
+              <Icon name="trash" aria-hidden="true" className="mr-1 h-3 w-3" />
               Untrack
             </Button>
             <div className="flex gap-2">

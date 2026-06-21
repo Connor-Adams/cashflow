@@ -8,8 +8,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
-import { Download, Lock, ShieldAlert, Trash2, Upload as UploadIcon } from 'lucide-react'
-import { Badge } from '@connor-adams/designsystem'
+import { ShieldAlert } from 'lucide-react'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { useConfirm } from '@/lib/ds-extras'
@@ -391,7 +391,7 @@ function UploadCard({ onUpload }: { onUpload: (form: VaultUploadForm) => Promise
         </div>
         <div className="md:col-span-2 flex justify-end">
           <Button type="submit" disabled={submitting || !file}>
-            <UploadIcon size={16} aria-hidden="true" />
+            <Icon name="upload" size={16} aria-hidden="true" />
             {submitting ? 'Uploading…' : 'Upload'}
           </Button>
         </div>
@@ -447,7 +447,7 @@ function VaultRow({
       <TableCell>
         {doc.encryptionAlgorithm === 'aes-256-gcm' ? (
           <Badge variant="secondary">
-            <Lock size={12} aria-hidden="true" />
+            <Icon name="lock" size={12} aria-hidden="true" />
             AES-256-GCM
           </Badge>
         ) : (
@@ -459,7 +459,7 @@ function VaultRow({
         <div className="flex justify-end gap-1">
           <a href={`/api/vault/documents/${doc.id}/file`} target="_blank" rel="noreferrer">
             <Button type="button" variant="ghost" size="sm" title="Download">
-              <Download size={16} aria-hidden="true" />
+              <Icon name="download" size={16} aria-hidden="true" />
             </Button>
           </a>
           <Button
@@ -469,7 +469,7 @@ function VaultRow({
             title="Delete"
             onClick={() => void onDelete(doc)}
           >
-            <Trash2 size={16} aria-hidden="true" />
+            <Icon name="trash" size={16} aria-hidden="true" />
           </Button>
         </div>
       </TableCell>

@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Check, Copy } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Button, Icon } from '@connor-adams/designsystem'
 import { Dialog } from '@connor-adams/designsystem'
 import { Input } from '@connor-adams/designsystem'
 import { Label } from '@connor-adams/designsystem'
@@ -98,7 +97,7 @@ export function InviteModal({ open, onOpenChange, onCreated }: InviteModalProps)
                 aria-label="Invite link"
               />
               <Button type="button" onClick={() => void copyLink()}>
-                {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+                {copied ? <Icon name="check" aria-hidden="true" /> : <Icon name="copy" aria-hidden="true" />}
                 Copy link
               </Button>
             </div>

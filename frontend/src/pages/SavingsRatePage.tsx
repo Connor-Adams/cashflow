@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
-import { PiggyBank, TrendingDown, TrendingUp } from 'lucide-react'
+import { TrendingDown, TrendingUp } from 'lucide-react'
 import { Alert } from '@connor-adams/designsystem'
+import { Icon as DsIcon } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
@@ -240,7 +241,7 @@ function RateBadge({ pct }: { pct: number | null }) {
   const Icon = positive ? TrendingUp : TrendingDown
   return (
     <Badge variant={positive ? 'default' : 'destructive'}>
-      <PiggyBank size={14} aria-hidden="true" /> {formatRate(pct)} saved
+      <DsIcon name="piggy-bank" size={14} aria-hidden="true" /> {formatRate(pct)} saved
       <Icon size={14} aria-hidden="true" />
     </Badge>
   )
