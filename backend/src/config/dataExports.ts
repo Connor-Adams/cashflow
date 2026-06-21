@@ -29,6 +29,3 @@ export function getExportsUrlSecret(): string {
 
 /** Export ZIP TTL in milliseconds (7 days). */
 export const EXPORT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-
-/** Soft limit for a single export job in milliseconds (1 hour). */
-export const EXPORT_JOB_SOFT_LIMIT_MS = 60 * 60 * 1000;

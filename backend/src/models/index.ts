@@ -1135,8 +1135,6 @@ export {
   // Model registry barrel: re-exported for API symmetry though current consumers import from the model file directly.
   // fallow-ignore-next-line unused-export
   PortfolioForwardProjection,
-  // Model registry barrel: re-exported for API symmetry though current consumers import from the model file directly.
-  // fallow-ignore-next-line unused-export
   PortfolioDailySnapshot,
   Scenario,
   ScenarioReturn,
