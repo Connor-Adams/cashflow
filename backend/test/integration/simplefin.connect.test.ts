@@ -166,6 +166,83 @@ test('AC6: connecting twice upserts (no duplicate row)', async () => {
   assert.equal(enc.decryptSecret(rows[0].accessUrlEncrypted), secondAccess);
 });
 
+// Issue #814: encryption key missing/invalid → 503 encryption_unconfigured,
+// returned BEFORE the setup token is exchanged (token stays valid for retry).
+const VALID_KEY =
+  '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff';
+
+async function withEncryptionKey<T>(
+  value: string | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const enc = await import('../../src/util/symmetricEncryption.js');
+  const original = process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY;
+  if (value === undefined) delete process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY;
+  else process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY = value;
+  enc.__resetKeyCacheForTests();
+  try {
+    return await fn();
+  } finally {
+    process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY = original;
+    enc.__resetKeyCacheForTests();
+  }
+}
+
+test('AC1/AC2 (#814): unset key → 503 encryption_unconfigured, token NOT exchanged, no row', async () => {
+  let claimCalls = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === CLAIM_URL && init?.method === 'POST') {
+      claimCalls += 1;
+      return new Response(ACCESS_URL, { status: 200 });
+    }
+    return new Response('nf', { status: 404 });
+  }) as unknown as typeof globalThis.fetch;
+
+  const res = await withEncryptionKey(undefined, () =>
+    authed.post('/api/simplefin/connect').send({ setupToken: SETUP_TOKEN }),
+  );
+
+  assert.equal(res.status, 503, JSON.stringify(res.body));
+  assert.equal(res.body.error, 'encryption_unconfigured');
+  assert.notEqual(res.body.error, 'storage_failed');
+  assert.notEqual(res.body.error, 'invalid_setup_token');
+  assert.match(res.body.message, /server configuration issue/i);
+  assert.match(res.body.message, /your token is still valid/i);
+  assert.equal(claimCalls, 0, 'claimAccessUrl must NOT be called — token not consumed');
+  assert.equal(await models.UserSimplefinIntegration.count(), 0);
+});
+
+test('AC3 (#814): key present but invalid (wrong length) → 503 encryption_unconfigured, no exchange', async () => {
+  let claimCalls = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === CLAIM_URL && init?.method === 'POST') {
+      claimCalls += 1;
+      return new Response(ACCESS_URL, { status: 200 });
+    }
+    return new Response('nf', { status: 404 });
+  }) as unknown as typeof globalThis.fetch;
+
+  const res = await withEncryptionKey('deadbeef', () =>
+    authed.post('/api/simplefin/connect').send({ setupToken: SETUP_TOKEN }),
+  );
+
+  assert.equal(res.status, 503, JSON.stringify(res.body));
+  assert.equal(res.body.error, 'encryption_unconfigured');
+  assert.equal(claimCalls, 0, 'invalid key must not exchange the token');
+  assert.equal(await models.UserSimplefinIntegration.count(), 0);
+});
+
+test('AC4 (#814): with a valid key the connect path still succeeds end-to-end', async () => {
+  stubFetch({ accounts: [] });
+  const res = await withEncryptionKey(VALID_KEY, () =>
+    authed.post('/api/simplefin/connect').send({ setupToken: SETUP_TOKEN }),
+  );
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.status, 'connected');
+  const rows = await models.UserSimplefinIntegration.findAll({ where: { userId } });
+  assert.equal(rows.length, 1);
+});
+
 test('AC7: discovery maps accounts, reports unlinked, writes zero transactions', async () => {
   await models.Account.create({
     name: 'My Checking',

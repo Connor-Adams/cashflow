@@ -157,7 +157,13 @@ common knobs:
 | `RECEIPTS_UPLOAD_DIR` | `./uploads/receipts` | Local receipt storage |
 | `OPENAI_API_KEY` | _(unset)_ | Enables AI suggestions, vision, chat |
 | `ALPHA_VANTAGE_API_KEY` | _(unset)_ | Enables stock quotes + dividends |
+| `EMAIL_INTEGRATION_ENCRYPTION_KEY` | _(unset)_ | **Required** for SimpleFIN bank-connect and email integrations — encrypts stored secrets at rest. 64-char hex; generate with `openssl rand -hex 32` |
 | `DEMO_ACCOUNT_ENABLED` | `true` | Seed the demo household on startup |
+
+Without `EMAIL_INTEGRATION_ENCRYPTION_KEY`, connecting a bank via SimpleFIN
+returns a `503 encryption_unconfigured` error (and the server logs a warning at
+startup). See [`backend/.env.example`](backend/.env.example) for the generation
+command and details.
 
 AI models (`OPENAI_MODEL`, `OPENAI_VISION_MODEL`), the quote scheduler
 (`QUOTE_*`), dividend reconciliation (`DIVIDEND_*`), Costco image enrichment

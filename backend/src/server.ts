@@ -8,6 +8,7 @@ import { seedDemoData } from './demo/seedDemoData';
 import { logger } from './observability/logger';
 import { isS3ReceiptStorageEnabled } from './storage/receiptStorage';
 import { registerDbPoolMetrics } from './observability/metrics';
+import { isEncryptionKeyConfigured } from './util/symmetricEncryption';
 import { sequelize } from './db';
 // Register job definitions (side-effect imports).
 import './jobs/definitions/yahooQuote';
@@ -33,6 +34,18 @@ if (!fs.existsSync(uploadDir)) {
 registerDbPoolMetrics(sequelize);
 
 async function start() {
+  // Loud, actionable boot warning when the encryption key is missing/invalid.
+  // SimpleFIN and email integrations both require it and will fail at connect
+  // time otherwise. Warn once at startup so operators catch it before a user
+  // hits a doomed bank-connect flow. (#814)
+  if (!isEncryptionKeyConfigured()) {
+    logger.warn(
+      'EMAIL_INTEGRATION_ENCRYPTION_KEY is not set (or not a 64-char hex string). ' +
+        'SimpleFIN and email integrations will fail until it is configured. ' +
+        'Generate one with: openssl rand -hex 32',
+    );
+  }
+
   await seedDemoData();
 
   app.listen(env.port, () => {

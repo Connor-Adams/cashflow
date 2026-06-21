@@ -12,7 +12,7 @@
  */
 import { Op } from 'sequelize';
 import { Account, SimplefinAccountLink, UserSimplefinIntegration } from '../models';
-import { encryptSecret } from '../util/symmetricEncryption';
+import { encryptSecret, isEncryptionKeyConfigured } from '../util/symmetricEncryption';
 import { logger } from '../observability/logger';
 import type { SimplefinUnlinkedAccount } from '@cashflow/shared';
 import {
@@ -28,6 +28,23 @@ export interface SimplefinConnectResult {
   accountsFound: number;
   accountsLinked: number;
   unlinkedAccounts: SimplefinUnlinkedAccount[];
+}
+
+/**
+ * Thrown by connect() when the server's encryption key
+ * (EMAIL_INTEGRATION_ENCRYPTION_KEY) is missing or not a valid 64-char hex
+ * string. This is a SERVER-misconfiguration error, not a user/token error: it is
+ * raised BEFORE the single-use setup token is exchanged, so the token is never
+ * consumed and the user can retry once the operator fixes the config. The route
+ * maps this to HTTP 503 `encryption_unconfigured` (issue #814).
+ */
+export class EncryptionUnconfiguredError extends Error {
+  constructor() {
+    super(
+      'EMAIL_INTEGRATION_ENCRYPTION_KEY is not set (or not a 64-char hex string).',
+    );
+    this.name = 'EncryptionUnconfiguredError';
+  }
 }
 
 export interface SimplefinStatusResult {
@@ -150,6 +167,14 @@ export async function connect(params: {
   setupToken: string;
 }): Promise<SimplefinConnectResult> {
   const { userId, householdId, setupToken } = params;
+
+  // 0. Fail fast if the server's encryption key is missing/invalid. This MUST run
+  //    before the token exchange (step 2): setup tokens are single-use, so a
+  //    later encryption failure would burn the token on a misconfiguration the
+  //    user can't fix. Throwing here leaves the token unused for retry. (#814)
+  if (!isEncryptionKeyConfigured()) {
+    throw new EncryptionUnconfiguredError();
+  }
 
   // 1. Decode + validate the setup token (throws invalid_setup_token).
   const claimUrl = decodeSetupToken(setupToken);

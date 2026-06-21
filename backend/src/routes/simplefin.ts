@@ -21,7 +21,7 @@ import type {
 import { currentAuth } from '../auth/middleware';
 import { logger } from '../observability/logger';
 import { SimplefinError } from '../simplefin/client';
-import { connect, disconnect, status } from '../simplefin/service';
+import { EncryptionUnconfiguredError, connect, disconnect, status } from '../simplefin/service';
 import {
   SimplefinLinkError,
   linkAccount,
@@ -36,6 +36,10 @@ const GENERIC_CONNECT_ERROR =
   "We couldn't connect your bank. Check that you pasted a fresh setup token and try again.";
 const INVALID_TOKEN_MESSAGE =
   "That setup token isn't valid. Paste a fresh token from SimpleFIN Bridge.";
+const ENCRYPTION_UNCONFIGURED_MESSAGE =
+  "Bank connections aren't available right now because this server is missing " +
+  'its encryption key. This is a server configuration issue, not a problem with ' +
+  'your setup token — your token is still valid. Contact the administrator.';
 
 const router = Router();
 
@@ -74,6 +78,17 @@ router.post('/connect', async (req, res) => {
     );
     res.json(payload);
   } catch (e) {
+    if (e instanceof EncryptionUnconfiguredError) {
+      // Server misconfiguration, not a token problem. The setup token was NOT
+      // exchanged (the check runs before claimAccessUrl), so it stays valid for
+      // retry once the operator sets EMAIL_INTEGRATION_ENCRYPTION_KEY. (#814)
+      logger.error({ message: e.message }, 'simplefin_encryption_unconfigured');
+      res.status(503).json({
+        error: 'encryption_unconfigured',
+        message: ENCRYPTION_UNCONFIGURED_MESSAGE,
+      });
+      return;
+    }
     if (e instanceof SimplefinError) {
       if (e.code === 'invalid_setup_token') {
         logger.warn({ message: e.message }, 'simplefin_invalid_setup_token');
