@@ -1048,6 +1048,63 @@ export type PortfolioSecurityDetail = {
   latestPrice: PortfolioLatestPrice | null
 }
 
+// ---------------------------------------------------------------------------
+// Manual corporate-action entry (issue #301)
+// ---------------------------------------------------------------------------
+
+/** Lightweight security row for the recipient picker on the corp-action form. */
+export type PortfolioSecurityListItem = {
+  id: number
+  symbol: string
+  name: string | null
+}
+
+/** GET /api/portfolio/securities response. */
+export type PortfolioSecuritiesResponse = {
+  securities: PortfolioSecurityListItem[]
+}
+
+/** The four manual corporate-action types accepted by the editor. */
+export type CorporateActionType =
+  | 'dividend_in_kind'
+  | 'spin_off'
+  | 'merger'
+  | 'return_of_capital'
+
+/** POST /api/portfolio/activities request body. */
+export type CreateCorporateActionRequest = {
+  accountId: number
+  securityId: number
+  activityType: CorporateActionType
+  tradeDate: string
+  quantity?: number | null
+  amount?: number | null
+  recipientSecurityId?: number | null
+  costBasisAllocationPct?: number | null
+  cashComponent?: number | null
+}
+
+/** A persisted activity row as echoed by the corp-action endpoint. */
+export type CreatedActivity = {
+  id: number
+  accountId: number
+  securityId: number | null
+  activityType: string
+  tradeDate: string
+  quantity: number | null
+  amount: number | null
+  recipientSecurityId: number | null
+  costBasisAllocationPct: number | null
+  cashComponent: number | null
+  currency: string
+}
+
+/** POST /api/portfolio/activities 201 response. */
+export type CreateCorporateActionResponse = {
+  activity: CreatedActivity
+  recipientActivity: CreatedActivity | null
+}
+
 export type ExternalOrderItemView = {
   id: number;
   externalOrderId: number;

@@ -22,6 +22,7 @@ import { TableCard, type TableColumn } from '@/components/ui/table-card'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import { AboutCard } from './portfolio-security/AboutCard'
+import { CorporateActionForm } from './portfolio-security/CorporateActionForm'
 import { AnalystRecCard } from './portfolio-security/AnalystRecCard'
 import { DividendHistoryCard } from './portfolio-security/DividendHistoryCard'
 import { EarningsCard } from './portfolio-security/EarningsCard'
@@ -231,6 +232,12 @@ export function PortfolioSecurityPage() {
           <Card><p className="muted">No accounts hold this security.</p></Card>
         )}
       </div>
+
+      <CorporateActionForm
+        securityId={security.id}
+        accounts={perAccount.map((p) => ({ accountId: p.accountId, accountName: p.accountName }))}
+        onSubmitted={() => void load()}
+      />
 
       <TableCard
         className="mt-4"

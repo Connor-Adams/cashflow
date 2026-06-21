@@ -1800,6 +1800,35 @@ const CORP_ACTION_LABELS: Record<string, string> = {
 };
 
 /**
+ * GET /api/portfolio/securities — the caller household's securities as
+ * lightweight `{ id, symbol, name }` rows. Backs the recipient-security
+ * picker on the manual corporate-action form (spin_off / merger), where
+ * the target may be a newly issued security the household does not yet
+ * hold, so the held-positions list is not sufficient.
+ */
+router.get('/securities', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const securities = await Security.findAll({
+      where: { householdId: household.id },
+      order: [
+        ['symbol', 'ASC'],
+        ['name', 'ASC'],
+      ],
+    });
+    res.json({
+      securities: securities.map((s) => ({
+        id: s.id,
+        symbol: s.symbol,
+        name: s.name,
+      })),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * POST /api/portfolio/activities — manual entry of a corporate action
  * (issue #301). Accepts the four corporate-action types and persists the
  * activity with synthesized manual provenance. For the cross-security
