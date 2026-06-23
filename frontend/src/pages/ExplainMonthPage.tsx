@@ -60,7 +60,7 @@ const KIND_ICON: Record<ExplainMonthFindingKind, IconName> = {
   spend_change: 'trending-up',
   subscription_change: 'alert-triangle',
   missing_receipt: 'receipt',
-  review_needed: 'clipboard',
+  review_needed: 'clipboard-check',
   business_summary: 'briefcase',
 }
 

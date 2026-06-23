@@ -61,7 +61,7 @@ export function AuthPage() {
             className={mode === 'login' ? 'isActive' : ''}
             onClick={() => setMode('login')}
           >
-            <Icon name="key" aria-hidden="true" />
+            <Icon name="log-in" aria-hidden="true" />
             Log in
           </Button>
           <Button
