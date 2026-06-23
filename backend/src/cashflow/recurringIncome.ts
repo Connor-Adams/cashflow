@@ -52,10 +52,8 @@ function classifyCadence(medianGap: number): number | null {
   return null;
 }
 
-export function detectRecurringIncome(
-  txns: IncomeTxn[],
-  asOfDate: string,
-): RecurringIncomeStream[] {
+/** Bucket positive, named inflows by normalized merchant. */
+function groupByMerchant(txns: IncomeTxn[]): Map<string, IncomeTxn[]> {
   const groups = new Map<string, IncomeTxn[]>();
   for (const t of txns) {
     if (!(t.amount > 0)) continue;
@@ -65,42 +63,61 @@ export function detectRecurringIncome(
     if (bucket) bucket.push(t);
     else groups.set(key, [t]);
   }
+  return groups;
+}
 
+/** Day-count gaps between consecutive (ascending) epoch-ms dates. */
+function consecutiveGaps(sortedMs: number[]): number[] {
+  const gaps: number[] = [];
+  for (let i = 1; i < sortedMs.length; i++) {
+    gaps.push((sortedMs[i] - sortedMs[i - 1]) / MS_PER_DAY);
+  }
+  return gaps;
+}
+
+/**
+ * Qualify one merchant's inflows as a recurring stream, or null if it fails any
+ * of the conservative rules (count, cadence, spacing, amount stability, recency).
+ */
+function qualifyStream(
+  merchant: string,
+  items: IncomeTxn[],
+  asOfMs: number,
+): RecurringIncomeStream | null {
+  if (items.length < MIN_OCCURRENCES) return null;
+  const sorted = [...items].sort((a, b) => isoToMs(a.date) - isoToMs(b.date));
+  const gaps = consecutiveGaps(sorted.map((s) => isoToMs(s.date)));
+
+  const cadence = classifyCadence(median(gaps));
+  if (cadence == null) return null;
+  // Every gap must be consistent with the cadence (reject the odd long break).
+  const gapTol = cadence <= 14 ? 3 : 6;
+  if (!gaps.every((g) => Math.abs(g - cadence) <= gapTol)) return null;
+
+  // Amounts must cluster — a stable paycheck, not lumpy gig income.
+  const amounts = sorted.map((s) => s.amount);
+  const medAmt = median(amounts);
+  if (medAmt <= 0) return null;
+  if (!amounts.every((a) => Math.abs(a - medAmt) / medAmt <= AMOUNT_TOLERANCE)) {
+    return null;
+  }
+
+  // Still active: the last occurrence is within 1.5 cadences of today.
+  const lastDate = sorted[sorted.length - 1].date;
+  if (asOfMs - isoToMs(lastDate) > 1.5 * cadence * MS_PER_DAY) return null;
+
+  return { merchant, amount: round2(medAmt), cadenceDays: cadence, lastDate };
+}
+
+export function detectRecurringIncome(
+  txns: IncomeTxn[],
+  asOfDate: string,
+): RecurringIncomeStream[] {
   const asOfMs = isoToMs(asOfDate);
   const out: RecurringIncomeStream[] = [];
-  for (const [key, items] of groups) {
-    if (items.length < MIN_OCCURRENCES) continue;
-    const sorted = [...items].sort((a, b) => isoToMs(a.date) - isoToMs(b.date));
-
-    const gaps: number[] = [];
-    for (let i = 1; i < sorted.length; i++) {
-      gaps.push((isoToMs(sorted[i].date) - isoToMs(sorted[i - 1].date)) / MS_PER_DAY);
-    }
-    const cadence = classifyCadence(median(gaps));
-    if (cadence == null) continue;
-
-    // Every gap must be consistent with the cadence (reject the odd long break).
-    const gapTol = cadence <= 14 ? 3 : 6;
-    if (!gaps.every((g) => Math.abs(g - cadence) <= gapTol)) continue;
-
-    // Amounts must cluster — a stable paycheck, not lumpy gig income.
-    const amounts = sorted.map((s) => s.amount);
-    const medAmt = median(amounts);
-    if (medAmt <= 0) continue;
-    if (!amounts.every((a) => Math.abs(a - medAmt) / medAmt <= AMOUNT_TOLERANCE)) {
-      continue;
-    }
-
-    // Still active: the last occurrence is within 1.5 cadences of today.
-    const lastMs = isoToMs(sorted[sorted.length - 1].date);
-    if (asOfMs - lastMs > 1.5 * cadence * MS_PER_DAY) continue;
-
-    out.push({
-      merchant: key,
-      amount: round2(medAmt),
-      cadenceDays: cadence,
-      lastDate: sorted[sorted.length - 1].date,
-    });
+  for (const [merchant, items] of groupByMerchant(txns)) {
+    const stream = qualifyStream(merchant, items, asOfMs);
+    if (stream) out.push(stream);
   }
   return out;
 }
