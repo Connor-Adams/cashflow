@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Loader2 } from 'lucide-react'
 import { Button } from '@connor-adams/designsystem'
 import { Input } from '@connor-adams/designsystem'
 import { NativeSelect } from '@connor-adams/designsystem'
+import { Spinner } from '@connor-adams/designsystem'
 import {
   getJson,
   getSimplefinAccounts,
@@ -103,7 +103,7 @@ export function SimplefinAccountLinkStep() {
   if (state.loading) {
     return (
       <p className="text-sm muted flex items-center gap-2 mt-3" data-testid="simplefin-accounts-loading">
-        <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+        <Spinner aria-hidden="true" size={16} />
         Loading your SimpleFIN accounts&hellip;
       </p>
     )

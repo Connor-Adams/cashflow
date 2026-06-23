@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3, GitMerge } from 'lucide-react'
+import { GitMerge } from 'lucide-react'
 import { Button, Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Dialog } from '@connor-adams/designsystem'
@@ -172,7 +172,7 @@ export function LabelsTab() {
                       aria-label={`Rename ${label.name}`}
                       onClick={() => openRename(label)}
                     >
-                      <Edit3 aria-hidden="true" />
+                      <Icon name="pencil" aria-hidden="true" />
                       Rename
                     </Button>
                     <Button

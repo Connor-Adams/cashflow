@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { RotateCcw } from 'lucide-react'
 import { Button, Icon } from '@connor-adams/designsystem'
 import { Card, CardContent, CardHeader, CardTitle } from '@connor-adams/designsystem'
 import { Input } from '@connor-adams/designsystem'
@@ -244,7 +243,7 @@ export function OpportunityCostCalculator({
             {loading ? 'Calculating…' : 'Calculate'}
           </Button>
           <Button type="button" variant="ghost" onClick={reset}>
-            <RotateCcw aria-hidden="true" />
+            <Icon name="refresh-cw" aria-hidden="true" />
             Reset
           </Button>
         </div>

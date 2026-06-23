@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState, useEffect } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
-  BarChart3, BookOpenCheck, CalendarClock, CheckSquare, ChevronDown, Receipt, CreditCard, Inbox, LineChart, LayoutDashboard, Lock, LogOut, MessageSquare, ReceiptText, DollarSign, Settings, Shield, Sun, Moon, GitCompare, HeartHandshake, Target, Calculator, Upload, PiggyBank, Sparkles, Tags, Users, } from 'lucide-react'
-import { Badge } from '@connor-adams/designsystem'
+  BarChart3, BookOpenCheck, CalendarClock, CheckSquare, Receipt, CreditCard, Inbox, LineChart, LayoutDashboard, Lock, MessageSquare, ReceiptText, DollarSign, Settings, GitCompare, HeartHandshake, Target, Calculator, Upload, PiggyBank, Sparkles, Tags, Users, } from 'lucide-react'
+import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { useAuth } from '../lib/useAuth'
 import { useTheme } from '../hooks/useTheme'
@@ -245,7 +245,8 @@ function SidebarNavSections({
             onClick={() => onToggle(section.id)}
           >
             <span>{section.label}</span>
-            <ChevronDown
+            <Icon
+              name="chevron-down"
               aria-hidden="true"
               className={`sidebar__sectionChevron${collapsed.has(section.id) ? ' sidebar__sectionChevron--collapsed' : ''}`}
             />
@@ -321,7 +322,7 @@ function SidebarFooter() {
         onClick={() => void auth.logout()}
         className="sidebar__logout w-full justify-start gap-2"
       >
-        <LogOut aria-hidden="true" />
+        <Icon name="log-out" aria-hidden="true" />
         Log out
       </Button>
       <SidebarVersion />
@@ -367,7 +368,7 @@ function ThemeToggleButton() {
       aria-pressed={isDark}
       className="sidebar__themeToggle w-full justify-start gap-2"
     >
-      {isDark ? <Sun size={18} /> : <Moon size={18} />}
+      {isDark ? <Icon name="sun" size={18} /> : <Icon name="moon" size={18} />}
       <span>{isDark ? 'Light mode' : 'Dark mode'}</span>
     </Button>
   )
@@ -385,7 +386,7 @@ function SidebarUser({
       <span className="sidebar__userName">{displayName ?? 'Signed in'}</span>
       {isSuperadmin && (
         <Badge variant="outline" className="superadminBadge">
-          <Shield aria-hidden="true" />
+          <Icon name="shield" aria-hidden="true" />
           God mode
         </Badge>
       )}

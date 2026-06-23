@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3 } from 'lucide-react'
 import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -627,7 +626,7 @@ export function GoalsPage() {
                             variant="secondary"
                             onClick={() => openEdit(row)}
                           >
-                            <Edit3 aria-hidden="true" />
+                            <Icon name="pencil" aria-hidden="true" />
                             Edit
                           </Button>
                           {row.status !== 'completed' ? (

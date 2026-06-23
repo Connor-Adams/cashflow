@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  AlertTriangle, Briefcase, ClipboardCheck, Receipt, Sparkles, TrendingDown, TrendingUp, } from 'lucide-react'
+  AlertTriangle, Briefcase, ClipboardCheck, Receipt, Sparkles, TrendingUp, } from 'lucide-react'
 import { Alert } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
+import { Icon } from '@connor-adams/designsystem'
 import { Grid } from '@/lib/ds-extras'
 import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
@@ -284,9 +285,9 @@ function MonthOverMonthSection({ data }: { data: ExplainMonthResponse }) {
         {data.monthOverMonth.map((mom) => {
           const spendUp = mom.spendDelta > 0
           const trendIcon = spendUp ? (
-            <TrendingUp size={16} aria-hidden="true" />
+            <Icon name="trending-up" size={16} aria-hidden="true" />
           ) : (
-            <TrendingDown size={16} aria-hidden="true" />
+            <Icon name="trending-down" size={16} aria-hidden="true" />
           )
           return (
             /*

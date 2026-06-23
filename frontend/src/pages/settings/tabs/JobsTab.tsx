@@ -1,5 +1,4 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
-import { RotateCcw } from 'lucide-react'
 import { Button, Icon } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
@@ -329,7 +328,7 @@ export function JobsTab() {
                             disabled={isRunning || noOverrides}
                             onClick={() => void resetOverrides(j)}
                           >
-                            <RotateCcw size={14} />
+                            <Icon name="refresh-cw" size={14} />
                           </Button>
                         </div>
                       </td>

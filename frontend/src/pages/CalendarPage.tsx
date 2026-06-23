@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useState, type FormEvent, } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { CalendarPlus, Edit3 } from 'lucide-react'
+import { CalendarPlus } from 'lucide-react'
 import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -538,7 +538,7 @@ export function CalendarPage() {
                           openEdit(ev)
                         }}
                       >
-                        <Edit3 aria-hidden="true" /> Edit
+                        <Icon name="pencil" aria-hidden="true" /> Edit
                       </Button>
                       <Button
                         size="sm"
@@ -839,7 +839,7 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
                     variant="secondary"
                     onClick={() => onEditClick(ev)}
                   >
-                    <Edit3 aria-hidden="true" /> Edit
+                    <Icon name="pencil" aria-hidden="true" /> Edit
                   </Button>
                   <Button
                     size="sm"
