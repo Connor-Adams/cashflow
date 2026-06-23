@@ -17,6 +17,7 @@ import {
   detectRecurringIncome,
   projectRecurringIncome,
   type IncomeTxn,
+  type RecurringIncomeStream,
 } from './recurringIncome';
 
 const ASOF = '2026-06-20';
@@ -92,7 +93,7 @@ test('separates two distinct payroll sources', () => {
 // --- projection -----------------------------------------------------------
 
 test('projects one biweekly occurrence landing inside the window', () => {
-  const streams = [
+  const streams: RecurringIncomeStream[] = [
     { merchant: 'ACME', amount: 2500, cadenceDays: 14, lastDate: '2026-06-19' },
   ];
   // window [06-20, 07-04]: next occurrence 07-03 is inside, 07-17 is not.
@@ -101,7 +102,7 @@ test('projects one biweekly occurrence landing inside the window', () => {
 });
 
 test('projects nothing when the next occurrence is past the window end', () => {
-  const streams = [
+  const streams: RecurringIncomeStream[] = [
     { merchant: 'RENTAL', amount: 1800, cadenceDays: 30, lastDate: '2026-06-18' },
   ];
   // next from 06-18 + 30 = 07-18, past the 07-04 window end.
@@ -109,7 +110,7 @@ test('projects nothing when the next occurrence is past the window end', () => {
 });
 
 test('projects two occurrences when a weekly stream lands twice in the window', () => {
-  const streams = [
+  const streams: RecurringIncomeStream[] = [
     { merchant: 'TIPS', amount: 300, cadenceDays: 7, lastDate: '2026-06-19' },
   ];
   // window [06-20, 07-04]: 06-26 and 07-03 land -> 2 x 300.

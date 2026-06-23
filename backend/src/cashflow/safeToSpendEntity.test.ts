@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { sequelize } from '../db';
 import { Account, Entity, Household, User } from '../models';
-import { computeSafeToSpend } from './safeToSpend';
+import { computeSafeToSpend, getExpectedIncome } from './safeToSpend';
 
 let HH = 0;
 let USER = 0;
@@ -231,4 +231,20 @@ test('recurring transfers are not counted as income', async () => {
   });
 
   assert.equal(res.breakdown.expectedIncome, 0);
+});
+
+test('getExpectedIncome projects an in-window paycheck occurrence directly', async () => {
+  const chequing = await mkAccount('Personal Chequing', PERSONAL);
+  for (const d of PAY_DATES) await seedTxn(chequing.id, d, 2500, 'ACME PAYROLL');
+
+  const income = await getExpectedIncome(HH, 'CAD', '2026-06-20', '2026-07-04', new Set());
+  assert.equal(income, 2500);
+});
+
+test('getExpectedIncome ignores income in a different currency', async () => {
+  const chequing = await mkAccount('Personal Chequing', PERSONAL);
+  for (const d of PAY_DATES) await seedTxn(chequing.id, d, 2500, 'ACME PAYROLL');
+
+  const income = await getExpectedIncome(HH, 'USD', '2026-06-20', '2026-07-04', new Set());
+  assert.equal(income, 0);
 });
