@@ -1487,6 +1487,8 @@ export type CashflowSettings = {
 
 export type SafeToSpendBreakdown = {
   currentCash: number;
+  /** Recurring income projected to land inside the window — added back. */
+  expectedIncome: number;
   upcomingRequiredExpenses: number;
   requiredSavingsContributions: number;
   expectedCreditCardPayments: number;
