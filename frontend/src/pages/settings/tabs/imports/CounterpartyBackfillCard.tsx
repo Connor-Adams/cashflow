@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Sparkles } from 'lucide-react'
 import { Button } from '@connor-adams/designsystem'
+import { Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { useConfirm } from '@/lib/ds-extras'
 import type {
@@ -231,7 +231,7 @@ export function CounterpartyBackfillCard() {
               onClick={() => void startBackfill()}
               aria-label="Backfill counterparty on past imports"
             >
-              <Sparkles aria-hidden="true" />
+              <Icon name="sparkles" aria-hidden="true" />
               {running ? 'Running backfill…' : 'Backfill counterparty on past imports'}
             </Button>
           </div>

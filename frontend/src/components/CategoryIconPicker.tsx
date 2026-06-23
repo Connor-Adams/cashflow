@@ -1,6 +1,6 @@
 import { CATEGORY_ICON_NAMES, type CategoryIconName } from '@cashflow/shared'
-import { Button } from '@connor-adams/designsystem'
-import { CATEGORY_ICON_COMPONENTS } from './CategoryIcon'
+import { Button, Icon } from '@connor-adams/designsystem'
+import { CATEGORY_ICON_GLYPHS } from './CategoryIcon'
 import { cn } from '@/lib/utils'
 
 type Props = {
@@ -27,7 +27,7 @@ export function CategoryIconPicker({ value, onSelect }: Props) {
         <span className="text-[11px]">None</span>
       </Button>
       {CATEGORY_ICON_NAMES.map((name) => {
-        const Icon = CATEGORY_ICON_COMPONENTS[name]
+        const glyph = CATEGORY_ICON_GLYPHS[name]
         const active = value === name
         return (
           <Button
@@ -40,7 +40,7 @@ export function CategoryIconPicker({ value, onSelect }: Props) {
             className={cn(CELL_BASE, active && CELL_ACTIVE)}
             title={name}
           >
-            <Icon size={20} />
+            <Icon name={glyph} size={20} />
           </Button>
         )
       })}

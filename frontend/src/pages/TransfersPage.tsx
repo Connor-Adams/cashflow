@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Unlink2 } from 'lucide-react'
 import { Alert, Icon } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
@@ -608,7 +607,7 @@ function MoneyMovementTable({
             .map(([cur, amount]) => formatMoney(amount, cur))
             .join(' + ')}{' '}
           (mixed currencies shown at native; FX not converted).
-          Click <Unlink2 size={10} aria-hidden="true" /> in the source transaction
+          Click <Icon name="unlink" size={10} aria-hidden="true" /> in the source transaction
           row on the Transactions page to break a specific pair.
         </p>
       )}

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Sparkles } from 'lucide-react'
 import { Alert, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -353,7 +352,7 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
             }
             aria-disabled={aiStatusLoaded && !aiEnabled ? true : undefined}
           >
-            <Sparkles aria-hidden="true" />
+            <Icon name="sparkles" aria-hidden="true" />
             {aiCategorizing ? 'Categorizing...' : 'AI categorize'}
           </Button>
         </div>
@@ -517,7 +516,7 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
               }
               aria-disabled={aiStatusLoaded && !aiEnabled ? true : undefined}
             >
-              <Sparkles aria-hidden="true" />
+              <Icon name="sparkles" aria-hidden="true" />
               {aiCategorizing ? 'Categorizing...' : 'AI categorize order'}
             </Button>
           </div>

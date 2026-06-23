@@ -1,5 +1,4 @@
 import * as React from 'react'
-import { ChevronsUpDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Card, Icon } from '@connor-adams/designsystem'
 import { SectionHeader } from './section-header'
@@ -202,7 +201,8 @@ function TableCardData<T>({
                         <Icon name="chevron-down" aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
                       )
                     ) : (
-                      <ChevronsUpDown
+                      <Icon
+                        name="chevrons-up-down"
                         aria-hidden="true"
                         className="h-3.5 w-3.5 shrink-0 opacity-40"
                       />

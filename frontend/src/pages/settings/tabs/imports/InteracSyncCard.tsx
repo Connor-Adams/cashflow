@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Sparkles } from 'lucide-react'
 import { Button } from '@connor-adams/designsystem'
+import { Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { getJson, postJson } from '@/lib/api'
 
@@ -116,7 +116,7 @@ export function InteracSyncCard() {
             onClick={() => void runSync()}
             aria-label="Sync Interac names from email"
           >
-            <Sparkles aria-hidden="true" />
+            <Icon name="sparkles" aria-hidden="true" />
             {running ? 'Syncing…' : 'Sync Interac names from email'}
           </Button>
         </div>

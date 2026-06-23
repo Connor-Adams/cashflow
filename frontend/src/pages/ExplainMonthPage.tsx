@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import {
-  AlertTriangle, Briefcase, ClipboardCheck, Receipt, Sparkles, TrendingUp, } from 'lucide-react'
 import { Alert } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
-import { Icon } from '@connor-adams/designsystem'
+import { Icon, type IconName } from '@connor-adams/designsystem'
 import { Grid } from '@/lib/ds-extras'
 import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
@@ -58,12 +56,12 @@ const KIND_LABEL: Record<ExplainMonthFindingKind, string> = {
   business_summary: 'Business spend',
 }
 
-const KIND_ICON: Record<ExplainMonthFindingKind, typeof TrendingUp> = {
-  spend_change: TrendingUp,
-  subscription_change: AlertTriangle,
-  missing_receipt: Receipt,
-  review_needed: ClipboardCheck,
-  business_summary: Briefcase,
+const KIND_ICON: Record<ExplainMonthFindingKind, IconName> = {
+  spend_change: 'trending-up',
+  subscription_change: 'alert-triangle',
+  missing_receipt: 'receipt',
+  review_needed: 'clipboard',
+  business_summary: 'briefcase',
 }
 
 const KIND_ORDER: ExplainMonthFindingKind[] = [
@@ -226,7 +224,7 @@ export function ExplainMonthPage() {
             /* aria-label on container — expand Card classes onto <section> */
             <section className={CARD_CLS} aria-label="AI summary">
               <div className="flex gap-2 items-start">
-                <Sparkles size={18} aria-hidden="true" />
+                <Icon name="sparkles" size={18} aria-hidden="true" />
                 <p className="m-0">{data.aiSummary}</p>
               </div>
             </section>
@@ -347,7 +345,7 @@ function FindingGroup({
   kind: ExplainMonthFindingKind
   items: ExplainMonthFinding[]
 }) {
-  const Icon = KIND_ICON[kind]
+  const glyph = KIND_ICON[kind]
   if (items.length === 0) return null
   return (
     /* aria-label on the section — expand Card classes */
@@ -361,7 +359,7 @@ function FindingGroup({
        * their semantic relationship. Keep as token utilities.
        */}
       <div className="flex gap-2 items-center mb-2">
-        <Icon size={18} aria-hidden="true" />
+        <Icon name={glyph} size={18} aria-hidden="true" />
         <h3 className="m-0">{KIND_LABEL[kind]}</h3>
         <Badge variant="outline">{items.length}</Badge>
       </div>

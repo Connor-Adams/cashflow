@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, Droplet, Repeat, Truck, Users } from 'lucide-react'
 import { Alert } from '@connor-adams/designsystem'
-import { Icon as DsIcon } from '@connor-adams/designsystem'
+import { Icon as DsIcon, type IconName } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -47,12 +46,12 @@ const SEVERITY_BADGE_VARIANT: Record<
   low: 'secondary',
 }
 
-const TYPE_ICON: Record<MoneyLeakType, typeof Droplet> = {
-  subscription_price_increase: AlertTriangle,
-  small_subscription: Droplet,
-  recurring_fee: Repeat,
-  duplicate_service: Users,
-  delivery_fee_high: Truck,
+const TYPE_ICON: Record<MoneyLeakType, IconName> = {
+  subscription_price_increase: 'alert-triangle',
+  small_subscription: 'droplet',
+  recurring_fee: 'repeat',
+  duplicate_service: 'users',
+  delivery_fee_high: 'truck',
 }
 
 const TYPE_LABEL: Record<MoneyLeakType, string> = {
@@ -326,7 +325,7 @@ function LeakGroup({
   items: MoneyLeakItem[]
   onDismiss: (item: MoneyLeakItem) => Promise<void>
 }) {
-  const Icon = TYPE_ICON[leakType]
+  const glyph = TYPE_ICON[leakType]
   const groupAnnual = items.reduce((s, i) => s + i.annualImpact, 0)
   const groupCurrencies = Array.from(new Set(items.map((i) => i.currency)))
   return (
@@ -341,7 +340,7 @@ function LeakGroup({
             key={`${item.leakType}|${item.identityKey}`}
             className="grid grid-cols-[auto_1fr_auto] gap-3 items-start py-3 border-b border-border"
           >
-            <Icon aria-hidden="true" size={20} className="mt-0.5" />
+            <DsIcon name={glyph} aria-hidden="true" size={20} className="mt-0.5" />
             <div>
               <div className="flex items-center gap-1.5 font-semibold">
                 {item.title}

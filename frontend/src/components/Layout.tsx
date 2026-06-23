@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
-import { Command as CommandIcon } from 'lucide-react'
 import { Button, Icon } from '@connor-adams/designsystem'
 import { useLayoutWidth } from '../lib/layoutWidth'
 import { useCommandPalette } from '../hooks/useCommandPalette'
@@ -105,7 +104,7 @@ export function Layout() {
               className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/60 px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
               data-testid="top-bar-command-palette-trigger"
             >
-              <CommandIcon size={14} aria-hidden="true" />
+              <Icon name="command" size={14} aria-hidden="true" />
               <span className="hidden sm:inline">Search commands</span>
               <kbd className="ml-1 hidden font-mono text-[10px] sm:inline">
                 ⌘K

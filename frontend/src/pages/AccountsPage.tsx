@@ -1,6 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { GitMerge } from 'lucide-react'
 import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -628,7 +627,7 @@ export function AccountsPage() {
                                   : 'Need at least two same-currency accounts to merge.'
                               }
                             >
-                              <GitMerge aria-hidden="true" />
+                              <Icon name="git-merge" aria-hidden="true" />
                               Merge into…
                             </Button>
                           )

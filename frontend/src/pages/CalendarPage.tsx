@@ -12,7 +12,6 @@
  */
 import { useCallback, useEffect, useMemo, useState, type FormEvent, } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { CalendarPlus } from 'lucide-react'
 import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -516,7 +515,8 @@ export function CalendarPage() {
                             className="mr-1 inline-block h-3 w-3"
                           />
                         ) : (
-                          <CalendarPlus
+                          <Icon
+                            name="calendar-plus"
                             aria-hidden="true"
                             className="mr-1 inline-block h-3 w-3"
                           />
@@ -743,7 +743,7 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
                   {ev.recurrenceRule ? (
                     <Icon name="repeat" aria-hidden="true" className="mr-0.5 inline-block h-2.5 w-2.5" />
                   ) : (
-                    <CalendarPlus aria-hidden="true" className="mr-0.5 inline-block h-2.5 w-2.5" />
+                    <Icon name="calendar-plus" aria-hidden="true" className="mr-0.5 inline-block h-2.5 w-2.5" />
                   )}
                   {ev.name}
                 </span>
@@ -821,7 +821,8 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
                         className="mr-1 inline-block h-3 w-3"
                       />
                     ) : (
-                      <CalendarPlus
+                      <Icon
+                        name="calendar-plus"
                         aria-hidden="true"
                         className="mr-1 inline-block h-3 w-3"
                       />

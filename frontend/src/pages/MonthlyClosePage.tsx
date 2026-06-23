@@ -17,7 +17,6 @@
  * derived state is warranted.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Unlock } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
@@ -422,7 +421,7 @@ export function MonthlyClosePage() {
                     onClick={reopenMonth}
                     disabled={busy}
                   >
-                    <Unlock size={16} aria-hidden="true" />
+                    <Icon name="unlock" size={16} aria-hidden="true" />
                     <span className="ml-2">Reopen</span>
                   </Button>
                 ) : (

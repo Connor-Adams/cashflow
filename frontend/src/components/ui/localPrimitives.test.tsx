@@ -495,8 +495,8 @@ describe('CollapsibleCard primitive', () => {
     expect(html).toContain('body content')
     expect(html).toContain('aria-expanded="true"')
     expect(html).toContain('Collapse Merchants')
-    // lucide ChevronDown has a unique path; check on the svg class wrapper present
-    expect(html).toContain('lucide-chevron-down')
+    // DS Icon tags the rendered glyph via data-icon
+    expect(html).toContain('data-icon="chevron-down"')
   })
 
   it('renders closed without body and uses ChevronRight when defaultOpen=false', () => {
@@ -509,7 +509,7 @@ describe('CollapsibleCard primitive', () => {
     expect(html).toContain('aria-expanded="false"')
     expect(html).toContain('Expand Accounts')
     expect(html).not.toContain('hidden body')
-    expect(html).toContain('lucide-chevron-right')
+    expect(html).toContain('data-icon="chevron-right"')
   })
 
   it('renders an actions slot in the header', () => {

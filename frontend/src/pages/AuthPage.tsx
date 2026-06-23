@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { LogIn } from 'lucide-react'
 import { Button, Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Input } from '@connor-adams/designsystem'
@@ -62,7 +61,7 @@ export function AuthPage() {
             className={mode === 'login' ? 'isActive' : ''}
             onClick={() => setMode('login')}
           >
-            <LogIn aria-hidden="true" />
+            <Icon name="key" aria-hidden="true" />
             Log in
           </Button>
           <Button

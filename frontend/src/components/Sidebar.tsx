@@ -1,8 +1,6 @@
 import { useCallback, useMemo, useState, useEffect } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import {
-  BarChart3, BookOpenCheck, CalendarClock, CheckSquare, Receipt, CreditCard, Inbox, LineChart, LayoutDashboard, Lock, MessageSquare, ReceiptText, DollarSign, Settings, GitCompare, HeartHandshake, Target, Calculator, Upload, PiggyBank, Sparkles, Tags, Users, } from 'lucide-react'
-import { Badge, Icon } from '@connor-adams/designsystem'
+import { Badge, Icon, type IconName } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { useAuth } from '../lib/useAuth'
 import { useTheme } from '../hooks/useTheme'
@@ -15,7 +13,7 @@ import { FRONTEND_VERSION, useBackendVersion } from '../lib/version'
 type NavItem = {
   to: string
   label: string
-  icon: typeof LayoutDashboard
+  icon: IconName
   end?: boolean
   visibilityKey?: NavFeature
 }
@@ -31,58 +29,58 @@ const navSections: NavSection[] = [
     id: 'today',
     label: 'Today',
     items: [
-      { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-      { to: '/inbox', label: 'Inbox', icon: Inbox },
-      { to: '/chat', label: 'Chat', icon: MessageSquare },
+      { to: '/', label: 'Dashboard', icon: 'layout-dashboard', end: true },
+      { to: '/inbox', label: 'Inbox', icon: 'inbox' },
+      { to: '/chat', label: 'Chat', icon: 'message-square' },
     ],
   },
   {
     id: 'money',
     label: 'Money',
     items: [
-      { to: '/accounts', label: 'Accounts', icon: CreditCard },
-      { to: '/income', label: 'Income', icon: DollarSign, visibilityKey: 'income' },
-      { to: '/transactions', label: 'Transactions', icon: ReceiptText },
-      { to: '/partner-home', label: 'Partner home', icon: HeartHandshake },
-      { to: '/receipts', label: 'Receipts', icon: Receipt },
-      { to: '/import', label: 'Import', icon: Upload },
+      { to: '/accounts', label: 'Accounts', icon: 'credit-card' },
+      { to: '/income', label: 'Income', icon: 'dollar-sign', visibilityKey: 'income' },
+      { to: '/transactions', label: 'Transactions', icon: 'receipt' },
+      { to: '/partner-home', label: 'Partner home', icon: 'heart' },
+      { to: '/receipts', label: 'Receipts', icon: 'receipt' },
+      { to: '/import', label: 'Import', icon: 'upload' },
     ],
   },
   {
     id: 'planning',
     label: 'Planning',
     items: [
-      { to: '/budgets', label: 'Budgets', icon: PiggyBank },
-      { to: '/planned', label: 'Planned', icon: CalendarClock, visibilityKey: 'planned' },
-      { to: '/planned/people', label: 'People', icon: Users },
-      { to: '/goals', label: 'Goals', icon: Target, visibilityKey: 'goals' },
-      { to: '/scenarios', label: 'Scenarios', icon: GitCompare, visibilityKey: 'scenarios' },
-      { to: '/scenarios/tax', label: 'Tax', icon: Calculator },
+      { to: '/budgets', label: 'Budgets', icon: 'piggy-bank' },
+      { to: '/planned', label: 'Planned', icon: 'calendar-clock', visibilityKey: 'planned' },
+      { to: '/planned/people', label: 'People', icon: 'users' },
+      { to: '/goals', label: 'Goals', icon: 'target', visibilityKey: 'goals' },
+      { to: '/scenarios', label: 'Scenarios', icon: 'git-compare', visibilityKey: 'scenarios' },
+      { to: '/scenarios/tax', label: 'Tax', icon: 'calculator' },
     ],
   },
   {
     id: 'investments',
     label: 'Investments',
     items: [
-      { to: '/portfolio', label: 'Portfolio', icon: LineChart },
+      { to: '/portfolio', label: 'Portfolio', icon: 'line-chart' },
     ],
   },
   {
     id: 'insights',
     label: 'Insights & rules',
     items: [
-      { to: '/rules', label: 'Rules', icon: BookOpenCheck },
-      { to: '/merchants/cleanup', label: 'Merchant cleanup', icon: Tags },
-      { to: '/reports', label: 'Reports', icon: BarChart3 },
-      { to: '/vault', label: 'Vault', icon: Lock, visibilityKey: 'vault' },
-      { to: '/monthly-close', label: 'Monthly close', icon: CheckSquare },
-      { to: '/enrichment', label: 'Enrichment', icon: Sparkles },
+      { to: '/rules', label: 'Rules', icon: 'book-open' },
+      { to: '/merchants/cleanup', label: 'Merchant cleanup', icon: 'tag' },
+      { to: '/reports', label: 'Reports', icon: 'bar-chart' },
+      { to: '/vault', label: 'Vault', icon: 'lock', visibilityKey: 'vault' },
+      { to: '/monthly-close', label: 'Monthly close', icon: 'check-square' },
+      { to: '/enrichment', label: 'Enrichment', icon: 'sparkles' },
     ],
   },
 ]
 
 // Settings is always visible at the bottom with no section header.
-const settingsItem: NavItem = { to: '/settings', label: 'Settings', icon: Settings }
+const settingsItem: NavItem = { to: '/settings', label: 'Settings', icon: 'settings' }
 
 const STORAGE_KEY = 'sidebar.collapsed'
 
@@ -283,7 +281,6 @@ function SidebarNavLink({
   onClick: () => void
   badgeCount: number
 }) {
-  const Icon = item.icon
   return (
     <NavLink
       to={item.to}
@@ -291,7 +288,7 @@ function SidebarNavLink({
       onClick={onClick}
       className={navLinkClass}
     >
-      <Icon aria-hidden="true" />
+      <Icon name={item.icon} aria-hidden="true" />
       <span>{item.label}</span>
       {badgeCount > 0 ? (
         <Badge variant="secondary" className="sidebar__navBadge">

@@ -24,7 +24,6 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { GitCompare } from 'lucide-react'
 import { Alert, Icon } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
@@ -483,7 +482,7 @@ function ComparisonPanel({
     <div className="mt-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-semibold flex items-center gap-2">
-          <GitCompare className="size-4" aria-hidden="true" />
+          <Icon name="git-compare" className="size-4" aria-hidden="true" />
           Comparison
         </h3>
         <div className="flex gap-2">

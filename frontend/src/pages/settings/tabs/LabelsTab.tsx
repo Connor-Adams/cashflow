@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { GitMerge } from 'lucide-react'
 import { Button, Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Dialog } from '@connor-adams/designsystem'
@@ -183,7 +182,7 @@ export function LabelsTab() {
                       disabled={labels.length < 2}
                       onClick={() => openMerge(label)}
                     >
-                      <GitMerge aria-hidden="true" />
+                      <Icon name="git-merge" aria-hidden="true" />
                       Merge
                     </Button>
                     <Button

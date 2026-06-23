@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useState } from 'react'
-import { CalendarClock } from 'lucide-react'
 import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -345,7 +344,7 @@ function CardRow({
               ))}
             </NativeSelect>
             <Button size="sm" variant="outline" onClick={planPayment} disabled={busy} title="Add this payment to your forecast">
-              <CalendarClock className="mr-1 size-3" aria-hidden="true" />
+              <Icon name="calendar-clock" className="mr-1 size-3" aria-hidden="true" />
               Plan
             </Button>
             <Button size="sm" variant="ghost" onClick={markPaid} disabled={busy} title="Mark the planned payment paid">
@@ -373,7 +372,7 @@ function DueBadge({ label, tone }: { label: string; tone: 'warn' | 'soon' | 'ok'
   if (tone === 'soon') {
     return (
       <Badge className="gap-1 bg-warning-bg text-warning text-xs">
-        <CalendarClock className="size-3" aria-hidden="true" />
+        <Icon name="calendar-clock" className="size-3" aria-hidden="true" />
         {label}
       </Badge>
     )
