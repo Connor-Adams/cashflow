@@ -985,7 +985,7 @@ export function ReviewInboxPage() {
             }
             actions={
               <Badge variant={selectedSummary.count ? 'default' : 'outline'}>
-                <Icon name="list" aria-hidden="true" />
+                <Icon name="list-checks" aria-hidden="true" />
                 {selectedSummary.count}
               </Badge>
             }

@@ -40,8 +40,8 @@ const navSections: NavSection[] = [
     items: [
       { to: '/accounts', label: 'Accounts', icon: 'credit-card' },
       { to: '/income', label: 'Income', icon: 'dollar-sign', visibilityKey: 'income' },
-      { to: '/transactions', label: 'Transactions', icon: 'receipt' },
-      { to: '/partner-home', label: 'Partner home', icon: 'heart' },
+      { to: '/transactions', label: 'Transactions', icon: 'receipt-text' },
+      { to: '/partner-home', label: 'Partner home', icon: 'heart-handshake' },
       { to: '/receipts', label: 'Receipts', icon: 'receipt' },
       { to: '/import', label: 'Import', icon: 'upload' },
     ],
@@ -69,8 +69,8 @@ const navSections: NavSection[] = [
     id: 'insights',
     label: 'Insights & rules',
     items: [
-      { to: '/rules', label: 'Rules', icon: 'book-open' },
-      { to: '/merchants/cleanup', label: 'Merchant cleanup', icon: 'tag' },
+      { to: '/rules', label: 'Rules', icon: 'book-open-check' },
+      { to: '/merchants/cleanup', label: 'Merchant cleanup', icon: 'tags' },
       { to: '/reports', label: 'Reports', icon: 'bar-chart' },
       { to: '/vault', label: 'Vault', icon: 'lock', visibilityKey: 'vault' },
       { to: '/monthly-close', label: 'Monthly close', icon: 'check-square' },
