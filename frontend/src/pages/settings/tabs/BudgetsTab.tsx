@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3 } from 'lucide-react'
 import { CategoryIcon } from '../../../components/CategoryIcon'
 import { Button, Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -598,7 +597,7 @@ export function BudgetsTab() {
                             variant="secondary"
                             onClick={() => openBudgetEdit(budget)}
                           >
-                            <Edit3 aria-hidden="true" />
+                            <Icon name="pencil" aria-hidden="true" />
                             Edit
                           </Button>
                           <Button

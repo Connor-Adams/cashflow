@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3, GitMerge } from 'lucide-react'
+import { GitMerge } from 'lucide-react'
 import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -604,7 +604,7 @@ export function AccountsPage() {
                           </>
                         ) : (
                           <Button type="button" size="sm" variant="secondary" onClick={() => startEdit(a)}>
-                            <Edit3 aria-hidden="true" />
+                            <Icon name="pencil" aria-hidden="true" />
                             Edit
                           </Button>
                         )}

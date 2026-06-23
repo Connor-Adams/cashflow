@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Loader2 } from 'lucide-react'
-import { Button, Icon } from '@connor-adams/designsystem'
+import { Button, Icon, Spinner } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Textarea } from '@connor-adams/designsystem'
 import { useConfirm } from '@/lib/ds-extras'
@@ -132,7 +131,7 @@ export function SimplefinConnectCard() {
 
       {statusLoading ? (
         <p className="text-sm muted flex items-center gap-2">
-          <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+          <Spinner aria-hidden="true" size={16} />
           Loading connection status&hellip;
         </p>
       ) : connected ? (
@@ -178,7 +177,7 @@ export function SimplefinConnectCard() {
             >
               {connecting ? (
                 <>
-                  <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+                  <Spinner aria-hidden="true" size={16} />
                   Connecting to your bank&hellip;
                 </>
               ) : (

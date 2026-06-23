@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3 } from 'lucide-react'
 import { Button, Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Dialog } from '@connor-adams/designsystem'
@@ -181,7 +180,7 @@ export function SavedFiltersTab() {
                       aria-label={`Rename ${f.name}`}
                       onClick={() => openRename(f)}
                     >
-                      <Edit3 className="size-3.5" aria-hidden />
+                      <Icon name="pencil" className="size-3.5" aria-hidden />
                       Rename
                     </Button>
                     <Button

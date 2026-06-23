@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3 } from 'lucide-react'
 import { Button, Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Dialog } from '@connor-adams/designsystem'
@@ -296,7 +295,7 @@ function ContactCard({
       </div>
       <div className="row">
         <Button type="button" size="sm" variant="secondary" onClick={onEdit}>
-          <Edit3 aria-hidden="true" />
+          <Icon name="pencil" aria-hidden="true" />
           Edit
         </Button>
         <Button type="button" size="sm" variant="destructive" onClick={onDelete}>

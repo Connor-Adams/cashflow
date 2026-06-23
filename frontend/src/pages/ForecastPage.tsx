@@ -2,8 +2,6 @@ import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
-import {
-  ArrowDownRight, ArrowUpRight, } from 'lucide-react'
 import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -336,12 +334,14 @@ export function ForecastPage() {
                   <TableCell>
                     <div className="flex items-center gap-2">
                       {e.direction === 'in' ? (
-                        <ArrowUpRight
+                        <Icon
+                          name="arrow-up"
                           className="size-4 text-positive"
                           aria-hidden="true"
                         />
                       ) : e.direction === 'out' ? (
-                        <ArrowDownRight
+                        <Icon
+                          name="arrow-down"
                           className="size-4 text-negative"
                           aria-hidden="true"
                         />
