@@ -58,6 +58,12 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
     ? [
         { label: 'Current cash', amount: data.breakdown.currentCash, sign: '+' },
         {
+          label: 'Expected income',
+          amount: data.breakdown.expectedIncome,
+          sign: '+',
+          note: `next ${data.windowDays}d`,
+        },
+        {
           label: 'Upcoming required expenses',
           amount: data.breakdown.upcomingRequiredExpenses,
           sign: '-',

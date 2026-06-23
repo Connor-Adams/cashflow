@@ -15,6 +15,7 @@
  * inputs. Result always returns the full breakdown — the UI shows it on
  * click and we want clients to render without a follow-up request.
  */
+import { Op } from 'sequelize';
 import { Account, Entity, FinancialGoal, CashflowSettings } from '../models';
 import { CASHFLOW_SETTINGS_DEFAULTS } from '../models/CashflowSettings';
 import { balanceAtDate } from '../networth/balanceAtDate';
@@ -31,7 +32,25 @@ import {
   resolveForecastCurrency,
 } from '../forecast/gatherOccurrences';
 import { projectGoal } from '../goals/projection';
+import {
+  detectRecurringIncome,
+  projectRecurringIncome,
+  type IncomeTxn,
+} from './recurringIncome';
 import { toUnits, fromUnits } from '../util/numbers';
+
+/** History window scanned for recurring-income detection. */
+const INCOME_LOOKBACK_DAYS = 180;
+
+/** Transaction types that are positive but never count as recurring income. */
+const INCOME_EXCLUDED_TXN_TYPES = new Set([
+  'transfer',
+  'payment',
+  'refund',
+  'reward',
+  'investment',
+  'dividend',
+]);
 
 /** Cash-bearing account types — match the forecast engine's exclusion list. */
 const CASH_EXCLUDED_TYPES = new Set(['investment', 'credit_card', 'loan']);
@@ -68,6 +87,8 @@ function isCorpAccount(
 
 export type SafeToSpendBreakdown = {
   currentCash: number;
+  /** Recurring income projected to land inside the window — added back. */
+  expectedIncome: number;
   upcomingRequiredExpenses: number;
   requiredSavingsContributions: number;
   expectedCreditCardPayments: number;
@@ -111,6 +132,7 @@ export function composeSafeToSpend(input: {
   windowDays: number;
   windowEndDate: string;
   currentCash: number;
+  expectedIncome?: number;
   upcomingRequiredExpenses: number;
   requiredSavingsContributions: number;
   expectedCreditCardPayments: number;
@@ -123,9 +145,14 @@ export function composeSafeToSpend(input: {
   const ccPayments = input.settings.includeCreditCardBalance
     ? input.expectedCreditCardPayments
     : 0;
+  const expectedIncome =
+    Number.isFinite(input.expectedIncome) && input.expectedIncome! > 0
+      ? input.expectedIncome!
+      : 0;
 
   const value = round2(
-    input.currentCash -
+    input.currentCash +
+      expectedIncome -
       input.upcomingRequiredExpenses -
       goalContrib -
       ccPayments -
@@ -141,6 +168,7 @@ export function composeSafeToSpend(input: {
     isNegative: value < 0,
     breakdown: {
       currentCash: round2(input.currentCash),
+      expectedIncome: round2(expectedIncome),
       upcomingRequiredExpenses: round2(input.upcomingRequiredExpenses),
       requiredSavingsContributions: round2(goalContrib),
       expectedCreditCardPayments: round2(ccPayments),
@@ -227,6 +255,57 @@ export async function getCurrentCash(
     }
   }
   return fromUnits(totalU);
+}
+
+/**
+ * Project recurring income (paychecks) expected to land inside
+ * [asOfDate, windowEndDate], in the requested currency. Scans the last
+ * `INCOME_LOOKBACK_DAYS` of personal cash-account inflows, detects
+ * high-confidence recurring streams (see `recurringIncome.ts`), and sums the
+ * occurrences that fall in the window. Corporate-entity accounts, non-income
+ * positive types (transfers, refunds, card payments…), and other currencies
+ * are excluded. Detection is conservative on purpose — over-counting income
+ * would tell the user they can spend money they don't have.
+ */
+export async function getExpectedIncome(
+  householdId: number,
+  currency: string,
+  asOfDate: string,
+  windowEndDate: string,
+  corpEntityIds: ReadonlySet<number> = new Set(),
+): Promise<number> {
+  const accounts = await Account.findAll({ where: { householdId } });
+  const eligible = accounts.filter(
+    (acc) =>
+      !CASH_EXCLUDED_TYPES.has(acc.accountType) &&
+      !isCorpAccount(acc, corpEntityIds) &&
+      !(acc.closedAt && acc.closedAt <= asOfDate),
+  );
+  if (eligible.length === 0) return 0;
+
+  const fromDate = addDaysIso(asOfDate, -INCOME_LOOKBACK_DAYS);
+  const { Transaction } = await import('../models');
+  const rows = await Transaction.findAll({
+    where: {
+      accountId: { [Op.in]: eligible.map((a) => a.id) },
+      currency,
+      date: { [Op.gt]: fromDate, [Op.lte]: asOfDate },
+    },
+    attributes: ['date', 'amount', 'txnType', 'merchantClean', 'merchantRaw'],
+  });
+
+  const txns: IncomeTxn[] = [];
+  for (const r of rows) {
+    const amount = Number(r.amount);
+    if (!(amount > 0)) continue;
+    if (r.txnType && INCOME_EXCLUDED_TXN_TYPES.has(r.txnType)) continue;
+    const merchant = (r.merchantClean || r.merchantRaw || '').trim();
+    if (!merchant) continue;
+    txns.push({ date: r.date, amount, merchant });
+  }
+
+  const streams = detectRecurringIncome(txns, asOfDate);
+  return projectRecurringIncome(streams, asOfDate, windowEndDate);
 }
 
 /**
@@ -384,11 +463,19 @@ export async function computeSafeToSpend(params: {
 
   const [
     currentCash,
+    expectedIncome,
     upcomingRequiredExpenses,
     requiredSavingsContributions,
     expectedCreditCardPayments,
   ] = await Promise.all([
     getCurrentCash(params.householdId, currency, params.asOfDate, corpEntityIds),
+    getExpectedIncome(
+      params.householdId,
+      currency,
+      params.asOfDate,
+      windowEndDate,
+      corpEntityIds,
+    ),
     getUpcomingRequiredExpenses(
       params.householdId,
       currency,
@@ -415,6 +502,7 @@ export async function computeSafeToSpend(params: {
     windowDays,
     windowEndDate,
     currentCash,
+    expectedIncome,
     upcomingRequiredExpenses,
     requiredSavingsContributions,
     expectedCreditCardPayments,

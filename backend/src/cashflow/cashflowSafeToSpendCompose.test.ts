@@ -49,6 +49,18 @@ test('composeSafeToSpend: includeCreditCardBalance=false zeroes out CC line', ()
   assert.equal(r.breakdown.expectedCreditCardPayments, 0);
 });
 
+test('composeSafeToSpend: expected income adds back into the value', () => {
+  const r = composeSafeToSpend({ ...baseInput(), expectedIncome: 2500 });
+  // 3000 + 2500 - 800 - 200 - 300 - 100 = 4100
+  assert.equal(r.value, 4100);
+  assert.equal(r.breakdown.expectedIncome, 2500);
+});
+
+test('composeSafeToSpend: omitted expected income defaults to zero', () => {
+  const r = composeSafeToSpend(baseInput());
+  assert.equal(r.breakdown.expectedIncome, 0);
+});
+
 test('composeSafeToSpend: includeGoalContributions=false zeroes out savings line', () => {
   const input = baseInput();
   input.settings.includeGoalContributions = false;

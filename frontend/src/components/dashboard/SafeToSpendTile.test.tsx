@@ -29,6 +29,7 @@ function mockSafe(value: number, isNegative = false, surplus?: SurplusOverride) 
       isNegative,
       breakdown: {
         currentCash: 3000,
+        expectedIncome: 0,
         upcomingRequiredExpenses: 800,
         requiredSavingsContributions: 200,
         expectedCreditCardPayments: 300,
