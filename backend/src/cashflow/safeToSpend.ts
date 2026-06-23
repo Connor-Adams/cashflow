@@ -16,7 +16,14 @@
  * click and we want clients to render without a follow-up request.
  */
 import { Op } from 'sequelize';
-import { Account, Entity, FinancialGoal, CashflowSettings } from '../models';
+import {
+  Account,
+  Entity,
+  FinancialGoal,
+  CashflowSettings,
+  LiabilityAccount,
+} from '../models';
+import { creditCardReservation } from './creditCardReservation';
 import { CASHFLOW_SETTINGS_DEFAULTS } from '../models/CashflowSettings';
 import { balanceAtDate } from '../networth/balanceAtDate';
 import { loadLiabilities, toDebtInputs } from '../debt/loadLiabilities';
@@ -395,30 +402,61 @@ export async function getRequiredSavingsContributions(
 }
 
 /**
- * Sum credit-card balances (in the requested currency) as expected
- * payments. Credit-card account balances live as negative transaction
- * totals (charges) with positive payments — net negative balance means the
- * user owes that much. We sign-flip the negative running balance into a
- * positive "expected payment" amount; positive balances (credit on the
- * card) contribute 0 — we don't want to encourage spending the card credit.
+ * Sum the cash safe-to-spend should reserve for credit-card payments in the
+ * requested currency. Per card we reserve the *statement balance* (what is
+ * billed and due), gated by the card's due day so a balance due next cycle is
+ * not reserved this window — see `creditCardReservation`. When no statement
+ * data is captured we fall back to the full current running balance
+ * (sign-flipped from the negative charge balance) so we never under-reserve.
+ * Positive (credit) balances contribute 0.
  */
 export async function getExpectedCreditCardPayments(
   householdId: number,
   currency: string,
   asOfDate: string,
+  windowEndDate: string,
   corpEntityIds: ReadonlySet<number> = new Set(),
 ): Promise<number> {
   const accounts = await Account.findAll({ where: { householdId } });
+  const cards = accounts.filter(
+    (acc) =>
+      CREDIT_CARD_TYPES.has(acc.accountType) &&
+      !isCorpAccount(acc, corpEntityIds) &&
+      !(acc.closedAt && acc.closedAt <= asOfDate),
+  );
+  if (cards.length === 0) return 0;
+
+  const profiles = await LiabilityAccount.findAll({
+    where: { accountId: { [Op.in]: cards.map((c) => c.id) } },
+  });
+  const profileByAccount = new Map(profiles.map((p) => [p.accountId, p]));
+
   let totalU = 0;
-  for (const acc of accounts) {
-    if (!CREDIT_CARD_TYPES.has(acc.accountType)) continue;
-    if (isCorpAccount(acc, corpEntityIds)) continue;
-    if (acc.closedAt && acc.closedAt <= asOfDate) continue;
+  for (const acc of cards) {
     const bal = await balanceAtDate(acc, asOfDate);
+    let currentOwedU = 0;
     for (const { currency: ccy, amount } of bal) {
-      if (ccy !== currency) continue;
-      if (amount < 0) totalU += toUnits(-amount);
+      if (ccy === currency && amount < 0) currentOwedU += toUnits(-amount);
     }
+    // Statement balance lives in the account's default currency; only gate by
+    // it when that matches the requested currency, otherwise fall back.
+    const profile = profileByAccount.get(acc.id);
+    const statementBalance =
+      profile != null &&
+      profile.statementBalance != null &&
+      acc.defaultCurrency === currency
+        ? Number(profile.statementBalance)
+        : null;
+    const reservation = creditCardReservation(
+      {
+        currentBalanceOwed: fromUnits(currentOwedU),
+        statementBalance,
+        dueDay: profile != null ? profile.dueDay : null,
+      },
+      asOfDate,
+      windowEndDate,
+    );
+    totalU += toUnits(reservation);
   }
   return fromUnits(totalU);
 }
@@ -492,6 +530,7 @@ export async function computeSafeToSpend(params: {
       params.householdId,
       currency,
       params.asOfDate,
+      windowEndDate,
       corpEntityIds,
     ),
   ]);
