@@ -118,3 +118,53 @@ test('corp-entity credit-card balance is excluded from expected payments', async
   assert.equal(res.breakdown.expectedCreditCardPayments, 300);
   assert.equal(res.value, 2700);
 });
+
+async function seedLiabilityProfile(
+  accountId: number,
+  statementBalance: number | null,
+  dueDay: number | null,
+): Promise<void> {
+  const { LiabilityAccount } = await import('../models');
+  await LiabilityAccount.create({
+    accountId,
+    householdId: HH,
+    statementBalance: statementBalance == null ? null : statementBalance.toFixed(4),
+    dueDay,
+  } as never);
+}
+
+test('reserves the statement balance, not the full current balance, when due in window', async () => {
+  const personalAcct = await mkAccount('Personal Chequing', PERSONAL);
+  await seedCash(personalAcct.id, 3000);
+  const cc = await mkAccount('Personal CC', PERSONAL, 'credit_card');
+  await seedCash(cc.id, -10000); // full current balance owed is 10k…
+  await seedLiabilityProfile(cc.id, 8000, 10); // …but only 8k is billed, due Jun 10 (in 14d window)
+
+  const res = await computeSafeToSpend({
+    userId: USER,
+    householdId: HH,
+    currency: 'CAD',
+    asOfDate: '2026-06-01',
+  });
+
+  assert.equal(res.breakdown.expectedCreditCardPayments, 8000);
+  assert.equal(res.value, 3000 - 8000);
+});
+
+test('reserves nothing for a credit card whose statement is due outside the window', async () => {
+  const personalAcct = await mkAccount('Personal Chequing', PERSONAL);
+  await seedCash(personalAcct.id, 3000);
+  const cc = await mkAccount('Personal CC', PERSONAL, 'credit_card');
+  await seedCash(cc.id, -10000);
+  await seedLiabilityProfile(cc.id, 8000, 25); // due Jun 25 — past the Jun 15 window end
+
+  const res = await computeSafeToSpend({
+    userId: USER,
+    householdId: HH,
+    currency: 'CAD',
+    asOfDate: '2026-06-01',
+  });
+
+  assert.equal(res.breakdown.expectedCreditCardPayments, 0);
+  assert.equal(res.value, 3000);
+});
