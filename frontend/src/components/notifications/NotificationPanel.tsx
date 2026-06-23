@@ -1,5 +1,4 @@
-import { AlertTriangle, Info, OctagonAlert } from 'lucide-react'
-import { Button, Icon as DsIcon } from '@connor-adams/designsystem'
+import { Button, Icon as DsIcon, type IconName } from '@connor-adams/designsystem'
 import { DigestCard } from './DigestCard'
 import type { Notification, NotificationSeverity } from '@/types/api'
 
@@ -21,17 +20,17 @@ type Props = {
   onRetry: () => Promise<void> | void
 }
 
-function severityIcon(severity: NotificationSeverity) {
-  // Tailwind JIT needs literal class names — return both icon component
+function severityIcon(severity: NotificationSeverity): { icon: IconName; color: string } {
+  // Tailwind JIT needs literal class names — return both icon name
   // and a class string per branch so JIT picks them up.
   switch (severity) {
     case 'critical':
-      return { Icon: OctagonAlert, color: 'text-danger' }
+      return { icon: 'octagon-alert', color: 'text-danger' }
     case 'warn':
-      return { Icon: AlertTriangle, color: 'text-warning' }
+      return { icon: 'alert-triangle', color: 'text-warning' }
     case 'info':
     default:
-      return { Icon: Info, color: 'text-info' }
+      return { icon: 'info', color: 'text-info' }
   }
 }
 
@@ -131,7 +130,7 @@ export function NotificationPanel({
                 </li>
               )
             }
-            const { Icon, color } = severityIcon(n.severity)
+            const { icon, color } = severityIcon(n.severity)
             const isUnread = n.readAt == null
             return (
               <li key={n.id}>
@@ -144,7 +143,7 @@ export function NotificationPanel({
                   onClick={() => void onMarkRead(n.id)}
                   data-unread={isUnread ? 'true' : 'false'}
                 >
-                  <Icon size={16} className={`mt-0.5 ${color}`} aria-hidden="true" />
+                  <DsIcon name={icon} size={16} className={`mt-0.5 ${color}`} aria-hidden="true" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm font-semibold text-foreground truncate">

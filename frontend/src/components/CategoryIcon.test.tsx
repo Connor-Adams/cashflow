@@ -11,7 +11,7 @@ describe('CategoryIcon', () => {
     vi.restoreAllMocks()
   })
 
-  it('renders the lucide icon mapped to the category', async () => {
+  it('renders the DS icon mapped to the category', async () => {
     vi.spyOn(api, 'getJson').mockResolvedValue([
       { id: 1, householdId: 1, name: 'Coffee', icon: 'Coffee',
         createdAt: '', updatedAt: '' },

@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Sparkles } from 'lucide-react'
 import { Button } from '@connor-adams/designsystem'
+import { Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { useConfirm } from '@/lib/ds-extras'
 import { Input } from '@connor-adams/designsystem'
@@ -178,7 +178,7 @@ export function EnrichmentBackfillCard({ onComplete }: Props) {
               disabled={backfillRunning != null}
               onClick={() => void runBackfill('dry')}
             >
-              <Sparkles aria-hidden="true" />
+              <Icon name="sparkles" aria-hidden="true" />
               {backfillRunning === 'dry' ? 'Running dry run…' : 'Dry run'}
             </Button>
             <Button
@@ -186,7 +186,7 @@ export function EnrichmentBackfillCard({ onComplete }: Props) {
               disabled={backfillRunning != null}
               onClick={() => void runBackfill('real')}
             >
-              <Sparkles aria-hidden="true" />
+              <Icon name="sparkles" aria-hidden="true" />
               {backfillRunning === 'real' ? 'Running backfill…' : 'Run backfill'}
             </Button>
           </div>

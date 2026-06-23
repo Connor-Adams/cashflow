@@ -1,5 +1,4 @@
-import { Sparkles } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Button, Icon } from '@connor-adams/designsystem'
 
 const SEEDED_PROMPTS = [
   "Show me last month's grocery spend",
@@ -23,7 +22,7 @@ export function ChatEmptyState({ onSeed }: Props) {
       data-slot="chat-empty-state"
       className="flex flex-1 flex-col items-center justify-center p-8 text-center"
     >
-      <Sparkles size={32} aria-hidden="true" className="mb-3 opacity-60" />
+      <Icon name="sparkles" size={32} aria-hidden="true" className="mb-3 opacity-60" />
       <h2 className="mb-2 text-lg font-semibold">Ask anything about your transactions</h2>
       <p className="muted mb-6 max-w-md text-sm">
         Read your data, draft mutations, or change rules across many transactions.

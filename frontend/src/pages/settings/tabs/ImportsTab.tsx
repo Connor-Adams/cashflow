@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Sparkles } from 'lucide-react'
 import { Button } from '@connor-adams/designsystem'
+import { Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Input } from '@connor-adams/designsystem'
 import { Textarea } from '@connor-adams/designsystem'
@@ -353,7 +353,7 @@ export function ImportsTab() {
               disabled={receiptBusy != null || !receiptText.trim()}
               onClick={() => void parseReceiptText()}
             >
-              <Sparkles aria-hidden="true" />
+              <Icon name="sparkles" aria-hidden="true" />
               {receiptBusy === 'text' ? 'Parsing…' : 'Parse pasted text'}
             </Button>
             <label
@@ -376,7 +376,7 @@ export function ImportsTab() {
                   e.target.value = ''
                 }}
               />
-              <Sparkles aria-hidden="true" />
+              <Icon name="sparkles" aria-hidden="true" />
               {receiptBusy === 'image' ? 'Parsing image…' : 'Or upload a receipt image'}
             </label>
             <label
@@ -399,7 +399,7 @@ export function ImportsTab() {
                   e.target.value = ''
                 }}
               />
-              <Sparkles aria-hidden="true" />
+              <Icon name="sparkles" aria-hidden="true" />
               {receiptBusy === 'pdf' ? 'Parsing PDF…' : 'Or upload a receipt PDF (Costco)'}
             </label>
           </div>
@@ -447,7 +447,7 @@ export function ImportsTab() {
                   e.target.value = ''
                 }}
               />
-              <Sparkles aria-hidden="true" />
+              <Icon name="sparkles" aria-hidden="true" />
               {receiptBusy === 'csv' ? 'Importing CSV…' : 'Upload CSV'}
             </label>
           </div>

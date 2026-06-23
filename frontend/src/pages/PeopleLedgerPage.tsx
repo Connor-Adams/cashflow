@@ -10,7 +10,6 @@
  */
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { UserX } from 'lucide-react'
 import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -176,7 +175,7 @@ function SelfAccountSection({
   return (
     <div className="mb-4" data-testid="self-account-section">
       <div className="mb-2 flex items-center gap-2">
-        <UserX className="size-4 text-muted-foreground" aria-hidden="true" />
+        <Icon name="user-x" className="size-4 text-muted-foreground" aria-hidden="true" />
         <span className="text-sm font-medium text-muted-foreground">
           These look like your own accounts
         </span>
@@ -588,7 +587,7 @@ export function PeopleLedgerPage() {
           {selfContacts.length > 0 && (
             <div className="mt-4" data-testid="excluded-contacts">
               <div className="mb-2 flex items-center gap-2">
-                <UserX className="size-4 text-muted-foreground" aria-hidden="true" />
+                <Icon name="user-x" className="size-4 text-muted-foreground" aria-hidden="true" />
                 <span className="text-xs uppercase tracking-wide text-muted-foreground">
                   Excluded — own accounts
                 </span>

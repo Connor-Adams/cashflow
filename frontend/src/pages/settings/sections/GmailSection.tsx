@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Sparkles } from 'lucide-react'
 import { Button } from '@connor-adams/designsystem'
+import { Icon } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
 import { Input } from '@connor-adams/designsystem'
 import { deleteReq, getJson, patchJson, postJson } from '@/lib/api'
@@ -387,7 +387,7 @@ export function GmailSection() {
       )}
       {gmailStatus?.featureEnabled && !gmailStatus.connected && (
         <Button type="button" onClick={() => connectGmail()}>
-          <Sparkles aria-hidden="true" />
+          <Icon name="sparkles" aria-hidden="true" />
           Connect Gmail
         </Button>
       )}
@@ -415,7 +415,7 @@ export function GmailSection() {
           )}
           <div className="row" style={{ gap: '0.5rem', flexWrap: 'wrap' }}>
             <Button type="button" disabled={gmailScanning} onClick={() => void runGmailScan(500)}>
-              <Sparkles aria-hidden="true" />
+              <Icon name="sparkles" aria-hidden="true" />
               {gmailScanning ? 'Scanning…' : 'Scan inbox (up to 500)'}
             </Button>
             <Button
@@ -443,7 +443,7 @@ export function GmailSection() {
               onClick={() => void runDiscovery()}
               title="Find receipts from senders not yet on your allowlist"
             >
-              <Sparkles aria-hidden="true" />
+              <Icon name="sparkles" aria-hidden="true" />
               Discover new receipt sources
             </Button>
             <Button

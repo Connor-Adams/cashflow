@@ -910,15 +910,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@connor-adams/designsystem@npm:^0.4.0":
-  version: 0.4.0
-  resolution: "@connor-adams/designsystem@npm:0.4.0::__archiveUrl=https%3A%2F%2Fnpm.pkg.github.com%2Fdownload%2F%40connor-adams%2Fdesignsystem%2F0.4.0%2Ffa00a5b5c185e10938955f09b49eabb521c8e1e1"
+"@connor-adams/designsystem@npm:^0.6.0":
+  version: 0.6.0
+  resolution: "@connor-adams/designsystem@npm:0.6.0::__archiveUrl=https%3A%2F%2Fnpm.pkg.github.com%2Fdownload%2F%40connor-adams%2Fdesignsystem%2F0.6.0%2Fbba6974cc66f1ded063f9b2b36d9ca6042c79325"
   dependencies:
     "@connor-adams/tokens": "npm:0.1.1"
   peerDependencies:
     react: ">=18"
     react-dom: ">=18"
-  checksum: 10c0/3c92c71d8c5b81ecb7e86fcc0936be2d2d0186548a4d582b61092b39ca757c62ebb56bff259294bf4d7f8eb87e019270ac1e15c7ca73f0317095c1eed721ed73
+  checksum: 10c0/19916618dad2f2353417bde54fc565b2a0113ee0f5a4cebd116f2f05d5c884fa981baf1ea70daf2eb1ead24cf5a773fa20dd3339035a938c3c49749ca9935163
   languageName: node
   linkType: hard
 
@@ -7779,7 +7779,7 @@ __metadata:
   resolution: "frontend@workspace:frontend"
   dependencies:
     "@cashflow/shared": "npm:*"
-    "@connor-adams/designsystem": "npm:^0.4.0"
+    "@connor-adams/designsystem": "npm:^0.6.0"
     "@connor-adams/tokens": "npm:^0.1.0"
     "@eslint/js": "npm:^9.39.4"
     "@radix-ui/react-slot": "npm:^1.2.4"
@@ -7800,7 +7800,6 @@ __metadata:
     eslint-plugin-react-refresh: "npm:^0.5.2"
     globals: "npm:^17.4.0"
     jsdom: "npm:^26.1.0"
-    lucide-react: "npm:^1.14.0"
     react: "npm:^19.2.4"
     react-dom: "npm:^19.2.4"
     react-is: "npm:^19.2.4"
@@ -9177,15 +9176,6 @@ __metadata:
   dependencies:
     yallist: "npm:^4.0.0"
   checksum: 10c0/cb53e582785c48187d7a188d3379c181b5ca2a9c78d2bce3e7dee36f32761d1c42983da3fe12b55cb74e1779fa94cdc2e5367c028a9b35317184ede0c07a30a9
-  languageName: node
-  linkType: hard
-
-"lucide-react@npm:^1.14.0":
-  version: 1.14.0
-  resolution: "lucide-react@npm:1.14.0"
-  peerDependencies:
-    react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
-  checksum: 10c0/25c5dd878945842ffb519532f1a66f59f2d461e7be7bd322091b0ecd3cd32561c1ae3d9b50161432d39a72bf8c8f1a039268f2f20a035e520dd3f49dd46ffaf2
   languageName: node
   linkType: hard
 

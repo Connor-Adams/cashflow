@@ -1,5 +1,4 @@
 import * as React from 'react'
-import { GripVertical } from 'lucide-react'
 import { Icon } from '@connor-adams/designsystem'
 import { cn } from '@/lib/utils'
 
@@ -57,7 +56,8 @@ function TreeRow({
       {...rowProps}
     >
       {grip && (
-        <GripVertical
+        <Icon
+          name="grip-vertical"
           size={14}
           aria-hidden
           className="shrink-0 cursor-grab text-muted-foreground/50 opacity-0 transition-opacity group-hover:opacity-100"

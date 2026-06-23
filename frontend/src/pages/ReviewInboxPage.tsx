@@ -1,7 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import {
-  Keyboard, ListChecks, ShieldCheck, Wand2, } from 'lucide-react'
 import type { ImportConfidenceFlagToken } from '@cashflow/shared'
 import { IMPORT_CONFIDENCE_FLAG_TOKENS } from '@cashflow/shared'
 import { Badge, Icon } from '@connor-adams/designsystem'
@@ -717,7 +715,7 @@ export function ReviewInboxPage() {
                 aria-label="Show keyboard shortcuts"
                 title="Keyboard shortcuts (press ?)"
               >
-                <Keyboard aria-hidden="true" />
+                <Icon name="keyboard" aria-hidden="true" />
                 Shortcuts
               </Button>
               {showShortcutHint && (
@@ -987,7 +985,7 @@ export function ReviewInboxPage() {
             }
             actions={
               <Badge variant={selectedSummary.count ? 'default' : 'outline'}>
-                <ListChecks aria-hidden="true" />
+                <Icon name="list" aria-hidden="true" />
                 {selectedSummary.count}
               </Badge>
             }
@@ -1081,7 +1079,7 @@ export function ReviewInboxPage() {
               disabled={!canCreateRule || !canApply || applying}
               onClick={() => void createRuleAndApply()}
             >
-              <Wand2 aria-hidden="true" />
+              <Icon name="wand" aria-hidden="true" />
               Create rule and apply
             </Button>
           </div>
@@ -1094,7 +1092,7 @@ export function ReviewInboxPage() {
               background: 'color-mix(in srgb, var(--muted) 42%, transparent)',
             }}
           >
-            <ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            <Icon name="shield-check" aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
             <span>
               This only updates selected rows. Rule creation is available when all
               selected rows share one merchant.

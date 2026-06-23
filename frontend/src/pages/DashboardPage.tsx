@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
-import { FilterX } from 'lucide-react'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { Link, useNavigate } from 'react-router-dom'
 import { Alert, Icon } from '@connor-adams/designsystem'
@@ -772,7 +771,7 @@ export function DashboardPage() {
                     setDateTo(defaultRange.to)
                   }}
                 >
-                  <FilterX aria-hidden="true" />
+                  <Icon name="filter-x" aria-hidden="true" />
                   Clear filters
                 </Button>
               ) : null

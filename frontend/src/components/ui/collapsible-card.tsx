@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { Icon } from '@connor-adams/designsystem'
 import { cn } from '@/lib/utils'
 
 export type CollapsibleCardProps = {
@@ -27,7 +27,7 @@ export function CollapsibleCard({
   const [open, setOpen] = React.useState(defaultOpen)
   const reactId = React.useId()
   const bodyId = `collapsible-card-${reactId}`
-  const Chevron = open ? ChevronDown : ChevronRight
+  const chevron = open ? 'chevron-down' : 'chevron-right'
   const label =
     toggleLabel ?? (typeof title === 'string' ? title : 'section')
 
@@ -74,7 +74,7 @@ export function CollapsibleCard({
           data-slot="collapsible-card-toggle"
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-[color-mix(in_srgb,var(--bg3)_50%,transparent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
-          <Chevron aria-hidden="true" className="h-4 w-4" />
+          <Icon name={chevron} aria-hidden="true" className="h-4 w-4" />
         </button>
       </div>
       {open && (

@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { TrendingDown, TrendingUp } from 'lucide-react'
 import { Alert } from '@connor-adams/designsystem'
 import { Icon as DsIcon } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
@@ -238,11 +237,10 @@ function RateBadge({ pct }: { pct: number | null }) {
     return <Badge variant="secondary">No income in window</Badge>
   }
   const positive = pct >= 0
-  const Icon = positive ? TrendingUp : TrendingDown
   return (
     <Badge variant={positive ? 'default' : 'destructive'}>
       <DsIcon name="piggy-bank" size={14} aria-hidden="true" /> {formatRate(pct)} saved
-      <Icon size={14} aria-hidden="true" />
+      <DsIcon name={positive ? 'trending-up' : 'trending-down'} size={14} aria-hidden="true" />
     </Badge>
   )
 }

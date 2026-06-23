@@ -1,4 +1,4 @@
-import { Wrench } from 'lucide-react'
+import { Icon } from '@connor-adams/designsystem'
 import { cn } from '@/lib/utils'
 import type { ChatMessage } from '@cashflow/shared'
 
@@ -60,7 +60,7 @@ function ToolMessage({ message }: { message: ChatMessage }) {
         'mx-auto flex max-w-[90%] items-start gap-2 rounded-md border border-dashed border-border bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground',
       )}
     >
-      <Wrench size={12} aria-hidden="true" className="mt-0.5 shrink-0" />
+      <Icon name="wrench" size={12} aria-hidden="true" className="mt-0.5 shrink-0" />
       <div className="min-w-0 flex-1">
         <span className="font-semibold">{message.toolName ?? 'tool'}</span>
         {preview ? <span className="ml-2 break-words">{preview}</span> : null}

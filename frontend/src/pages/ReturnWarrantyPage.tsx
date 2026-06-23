@@ -8,7 +8,6 @@
  * edit dialog. Heavier query/filter UX can come later — the bones go in first.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CalendarClock, ShieldCheck } from 'lucide-react'
 import { Alert, Icon } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
@@ -341,7 +340,7 @@ function RowView({
               date={row.returnDeadline}
               days={row.daysUntilReturnDeadline}
               icon={
-                <CalendarClock className="inline-block size-3 align-text-bottom" />
+                <Icon name="calendar-clock" className="inline-block size-3 align-text-bottom" />
               }
               expiringSoon={Boolean(highlightExpiringSoon)}
             />
@@ -357,7 +356,7 @@ function RowView({
               date={row.warrantyEndDate}
               days={row.daysUntilWarrantyEnd}
               icon={
-                <ShieldCheck className="inline-block size-3 align-text-bottom" />
+                <Icon name="shield-check" className="inline-block size-3 align-text-bottom" />
               }
             />
           ) : (

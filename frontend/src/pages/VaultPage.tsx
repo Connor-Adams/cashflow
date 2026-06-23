@@ -8,7 +8,6 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
-import { ShieldAlert } from 'lucide-react'
 import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
@@ -161,7 +160,7 @@ export function VaultPage() {
       {!encryptionConfigured ? (
         <Card className="border-warning bg-warning-bg p-4">
           <div className="flex gap-3">
-            <ShieldAlert className="text-warning" aria-hidden="true" />
+            <Icon name="shield-alert" className="text-warning" aria-hidden="true" />
             <div className="text-sm">
               <p className="font-medium">Vault encryption is not configured.</p>
               <p className="text-muted-foreground">

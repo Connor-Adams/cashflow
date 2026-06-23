@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, TrendingDown, TrendingUp } from 'lucide-react'
-import { Button } from '@connor-adams/designsystem'
+import { Button, Icon, type IconName } from '@connor-adams/designsystem'
 import { formatCurrency } from '@/lib/formatCurrency'
 import type {
   DigestCategoryDelta,
@@ -28,11 +27,11 @@ type Props = {
   defaultExpanded?: boolean
 }
 
-function netChangeTone(net: number): { Icon: typeof TrendingUp; color: string } {
+function netChangeTone(net: number): { icon: IconName; color: string } {
   // Positive net = cash added (good, up); negative = cash out (down).
   return net >= 0
-    ? { Icon: TrendingUp, color: 'text-success' }
-    : { Icon: TrendingDown, color: 'text-danger' }
+    ? { icon: 'trending-up', color: 'text-success' }
+    : { icon: 'trending-down', color: 'text-danger' }
 }
 
 /** Color class for a spend delta: up = bad (danger), down = good (success). */
@@ -139,10 +138,10 @@ export function DigestCard({ notification, defaultExpanded = false }: Props) {
   const hasNet = typeof data.netChange === 'number'
   const enriched = isEnriched(data)
 
-  const Chevron = expanded ? ChevronDown : ChevronRight
-  const { Icon: NetIcon, color: netColor } = hasNet
+  const chevron: IconName = expanded ? 'chevron-down' : 'chevron-right'
+  const { icon: netIcon, color: netColor } = hasNet
     ? netChangeTone(data.netChange as number)
-    : { Icon: TrendingUp, color: 'text-muted-foreground' }
+    : { icon: 'trending-up' as IconName, color: 'text-muted-foreground' }
 
   return (
     <div className="rounded-md border border-border bg-card">
@@ -154,14 +153,14 @@ export function DigestCard({ notification, defaultExpanded = false }: Props) {
         onClick={() => setExpanded((v) => !v)}
         data-testid="digest-card-toggle"
       >
-        <Chevron size={16} className="shrink-0 text-muted-foreground" aria-hidden="true" />
+        <Icon name={chevron} size={16} className="shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-semibold text-foreground">
             {notification.title}
           </span>
           {hasNet ? (
             <span className={`flex items-center gap-1 text-xs font-medium ${netColor}`}>
-              <NetIcon size={13} aria-hidden="true" />
+              <Icon name={netIcon} size={13} aria-hidden="true" />
               Net {formatCurrency(data.netChange as number, currency)} this week
             </span>
           ) : (

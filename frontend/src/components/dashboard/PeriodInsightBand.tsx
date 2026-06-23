@@ -1,4 +1,4 @@
-import { CalendarRange } from 'lucide-react'
+import { Icon } from '@connor-adams/designsystem'
 import { formatCurrency } from '@/lib/formatCurrency'
 import type { PeriodInsightCurrency } from '@cashflow/shared'
 
@@ -38,7 +38,7 @@ export function PeriodInsightBand({ data, currency, rangeLabel }: Props) {
     <div className="flex flex-col gap-4">
       {/* Caption */}
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <CalendarRange className="h-3.5 w-3.5" aria-hidden />
+        <Icon name="calendar-range" className="h-3.5 w-3.5" aria-hidden />
         {[rangeLabel || 'this period', currency].filter(Boolean).join(' · ')}
       </p>
 

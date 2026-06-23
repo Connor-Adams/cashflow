@@ -1,37 +1,32 @@
 /* eslint-disable react-refresh/only-export-components */
-import {
-  ShoppingCart, ShoppingBag, Utensils, Coffee, Pizza, Beer, Wine,
-  Home, Bed, Sofa, Lightbulb, Plug, Wifi, Phone, Smartphone, Tv, Laptop,
-  Car, Fuel, Bus, Train, Plane, Bike, ParkingSquare,
-  Stethoscope, Pill, HeartPulse, Dumbbell,
-  GraduationCap, BookOpen, Briefcase, Building2,
-  PiggyBank, Landmark, CreditCard, Banknote, Wallet, Receipt,
-  Gift, PartyPopper, Cake, Baby, PawPrint, Flower2, Trees,
-  Wrench, Hammer, Paintbrush, Scissors, Shirt, Gem,
-  Camera, Music, Film, Gamepad2, Ticket,
-  Map, Mountain, Sun, Cloud, Umbrella, Snowflake, Flame, Droplet,
-  Trash2, Recycle, Leaf, Heart, Star, Sparkles,
-  Tag, Bookmark, Folder, Box, Package, Truck,
-  HandCoins, TrendingUp, TrendingDown,
-  type LucideIcon,
-} from 'lucide-react'
+import { Icon, type IconName } from '@connor-adams/designsystem'
 import { isCategoryIconName, type CategoryIconName } from '@cashflow/shared'
 import { useCategories } from '../lib/useCategories'
 
-export const CATEGORY_ICON_COMPONENTS: Record<CategoryIconName, LucideIcon> = {
-  ShoppingCart, ShoppingBag, Utensils, Coffee, Pizza, Beer, Wine,
-  Home, Bed, Sofa, Lightbulb, Plug, Wifi, Phone, Smartphone, Tv, Laptop,
-  Car, Fuel, Bus, Train, Plane, Bike, ParkingSquare,
-  Stethoscope, Pill, HeartPulse, Dumbbell,
-  GraduationCap, BookOpen, Briefcase, Building2,
-  PiggyBank, Landmark, CreditCard, Banknote, Wallet, Receipt,
-  Gift, PartyPopper, Cake, Baby, PawPrint, Flower2, Trees,
-  Wrench, Hammer, Paintbrush, Scissors, Shirt, Gem,
-  Camera, Music, Film, Gamepad2, Ticket,
-  Map, Mountain, Sun, Cloud, Umbrella, Snowflake, Flame, Droplet,
-  Trash2, Recycle, Leaf, Heart, Star, Sparkles,
-  Tag, Bookmark, Folder, Box, Package, Truck,
-  HandCoins, TrendingUp, TrendingDown,
+export const CATEGORY_ICON_GLYPHS: Record<CategoryIconName, IconName> = {
+  ShoppingCart: 'shopping-cart', ShoppingBag: 'shopping-bag', Utensils: 'utensils',
+  Coffee: 'coffee', Pizza: 'pizza', Beer: 'beer', Wine: 'wine',
+  Home: 'home', Bed: 'bed', Sofa: 'sofa', Lightbulb: 'lightbulb', Plug: 'plug',
+  Wifi: 'wifi', Phone: 'phone', Smartphone: 'phone', Tv: 'tv', Laptop: 'laptop',
+  Car: 'car', Fuel: 'fuel', Bus: 'bus', Train: 'train', Plane: 'plane',
+  Bike: 'bike', ParkingSquare: 'parking-square',
+  Stethoscope: 'stethoscope', Pill: 'pill', HeartPulse: 'heart', Dumbbell: 'dumbbell',
+  GraduationCap: 'graduation-cap', BookOpen: 'book-open', Briefcase: 'briefcase',
+  Building2: 'building',
+  PiggyBank: 'piggy-bank', Landmark: 'landmark', CreditCard: 'credit-card',
+  Banknote: 'banknote', Wallet: 'wallet', Receipt: 'receipt',
+  Gift: 'gift', PartyPopper: 'party-popper', Cake: 'cake', Baby: 'baby',
+  PawPrint: 'paw-print', Flower2: 'flower-2', Trees: 'trees',
+  Wrench: 'wrench', Hammer: 'wrench', Paintbrush: 'paintbrush', Scissors: 'scissors',
+  Shirt: 'shirt', Gem: 'gem',
+  Camera: 'camera', Music: 'music', Film: 'film', Gamepad2: 'gamepad-2', Ticket: 'ticket',
+  Map: 'map', Mountain: 'mountain', Sun: 'sun', Cloud: 'cloud', Umbrella: 'umbrella',
+  Snowflake: 'snowflake', Flame: 'flame', Droplet: 'droplet',
+  Trash2: 'trash', Recycle: 'recycle', Leaf: 'leaf', Heart: 'heart', Star: 'star',
+  Sparkles: 'sparkles',
+  Tag: 'tag', Bookmark: 'bookmark', Folder: 'folder', Box: 'package', Package: 'package',
+  Truck: 'truck',
+  HandCoins: 'coins', TrendingUp: 'trending-up', TrendingDown: 'trending-down',
 }
 
 type Props = {
@@ -45,9 +40,9 @@ export function CategoryIcon({ name, size = 16, className }: Props) {
   if (!name) return null
   const cat = byName(name)
   const iconName = isCategoryIconName(cat?.icon) ? cat.icon : null
-  const Icon = iconName ? CATEGORY_ICON_COMPONENTS[iconName] : Tag
   return (
     <Icon
+      name={iconName ? CATEGORY_ICON_GLYPHS[iconName] : 'tag'}
       size={size}
       className={className}
       data-icon={iconName ?? 'Tag'}
