@@ -10,8 +10,11 @@ import {
   resolveSolePartnerId,
   contactForSharedRow,
   topLargestShared,
+  computeTransfersByContact,
+  buildPaybacks,
   type SettlementTotals,
   type SharedTxnRow,
+  type RawSettlementForPayback,
 } from './partnerFairness';
 
 // ---------------- resolveSolePartnerId / contactForSharedRow ----------------
@@ -742,4 +745,40 @@ test('buildFairnessByCurrency folds partner transfers into balance', () => {
   assert.ok(cad, 'expected a CAD entry from transfers-only input');
   assert.equal(cad.balance, -2000);
   assert.deepEqual(cad.partnerTransfers, { in: 2000, out: 0 });
+});
+
+// ---------------- computeTransfersByContact ----------------
+
+test('computeTransfersByContact buckets pure transfers per contact+currency', () => {
+  const rows = [
+    row({ counterpartyContactId: 7, partnerShare: 0, amount: 5000 }),
+    row({ counterpartyContactId: 7, partnerShare: 0, amount: 2000 }),
+    row({ counterpartyContactId: 7, partnerShare: -50, amount: -100 }), // shared split — ignored
+    row({ counterpartyContactId: 3, partnerShare: 0, amount: -300 }),   // I sent Dad
+  ];
+  const m = computeTransfersByContact(rows);
+  assert.deepEqual(m.get(7)?.get('CAD'), { in: 7000, out: 0 });
+  assert.deepEqual(m.get(3)?.get('CAD'), { in: 0, out: 300 });
+});
+
+// ---------------- buildPaybacks ----------------
+
+test('buildPaybacks merges tagged transfers and settlements with source tags', () => {
+  const rows = [
+    row({ counterpartyContactId: 7, partnerShare: 0, amount: 5000, date: '2025-07-28', merchant: 'Cash received', txnId: 1045 }),
+    row({ counterpartyContactId: 7, partnerShare: -50, amount: -100 }), // shared — not a payback
+  ];
+  const settlements: RawSettlementForPayback[] = [
+    { contactId: 7, currency: 'CAD', direction: 'partner_paid_me', amount: 300, settledDate: '2026-02-01', note: 'cash' },
+  ];
+  const pb = buildPaybacks(rows, settlements);
+  assert.equal(pb.length, 2);
+  assert.deepEqual(pb.find((p) => p.source === 'transfer'), {
+    source: 'transfer', date: '2025-07-28', amount: 5000, currency: 'CAD',
+    direction: 'partner_paid_me', note: 'Cash received', txnId: 1045,
+  });
+  assert.deepEqual(pb.find((p) => p.source === 'settlement'), {
+    source: 'settlement', date: '2026-02-01', amount: 300, currency: 'CAD',
+    direction: 'partner_paid_me', note: 'cash', txnId: null,
+  });
 });

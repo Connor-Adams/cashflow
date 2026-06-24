@@ -674,6 +674,87 @@ export function buildFairnessMonthly(
   return points;
 }
 
+export type PaybackEntry = {
+  source: 'transfer' | 'settlement';
+  date: string;
+  /** Absolute amount of the movement. */
+  amount: number;
+  currency: string;
+  direction: 'partner_paid_me' | 'i_paid_partner';
+  note: string | null;
+  /** Transaction id for transfer-sourced rows; null for manual settlements. */
+  txnId: number | null;
+};
+
+export type RawSettlementForPayback = {
+  contactId: number;
+  currency: string;
+  direction: 'i_paid_partner' | 'partner_paid_me';
+  amount: number;
+  settledDate: string;
+  note: string | null;
+};
+
+/** Pure partner-to-partner transfers bucketed by counterparty contact, then currency. */
+export function computeTransfersByContact(
+  rows: SharedTxnRow[],
+): Map<number, Map<string, PartnerTransferTotals>> {
+  const out = new Map<number, Map<string, PartnerTransferTotals>>();
+  for (const r of rows) {
+    const cid = r.counterpartyContactId;
+    if (cid == null) continue;
+    if (r.partnerShare !== 0) continue;
+    const n = r.amount;
+    if (!Number.isFinite(n) || n === 0) continue;
+    const byCur = out.get(cid) ?? new Map<string, PartnerTransferTotals>();
+    const acc = byCur.get(r.currency) ?? { in: 0, out: 0 };
+    if (n < 0) acc.out += -n;
+    else acc.in += n;
+    byCur.set(r.currency, acc);
+    out.set(cid, byCur);
+  }
+  return out;
+}
+
+/**
+ * Display list of paybacks for one contact: tagged transfers (from the txn
+ * rows) + manual settlement records. Display-only — the balance already counts
+ * both via the transfer delta and settlement delta, so this never feeds the
+ * math. Sorted newest first.
+ */
+export function buildPaybacks(
+  contactRows: SharedTxnRow[],
+  contactSettlements: RawSettlementForPayback[],
+): PaybackEntry[] {
+  const out: PaybackEntry[] = [];
+  for (const r of contactRows) {
+    if (r.counterpartyContactId == null) continue;
+    if (r.partnerShare !== 0) continue;
+    if (!Number.isFinite(r.amount) || r.amount === 0) continue;
+    out.push({
+      source: 'transfer',
+      date: r.date,
+      amount: Math.abs(r.amount),
+      currency: r.currency,
+      direction: r.amount > 0 ? 'partner_paid_me' : 'i_paid_partner',
+      note: r.merchant,
+      txnId: r.txnId,
+    });
+  }
+  for (const s of contactSettlements) {
+    out.push({
+      source: 'settlement',
+      date: s.settledDate,
+      amount: Math.abs(s.amount),
+      currency: s.currency,
+      direction: s.direction,
+      note: s.note,
+      txnId: null,
+    });
+  }
+  return out.sort((a, b) => b.date.localeCompare(a.date));
+}
+
 /**
  * Derive a settlement recommendation from the per-currency outstanding
  * balance. Sub-cent balances collapse to `direction: 'none'` so the UI
