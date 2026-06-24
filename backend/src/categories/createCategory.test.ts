@@ -51,6 +51,20 @@ test('rejects a duplicate sibling name case-insensitively (sibling_conflict)', a
   );
 });
 
+test('rejects a name containing "/" — the path separator (invalid_name)', async () => {
+  await assert.rejects(
+    () => createCategory(householdId, 'Household / Vape', null),
+    (e: unknown) => e instanceof CategoryError && e.code === 'invalid_name',
+  );
+});
+
+test('the model itself refuses to persist a name containing "/" (last-resort invariant)', async () => {
+  await assert.rejects(
+    () => Category.create({ householdId, name: 'Household / Vape', parentId: null, icon: null }),
+    (e: unknown) => e instanceof CategoryError && e.code === 'invalid_name',
+  );
+});
+
 test('allows the same name under two different parents', async () => {
   const work = await Category.create({ householdId, name: 'Work', icon: null, parentId: null });
   const home = await Category.create({ householdId, name: 'Home', icon: null, parentId: null });

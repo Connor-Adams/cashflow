@@ -9,6 +9,7 @@ import {
   CreationOptional,
 } from 'sequelize';
 import { normalizeCategoryName } from '../categories/normalizeName';
+import { CategoryError } from '../categories/errors';
 
 export class Category extends Model<
   InferAttributes<Category>,
@@ -50,6 +51,15 @@ export function initCategory(sequelize: Sequelize): typeof Category {
       hooks: {
         beforeValidate(instance: Category) {
           if (instance.name != null) {
+            // "/" is reserved as the category path separator (see categories/path.ts);
+            // a name carrying it would otherwise persist as a flat row that shadows a
+            // nested category. Enforce the invariant for every writer, last resort.
+            if (instance.name.includes('/')) {
+              throw new CategoryError(
+                'invalid_name',
+                `category name may not contain "/": ${instance.name}`,
+              );
+            }
             instance.nameKey = normalizeCategoryName(instance.name);
           }
         },
