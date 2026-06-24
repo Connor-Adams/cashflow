@@ -855,6 +855,42 @@ test('buildFairnessMonthlyByContact keys trend per contact', () => {
   assert.equal(dad?.points[0].partnerShare, -200);
 });
 
+// ---------------- Fix 1 regression: excludeNonPartnerInflows must not drop contact-partitioned rows ----------------
+
+test('buildFairnessByContact: excludeNonPartnerInflows=true does NOT drop positive-amount split rows from a non-partner contact bucket', () => {
+  // Contact 3 is NOT a partner (isPartner=false). It has a positive-amount shared/split row
+  // (a refund for a shared expense). With the bug, classifyInflow would classify this as
+  // 'non_partner' (counterpartyContactId=null) and drop it. After the fix, the per-contact
+  // delegate is called with excludeNonPartnerInflows: false so the row is retained.
+  const rows: SharedTxnRow[] = [
+    // Non-partner contact split row — positive amount (refund), partnerShare non-zero
+    row({ ownershipType: 'contact', ownershipContactId: 3, amount: 50, myShare: 0, partnerShare: 50, counterpartyContactId: null }),
+    // Partner (id 7) bucket: positive-amount split row with null counterpartyContactId
+    row({ ownershipType: 'me', amount: 80, myShare: 40, partnerShare: 40, counterpartyContactId: null }),
+  ];
+  const meta = new Map([
+    [7, { name: 'Alex', isPartner: true }],
+    [3, { name: 'Dad', isPartner: false }],
+  ]);
+  const contacts = buildFairnessByContact(
+    rows, [], [], '2026-06-01', '2026-07-01',
+    { partnerContactIds: new Set([7]), excludeNonPartnerInflows: true },
+    meta,
+  );
+
+  const dad = contacts.find((c) => c.contactId === 3);
+  assert.ok(dad, 'Dad bucket should exist');
+  // The positive-amount row must NOT be dropped — sharedTransactionCount=1, partnerShareTotal=50
+  assert.equal(dad.byCurrency[0].sharedTransactionCount, 1);
+  assert.equal(dad.byCurrency[0].partnerShareTotal, 50);
+
+  const alex = contacts.find((c) => c.contactId === 7);
+  assert.ok(alex, 'Alex bucket should exist');
+  // Alex's positive-amount row with null counterparty must also be retained
+  assert.equal(alex.byCurrency[0].sharedTransactionCount, 1);
+  assert.equal(alex.byCurrency[0].partnerShareTotal, 40);
+});
+
 // ---------------- buildSettlementRecommendationByContact ----------------
 
 test('buildSettlementRecommendationByContact derives per-contact recs', () => {

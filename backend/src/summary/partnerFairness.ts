@@ -817,7 +817,10 @@ export function buildFairnessByContact(
       contactSettleTotals,
       currentMonthStart,
       nextMonthStart,
-      { ...options, partnerTransfersByCurrency },
+      // Per-contact partitioning already attributes rows to the right bucket;
+      // forwarding excludeNonPartnerInflows would silently drop positive-amount
+      // split/refund rows whose counterpartyContactId is null or non-partner.
+      { ...options, excludeNonPartnerInflows: false, partnerTransfersByCurrency },
     );
     if (byCurrency.length === 0) continue;
 
@@ -871,7 +874,9 @@ export function buildFairnessMonthlyByContact(
     const contactRows = rowsByContact.get(cid) ?? [];
     const contactSettlements =
       cid == null ? [] : monthlySettlements.filter((s) => s.contactId === cid);
-    const points = buildFairnessMonthly(contactRows, contactSettlements, options);
+    // Per-contact partitioning already achieves the attribution the toggle
+    // approximated; forwarding it would drop positive-amount rows from buckets.
+    const points = buildFairnessMonthly(contactRows, contactSettlements, { ...options, excludeNonPartnerInflows: false });
     if (points.length === 0) continue;
     const meta = cid != null ? contactsMeta.get(cid) : undefined;
     out.push({

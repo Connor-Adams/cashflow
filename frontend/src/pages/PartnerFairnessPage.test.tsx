@@ -356,7 +356,6 @@ describe('PartnerFairnessPage', () => {
   // ---------------- per-contact sections + PaybackList ------------------
 
   it('renders a section per contact and shows payback source badges', async () => {
-    vi.spyOn({ getJson: () => {} }, 'getJson')
     vi.stubGlobal(
       'fetch',
       vi.fn((input: RequestInfo) => {

@@ -320,7 +320,7 @@ function PartnerFairnessSection({
   return (
     <section className="grid gap-4">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-xl font-semibold">{cur}</h2>
+        <h3 className="text-xl font-semibold">{cur}</h3>
         <p className="mb-0 text-sm text-muted-foreground">
           {data.sharedTransactionCount} shared transaction
           {data.sharedTransactionCount === 1 ? '' : 's'} in range

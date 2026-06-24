@@ -7,6 +7,22 @@ import * as api from '../lib/api'
 
 describe('PartnerHomePage', () => {
   beforeEach(() => vi.restoreAllMocks())
+  it('nudges to share an account when nothing is shared', async () => {
+    vi.spyOn(api, 'getJson').mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/partner/fairness')) {
+        return { contacts: [], excludeNonPartnerInflows: false } as never
+      }
+      // All accounts are private (no visibility='shared')
+      return [{ visibility: 'private', accountId: 1, name: 'Chequing' }] as never
+    })
+    render(<MemoryRouter><PartnerHomePage /></MemoryRouter>)
+    await waitFor(() =>
+      expect(screen.getByText(/Nothing shared yet/i)).toBeInTheDocument(),
+    )
+    // The button text "Share an account" also appears in the description; target the button role.
+    expect(screen.getByRole('button', { name: /Share an account/i })).toBeInTheDocument()
+  })
+
   it('shows the is_partner contact balance, not a conflated total', async () => {
     vi.spyOn(api, 'getJson').mockImplementation(async (url: string) => {
       if (url.startsWith('/api/partner/fairness')) {
