@@ -763,6 +763,52 @@ export type FairnessContact = {
   paybacks: PaybackEntry[];
 };
 
+type ContactMeta = Map<number, { name: string; isPartner: boolean }>;
+
+/**
+ * Partition contributing rows by contact: split rows (partnerShare ≠ 0) by
+ * `contactForSharedRow`, pure-transfer rows by counterparty. Pure-`me` rows
+ * (partnerShare 0, no counterparty) contribute to nobody and are dropped. A
+ * `null` key is the "Unassigned" bucket (unlabeled split with no sole partner).
+ */
+function partitionRowsByContact(
+  rows: SharedTxnRow[],
+  solePartnerId: number | null,
+): Map<number | null, SharedTxnRow[]> {
+  const byContact = new Map<number | null, SharedTxnRow[]>();
+  for (const r of rows) {
+    let cid: number | null;
+    if (r.partnerShare !== 0) cid = contactForSharedRow(r, solePartnerId);
+    else if (r.counterpartyContactId != null) cid = r.counterpartyContactId;
+    else continue;
+    const list = byContact.get(cid) ?? [];
+    list.push(r);
+    byContact.set(cid, list);
+  }
+  return byContact;
+}
+
+/** Display name + partner flag for a bucket id (null → "Unassigned"). */
+function contactDisplay(
+  cid: number | null,
+  contactsMeta: ContactMeta,
+): { name: string; isPartner: boolean } {
+  const meta = cid != null ? contactsMeta.get(cid) : undefined;
+  return {
+    name: meta?.name ?? (cid == null ? 'Unassigned' : `Contact ${cid}`),
+    isPartner: meta?.isPartner ?? false,
+  };
+}
+
+/** Sort comparator: partners first, then alphabetical by contact name. */
+function comparePartnerThenName(
+  a: { isPartner: boolean; contactName: string },
+  b: { isPartner: boolean; contactName: string },
+): number {
+  if (a.isPartner !== b.isPartner) return a.isPartner ? -1 : 1;
+  return a.contactName.localeCompare(b.contactName);
+}
+
 /**
  * Partition every contributing row/settlement/transfer by contact, then run the
  * existing per-currency builder on each contact's subset. A row contributes to a
@@ -777,26 +823,11 @@ export function buildFairnessByContact(
   currentMonthStart: string,
   nextMonthStart: string,
   options: FairnessOptions = {},
-  contactsMeta: Map<number, { name: string; isPartner: boolean }> = new Map(),
+  contactsMeta: ContactMeta = new Map(),
 ): FairnessContact[] {
-  const partnerContactIds = options.partnerContactIds ?? new Set<number>();
-  const solePartnerId = resolveSolePartnerId(partnerContactIds);
+  const solePartnerId = resolveSolePartnerId(options.partnerContactIds ?? new Set<number>());
   const transfersByContact = computeTransfersByContact(rows);
-
-  // contactId (number | null) → rows. null = Unassigned bucket.
-  const rowsByContact = new Map<number | null, SharedTxnRow[]>();
-  const add = (cid: number | null, r: SharedTxnRow) => {
-    const list = rowsByContact.get(cid) ?? [];
-    list.push(r);
-    rowsByContact.set(cid, list);
-  };
-  for (const r of rows) {
-    if (r.partnerShare !== 0) {
-      add(contactForSharedRow(r, solePartnerId), r);
-    } else if (r.counterpartyContactId != null) {
-      add(r.counterpartyContactId, r);
-    }
-  }
+  const rowsByContact = partitionRowsByContact(rows, solePartnerId);
 
   // Ensure contacts that appear only via settlements still surface.
   const allContactIds = new Set<number | null>(rowsByContact.keys());
@@ -825,48 +856,33 @@ export function buildFairnessByContact(
     );
     if (byCurrency.length === 0) continue;
 
-    const meta = cid != null ? contactsMeta.get(cid) : undefined;
+    const { name, isPartner } = contactDisplay(cid, contactsMeta);
     result.push({
       contactId: cid,
-      contactName: meta?.name ?? (cid == null ? 'Unassigned' : `Contact ${cid}`),
-      isPartner: meta?.isPartner ?? false,
+      contactName: name,
+      isPartner,
       byCurrency,
       paybacks: buildPaybacks(contactRows, contactRawSettlements),
     });
   }
 
-  // Partners first, then by name.
-  return result.sort((a, b) =>
-    a.isPartner === b.isPartner
-      ? a.contactName.localeCompare(b.contactName)
-      : a.isPartner ? -1 : 1,
-  );
+  return result.sort(comparePartnerThenName);
 }
 
 /**
  * Per-contact wrapper over `buildFairnessMonthly`. Partitions rows by contact
- * using the same `contactForSharedRow`/`resolveSolePartnerId` logic as
- * `buildFairnessByContact`, then runs the existing monthly builder on each
- * contact's subset. Partners sort first, then alphabetically.
+ * using the same logic as `buildFairnessByContact`, then runs the existing
+ * monthly builder on each contact's subset. Partners sort first, then by name.
  */
 export function buildFairnessMonthlyByContact(
   rows: SharedTxnRow[],
   monthlySettlements: Array<SettlementTotals & { month: string }>,
   options: FairnessOptions = {},
-  contactsMeta: Map<number, { name: string; isPartner: boolean }> = new Map(),
+  contactsMeta: ContactMeta = new Map(),
 ): Array<{ contactId: number | null; contactName: string; isPartner: boolean; points: FairnessMonthlyPoint[] }> {
   const solePartnerId = resolveSolePartnerId(options.partnerContactIds ?? new Set<number>());
+  const rowsByContact = partitionRowsByContact(rows, solePartnerId);
 
-  const rowsByContact = new Map<number | null, SharedTxnRow[]>();
-  const add = (cid: number | null, r: SharedTxnRow) => {
-    const list = rowsByContact.get(cid) ?? [];
-    list.push(r);
-    rowsByContact.set(cid, list);
-  };
-  for (const r of rows) {
-    if (r.partnerShare !== 0) add(contactForSharedRow(r, solePartnerId), r);
-    else if (r.counterpartyContactId != null) add(r.counterpartyContactId, r);
-  }
   const allContactIds = new Set<number | null>(rowsByContact.keys());
   for (const s of monthlySettlements) allContactIds.add(s.contactId);
 
@@ -879,17 +895,10 @@ export function buildFairnessMonthlyByContact(
     // counterparty partner-membership, orthogonal to the per-contact bucketing.
     const points = buildFairnessMonthly(contactRows, contactSettlements, options);
     if (points.length === 0) continue;
-    const meta = cid != null ? contactsMeta.get(cid) : undefined;
-    out.push({
-      contactId: cid,
-      contactName: meta?.name ?? (cid == null ? 'Unassigned' : `Contact ${cid}`),
-      isPartner: meta?.isPartner ?? false,
-      points,
-    });
+    const { name, isPartner } = contactDisplay(cid, contactsMeta);
+    out.push({ contactId: cid, contactName: name, isPartner, points });
   }
-  return out.sort((a, b) =>
-    a.isPartner === b.isPartner ? a.contactName.localeCompare(b.contactName) : a.isPartner ? -1 : 1,
-  );
+  return out.sort(comparePartnerThenName);
 }
 
 /**
