@@ -7,7 +7,7 @@ import { EmptyState } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
-import type { Account, PartnerFairnessByCurrency, PartnerFairnessResponse } from '../types/api'
+import type { Account, PartnerFairnessByCurrency, PartnerFairnessContact, PartnerFairnessResponse } from '../types/api'
 
 /**
  * Partner Home — a viewer-relative landing surface for a household member.
@@ -31,11 +31,11 @@ function balanceTone(d: 'partner_owes_me' | 'i_owe_partner' | 'even'): string {
   return 'text-muted-foreground'
 }
 
-function CurrencyCard({ data }: { data: PartnerFairnessByCurrency }) {
+function ContactCurrencyCard({ name, data }: { name: string; data: PartnerFairnessByCurrency }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{data.currency}</CardTitle>
+        <CardTitle><span>{name}</span><span className="text-muted-foreground"> · {data.currency}</span></CardTitle>
       </CardHeader>
       <CardContent className="grid gap-3">
         <div>
@@ -63,7 +63,7 @@ function CurrencyCard({ data }: { data: PartnerFairnessByCurrency }) {
 
 export function PartnerHomePage() {
   const navigate = useNavigate()
-  const [fairness, setFairness] = useState<PartnerFairnessByCurrency[]>([])
+  const [partners, setPartners] = useState<PartnerFairnessContact[]>([])
   const [hasSharedAccount, setHasSharedAccount] = useState(false)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -77,7 +77,7 @@ export function PartnerHomePage() {
     ])
       .then(([f, accounts]) => {
         if (cancelled) return
-        setFairness(f.byCurrency)
+        setPartners(f.contacts.filter((c) => c.isPartner))
         setHasSharedAccount(accounts.some((a) => a.visibility === 'shared'))
         setErr(null)
       })
@@ -121,7 +121,7 @@ export function PartnerHomePage() {
         />
       ) : null}
 
-      {!loading && hasSharedAccount && fairness.length === 0 ? (
+      {!loading && hasSharedAccount && partners.length === 0 ? (
         <EmptyState
           title="No shared spending yet"
           description="Once you split a transaction with your partner, the running balance shows up here."
@@ -129,11 +129,13 @@ export function PartnerHomePage() {
         />
       ) : null}
 
-      {fairness.length > 0 ? (
+      {partners.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {fairness.map((c) => (
-            <CurrencyCard key={c.currency} data={c} />
-          ))}
+          {partners.flatMap((c) =>
+            c.byCurrency.map((cur) => (
+              <ContactCurrencyCard key={`${c.contactId}-${cur.currency}`} name={c.contactName} data={cur} />
+            )),
+          )}
         </div>
       ) : null}
     </div>

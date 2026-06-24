@@ -19,11 +19,15 @@ import { summaryQueryString } from '../lib/summaryQuery'
 import { useSessionState } from '../lib/useSessionState'
 import type {
   PartnerFairnessByCurrency,
+  PartnerFairnessContact,
+  PartnerFairnessMonthlyContact,
   PartnerFairnessMonthlyPoint,
   PartnerFairnessMonthlyResponse,
   PartnerFairnessResponse,
   PartnerSettlementRecommendation,
+  PartnerSettlementRecommendationContact,
   PartnerSettlementRecommendationResponse,
+  PaybackEntry,
 } from '../types/api'
 
 /**
@@ -55,9 +59,9 @@ function getYearToDate(): { from: string; to: string } {
 /**
  * /partner — shared-finance fairness dashboard (issue #207). Aggregates the
  * three GET /api/partner/* endpoints into one page:
- *   - /fairness → per-currency summary (balance, paidMore, breakdown, largest)
- *   - /monthly → historical trend
- *   - /settlement-recommendation → suggested next settlement
+ *   - /fairness → per-contact per-currency summary (balance, paidMore, breakdown, largest)
+ *   - /monthly → historical trend per contact
+ *   - /settlement-recommendation → suggested next settlement per contact
  *
  * Filters: currency + date range. Default view is "all time" so the
  * settlement recommendation reflects the true lifetime balance.
@@ -70,9 +74,9 @@ export function PartnerFairnessPage() {
   const [dateFrom, setDateFrom] = useSessionState('partner.dateFrom', '')
   const [dateTo, setDateTo] = useSessionState('partner.dateTo', '')
 
-  const [fairness, setFairness] = useState<PartnerFairnessByCurrency[]>([])
-  const [monthly, setMonthly] = useState<PartnerFairnessMonthlyPoint[]>([])
-  const [recommendations, setRecommendations] = useState<PartnerSettlementRecommendation[]>([])
+  const [contacts, setContacts] = useState<PartnerFairnessContact[]>([])
+  const [monthlyByContact, setMonthlyByContact] = useState<PartnerFairnessMonthlyContact[]>([])
+  const [recsByContact, setRecsByContact] = useState<PartnerSettlementRecommendationContact[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   /**
@@ -158,9 +162,9 @@ export function PartnerFairnessPage() {
     ])
       .then(([f, m, r]) => {
         if (cancelled) return
-        setFairness(f.byCurrency)
-        setMonthly(m.points)
-        setRecommendations(r.recommendations)
+        setContacts(f.contacts)
+        setMonthlyByContact(m.contacts)
+        setRecsByContact(r.contacts)
       })
       .catch((e: unknown) => {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Error')
@@ -226,23 +230,38 @@ export function PartnerFairnessPage() {
             <p className="text-sm leading-6 text-muted-foreground">Loading…</p>
           </CardContent>
         </Card>
-      ) : fairness.length === 0 ? (
+      ) : contacts.length === 0 ? (
         <EmptyState
           title="No shared activity yet"
           description="Tag transactions as split or with a contact to start tracking partner fairness."
         />
       ) : (
         <div className="grid gap-4">
-          {fairness.map((byCurrency) => (
-            <PartnerFairnessSection
-              key={byCurrency.currency}
-              data={byCurrency}
-              monthly={monthly.filter((p) => p.currency === byCurrency.currency)}
-              recommendation={recommendations.find(
-                (r) => r.currency === byCurrency.currency,
-              )}
-            />
-          ))}
+          {contacts.map((contact) => {
+            const monthly = monthlyByContact.find((m) => m.contactId === contact.contactId)?.points ?? []
+            const recs = recsByContact.find((r) => r.contactId === contact.contactId)?.recommendations ?? []
+            return (
+              <section key={contact.contactId ?? 'unassigned'} className="mb-8">
+                <h2 className="mb-3 text-lg font-semibold">
+                  {contact.contactName}
+                  {!contact.isPartner ? <span className="ml-2 text-sm text-muted-foreground">(other balance)</span> : null}
+                </h2>
+                <div className="grid gap-4">
+                  {contact.byCurrency.map((byCurrency) => (
+                    <PartnerFairnessSection
+                      key={byCurrency.currency}
+                      data={byCurrency}
+                      monthly={monthly.filter((p) => p.currency === byCurrency.currency)}
+                      recommendation={recs.find(
+                        (r) => r.currency === byCurrency.currency,
+                      )}
+                    />
+                  ))}
+                </div>
+                <PaybackList paybacks={contact.paybacks} />
+              </section>
+            )
+          })}
         </div>
       )}
     </>
@@ -263,6 +282,31 @@ function recommendationLabel(
   return 'You are square'
 }
 
+function PaybackList({ paybacks }: { paybacks: PaybackEntry[] }) {
+  if (paybacks.length === 0) return null
+  return (
+    <div className="mt-4">
+      <h3 className="mb-2 text-sm font-medium text-muted-foreground">Paybacks</h3>
+      <ul className="grid gap-1">
+        {paybacks.map((p, i) => (
+          <li key={`${p.txnId ?? 'settle'}-${i}`} className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-2">
+              <span className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                {p.source === 'transfer' ? 'bank transfer' : 'manual'}
+              </span>
+              <span>{p.date}</span>
+              <span className="text-muted-foreground">{p.note ?? ''}</span>
+            </span>
+            <span className={p.direction === 'partner_paid_me' ? 'text-positive' : 'text-negative'}>
+              {p.direction === 'partner_paid_me' ? '+' : '−'}{formatMoney(p.amount, p.currency)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function PartnerFairnessSection({
   data,
   monthly,
@@ -276,7 +320,7 @@ function PartnerFairnessSection({
   return (
     <section className="grid gap-4">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-xl font-semibold">{cur}</h2>
+        <h3 className="text-xl font-semibold">{cur}</h3>
         <p className="mb-0 text-sm text-muted-foreground">
           {data.sharedTransactionCount} shared transaction
           {data.sharedTransactionCount === 1 ? '' : 's'} in range

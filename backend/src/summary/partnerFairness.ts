@@ -195,6 +195,27 @@ export type SettlementRecommendation = {
   outstandingBalance: number;
 };
 
+/** The lone is_partner contact id, or null when the household has ≠ 1 partner. */
+export function resolveSolePartnerId(partnerContactIds: Set<number>): number | null {
+  return partnerContactIds.size === 1 ? [...partnerContactIds][0] : null;
+}
+
+/**
+ * Which contact a split expense (partnerShare !== 0) belongs to. A split the
+ * user explicitly assigned to a contact (ownershipType='contact') keeps that
+ * contact; an unlabeled split falls to the single household partner. Returns
+ * null → "Unassigned" bucket (no sole partner to attribute to).
+ */
+export function contactForSharedRow(
+  row: SharedTxnRow,
+  solePartnerId: number | null,
+): number | null {
+  if (row.ownershipType === 'contact' && row.ownershipContactId != null) {
+    return row.ownershipContactId;
+  }
+  return solePartnerId;
+}
+
 const TOP_CATEGORY_LIMIT = 8;
 const TOP_LARGEST_LIMIT = 10;
 
@@ -651,6 +672,239 @@ export function buildFairnessMonthly(
     });
   }
   return points;
+}
+
+export type PaybackEntry = {
+  source: 'transfer' | 'settlement';
+  date: string;
+  /** Absolute amount of the movement. */
+  amount: number;
+  currency: string;
+  direction: 'partner_paid_me' | 'i_paid_partner';
+  note: string | null;
+  /** Transaction id for transfer-sourced rows; null for manual settlements. */
+  txnId: number | null;
+};
+
+export type RawSettlementForPayback = {
+  contactId: number;
+  currency: string;
+  direction: 'i_paid_partner' | 'partner_paid_me';
+  amount: number;
+  settledDate: string;
+  note: string | null;
+};
+
+/** Pure partner-to-partner transfers bucketed by counterparty contact, then currency. */
+export function computeTransfersByContact(
+  rows: SharedTxnRow[],
+): Map<number, Map<string, PartnerTransferTotals>> {
+  const out = new Map<number, Map<string, PartnerTransferTotals>>();
+  for (const r of rows) {
+    const cid = r.counterpartyContactId;
+    if (cid == null) continue;
+    if (r.partnerShare !== 0) continue;
+    const n = r.amount;
+    if (!Number.isFinite(n) || n === 0) continue;
+    const byCur = out.get(cid) ?? new Map<string, PartnerTransferTotals>();
+    const acc = byCur.get(r.currency) ?? { in: 0, out: 0 };
+    if (n < 0) acc.out += -n;
+    else acc.in += n;
+    byCur.set(r.currency, acc);
+    out.set(cid, byCur);
+  }
+  return out;
+}
+
+/**
+ * Display list of paybacks for one contact: tagged transfers (from the txn
+ * rows) + manual settlement records. Display-only — the balance already counts
+ * both via the transfer delta and settlement delta, so this never feeds the
+ * math. Sorted newest first.
+ */
+export function buildPaybacks(
+  contactRows: SharedTxnRow[],
+  contactSettlements: RawSettlementForPayback[],
+): PaybackEntry[] {
+  const out: PaybackEntry[] = [];
+  for (const r of contactRows) {
+    if (r.counterpartyContactId == null) continue;
+    if (r.partnerShare !== 0) continue;
+    if (!Number.isFinite(r.amount) || r.amount === 0) continue;
+    out.push({
+      source: 'transfer',
+      date: r.date,
+      amount: Math.abs(r.amount),
+      currency: r.currency,
+      direction: r.amount > 0 ? 'partner_paid_me' : 'i_paid_partner',
+      note: r.merchant,
+      txnId: r.txnId,
+    });
+  }
+  for (const s of contactSettlements) {
+    out.push({
+      source: 'settlement',
+      date: s.settledDate,
+      amount: Math.abs(s.amount),
+      currency: s.currency,
+      direction: s.direction,
+      note: s.note,
+      txnId: null,
+    });
+  }
+  return out.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export type FairnessContact = {
+  contactId: number | null;
+  contactName: string;
+  isPartner: boolean;
+  byCurrency: FairnessByCurrency[];
+  paybacks: PaybackEntry[];
+};
+
+/**
+ * Partition every contributing row/settlement/transfer by contact, then run the
+ * existing per-currency builder on each contact's subset. A row contributes to a
+ * contact when it is that contact's split (contactForSharedRow) OR a transfer
+ * whose counterparty is that contact. Pure-`me` rows (partnerShare 0, no
+ * counterparty) contribute to nobody and are dropped.
+ */
+export function buildFairnessByContact(
+  rows: SharedTxnRow[],
+  settlementTotals: SettlementTotals[],
+  rawSettlements: RawSettlementForPayback[],
+  currentMonthStart: string,
+  nextMonthStart: string,
+  options: FairnessOptions = {},
+  contactsMeta: Map<number, { name: string; isPartner: boolean }> = new Map(),
+): FairnessContact[] {
+  const partnerContactIds = options.partnerContactIds ?? new Set<number>();
+  const solePartnerId = resolveSolePartnerId(partnerContactIds);
+  const transfersByContact = computeTransfersByContact(rows);
+
+  // contactId (number | null) → rows. null = Unassigned bucket.
+  const rowsByContact = new Map<number | null, SharedTxnRow[]>();
+  const add = (cid: number | null, r: SharedTxnRow) => {
+    const list = rowsByContact.get(cid) ?? [];
+    list.push(r);
+    rowsByContact.set(cid, list);
+  };
+  for (const r of rows) {
+    if (r.partnerShare !== 0) {
+      add(contactForSharedRow(r, solePartnerId), r);
+    } else if (r.counterpartyContactId != null) {
+      add(r.counterpartyContactId, r);
+    }
+  }
+
+  // Ensure contacts that appear only via settlements still surface.
+  const allContactIds = new Set<number | null>(rowsByContact.keys());
+  for (const s of settlementTotals) allContactIds.add(s.contactId);
+
+  const result: FairnessContact[] = [];
+  for (const cid of allContactIds) {
+    const contactRows = rowsByContact.get(cid) ?? [];
+    const contactSettleTotals =
+      cid == null ? [] : settlementTotals.filter((s) => s.contactId === cid);
+    const contactRawSettlements =
+      cid == null ? [] : rawSettlements.filter((s) => s.contactId === cid);
+    const partnerTransfersByCurrency =
+      cid == null ? new Map() : transfersByContact.get(cid) ?? new Map();
+
+    const byCurrency = buildFairnessByCurrency(
+      contactRows,
+      contactSettleTotals,
+      currentMonthStart,
+      nextMonthStart,
+      // #375 — forward excludeNonPartnerInflows unchanged. It filters by
+      // COUNTERPARTY partner-membership (who paid in), an axis orthogonal to
+      // the ownership-contact bucketing this function does, so it still
+      // correctly drops reimbursement/side-income rows within a bucket.
+      { ...options, partnerTransfersByCurrency },
+    );
+    if (byCurrency.length === 0) continue;
+
+    const meta = cid != null ? contactsMeta.get(cid) : undefined;
+    result.push({
+      contactId: cid,
+      contactName: meta?.name ?? (cid == null ? 'Unassigned' : `Contact ${cid}`),
+      isPartner: meta?.isPartner ?? false,
+      byCurrency,
+      paybacks: buildPaybacks(contactRows, contactRawSettlements),
+    });
+  }
+
+  // Partners first, then by name.
+  return result.sort((a, b) =>
+    a.isPartner === b.isPartner
+      ? a.contactName.localeCompare(b.contactName)
+      : a.isPartner ? -1 : 1,
+  );
+}
+
+/**
+ * Per-contact wrapper over `buildFairnessMonthly`. Partitions rows by contact
+ * using the same `contactForSharedRow`/`resolveSolePartnerId` logic as
+ * `buildFairnessByContact`, then runs the existing monthly builder on each
+ * contact's subset. Partners sort first, then alphabetically.
+ */
+export function buildFairnessMonthlyByContact(
+  rows: SharedTxnRow[],
+  monthlySettlements: Array<SettlementTotals & { month: string }>,
+  options: FairnessOptions = {},
+  contactsMeta: Map<number, { name: string; isPartner: boolean }> = new Map(),
+): Array<{ contactId: number | null; contactName: string; isPartner: boolean; points: FairnessMonthlyPoint[] }> {
+  const solePartnerId = resolveSolePartnerId(options.partnerContactIds ?? new Set<number>());
+
+  const rowsByContact = new Map<number | null, SharedTxnRow[]>();
+  const add = (cid: number | null, r: SharedTxnRow) => {
+    const list = rowsByContact.get(cid) ?? [];
+    list.push(r);
+    rowsByContact.set(cid, list);
+  };
+  for (const r of rows) {
+    if (r.partnerShare !== 0) add(contactForSharedRow(r, solePartnerId), r);
+    else if (r.counterpartyContactId != null) add(r.counterpartyContactId, r);
+  }
+  const allContactIds = new Set<number | null>(rowsByContact.keys());
+  for (const s of monthlySettlements) allContactIds.add(s.contactId);
+
+  const out: Array<{ contactId: number | null; contactName: string; isPartner: boolean; points: FairnessMonthlyPoint[] }> = [];
+  for (const cid of allContactIds) {
+    const contactRows = rowsByContact.get(cid) ?? [];
+    const contactSettlements =
+      cid == null ? [] : monthlySettlements.filter((s) => s.contactId === cid);
+    // #375 — forward excludeNonPartnerInflows unchanged: it filters by
+    // counterparty partner-membership, orthogonal to the per-contact bucketing.
+    const points = buildFairnessMonthly(contactRows, contactSettlements, options);
+    if (points.length === 0) continue;
+    const meta = cid != null ? contactsMeta.get(cid) : undefined;
+    out.push({
+      contactId: cid,
+      contactName: meta?.name ?? (cid == null ? 'Unassigned' : `Contact ${cid}`),
+      isPartner: meta?.isPartner ?? false,
+      points,
+    });
+  }
+  return out.sort((a, b) =>
+    a.isPartner === b.isPartner ? a.contactName.localeCompare(b.contactName) : a.isPartner ? -1 : 1,
+  );
+}
+
+/**
+ * Per-contact wrapper over `buildSettlementRecommendation`. Maps each
+ * `FairnessContact`'s `byCurrency` array through the existing recommendation
+ * builder and tags the output with the contact's id and name.
+ */
+export function buildSettlementRecommendationByContact(
+  contacts: FairnessContact[],
+): Array<{ contactId: number | null; contactName: string; recommendations: SettlementRecommendation[] }> {
+  return contacts.map((c) => ({
+    contactId: c.contactId,
+    contactName: c.contactName,
+    recommendations: buildSettlementRecommendation(c.byCurrency),
+  }));
 }
 
 /**

@@ -4,13 +4,53 @@ import {
   aggregateCategoryBreakdown,
   buildFairnessByCurrency,
   buildFairnessMonthly,
+  buildFairnessByContact,
+  buildFairnessMonthlyByContact,
   buildSettlementRecommendation,
+  buildSettlementRecommendationByContact,
   computePartnerTransferDelta,
   projectSettlementContribution,
+  resolveSolePartnerId,
+  contactForSharedRow,
   topLargestShared,
+  computeTransfersByContact,
+  buildPaybacks,
   type SettlementTotals,
   type SharedTxnRow,
+  type RawSettlementForPayback,
 } from './partnerFairness';
+
+// ---------------- resolveSolePartnerId / contactForSharedRow ----------------
+
+function row(p: Partial<SharedTxnRow>): SharedTxnRow {
+  return {
+    date: '2026-01-01', currency: 'CAD', category: null, merchant: 'm',
+    amount: -100, myShare: -50, partnerShare: -50, txnId: 1,
+    ownershipType: 'me', ownershipContactId: null, contactName: null,
+    counterpartyContactId: null, payerUserId: null, ...p,
+  };
+}
+
+test('resolveSolePartnerId returns the id only when exactly one partner', () => {
+  assert.equal(resolveSolePartnerId(new Set([7])), 7);
+  assert.equal(resolveSolePartnerId(new Set()), null);
+  assert.equal(resolveSolePartnerId(new Set([7, 9])), null);
+});
+
+test('contactForSharedRow: contact-owned split keeps its contact', () => {
+  const r = row({ ownershipType: 'contact', ownershipContactId: 3, partnerShare: -640.56 });
+  assert.equal(contactForSharedRow(r, 7), 3);
+});
+
+test('contactForSharedRow: unlabeled split falls to sole partner', () => {
+  const r = row({ ownershipType: 'me', ownershipContactId: null, partnerShare: -50 });
+  assert.equal(contactForSharedRow(r, 7), 7);
+});
+
+test('contactForSharedRow: unlabeled split with no sole partner is null (Unassigned)', () => {
+  const r = row({ ownershipType: 'me', ownershipContactId: null, partnerShare: -50 });
+  assert.equal(contactForSharedRow(r, null), null);
+});
 
 // ---------------- projectSettlementContribution ----------------
 
@@ -708,4 +748,162 @@ test('buildFairnessByCurrency folds partner transfers into balance', () => {
   assert.ok(cad, 'expected a CAD entry from transfers-only input');
   assert.equal(cad.balance, -2000);
   assert.deepEqual(cad.partnerTransfers, { in: 2000, out: 0 });
+});
+
+// ---------------- computeTransfersByContact ----------------
+
+test('computeTransfersByContact buckets pure transfers per contact+currency', () => {
+  const rows = [
+    row({ counterpartyContactId: 7, partnerShare: 0, amount: 5000 }),
+    row({ counterpartyContactId: 7, partnerShare: 0, amount: 2000 }),
+    row({ counterpartyContactId: 7, partnerShare: -50, amount: -100 }), // shared split — ignored
+    row({ counterpartyContactId: 3, partnerShare: 0, amount: -300 }),   // I sent Dad
+  ];
+  const m = computeTransfersByContact(rows);
+  assert.deepEqual(m.get(7)?.get('CAD'), { in: 7000, out: 0 });
+  assert.deepEqual(m.get(3)?.get('CAD'), { in: 0, out: 300 });
+});
+
+// ---------------- buildPaybacks ----------------
+
+test('buildPaybacks merges tagged transfers and settlements with source tags', () => {
+  const rows = [
+    row({ counterpartyContactId: 7, partnerShare: 0, amount: 5000, date: '2025-07-28', merchant: 'Cash received', txnId: 1045 }),
+    row({ counterpartyContactId: 7, partnerShare: -50, amount: -100 }), // shared — not a payback
+  ];
+  const settlements: RawSettlementForPayback[] = [
+    { contactId: 7, currency: 'CAD', direction: 'partner_paid_me', amount: 300, settledDate: '2026-02-01', note: 'cash' },
+  ];
+  const pb = buildPaybacks(rows, settlements);
+  assert.equal(pb.length, 2);
+  assert.deepEqual(pb.find((p) => p.source === 'transfer'), {
+    source: 'transfer', date: '2025-07-28', amount: 5000, currency: 'CAD',
+    direction: 'partner_paid_me', note: 'Cash received', txnId: 1045,
+  });
+  assert.deepEqual(pb.find((p) => p.source === 'settlement'), {
+    source: 'settlement', date: '2026-02-01', amount: 300, currency: 'CAD',
+    direction: 'partner_paid_me', note: 'cash', txnId: null,
+  });
+});
+
+// ---------------- buildFairnessByContact ----------------
+
+test('buildFairnessByContact separates Alex from Dad — no conflation', () => {
+  const rows: SharedTxnRow[] = [
+    // Alex 50/50 shared expense: I paid 18,811.58 of partner share total across rows.
+    row({ ownershipType: 'me', ownershipContactId: null, amount: -37623.16, myShare: -18811.58, partnerShare: -18811.58, currency: 'CAD' }),
+    // Alex inbound transfer (the $7k + more): pure transfer, partnerShare 0.
+    row({ ownershipType: 'me', counterpartyContactId: 7, amount: 8425, myShare: 0, partnerShare: 0, currency: 'CAD', date: '2025-07-28' }),
+    // Dad partner-split row (100% Dad): ownershipType contact.
+    row({ ownershipType: 'contact', ownershipContactId: 3, amount: -640.56, myShare: 0, partnerShare: -640.56, currency: 'CAD' }),
+  ];
+  const settlements: SettlementTotals[] = [
+    { contactId: 3, currency: 'CAD', iPaid: 0, partnerPaid: 11198.30 },
+  ];
+  const raw: RawSettlementForPayback[] = [
+    { contactId: 3, currency: 'CAD', direction: 'partner_paid_me', amount: 11198.30, settledDate: '2024-11-21', note: 'NORTHVUE' },
+  ];
+  const meta = new Map([
+    [7, { name: 'Alex', isPartner: true }],
+    [3, { name: 'Dad', isPartner: false }],
+  ]);
+  const contacts = buildFairnessByContact(
+    rows, settlements, raw, '2026-06-01', '2026-07-01',
+    { partnerContactIds: new Set([7]) }, meta,
+  );
+
+  const alex = contacts.find((c) => c.contactId === 7);
+  const dad = contacts.find((c) => c.contactId === 3);
+  assert.ok(alex && dad);
+  // Alex: -partnerShareTotal (+18,811.58) + transfer (out - in = -8425) = 10,386.58
+  assert.equal(Math.round((alex.byCurrency[0].balance) * 100) / 100, 10386.58);
+  assert.equal(alex.isPartner, true);
+  // Dad: -partnerShareTotal (+640.56) + (iPaid - partnerPaid = -11,198.30) = -10,557.74
+  assert.equal(Math.round((dad.byCurrency[0].balance) * 100) / 100, -10557.74);
+  // Alex's $8,425 transfer is not in Dad's bucket and vice-versa.
+  assert.equal(alex.paybacks.length, 1);
+  assert.equal(alex.paybacks[0].source, 'transfer');
+  assert.equal(dad.paybacks.length, 1);
+  assert.equal(dad.paybacks[0].source, 'settlement');
+});
+
+test('buildFairnessByContact routes unlabeled splits to Unassigned when no sole partner', () => {
+  const rows: SharedTxnRow[] = [
+    row({ ownershipType: 'me', ownershipContactId: null, amount: -100, myShare: -50, partnerShare: -50, currency: 'CAD' }),
+  ];
+  const contacts = buildFairnessByContact(
+    rows, [], [], '2026-06-01', '2026-07-01',
+    { partnerContactIds: new Set([7, 9]) }, new Map(),
+  );
+  assert.equal(contacts.length, 1);
+  assert.equal(contacts[0].contactId, null);
+  assert.equal(contacts[0].contactName, 'Unassigned');
+});
+
+// ---------------- buildFairnessMonthlyByContact ----------------
+
+test('buildFairnessMonthlyByContact keys trend per contact', () => {
+  const rows: SharedTxnRow[] = [
+    row({ ownershipType: 'me', amount: -100, myShare: -50, partnerShare: -50, date: '2026-01-15', currency: 'CAD' }),
+    row({ ownershipType: 'contact', ownershipContactId: 3, amount: -200, myShare: 0, partnerShare: -200, date: '2026-01-20', currency: 'CAD' }),
+  ];
+  const meta = new Map([[7, { name: 'Alex', isPartner: true }], [3, { name: 'Dad', isPartner: false }]]);
+  const out = buildFairnessMonthlyByContact(rows, [], { partnerContactIds: new Set([7]) }, meta);
+  const alex = out.find((c) => c.contactId === 7);
+  const dad = out.find((c) => c.contactId === 3);
+  assert.equal(alex?.points[0].partnerShare, -50);
+  assert.equal(dad?.points[0].partnerShare, -200);
+});
+
+// ---------------- excludeNonPartnerInflows forwards through the per-contact delegate ----------------
+
+test('buildFairnessByContact: forwards excludeNonPartnerInflows so #375 still drops non-partner inflows within a bucket', () => {
+  // #375 filters by COUNTERPARTY partner-membership (who paid in), which is
+  // orthogonal to the ownership-contact bucketing. A row owned by contact 3 whose
+  // counterparty is a non-partner (or null) is a reimbursement/side-income inflow
+  // and must still drop when the toggle is on.
+  const rows: SharedTxnRow[] = [
+    // Owned by contact 3, partner counterparty (7) — kept.
+    row({ ownershipType: 'contact', ownershipContactId: 3, amount: 200, myShare: 0, partnerShare: 200, counterpartyContactId: 7 }),
+    // Owned by contact 3, non-partner counterparty (null) — a positive inflow; dropped when toggle on.
+    row({ ownershipType: 'contact', ownershipContactId: 3, amount: 50, myShare: 0, partnerShare: 50, counterpartyContactId: null }),
+  ];
+  const meta = new Map([
+    [7, { name: 'Alex', isPartner: true }],
+    [3, { name: 'Dad', isPartner: false }],
+  ]);
+  const on = buildFairnessByContact(
+    rows, [], [], '2026-06-01', '2026-07-01',
+    { partnerContactIds: new Set([7]), excludeNonPartnerInflows: true },
+    meta,
+  );
+  const dadOn = on.find((c) => c.contactId === 3);
+  assert.ok(dadOn);
+  // Only the partner-counterparty row survives the toggle.
+  assert.equal(dadOn.byCurrency[0].sharedTransactionCount, 1);
+  assert.equal(dadOn.byCurrency[0].partnerShareTotal, 200);
+
+  const off = buildFairnessByContact(
+    rows, [], [], '2026-06-01', '2026-07-01',
+    { partnerContactIds: new Set([7]), excludeNonPartnerInflows: false },
+    meta,
+  );
+  const dadOff = off.find((c) => c.contactId === 3);
+  assert.ok(dadOff);
+  // Toggle off: both rows count.
+  assert.equal(dadOff.byCurrency[0].sharedTransactionCount, 2);
+  assert.equal(dadOff.byCurrency[0].partnerShareTotal, 250);
+});
+
+// ---------------- buildSettlementRecommendationByContact ----------------
+
+test('buildSettlementRecommendationByContact derives per-contact recs', () => {
+  const contacts = [
+    { contactId: 7, contactName: 'Alex', isPartner: true, paybacks: [],
+      byCurrency: [{ currency: 'CAD', balance: 10386.58, direction: 'partner_owes_me' } as never] },
+  ];
+  const recs = buildSettlementRecommendationByContact(contacts as never);
+  assert.equal(recs[0].contactId, 7);
+  assert.equal(recs[0].recommendations[0].direction, 'partner_pays_you');
+  assert.equal(recs[0].recommendations[0].amount, 10386.58);
 });
