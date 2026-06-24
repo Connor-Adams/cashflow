@@ -29,6 +29,12 @@ function last4FromText(text: string | null | undefined): string | null {
 export type MatchScore = {
   confidence: number;
   matchReason: string;
+  /**
+   * Secondary score computed from unambiguous-identity signals only
+   * (date proximity + payment last4 match). Used by selectMatchCandidates to
+   * break a sub-threshold tie without reintroducing fan-out.
+   */
+  secondaryScore: number;
 };
 
 /** A candidate is auto-suggested only at or above this confidence. */
@@ -55,7 +61,7 @@ export const FALLBACK_MIN_CONFIDENCE = 50;
  * sub-threshold score, so one charge whose amount collided with many stale
  * Amazon orders (each scoring 50) produced a link to all of them.
  */
-export function selectMatchCandidates<T extends { confidence: number }>(scored: T[]): T[] {
+export function selectMatchCandidates<T extends { confidence: number; secondary?: number }>(scored: T[]): T[] {
   const strong = scored.filter((candidate) => candidate.confidence >= MATCH_CONFIDENCE_THRESHOLD);
   if (strong.length > 0) return strong;
 
@@ -63,12 +69,25 @@ export function selectMatchCandidates<T extends { confidence: number }>(scored: 
   const best = sorted[0];
   if (!best || best.confidence < FALLBACK_MIN_CONFIDENCE) return [];
   const tiedAtBest = sorted.filter((candidate) => candidate.confidence === best.confidence);
-  if (tiedAtBest.length > 1) return []; // ambiguous fan-out — abstain rather than guess
+  if (tiedAtBest.length > 1) {
+    // Attempt a secondary tiebreak on unambiguous-identity signals (date + last4).
+    // Only resolve the tie when exactly ONE candidate strictly leads on secondary.
+    const withSecondary = tiedAtBest.filter((c) => c.secondary != null);
+    if (withSecondary.length > 0) {
+      const bestSecondary = Math.max(...tiedAtBest.map((c) => c.secondary ?? 0));
+      const leadersOnSecondary = tiedAtBest.filter((c) => (c.secondary ?? 0) === bestSecondary);
+      if (leadersOnSecondary.length === 1 && bestSecondary > 0) {
+        return [leadersOnSecondary[0]];
+      }
+    }
+    return []; // still ambiguous — abstain rather than guess
+  }
   return [best];
 }
 
 export function scoreAmazonOrderMatch(txn: Transaction, order: ExternalOrder): MatchScore {
   let score = 0;
+  let secondary = 0;
   const reasons: string[] = [];
   const txnAmount = Math.abs(Number(txn.amount));
   const orderTotal = numberOrNull(order.total);
@@ -91,6 +110,7 @@ export function scoreAmazonOrderMatch(txn: Transaction, order: ExternalOrder): M
     const gap = daysBetween(txn.date, orderDate);
     if (gap >= 0 && gap <= 5) {
       score += 25;
+      secondary += 25;
       reasons.push(`order/shipment date ${gap} day(s) before transaction`);
     } else if (Math.abs(gap) > 10) {
       score -= 15;
@@ -106,12 +126,14 @@ export function scoreAmazonOrderMatch(txn: Transaction, order: ExternalOrder): M
   const txnLast4 = last4FromText(`${txn.notes || ''} ${txn.sourceReference || ''}`);
   if (txnLast4 && order.paymentLast4 && txnLast4 === order.paymentLast4) {
     score += 20;
+    secondary += 20;
     reasons.push('payment last4 matches');
   }
 
   return {
     confidence: Math.max(0, Math.min(100, score)),
     matchReason: reasons.join('; ') || 'candidate Amazon order',
+    secondaryScore: secondary,
   };
 }
 
@@ -202,7 +224,10 @@ export async function runAmazonMatching(args: {
   let matchedDateTo: string | null = null;
 
   for (const txn of txns.filter((row) => isAmazonLikeMerchant(`${row.merchantRaw} ${row.merchantClean}`))) {
-    const scores = orders.map((order) => ({ order, ...scoreAmazonOrderMatch(txn, order) }));
+    const scores = orders.map((order) => {
+      const { confidence, matchReason, secondaryScore } = scoreAmazonOrderMatch(txn, order);
+      return { order, confidence, matchReason, secondary: secondaryScore };
+    });
     const candidates = selectMatchCandidates(scores);
     // Per-transaction auto-accept: only when there is a single candidate and it
     // is unambiguous + ≥ threshold. A transaction spanning multiple confident
