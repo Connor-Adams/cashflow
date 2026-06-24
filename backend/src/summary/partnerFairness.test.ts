@@ -7,10 +7,44 @@ import {
   buildSettlementRecommendation,
   computePartnerTransferDelta,
   projectSettlementContribution,
+  resolveSolePartnerId,
+  contactForSharedRow,
   topLargestShared,
   type SettlementTotals,
   type SharedTxnRow,
 } from './partnerFairness';
+
+// ---------------- resolveSolePartnerId / contactForSharedRow ----------------
+
+function row(p: Partial<SharedTxnRow>): SharedTxnRow {
+  return {
+    date: '2026-01-01', currency: 'CAD', category: null, merchant: 'm',
+    amount: -100, myShare: -50, partnerShare: -50, txnId: 1,
+    ownershipType: 'me', ownershipContactId: null, contactName: null,
+    counterpartyContactId: null, payerUserId: null, ...p,
+  };
+}
+
+test('resolveSolePartnerId returns the id only when exactly one partner', () => {
+  assert.equal(resolveSolePartnerId(new Set([7])), 7);
+  assert.equal(resolveSolePartnerId(new Set()), null);
+  assert.equal(resolveSolePartnerId(new Set([7, 9])), null);
+});
+
+test('contactForSharedRow: contact-owned split keeps its contact', () => {
+  const r = row({ ownershipType: 'contact', ownershipContactId: 3, partnerShare: -640.56 });
+  assert.equal(contactForSharedRow(r, 7), 3);
+});
+
+test('contactForSharedRow: unlabeled split falls to sole partner', () => {
+  const r = row({ ownershipType: 'me', ownershipContactId: null, partnerShare: -50 });
+  assert.equal(contactForSharedRow(r, 7), 7);
+});
+
+test('contactForSharedRow: unlabeled split with no sole partner is null (Unassigned)', () => {
+  const r = row({ ownershipType: 'me', ownershipContactId: null, partnerShare: -50 });
+  assert.equal(contactForSharedRow(r, null), null);
+});
 
 // ---------------- projectSettlementContribution ----------------
 

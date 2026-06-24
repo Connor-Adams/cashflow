@@ -195,6 +195,27 @@ export type SettlementRecommendation = {
   outstandingBalance: number;
 };
 
+/** The lone is_partner contact id, or null when the household has ≠ 1 partner. */
+export function resolveSolePartnerId(partnerContactIds: Set<number>): number | null {
+  return partnerContactIds.size === 1 ? [...partnerContactIds][0] : null;
+}
+
+/**
+ * Which contact a split expense (partnerShare !== 0) belongs to. A split the
+ * user explicitly assigned to a contact (ownershipType='contact') keeps that
+ * contact; an unlabeled split falls to the single household partner. Returns
+ * null → "Unassigned" bucket (no sole partner to attribute to).
+ */
+export function contactForSharedRow(
+  row: SharedTxnRow,
+  solePartnerId: number | null,
+): number | null {
+  if (row.ownershipType === 'contact' && row.ownershipContactId != null) {
+    return row.ownershipContactId;
+  }
+  return solePartnerId;
+}
+
 const TOP_CATEGORY_LIMIT = 8;
 const TOP_LARGEST_LIMIT = 10;
 
