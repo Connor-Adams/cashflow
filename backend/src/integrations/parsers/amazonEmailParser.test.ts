@@ -62,3 +62,54 @@ test('decimal-comma totals (no period) still parse as cents', () => {
   assert.ok(order);
   assert.equal(order.total, 44.97);
 });
+
+test('populates structured subtotal/tax, not just notes', () => {
+  const body = [
+    'Order #114-1234567-1234567',
+    'Placed on May 21, 2026',
+    'Widget',
+    'Quantity: 1',
+    '$44.97',
+    'Order Subtotal: $44.97',
+    'Shipping & handling: $0.00',
+    'Tax: $5.39',
+    'Order Total: $50.36',
+  ].join('\n');
+  const order = parseAmazonReceiptEmail(body);
+  assert.ok(order);
+  assert.equal(order!.tax, 5.39);
+  assert.equal(order!.subtotal, 44.97);
+  assert.equal(order!.total, 50.36);
+  // tax and shipping must NOT appear in notes
+  assert.ok(!order!.notes?.includes('Tax:'), 'notes must not contain Tax line');
+  assert.ok(!order!.notes?.includes('Shipping:'), 'notes must not contain Shipping line');
+});
+
+test('detects CAD currency from CDN$ prefix', () => {
+  const body = [
+    'Order #114-9999999-9999999',
+    'CDN$ 29.99',
+    'Order Total: CDN$ 29.99',
+  ].join('\n');
+  const order = parseAmazonReceiptEmail(body);
+  assert.ok(order);
+  assert.equal(order!.currency, 'CAD');
+});
+
+test('detects USD currency from US$ prefix', () => {
+  const body = [
+    'Order #114-8888888-8888888',
+    'US$ 19.99',
+    'Order Total: US$ 19.99',
+  ].join('\n');
+  const order = parseAmazonReceiptEmail(body);
+  assert.ok(order);
+  assert.equal(order!.currency, 'USD');
+});
+
+test('currency is null when no currency prefix present', () => {
+  const body = ['Order #114-7777777-7777777', 'Order Total: 44.97'].join('\n');
+  const order = parseAmazonReceiptEmail(body);
+  assert.ok(order);
+  assert.equal(order!.currency, null);
+});

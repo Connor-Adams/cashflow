@@ -38,10 +38,6 @@ const ORDER_ID_RE = /\bOrder\s*#?\s*([0-9]{3}-[0-9]{7}-[0-9]{7})\b/i;
 const TOTAL_RE = new RegExp(`\\bOrder\\s*Total\\b\\s*[:\\-]?\\s*\\$?\\s*${AMOUNT_SRC}`, 'i');
 const SUBTOTAL_RE = new RegExp(`\\bOrder\\s*Subtotal\\b\\s*[:\\-]?\\s*\\$?\\s*${AMOUNT_SRC}`, 'i');
 const TAX_RE = new RegExp(`\\bTax\\b\\s*[:\\-]?\\s*\\$?\\s*${AMOUNT_SRC}`, 'i');
-const SHIPPING_RE = new RegExp(
-  `\\bShipping(?:\\s*&\\s*handling)?\\b\\s*[:\\-]?\\s*\\$?\\s*${AMOUNT_SRC}`,
-  'i',
-);
 const DATE_RE = /\b(?:Placed\s*on|Order\s*placed|Date|Order\s*Date)\b\s*[:\-]?\s*([A-Za-z]{3,9}\s+[0-9]{1,2},?\s+[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2})/i;
 const QUANTITY_RE = /\bQuantity\s*[:\-]?\s*([0-9]+)/i;
 const PRICE_RE = /\$\s*((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)\.[0-9]{2})/;
@@ -53,6 +49,15 @@ function parseAmount(raw: string): number {
     return Number(`${raw.slice(0, -3).replace(/,/g, '')}.${raw.slice(-2)}`);
   }
   return Number(raw.replace(/,/g, ''));
+}
+
+/** Detects the currency symbol used in the email body. Returns null when ambiguous. */
+function detectCurrency(body: string): string | null {
+  if (/CDN\$|CA\$|\bCAD\b/.test(body)) return 'CAD';
+  if (/US\$|\bUSD\b/.test(body)) return 'USD';
+  if (/£|\bGBP\b/.test(body)) return 'GBP';
+  if (/€|\bEUR\b/.test(body)) return 'EUR';
+  return null;
 }
 
 function normalizeDate(raw: string): string | null {
@@ -136,28 +141,25 @@ export function parseAmazonReceiptEmail(body: string): ExtractedReceiptOrder | n
   const orderDate = dateMatch ? normalizeDate(dateMatch[1]) : null;
   const last4 = body.match(LAST4_RE)?.[1] ?? null;
   const items = extractItems(body);
-  const tax = body.match(TAX_RE)?.[1] ?? null;
-  const shipping = body.match(SHIPPING_RE)?.[1] ?? null;
+  const taxRaw = body.match(TAX_RE)?.[1] ?? null;
+  const subtotalMatch = body.match(SUBTOTAL_RE);
+  const subtotal = subtotalMatch ? parseAmount(subtotalMatch[1]) : null;
+  const currency = detectCurrency(body);
 
   if (total == null && items.length === 0) return null;
-
-  const notesParts: string[] = [];
-  if (orderId) notesParts.push(`Order ${orderId}`);
-  if (tax) notesParts.push(`Tax: $${tax}`);
-  if (shipping) notesParts.push(`Shipping: $${shipping}`);
 
   return {
     vendor: 'amazon',
     vendorName: 'Amazon',
     orderDate,
     orderId,
-    subtotal: null,
-    tax: null,
+    subtotal,
+    tax: taxRaw != null ? parseAmount(taxRaw) : null,
     total,
-    currency: null,
+    currency,
     paymentLast4: last4,
     tenders: [],
     items,
-    notes: notesParts.length > 0 ? notesParts.join(' · ') : null,
+    notes: orderId ? `Order ${orderId}` : null,
   };
 }
