@@ -239,9 +239,7 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   function removeLinkFromState(linkId: number) {
     setTxns((prev) =>
-      prev
-        .map((txn) => ({ ...txn, orderLinks: (txn.orderLinks ?? []).filter((l) => l.id !== linkId) }))
-        .filter((txn) => (txn.orderLinks ?? []).length > 0 || true),
+      prev.map((txn) => ({ ...txn, orderLinks: (txn.orderLinks ?? []).filter((l) => l.id !== linkId) })),
     )
   }
 

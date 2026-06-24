@@ -450,9 +450,10 @@ test('GET /spending/by-category: accepted-linked itemized txn decomposes into pe
   // Electronics gets $40 from txnA item + $30 from txnB plain = $70.
   assert.equal(eRow.amount, 70);
 
-  // (b) Invariant: sum of all category direct amounts equals sum of all transaction spend.
+  // (b) Invariant: sum of ALL category direct amounts (including any Uncategorized row)
+  // equals the sum of all transaction spend. Filtering out Uncategorized would miss
+  // spend leaking into that bucket.
   const totalCategorySpend = res.body.categories
-    .filter((c: { name: string }) => c.name !== 'Uncategorized')
     .reduce((s: number, c: { amount: number }) => s + c.amount, 0);
   // Two transactions: $120 + $30 = $150.
   assert.equal(Math.round(totalCategorySpend * 100), 15000);

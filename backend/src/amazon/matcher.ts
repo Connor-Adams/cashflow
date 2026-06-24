@@ -72,11 +72,10 @@ export function selectMatchCandidates<T extends { confidence: number; secondary?
   if (tiedAtBest.length > 1) {
     // Attempt a secondary tiebreak on unambiguous-identity signals (date + last4).
     // Only resolve the tie when exactly ONE candidate strictly leads on secondary.
-    const withSecondary = tiedAtBest.filter((c) => c.secondary != null);
-    if (withSecondary.length > 0) {
-      const bestSecondary = Math.max(...tiedAtBest.map((c) => c.secondary ?? 0));
+    const bestSecondary = Math.max(...tiedAtBest.map((c) => c.secondary ?? 0));
+    if (bestSecondary > 0) {
       const leadersOnSecondary = tiedAtBest.filter((c) => (c.secondary ?? 0) === bestSecondary);
-      if (leadersOnSecondary.length === 1 && bestSecondary > 0) {
+      if (leadersOnSecondary.length === 1) {
         return [leadersOnSecondary[0]];
       }
     }

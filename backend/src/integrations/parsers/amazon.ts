@@ -34,9 +34,14 @@ import type { ExtractedReceiptOrder, ExtractedReceiptItem } from '../../ai/extra
 // ('1,234.56'), or a bare decimal comma ('44,97' in EU-formatted emails).
 const AMOUNT_SRC = '((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:[.,][0-9]{2}))';
 
+// Currency symbols pattern: CDN$/CA$/US$ or bare $. Used by both the optional
+// prefix (for totals) and the required prefix (for per-item prices).
+const CURRENCY_SYMBOLS = '(?:CDN|CA|US)\\$|\\$';
 // Currency prefix: optional CDN$/CA$/US$ or bare $ — letters must NOT be
 // captured into the numeric group; the outer (?:…)? makes the whole prefix optional.
-const CURRENCY_PREFIX = '(?:(?:CDN|CA|US)\\$|\\$)?\\s*';
+const CURRENCY_PREFIX = `(?:${CURRENCY_SYMBOLS})?\\s*`;
+// Required currency prefix — for contexts where a $ (or CDN$/CA$/US$) must be present.
+const CURRENCY_PREFIX_REQUIRED = `(?:${CURRENCY_SYMBOLS})\\s*`;
 
 const ORDER_ID_RE = /\bOrder\s*#?\s*([0-9]{3}-[0-9]{7}-[0-9]{7})\b/i;
 const TOTAL_RE = new RegExp(`\\bOrder\\s*Total\\b\\s*[:\\-]?\\s*${CURRENCY_PREFIX}${AMOUNT_SRC}`, 'i');
@@ -46,7 +51,7 @@ const TAX_RE = new RegExp(`\\bTax\\b\\s*[:\\-]?\\s*${CURRENCY_PREFIX}${AMOUNT_SR
 // and ship-confirm phrasings "Arriving <date>" / "Shipped on <date>".
 const DATE_RE = /\b(?:Placed\s*on|Order\s*placed|Order\s*Date|Date|Arriving|Shipped\s*on)\b\s*[:\-]?\s*([A-Za-z]{3,9}\s+[0-9]{1,2},?\s+[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2})/i;
 const QUANTITY_RE = /\bQuantity\s*[:\-]?\s*([0-9]+)/i;
-const PRICE_RE = /(?:(?:CDN|CA|US)\$|\$)\s*((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)\.[0-9]{2})/;
+const PRICE_RE = new RegExp(`${CURRENCY_PREFIX_REQUIRED}((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)\\.[0-9]{2})`);
 // LAST4_RE: matches "ending in 1234", "ending with 1234", and card-network-prefixed
 // forms like "Visa ending in 1234", "Mastercard ending with 1234".
 const LAST4_RE = /(?:(?:Visa|Mastercard|Amex|American\s*Express|Discover)\s+)?ending\s+(?:in|with)\s+(\d{4})/i;
