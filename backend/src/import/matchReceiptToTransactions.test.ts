@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import {
   scoreReceiptMatch,
   txnMatchesVendor,
-  decideAutoAccept,
   type CandidatePayment,
 } from './matchReceiptToTransactions';
+import { decideAutoAccept } from '../amazon/autoAccept';
 import type { ExternalOrder } from '../models/ExternalOrder';
 import type { Transaction } from '../models/Transaction';
 
