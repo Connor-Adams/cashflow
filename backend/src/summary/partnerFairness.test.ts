@@ -4,6 +4,7 @@ import {
   aggregateCategoryBreakdown,
   buildFairnessByCurrency,
   buildFairnessMonthly,
+  buildFairnessByContact,
   buildSettlementRecommendation,
   computePartnerTransferDelta,
   projectSettlementContribution,
@@ -781,4 +782,58 @@ test('buildPaybacks merges tagged transfers and settlements with source tags', (
     source: 'settlement', date: '2026-02-01', amount: 300, currency: 'CAD',
     direction: 'partner_paid_me', note: 'cash', txnId: null,
   });
+});
+
+// ---------------- buildFairnessByContact ----------------
+
+test('buildFairnessByContact separates Alex from Dad — no conflation', () => {
+  const rows: SharedTxnRow[] = [
+    // Alex 50/50 shared expense: I paid 18,811.58 of partner share total across rows.
+    row({ ownershipType: 'me', ownershipContactId: null, amount: -37623.16, myShare: -18811.58, partnerShare: -18811.58, currency: 'CAD' }),
+    // Alex inbound transfer (the $7k + more): pure transfer, partnerShare 0.
+    row({ ownershipType: 'me', counterpartyContactId: 7, amount: 8425, myShare: 0, partnerShare: 0, currency: 'CAD', date: '2025-07-28' }),
+    // Dad partner-split row (100% Dad): ownershipType contact.
+    row({ ownershipType: 'contact', ownershipContactId: 3, amount: -640.56, myShare: 0, partnerShare: -640.56, currency: 'CAD' }),
+  ];
+  const settlements: SettlementTotals[] = [
+    { contactId: 3, currency: 'CAD', iPaid: 0, partnerPaid: 11198.30 },
+  ];
+  const raw: RawSettlementForPayback[] = [
+    { contactId: 3, currency: 'CAD', direction: 'partner_paid_me', amount: 11198.30, settledDate: '2024-11-21', note: 'NORTHVUE' },
+  ];
+  const meta = new Map([
+    [7, { name: 'Alex', isPartner: true }],
+    [3, { name: 'Dad', isPartner: false }],
+  ]);
+  const contacts = buildFairnessByContact(
+    rows, settlements, raw, '2026-06-01', '2026-07-01',
+    { partnerContactIds: new Set([7]) }, meta,
+  );
+
+  const alex = contacts.find((c) => c.contactId === 7);
+  const dad = contacts.find((c) => c.contactId === 3);
+  assert.ok(alex && dad);
+  // Alex: -partnerShareTotal (+18,811.58) + transfer (out - in = -8425) = 10,386.58
+  assert.equal(Math.round((alex.byCurrency[0].balance) * 100) / 100, 10386.58);
+  assert.equal(alex.isPartner, true);
+  // Dad: -partnerShareTotal (+640.56) + (iPaid - partnerPaid = -11,198.30) = -10,557.74
+  assert.equal(Math.round((dad.byCurrency[0].balance) * 100) / 100, -10557.74);
+  // Alex's $8,425 transfer is not in Dad's bucket and vice-versa.
+  assert.equal(alex.paybacks.length, 1);
+  assert.equal(alex.paybacks[0].source, 'transfer');
+  assert.equal(dad.paybacks.length, 1);
+  assert.equal(dad.paybacks[0].source, 'settlement');
+});
+
+test('buildFairnessByContact routes unlabeled splits to Unassigned when no sole partner', () => {
+  const rows: SharedTxnRow[] = [
+    row({ ownershipType: 'me', ownershipContactId: null, amount: -100, myShare: -50, partnerShare: -50, currency: 'CAD' }),
+  ];
+  const contacts = buildFairnessByContact(
+    rows, [], [], '2026-06-01', '2026-07-01',
+    { partnerContactIds: new Set([7, 9]) }, new Map(),
+  );
+  assert.equal(contacts.length, 1);
+  assert.equal(contacts[0].contactId, null);
+  assert.equal(contacts[0].contactName, 'Unassigned');
 });
