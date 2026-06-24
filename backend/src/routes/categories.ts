@@ -23,7 +23,9 @@ type CategoryNode = {
 };
 
 function statusForCategoryError(code: CategoryError['code']): number {
-  return code === 'not_found' || code === 'parent_not_found' ? 404 : 409;
+  if (code === 'not_found' || code === 'parent_not_found') return 404;
+  if (code === 'invalid_name') return 400;
+  return 409;
 }
 
 const router = Router();
@@ -185,6 +187,10 @@ router.patch('/:id', async (req, res, next) => {
     await row.save();
     res.json(row);
   } catch (e) {
+    if (e instanceof CategoryError) {
+      res.status(statusForCategoryError(e.code)).json({ error: e.message, code: e.code });
+      return;
+    }
     next(e);
   }
 });

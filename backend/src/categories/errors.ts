@@ -4,7 +4,8 @@ export type CategoryErrorCode =
   | 'cycle'
   | 'sibling_conflict'
   | 'has_children'
-  | 'has_references';
+  | 'has_references'
+  | 'invalid_name';
 
 export class CategoryError extends Error {
   code: CategoryErrorCode;
