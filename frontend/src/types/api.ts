@@ -568,9 +568,29 @@ export type PartnerFairnessByCurrency = {
   largestShared: PartnerFairnessLargestTransaction[]
 }
 
+/** A payback movement shown in a contact's history (display-only; already counted in balance). */
+export type PaybackEntry = {
+  source: 'transfer' | 'settlement'
+  date: string
+  amount: number
+  currency: string
+  direction: 'partner_paid_me' | 'i_paid_partner'
+  note: string | null
+  txnId: number | null
+}
+
+/** Per-contact fairness bucket. */
+export type PartnerFairnessContact = {
+  contactId: number | null
+  contactName: string
+  isPartner: boolean
+  byCurrency: PartnerFairnessByCurrency[]
+  paybacks: PaybackEntry[]
+}
+
 /** Response shape for GET /api/partner/fairness. */
 export type PartnerFairnessResponse = {
-  byCurrency: PartnerFairnessByCurrency[]
+  contacts: PartnerFairnessContact[]
   /**
    * #375 — echo of the toggle state the rollup was computed with. The
    * frontend uses this to keep the local switch in sync after a navigation
@@ -592,9 +612,16 @@ export type PartnerFairnessMonthlyPoint = {
   cumulativeBalance: number
 }
 
+export type PartnerFairnessMonthlyContact = {
+  contactId: number | null
+  contactName: string
+  isPartner: boolean
+  points: PartnerFairnessMonthlyPoint[]
+}
+
 /** Response shape for GET /api/partner/monthly. */
 export type PartnerFairnessMonthlyResponse = {
-  points: PartnerFairnessMonthlyPoint[]
+  contacts: PartnerFairnessMonthlyContact[]
   /** #375 — echo of the toggle state used to compute the trend. */
   excludeNonPartnerInflows: boolean
 }
@@ -607,9 +634,15 @@ export type PartnerSettlementRecommendation = {
   outstandingBalance: number
 }
 
+export type PartnerSettlementRecommendationContact = {
+  contactId: number | null
+  contactName: string
+  recommendations: PartnerSettlementRecommendation[]
+}
+
 /** Response shape for GET /api/partner/settlement-recommendation. */
 export type PartnerSettlementRecommendationResponse = {
-  recommendations: PartnerSettlementRecommendation[]
+  contacts: PartnerSettlementRecommendationContact[]
   /** #375 — echo of the toggle state used to compute the recommendation. */
   excludeNonPartnerInflows: boolean
 }
