@@ -310,3 +310,30 @@ test('cancellation email returns null (do not create a spurious order)', () => {
   const order = parseAmazonReceiptEmail(body);
   assert.equal(order, null, 'cancellation emails must return null');
 });
+
+test('refund-policy boilerplate in footer does NOT drop a real order (regression: bare \\brefund\\b)', () => {
+  // A real order confirmation whose footer mentions "refund" in a policy blurb
+  // must NOT be treated as a refund/cancellation email and must parse to a valid
+  // order with the correct total.
+  const body = [
+    'Thank you for your order.',
+    'Order #114-2468013-5791234',
+    'Placed on June 24, 2026',
+    '',
+    'Wireless Keyboard',
+    'Quantity: 1',
+    '$45.00',
+    '',
+    'Order Subtotal: $45.00',
+    'Tax: $5.36',
+    'Order Total: $50.36',
+    '',
+    // Refund-policy boilerplate — must NOT trigger refund guard
+    'Items are eligible for a full refund within 30 days of delivery.',
+    'See our 30-day refund policy for details.',
+  ].join('\n');
+  const order = parseAmazonReceiptEmail(body);
+  assert.ok(order, 'order with refund-policy boilerplate must NOT be dropped');
+  assert.equal(order!.total, 50.36);
+  assert.equal(order!.orderId, '114-2468013-5791234');
+});

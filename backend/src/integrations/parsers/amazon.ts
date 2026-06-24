@@ -154,7 +154,7 @@ export function parseAmazonReceiptEmail(body: string): ExtractedReceiptOrder | n
 
   // Refund/cancellation emails are out of scope — return null rather than
   // creating a spurious positive-amount order.
-  const isRefundOrCancellation = /\b(?:refund|cancell?ation|cancelled|your\s+order\s+has\s+been\s+cancel|we(?:'ve|'ve|\s+have)\s+(?:issued|processed)\s+(?:a|your)\s+refund)\b/i.test(body);
+  const isRefundOrCancellation = /\b(?:cancell?ation|cancell?ed|your\s+order\s+has\s+been\s+cancel|we(?:'ve|\s+have)\s+(?:issued|processed)\s+(?:a|your)\s+refund|your\s+refund\s+of)\b/i.test(body);
   if (isRefundOrCancellation) return null;
 
   const orderId = body.match(ORDER_ID_RE)?.[1] ?? null;
