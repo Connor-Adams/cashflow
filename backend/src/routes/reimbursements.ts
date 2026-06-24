@@ -387,6 +387,10 @@ router.delete('/transactions/:id/split', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
+    if (txn.householdId == null) {
+      res.status(400).json({ error: 'Transaction has no household' });
+      return;
+    }
     await sequelize.transaction(async (t) => {
       await Reimbursement.destroy({
         where: { transactionId: txn.id, fromSplit: true },
