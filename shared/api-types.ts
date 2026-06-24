@@ -2114,7 +2114,7 @@ export interface SimplefinAlreadyLinkedResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Multiway transaction split (issue #805)
+// Multiway transaction split (docs/superpowers/specs/2026-06-23-multiway-split-design.md)
 // ---------------------------------------------------------------------------
 
 export interface SplitParticipantDTO {

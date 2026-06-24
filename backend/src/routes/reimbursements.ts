@@ -333,8 +333,14 @@ router.post('/transactions/:id/split', async (req, res, next) => {
       v.value.includeSelf,
     );
     await sequelize.transaction(async (t) => {
+      // Preserve received or repayment-linked split claims — only remove still-open ones.
       await Reimbursement.destroy({
-        where: { transactionId: txn.id, fromSplit: true },
+        where: {
+          transactionId: txn.id,
+          fromSplit: true,
+          status: { [Op.ne]: 'received' },
+          repaymentTransactionId: null,
+        },
         transaction: t,
       });
       await Reimbursement.bulkCreate(
@@ -392,8 +398,14 @@ router.delete('/transactions/:id/split', async (req, res, next) => {
       return;
     }
     await sequelize.transaction(async (t) => {
+      // Preserve received or repayment-linked split claims — only remove still-open ones.
       await Reimbursement.destroy({
-        where: { transactionId: txn.id, fromSplit: true },
+        where: {
+          transactionId: txn.id,
+          fromSplit: true,
+          status: { [Op.ne]: 'received' },
+          repaymentTransactionId: null,
+        },
         transaction: t,
       });
       txn.ownershipType = 'me';

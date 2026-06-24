@@ -244,3 +244,46 @@ test('rejects contact from another household', async () => {
     .send({ method: 'even', participants: [{ contactId: otherContactId }], includeSelf: true })
     .expect(400);
 });
+
+test('re-split preserves a split claim already marked received', async () => {
+  const txnId = await createTransaction(primaryHouseholdId, primaryAccountId, '2026-04-06', -90, {
+    createdByUserId: primaryUserId,
+  });
+  // split -> 1 claim
+  const first = await primaryAgent
+    .post(`/api/transactions/${txnId}/split`)
+    .send({ method: 'even', participants: [{ contactId: primaryContactId }], includeSelf: true })
+    .expect(201);
+  const claimId = first.body.claims[0].id;
+  // mark it received via PUT /api/reimbursements/:id
+  await primaryAgent.put(`/api/reimbursements/${claimId}`).send({ status: 'received' }).expect(200);
+  // re-split with a different shape
+  await primaryAgent
+    .post(`/api/transactions/${txnId}/split`)
+    .send({ method: 'percent', participants: [{ contactId: primaryContactId, pct: 50 }], includeSelf: true })
+    .expect(201);
+  // the received claim must still exist, alongside the new open one
+  const list = await primaryAgent.get(`/api/reimbursements?transactionId=${txnId}`).expect(200);
+  const ids = list.body.data.map((d: { id: number }) => d.id);
+  assert.ok(ids.includes(claimId), 'received split claim must survive a re-split');
+});
+
+test('unsplit preserves a split claim already marked received', async () => {
+  const txnId = await createTransaction(primaryHouseholdId, primaryAccountId, '2026-04-07', -60, {
+    createdByUserId: primaryUserId,
+  });
+  // split -> 1 claim
+  const first = await primaryAgent
+    .post(`/api/transactions/${txnId}/split`)
+    .send({ method: 'even', participants: [{ contactId: primaryContactId }], includeSelf: true })
+    .expect(201);
+  const claimId = first.body.claims[0].id;
+  // mark it received
+  await primaryAgent.put(`/api/reimbursements/${claimId}`).send({ status: 'received' }).expect(200);
+  // unsplit (DELETE)
+  await primaryAgent.delete(`/api/transactions/${txnId}/split`).expect(200);
+  // the received claim must still exist
+  const list = await primaryAgent.get(`/api/reimbursements?transactionId=${txnId}`).expect(200);
+  const ids = list.body.data.map((d: { id: number }) => d.id);
+  assert.ok(ids.includes(claimId), 'received split claim must survive an unsplit');
+});
