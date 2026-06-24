@@ -1,3 +1,9 @@
+// fallow-ignore-file code-duplication
+// The ExternalOrder.findOrCreate block here and in routes/externalOrders.ts are
+// intentionally separate: this path appends the Gmail message id to the dedupeKey,
+// embeds scanner metadata into rawPayload, and carries businessUsePercent from the
+// AI-extraction context — coupling them via a shared helper would require so many
+// options it would be more complex than the duplication.
 /**
  * scanReceipts — orchestrates a one-shot Gmail receipt-scan for a connected user.
  *
@@ -654,8 +660,8 @@ export async function scanInbox(
             dedupeKey,
             orderDate: extracted!.orderDate,
             shipmentDate: null,
-            subtotal: null,
-            tax: null,
+            subtotal: extracted!.subtotal != null ? String(extracted!.subtotal) : null,
+            tax: extracted!.tax != null ? String(extracted!.tax) : null,
             shipping: null,
             total: extracted!.total != null ? String(extracted!.total) : null,
             currency: receiptCurrencyOrDefault(extracted!.currency),

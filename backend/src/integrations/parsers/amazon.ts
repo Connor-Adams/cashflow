@@ -1,3 +1,6 @@
+// fallow-ignore-file code-duplication
+// Vendor parsers are intentionally independent; shared helpers would couple parsers
+// that must diverge as Amazon's email format evolves independently of Google/Apple.
 /**
  * Amazon receipt-email parser.
  *
@@ -34,18 +37,27 @@ import type { ExtractedReceiptOrder, ExtractedReceiptItem } from '../../ai/extra
 // ('1,234.56'), or a bare decimal comma ('44,97' in EU-formatted emails).
 const AMOUNT_SRC = '((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:[.,][0-9]{2}))';
 
+// Currency symbols pattern: CDN$/CA$/US$ or bare $. Used by both the optional
+// prefix (for totals) and the required prefix (for per-item prices).
+const CURRENCY_SYMBOLS = '(?:CDN|CA|US)\\$|\\$';
+// Currency prefix: optional CDN$/CA$/US$ or bare $ — letters must NOT be
+// captured into the numeric group; the outer (?:…)? makes the whole prefix optional.
+const CURRENCY_PREFIX = `(?:${CURRENCY_SYMBOLS})?\\s*`;
+// Required currency prefix — for contexts where a $ (or CDN$/CA$/US$) must be present.
+const CURRENCY_PREFIX_REQUIRED = `(?:${CURRENCY_SYMBOLS})\\s*`;
+
 const ORDER_ID_RE = /\bOrder\s*#?\s*([0-9]{3}-[0-9]{7}-[0-9]{7})\b/i;
-const TOTAL_RE = new RegExp(`\\bOrder\\s*Total\\b\\s*[:\\-]?\\s*\\$?\\s*${AMOUNT_SRC}`, 'i');
-const SUBTOTAL_RE = new RegExp(`\\bOrder\\s*Subtotal\\b\\s*[:\\-]?\\s*\\$?\\s*${AMOUNT_SRC}`, 'i');
-const TAX_RE = new RegExp(`\\bTax\\b\\s*[:\\-]?\\s*\\$?\\s*${AMOUNT_SRC}`, 'i');
-const SHIPPING_RE = new RegExp(
-  `\\bShipping(?:\\s*&\\s*handling)?\\b\\s*[:\\-]?\\s*\\$?\\s*${AMOUNT_SRC}`,
-  'i',
-);
-const DATE_RE = /\b(?:Placed\s*on|Order\s*placed|Date|Order\s*Date)\b\s*[:\-]?\s*([A-Za-z]{3,9}\s+[0-9]{1,2},?\s+[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2})/i;
+const TOTAL_RE = new RegExp(`\\bOrder\\s*Total\\b\\s*[:\\-]?\\s*${CURRENCY_PREFIX}${AMOUNT_SRC}`, 'i');
+const SUBTOTAL_RE = new RegExp(`\\bOrder\\s*Subtotal\\b\\s*[:\\-]?\\s*${CURRENCY_PREFIX}${AMOUNT_SRC}`, 'i');
+const TAX_RE = new RegExp(`\\bTax\\b\\s*[:\\-]?\\s*${CURRENCY_PREFIX}${AMOUNT_SRC}`, 'i');
+// DATE_RE: matches "Placed on", "Order placed", "Order Date:", standalone "Date:",
+// and ship-confirm phrasings "Arriving <date>" / "Shipped on <date>".
+const DATE_RE = /\b(?:Placed\s*on|Order\s*placed|Order\s*Date|Date|Arriving|Shipped\s*on)\b\s*[:\-]?\s*([A-Za-z]{3,9}\s+[0-9]{1,2},?\s+[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2})/i;
 const QUANTITY_RE = /\bQuantity\s*[:\-]?\s*([0-9]+)/i;
-const PRICE_RE = /\$\s*((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)\.[0-9]{2})/;
-const LAST4_RE = /(?:ending\s*in)\s*(\d{4})/i;
+const PRICE_RE = new RegExp(`${CURRENCY_PREFIX_REQUIRED}((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)\\.[0-9]{2})`);
+// LAST4_RE: matches "ending in 1234", "ending with 1234", and card-network-prefixed
+// forms like "Visa ending in 1234", "Mastercard ending with 1234".
+const LAST4_RE = /(?:(?:Visa|Mastercard|Amex|American\s*Express|Discover)\s+)?ending\s+(?:in|with)\s+(\d{4})/i;
 
 /** '1,234.56' (thousands commas) and '44,97' (decimal comma) both parse. */
 function parseAmount(raw: string): number {
@@ -53,6 +65,25 @@ function parseAmount(raw: string): number {
     return Number(`${raw.slice(0, -3).replace(/,/g, '')}.${raw.slice(-2)}`);
   }
   return Number(raw.replace(/,/g, ''));
+}
+
+/**
+ * Detects the currency used in the email body. Returns null when ambiguous.
+ *
+ * Anchors every pattern to an adjacent digit so that an incidental currency
+ * symbol in non-price prose (e.g. "£ sterling deposits are handled …") does
+ * not flip the detected currency away from a clearly-priced CAD order.
+ */
+function detectCurrency(body: string): string | null {
+  // CDN$/CA$ prefix adjacent to digits, or CAD adjacent to digits (e.g. "44.97 CAD")
+  if (/CDN\$\s*\d|CA\$\s*\d|\d[\s.]*CAD\b|\bCAD\s*\d/.test(body)) return 'CAD';
+  // US$ prefix adjacent to digits, or USD adjacent to digits
+  if (/US\$\s*\d|\d[\s.]*USD\b|\bUSD\s*\d/.test(body)) return 'USD';
+  // £ adjacent to digits, or GBP adjacent to digits
+  if (/£\s*\d|\d[\s.]*GBP\b|\bGBP\s*\d/.test(body)) return 'GBP';
+  // € adjacent to digits, or EUR adjacent to digits
+  if (/€\s*\d|\d[\s.]*EUR\b|\bEUR\s*\d/.test(body)) return 'EUR';
+  return null;
 }
 
 function normalizeDate(raw: string): string | null {
@@ -129,6 +160,11 @@ export function parseAmazonReceiptEmail(body: string): ExtractedReceiptOrder | n
     /amazon|amzn|kindle|prime\s*video|audible/i.test(body) || ORDER_ID_RE.test(body);
   if (!looksAmazon) return null;
 
+  // Refund/cancellation emails are out of scope — return null rather than
+  // creating a spurious positive-amount order.
+  const isRefundOrCancellation = /\b(?:cancell?ation|cancell?ed|your\s+order\s+has\s+been\s+cancel|we(?:'ve|\s+have)\s+(?:issued|processed)\s+(?:a|your)\s+refund|your\s+refund\s+of)\b/i.test(body);
+  if (isRefundOrCancellation) return null;
+
   const orderId = body.match(ORDER_ID_RE)?.[1] ?? null;
   const totalMatch = body.match(TOTAL_RE) ?? body.match(SUBTOTAL_RE);
   const total = totalMatch ? parseAmount(totalMatch[1]) : null;
@@ -136,28 +172,25 @@ export function parseAmazonReceiptEmail(body: string): ExtractedReceiptOrder | n
   const orderDate = dateMatch ? normalizeDate(dateMatch[1]) : null;
   const last4 = body.match(LAST4_RE)?.[1] ?? null;
   const items = extractItems(body);
-  const tax = body.match(TAX_RE)?.[1] ?? null;
-  const shipping = body.match(SHIPPING_RE)?.[1] ?? null;
+  const taxRaw = body.match(TAX_RE)?.[1] ?? null;
+  const subtotalMatch = body.match(SUBTOTAL_RE);
+  const subtotal = subtotalMatch ? parseAmount(subtotalMatch[1]) : null;
+  const currency = detectCurrency(body);
 
   if (total == null && items.length === 0) return null;
-
-  const notesParts: string[] = [];
-  if (orderId) notesParts.push(`Order ${orderId}`);
-  if (tax) notesParts.push(`Tax: $${tax}`);
-  if (shipping) notesParts.push(`Shipping: $${shipping}`);
 
   return {
     vendor: 'amazon',
     vendorName: 'Amazon',
     orderDate,
     orderId,
-    subtotal: null,
-    tax: null,
+    subtotal,
+    tax: taxRaw != null ? parseAmount(taxRaw) : null,
     total,
-    currency: null,
+    currency,
     paymentLast4: last4,
     tenders: [],
     items,
-    notes: notesParts.length > 0 ? notesParts.join(' · ') : null,
+    notes: orderId ? `Order ${orderId}` : null,
   };
 }
