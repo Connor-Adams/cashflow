@@ -41,3 +41,14 @@ test('runAmazonMatching auto-accepts a sole ≥85 candidate', async () => {
   });
   assert.equal(link?.status, 'accepted');
 });
+
+test('runAmazonMatching does not re-count already-accepted link on second run', async () => {
+  const householdId = 9002;
+  await seedHousehold(householdId);
+  // First run: should auto-accept and count it.
+  const first = await runAmazonMatching({ householdId });
+  assert.ok(first.autoAccepted >= 1, 'first run should auto-accept');
+  // Second run: link is already accepted — must NOT increment autoAccepted again.
+  const second = await runAmazonMatching({ householdId });
+  assert.equal(second.autoAccepted, 0, 'second run must not re-count an already-accepted link');
+});

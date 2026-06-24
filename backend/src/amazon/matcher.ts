@@ -146,7 +146,10 @@ export async function upsertSuggestedOrderLink(args: {
     },
     transaction,
   });
-  if (!created && link.status === 'suggested') {
+  // Capture whether this pre-existing row was still pending (not yet acted on)
+  // BEFORE any update so we know if THIS call promoted it.
+  const wasSuggested = !created && link.status === 'suggested';
+  if (wasSuggested) {
     // Refresh score/reason; promote to accepted if this run qualifies. Never
     // touch an already-accepted or user-rejected row.
     await link.update(
@@ -154,7 +157,12 @@ export async function upsertSuggestedOrderLink(args: {
       { transaction },
     );
   }
-  return { created, accepted: link.status === 'accepted' };
+  // `accepted` means NEWLY accepted by THIS call — not the row's current status.
+  // A newly-created row is accepted iff it was created with status 'accepted'.
+  // A pre-existing row is newly-accepted iff it was suggested and autoAccept promoted it.
+  // An already-accepted or rejected row is never newly accepted here.
+  const newlyAccepted = created ? autoAccept === true : wasSuggested && autoAccept === true;
+  return { created, accepted: newlyAccepted };
 }
 
 export async function runAmazonMatching(args: {
