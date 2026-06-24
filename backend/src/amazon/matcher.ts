@@ -1,5 +1,10 @@
 import { Op, type Transaction as DbTransaction } from 'sequelize';
 import { ExternalOrder, Transaction, TransactionOrderLink } from '../models';
+import { decideAutoAccept } from './autoAccept';
+import {
+  recomputeTransactionsReviewFromItems,
+  transactionIdsForOrder,
+} from '../import/enrichment/recomputeTransactionReviewFromItems';
 
 export function isAmazonLikeMerchant(merchant: string): boolean {
   return /\b(amazon(?:\.ca)?|amzn|amzn\s*mktp|amazon marketplace|prime)\b/i.test(merchant);
@@ -111,21 +116,25 @@ export function scoreAmazonOrderMatch(txn: Transaction, order: ExternalOrder): M
 }
 
 /**
- * Create — or refresh — a *suggested* link between a transaction and an external
- * order. Idempotent: an existing link for the same (transaction, order) pair is
- * never duplicated, and a link the user has already accepted or rejected is left
+ * Create — or refresh — a link between a transaction and an external order.
+ * Idempotent: an existing link for the same (transaction, order) pair is never
+ * duplicated, and a link the user has already accepted or rejected is left
  * untouched — only a still-'suggested' row gets its score/reason refreshed.
+ * Pass `autoAccept: true` to promote a newly-created (or still-suggested) row
+ * to 'accepted' immediately.
  * Pass `transaction` to enlist the write in a surrounding DB transaction.
- * Returns whether a new row was created.
+ * Returns `{ created, accepted }`.
  */
 export async function upsertSuggestedOrderLink(args: {
   transactionId: number;
   externalOrderId: number;
   confidence: number;
   matchReason: string;
+  autoAccept?: boolean;
   transaction?: DbTransaction;
-}): Promise<boolean> {
-  const { transactionId, externalOrderId, confidence, matchReason, transaction } = args;
+}): Promise<{ created: boolean; accepted: boolean }> {
+  const { transactionId, externalOrderId, confidence, matchReason, autoAccept, transaction } = args;
+  const status = autoAccept ? 'accepted' : 'suggested';
   const [link, created] = await TransactionOrderLink.findOrCreate({
     where: { transactionId, externalOrderId },
     defaults: {
@@ -133,20 +142,26 @@ export async function upsertSuggestedOrderLink(args: {
       externalOrderId,
       confidence: String(confidence),
       matchReason,
-      status: 'suggested',
+      status,
     },
     transaction,
   });
   if (!created && link.status === 'suggested') {
-    await link.update({ confidence: String(confidence), matchReason }, { transaction });
+    // Refresh score/reason; promote to accepted if this run qualifies. Never
+    // touch an already-accepted or user-rejected row.
+    await link.update(
+      { confidence: String(confidence), matchReason, ...(autoAccept ? { status: 'accepted' as const } : {}) },
+      { transaction },
+    );
   }
-  return created;
+  return { created, accepted: link.status === 'accepted' };
 }
 
 export async function runAmazonMatching(args: {
   householdId: number;
 }): Promise<{
   suggested: number;
+  autoAccepted: number;
   scannedTransactions: number;
   /** Earliest txn date that received a newly-suggested link, or null if none. */
   matchedDateFrom: string | null;
@@ -173,26 +188,44 @@ export async function runAmazonMatching(args: {
     where: { householdId: args.householdId, vendor: 'amazon' },
   });
   let suggested = 0;
+  let autoAccepted = 0;
+  const acceptedOrderIds = new Set<number>();
   let matchedDateFrom: string | null = null;
   let matchedDateTo: string | null = null;
 
   for (const txn of txns.filter((row) => isAmazonLikeMerchant(`${row.merchantRaw} ${row.merchantClean}`))) {
     const scores = orders.map((order) => ({ order, ...scoreAmazonOrderMatch(txn, order) }));
     const candidates = selectMatchCandidates(scores);
+    // Per-transaction auto-accept: only when there is a single candidate and it
+    // is unambiguous + ≥ threshold. A transaction spanning multiple confident
+    // orders is never auto-accepted (genuinely ambiguous which order it is).
+    const sortedConf = candidates.map((c) => c.confidence).sort((a, b) => b - a);
+    const auto = candidates.length === 1 && decideAutoAccept(sortedConf);
     for (const candidate of candidates) {
-      const created = await upsertSuggestedOrderLink({
+      const { created, accepted } = await upsertSuggestedOrderLink({
         transactionId: txn.id,
         externalOrderId: candidate.order.id,
         confidence: candidate.confidence,
         matchReason: candidate.matchReason,
+        autoAccept: auto,
       });
       if (created) {
         suggested += 1;
         if (matchedDateFrom == null || txn.date < matchedDateFrom) matchedDateFrom = txn.date;
         if (matchedDateTo == null || txn.date > matchedDateTo) matchedDateTo = txn.date;
       }
+      if (auto && accepted) {
+        autoAccepted += 1;
+        acceptedOrderIds.add(candidate.order.id);
+      }
     }
   }
 
-  return { suggested, scannedTransactions: txns.length, matchedDateFrom, matchedDateTo };
+  // Mirror the manual-accept side effect (routes/amazon.ts /links/:id/accept):
+  // accepted item links can clear the transaction's review flag.
+  for (const orderId of acceptedOrderIds) {
+    await recomputeTransactionsReviewFromItems(await transactionIdsForOrder(orderId));
+  }
+
+  return { suggested, autoAccepted, scannedTransactions: txns.length, matchedDateFrom, matchedDateTo };
 }
