@@ -840,6 +840,68 @@ export function buildFairnessByContact(
 }
 
 /**
+ * Per-contact wrapper over `buildFairnessMonthly`. Partitions rows by contact
+ * using the same `contactForSharedRow`/`resolveSolePartnerId` logic as
+ * `buildFairnessByContact`, then runs the existing monthly builder on each
+ * contact's subset. Partners sort first, then alphabetically.
+ */
+export function buildFairnessMonthlyByContact(
+  rows: SharedTxnRow[],
+  monthlySettlements: Array<SettlementTotals & { month: string }>,
+  options: FairnessOptions = {},
+  contactsMeta: Map<number, { name: string; isPartner: boolean }> = new Map(),
+): Array<{ contactId: number | null; contactName: string; isPartner: boolean; points: FairnessMonthlyPoint[] }> {
+  const solePartnerId = resolveSolePartnerId(options.partnerContactIds ?? new Set<number>());
+
+  const rowsByContact = new Map<number | null, SharedTxnRow[]>();
+  const add = (cid: number | null, r: SharedTxnRow) => {
+    const list = rowsByContact.get(cid) ?? [];
+    list.push(r);
+    rowsByContact.set(cid, list);
+  };
+  for (const r of rows) {
+    if (r.partnerShare !== 0) add(contactForSharedRow(r, solePartnerId), r);
+    else if (r.counterpartyContactId != null) add(r.counterpartyContactId, r);
+  }
+  const allContactIds = new Set<number | null>(rowsByContact.keys());
+  for (const s of monthlySettlements) allContactIds.add(s.contactId);
+
+  const out: Array<{ contactId: number | null; contactName: string; isPartner: boolean; points: FairnessMonthlyPoint[] }> = [];
+  for (const cid of allContactIds) {
+    const contactRows = rowsByContact.get(cid) ?? [];
+    const contactSettlements =
+      cid == null ? [] : monthlySettlements.filter((s) => s.contactId === cid);
+    const points = buildFairnessMonthly(contactRows, contactSettlements, options);
+    if (points.length === 0) continue;
+    const meta = cid != null ? contactsMeta.get(cid) : undefined;
+    out.push({
+      contactId: cid,
+      contactName: meta?.name ?? (cid == null ? 'Unassigned' : `Contact ${cid}`),
+      isPartner: meta?.isPartner ?? false,
+      points,
+    });
+  }
+  return out.sort((a, b) =>
+    a.isPartner === b.isPartner ? a.contactName.localeCompare(b.contactName) : a.isPartner ? -1 : 1,
+  );
+}
+
+/**
+ * Per-contact wrapper over `buildSettlementRecommendation`. Maps each
+ * `FairnessContact`'s `byCurrency` array through the existing recommendation
+ * builder and tags the output with the contact's id and name.
+ */
+export function buildSettlementRecommendationByContact(
+  contacts: FairnessContact[],
+): Array<{ contactId: number | null; contactName: string; recommendations: SettlementRecommendation[] }> {
+  return contacts.map((c) => ({
+    contactId: c.contactId,
+    contactName: c.contactName,
+    recommendations: buildSettlementRecommendation(c.byCurrency),
+  }));
+}
+
+/**
  * Derive a settlement recommendation from the per-currency outstanding
  * balance. Sub-cent balances collapse to `direction: 'none'` so the UI
  * doesn't suggest paying a fraction of a cent.

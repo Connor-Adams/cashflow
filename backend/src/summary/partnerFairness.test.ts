@@ -5,7 +5,9 @@ import {
   buildFairnessByCurrency,
   buildFairnessMonthly,
   buildFairnessByContact,
+  buildFairnessMonthlyByContact,
   buildSettlementRecommendation,
+  buildSettlementRecommendationByContact,
   computePartnerTransferDelta,
   projectSettlementContribution,
   resolveSolePartnerId,
@@ -836,4 +838,32 @@ test('buildFairnessByContact routes unlabeled splits to Unassigned when no sole 
   assert.equal(contacts.length, 1);
   assert.equal(contacts[0].contactId, null);
   assert.equal(contacts[0].contactName, 'Unassigned');
+});
+
+// ---------------- buildFairnessMonthlyByContact ----------------
+
+test('buildFairnessMonthlyByContact keys trend per contact', () => {
+  const rows: SharedTxnRow[] = [
+    row({ ownershipType: 'me', amount: -100, myShare: -50, partnerShare: -50, date: '2026-01-15', currency: 'CAD' }),
+    row({ ownershipType: 'contact', ownershipContactId: 3, amount: -200, myShare: 0, partnerShare: -200, date: '2026-01-20', currency: 'CAD' }),
+  ];
+  const meta = new Map([[7, { name: 'Alex', isPartner: true }], [3, { name: 'Dad', isPartner: false }]]);
+  const out = buildFairnessMonthlyByContact(rows, [], { partnerContactIds: new Set([7]) }, meta);
+  const alex = out.find((c) => c.contactId === 7);
+  const dad = out.find((c) => c.contactId === 3);
+  assert.equal(alex?.points[0].partnerShare, -50);
+  assert.equal(dad?.points[0].partnerShare, -200);
+});
+
+// ---------------- buildSettlementRecommendationByContact ----------------
+
+test('buildSettlementRecommendationByContact derives per-contact recs', () => {
+  const contacts = [
+    { contactId: 7, contactName: 'Alex', isPartner: true, paybacks: [],
+      byCurrency: [{ currency: 'CAD', balance: 10386.58, direction: 'partner_owes_me' } as never] },
+  ];
+  const recs = buildSettlementRecommendationByContact(contacts as never);
+  assert.equal(recs[0].contactId, 7);
+  assert.equal(recs[0].recommendations[0].direction, 'partner_pays_you');
+  assert.equal(recs[0].recommendations[0].amount, 10386.58);
 });
