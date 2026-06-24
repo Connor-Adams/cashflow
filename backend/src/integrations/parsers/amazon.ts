@@ -34,14 +34,22 @@ import type { ExtractedReceiptOrder, ExtractedReceiptItem } from '../../ai/extra
 // ('1,234.56'), or a bare decimal comma ('44,97' in EU-formatted emails).
 const AMOUNT_SRC = '((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:[.,][0-9]{2}))';
 
+// Currency prefix: optional CDN$/CA$/US$ or bare $ — letters must NOT be
+// captured into the numeric group; the outer (?:…)? makes the whole prefix optional.
+const CURRENCY_PREFIX = '(?:(?:CDN|CA|US)\\$|\\$)?\\s*';
+
 const ORDER_ID_RE = /\bOrder\s*#?\s*([0-9]{3}-[0-9]{7}-[0-9]{7})\b/i;
-const TOTAL_RE = new RegExp(`\\bOrder\\s*Total\\b\\s*[:\\-]?\\s*\\$?\\s*${AMOUNT_SRC}`, 'i');
-const SUBTOTAL_RE = new RegExp(`\\bOrder\\s*Subtotal\\b\\s*[:\\-]?\\s*\\$?\\s*${AMOUNT_SRC}`, 'i');
-const TAX_RE = new RegExp(`\\bTax\\b\\s*[:\\-]?\\s*\\$?\\s*${AMOUNT_SRC}`, 'i');
-const DATE_RE = /\b(?:Placed\s*on|Order\s*placed|Date|Order\s*Date)\b\s*[:\-]?\s*([A-Za-z]{3,9}\s+[0-9]{1,2},?\s+[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2})/i;
+const TOTAL_RE = new RegExp(`\\bOrder\\s*Total\\b\\s*[:\\-]?\\s*${CURRENCY_PREFIX}${AMOUNT_SRC}`, 'i');
+const SUBTOTAL_RE = new RegExp(`\\bOrder\\s*Subtotal\\b\\s*[:\\-]?\\s*${CURRENCY_PREFIX}${AMOUNT_SRC}`, 'i');
+const TAX_RE = new RegExp(`\\bTax\\b\\s*[:\\-]?\\s*${CURRENCY_PREFIX}${AMOUNT_SRC}`, 'i');
+// DATE_RE: matches "Placed on", "Order placed", "Order Date:", standalone "Date:",
+// and ship-confirm phrasings "Arriving <date>" / "Shipped on <date>".
+const DATE_RE = /\b(?:Placed\s*on|Order\s*placed|Order\s*Date|Date|Arriving|Shipped\s*on)\b\s*[:\-]?\s*([A-Za-z]{3,9}\s+[0-9]{1,2},?\s+[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2})/i;
 const QUANTITY_RE = /\bQuantity\s*[:\-]?\s*([0-9]+)/i;
-const PRICE_RE = /\$\s*((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)\.[0-9]{2})/;
-const LAST4_RE = /(?:ending\s*in)\s*(\d{4})/i;
+const PRICE_RE = /(?:(?:CDN|CA|US)\$|\$)\s*((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)\.[0-9]{2})/;
+// LAST4_RE: matches "ending in 1234", "ending with 1234", and card-network-prefixed
+// forms like "Visa ending in 1234", "Mastercard ending with 1234".
+const LAST4_RE = /(?:(?:Visa|Mastercard|Amex|American\s*Express|Discover)\s+)?ending\s+(?:in|with)\s+(\d{4})/i;
 
 /** '1,234.56' (thousands commas) and '44,97' (decimal comma) both parse. */
 function parseAmount(raw: string): number {
@@ -143,6 +151,11 @@ export function parseAmazonReceiptEmail(body: string): ExtractedReceiptOrder | n
   const looksAmazon =
     /amazon|amzn|kindle|prime\s*video|audible/i.test(body) || ORDER_ID_RE.test(body);
   if (!looksAmazon) return null;
+
+  // Refund/cancellation emails are out of scope — return null rather than
+  // creating a spurious positive-amount order.
+  const isRefundOrCancellation = /\b(?:refund|cancell?ation|cancelled|your\s+order\s+has\s+been\s+cancel|we(?:'ve|'ve|\s+have)\s+(?:issued|processed)\s+(?:a|your)\s+refund)\b/i.test(body);
+  if (isRefundOrCancellation) return null;
 
   const orderId = body.match(ORDER_ID_RE)?.[1] ?? null;
   const totalMatch = body.match(TOTAL_RE) ?? body.match(SUBTOTAL_RE);

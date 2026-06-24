@@ -158,3 +158,155 @@ test('detectCurrency still works for standalone CAD/USD codes adjacent to amount
   assert.ok(usdOrder);
   assert.equal(usdOrder!.currency, 'USD');
 });
+
+// ── Task 8: new fixture coverage ─────────────────────────────────────────────
+
+test('extracts ISO order date and card last4 (Visa ending in NNNN)', () => {
+  const body = [
+    'Your Amazon.ca order',
+    'Order # 701-9999999-0000000',
+    'Order Date: 2026-06-09',
+    'Payment method: Visa ending in 1234',
+    'Item A',
+    'Quantity: 1',
+    '$10.00',
+    'Order Total: $10.00',
+  ].join('\n');
+  const order = parseAmazonReceiptEmail(body);
+  assert.ok(order);
+  assert.equal(order!.orderDate, '2026-06-09');
+  assert.equal(order!.paymentLast4, '1234');
+});
+
+test('extracts last4 with "ending with" phrasing', () => {
+  const body = [
+    'Order #114-1234567-9990001',
+    'Placed on June 10, 2026',
+    'Payment: Mastercard ending with 5678',
+    'Widget',
+    'Quantity: 1',
+    '$25.00',
+    'Order Total: $25.00',
+  ].join('\n');
+  const order = parseAmazonReceiptEmail(body);
+  assert.ok(order);
+  assert.equal(order!.paymentLast4, '5678');
+});
+
+test('extracts date from ship-confirm "Arriving" phrasing', () => {
+  // Ship-confirm emails use "Arriving <date>" rather than "Placed on".
+  const body = [
+    'Your order has shipped',
+    'Order #114-5551111-2222222',
+    'Arriving June 15, 2026',
+    'USB-C Hub',
+    'Quantity: 1',
+    '$39.99',
+    'Order Total: $39.99',
+  ].join('\n');
+  const order = parseAmazonReceiptEmail(body);
+  assert.ok(order);
+  assert.equal(order!.orderDate, '2026-06-15');
+});
+
+test('extracts date from ship-confirm "Shipped on" phrasing', () => {
+  const body = [
+    'Your order has shipped',
+    'Order #114-7772222-3333333',
+    'Shipped on June 12, 2026',
+    'Desk Lamp',
+    'Quantity: 1',
+    '$45.00',
+    'Order Total: $45.00',
+  ].join('\n');
+  const order = parseAmazonReceiptEmail(body);
+  assert.ok(order);
+  assert.equal(order!.orderDate, '2026-06-12');
+});
+
+test('CDN$-prefixed total/subtotal/tax amounts parse correctly', () => {
+  // Real Canadian Amazon emails write "CDN$ 50.36" on summary lines.
+  const body = [
+    'Your Amazon.ca order',
+    'Order #114-3333333-4444444',
+    'Placed on June 1, 2026',
+    'Premium Webcam',
+    'Quantity: 1',
+    'CDN$ 43.70',
+    'Order Subtotal: CDN$ 43.70',
+    'Shipping & handling: CDN$ 0.00',
+    'Tax: CDN$ 5.68',
+    'Order Total: CDN$ 50.36',
+  ].join('\n');
+  const order = parseAmazonReceiptEmail(body);
+  assert.ok(order);
+  assert.equal(order!.total, 50.36);
+  assert.equal(order!.subtotal, 43.70);
+  assert.equal(order!.tax, 5.68);
+  assert.equal(order!.currency, 'CAD');
+});
+
+test('US$-prefixed total/subtotal/tax amounts parse correctly', () => {
+  const body = [
+    'Your Amazon.com order',
+    'Order #114-2222222-3333333',
+    'Placed on June 2, 2026',
+    'Keyboard',
+    'Quantity: 1',
+    'US$ 89.00',
+    'Order Subtotal: US$ 89.00',
+    'Tax: US$ 7.34',
+    'Order Total: US$ 96.34',
+  ].join('\n');
+  const order = parseAmazonReceiptEmail(body);
+  assert.ok(order);
+  assert.equal(order!.total, 96.34);
+  assert.equal(order!.subtotal, 89.00);
+  assert.equal(order!.tax, 7.34);
+  assert.equal(order!.currency, 'USD');
+});
+
+test('digital receipt (Audible) yields title and total', () => {
+  // Audible/Kindle receipts have a simpler layout without per-item Quantity lines.
+  const body = [
+    'Thank you for your Audible purchase',
+    'Order #D01-1234567-7654321',
+    'Order Date: 2026-06-08',
+    'Payment method: Visa ending in 4321',
+    '',
+    'The Great Novel (Unabridged)',
+    '$24.95',
+    '',
+    'Order Total: $24.95',
+  ].join('\n');
+  const order = parseAmazonReceiptEmail(body);
+  assert.ok(order);
+  assert.equal(order!.total, 24.95);
+  assert.ok(order!.items.length >= 1, 'should yield at least one item');
+  assert.equal(order!.items[0].title, 'The Great Novel (Unabridged)');
+  assert.equal(order!.paymentLast4, '4321');
+});
+
+test('refund email returns null (do not create a spurious order)', () => {
+  const body = [
+    'Your refund has been processed',
+    'Order #114-9876543-2109876',
+    'We have issued a refund of $29.99 for your recent order.',
+    'Refund amount: $29.99',
+    'Order Total: $29.99',
+  ].join('\n');
+  const order = parseAmazonReceiptEmail(body);
+  assert.equal(order, null, 'refund emails must return null');
+});
+
+test('cancellation email returns null (do not create a spurious order)', () => {
+  const body = [
+    'Your order has been cancelled',
+    'Order #114-1111111-9999999',
+    'We have cancelled your order as requested.',
+    'Item: Wireless Mouse',
+    'Order Total: $19.99',
+  ].join('\n');
+  const order = parseAmazonReceiptEmail(body);
+  assert.equal(order, null, 'cancellation emails must return null');
+});
