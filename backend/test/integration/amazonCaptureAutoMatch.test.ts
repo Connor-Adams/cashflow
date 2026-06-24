@@ -47,9 +47,11 @@ test('sync-status is empty before any capture', async () => {
   assert.equal(res.body.lastCapturedAt, null);
 });
 
-test('capturing an Amazon order auto-suggests a link to a matching transaction', async () => {
+test('capturing an Amazon order auto-accepts a link to a sole high-confidence matching transaction', async () => {
   // Seed a transaction that should match the captured order (exact amount,
-  // 1-day gap, Amazon merchant → score 90, well above the 70 threshold).
+  // 1-day gap, Amazon merchant → score 90). As the SOLE candidate ≥85 it is
+  // unambiguous, so runAmazonMatching auto-accepts it rather than leaving it
+  // 'suggested' (decideAutoAccept: ≥85 + clear margin / sole qualifier).
   await models.Transaction.create({
     accountId,
     householdId,
@@ -91,7 +93,7 @@ test('capturing an Amazon order auto-suggests a link to a matching transaction',
   assert.equal(order!.source, 'extension-amazon-v1');
   const links = await models.TransactionOrderLink.findAll({ where: { externalOrderId: order!.id } });
   assert.equal(links.length, 1);
-  assert.equal(links[0].status, 'suggested');
+  assert.equal(links[0].status, 'accepted');
 });
 
 test('sync-status reports the capture afterward', async () => {
