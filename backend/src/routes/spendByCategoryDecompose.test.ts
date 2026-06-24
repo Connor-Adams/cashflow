@@ -24,6 +24,7 @@ test('no links → identical to direct aggregation', () => {
   assert.equal(r.uncat, 0);
 });
 
+// fallow-ignore-next-line complexity
 test('linked mixed order splits across categories; total invariant', () => {
   const rows = [
     { id: 2, amount: '-200.00', finalCategory: 'Coffee', finalCategoryId: 10, txnType: null, accountType: null },

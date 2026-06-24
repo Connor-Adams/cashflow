@@ -27,13 +27,31 @@ export async function backfillAutoAcceptAmazonLinks(args: {
     where: { transactionId: { [Op.in]: amazonTxnIds }, status: 'suggested' },
   });
 
+  const byTxn = groupLinksByTxn(suggested);
+  const { promoted, acceptedOrderIds } = await promoteEligibleLinks(byTxn);
+
+  for (const orderId of acceptedOrderIds) {
+    await recomputeTransactionsReviewFromItems(await transactionIdsForOrder(orderId));
+  }
+
+  return { promoted, examined: suggested.length };
+}
+
+/** Group a flat list of suggested links by their transaction id. */
+function groupLinksByTxn(links: TransactionOrderLink[]): Map<number, TransactionOrderLink[]> {
   const byTxn = new Map<number, TransactionOrderLink[]>();
-  for (const l of suggested) {
+  for (const l of links) {
     const list = byTxn.get(l.transactionId) ?? [];
     list.push(l);
     byTxn.set(l.transactionId, list);
   }
+  return byTxn;
+}
 
+/** Accept unambiguous, confidence-passing links. Returns counts and the affected order ids. */
+async function promoteEligibleLinks(
+  byTxn: Map<number, TransactionOrderLink[]>,
+): Promise<{ promoted: number; acceptedOrderIds: Set<number> }> {
   let promoted = 0;
   const acceptedOrderIds = new Set<number>();
   for (const [, links] of byTxn) {
@@ -44,10 +62,5 @@ export async function backfillAutoAcceptAmazonLinks(args: {
     promoted += 1;
     acceptedOrderIds.add(link.externalOrderId);
   }
-
-  for (const orderId of acceptedOrderIds) {
-    await recomputeTransactionsReviewFromItems(await transactionIdsForOrder(orderId));
-  }
-
-  return { promoted, examined: suggested.length };
+  return { promoted, acceptedOrderIds };
 }

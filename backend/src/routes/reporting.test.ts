@@ -1,3 +1,7 @@
+// fallow-ignore-file code-duplication
+// Test fixture helpers (seedTxn / seedTxnReturningId) are parallel by design —
+// they seed similar transaction shapes for different test scenarios and should
+// not be collapsed into a single helper that obscures individual test intent.
 /**
  * DB-backed unit tests for the /api/v1 reporting routes' money math.
  *

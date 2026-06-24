@@ -1,3 +1,7 @@
+// fallow-ignore-file code-duplication
+// Per-test mock setup blocks repeat similar getJson stubs intentionally:
+// each test exercises a distinct UI state and the inline mock makes the
+// fixture self-contained and readable without shared-state coupling.
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'

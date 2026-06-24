@@ -1,3 +1,6 @@
+// fallow-ignore-file code-duplication
+// Vendor parsers are intentionally independent; shared helpers would couple parsers
+// that must diverge as Amazon's email format evolves independently of Google/Apple.
 /**
  * Amazon receipt-email parser.
  *
