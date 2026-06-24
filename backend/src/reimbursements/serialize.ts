@@ -370,6 +370,7 @@ export interface ReimbursementView {
   repaymentTransactionId: number | null;
   receivedAt: string | null;
   notes: string | null;
+  fromSplit: boolean;
   createdAt: string | null;
   updatedAt: string | null;
   contact?: ReimbursementContactView | null;
@@ -392,6 +393,7 @@ export interface ReimbursementRow {
   repaymentTransactionId: number | null;
   receivedAt: Date | string | null;
   notes: string | null;
+  fromSplit?: boolean | null;
   createdAt?: Date | string | null;
   updatedAt?: Date | string | null;
   contact?: { id: number; name: string } | null;
@@ -455,6 +457,7 @@ export function serializeReimbursement(
     repaymentTransactionId: r.repaymentTransactionId,
     receivedAt: toIsoOrNull(r.receivedAt),
     notes: r.notes,
+    fromSplit: Boolean(r.fromSplit),
     createdAt: toIsoOrNull(r.createdAt),
     updatedAt: toIsoOrNull(r.updatedAt),
     contact: r.contact ? { id: r.contact.id, name: r.contact.name } : null,

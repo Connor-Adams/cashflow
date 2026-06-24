@@ -54,6 +54,8 @@ import {
   REIMBURSEMENT_STATUSES,
   type ReimbursementStatus,
 } from '../models/Reimbursement';
+import { recomputeTransactionAmounts } from '../import/calculateShares';
+import { validateSplitRequest, computeSplitShares } from '../reimbursements/splitShares';
 
 const router = Router();
 router.use(aiSuggestLimiter);
@@ -102,6 +104,24 @@ async function contactInHousehold(
     attributes: ['id'],
   });
   return Boolean(c);
+}
+
+/** True iff every contactId is in the caller's household and none is is_self. */
+async function splitContactsOk(
+  req: Request,
+  contactIds: number[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const rows = await Contact.findAll({
+    where: { id: contactIds, ...householdWhere(req) },
+    attributes: ['id', 'isSelf'],
+  });
+  if (rows.length !== contactIds.length) {
+    return { ok: false, error: 'contactId not found in household' };
+  }
+  if (rows.some((c) => c.isSelf)) {
+    return { ok: false, error: 'cannot split a share to yourself (is_self contact)' };
+  }
+  return { ok: true };
 }
 
 // ----- POST /api/transactions/:id/reimbursable ----------------------------
@@ -272,6 +292,135 @@ router.post(
     }
   },
 );
+
+// ----- POST /api/transactions/:id/split -----------------------------------
+// Multiway split: payer fronts the outlay, each other participant owes a share
+// back (one Reimbursement per participant, from_split=true). Replaces any prior
+// from_split claims on this txn. Sets the txn to ownership 'me' so it leaves the
+// partner-fairness shared pool (no double-count of a partner participant).
+router.post('/transactions/:id/split', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const txn = await Transaction.findOne({ where: { id, ...visibleTransactionWhere(req) } });
+    if (!txn) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    if (txn.householdId == null) {
+      res.status(400).json({ error: 'Transaction has no household' });
+      return;
+    }
+    const v = validateSplitRequest((req.body || {}) as Record<string, unknown>);
+    if (!v.ok) {
+      res.status(v.status).json({ error: v.error });
+      return;
+    }
+    const ids = v.value.participants.map((p) => p.contactId);
+    const contactsOk = await splitContactsOk(req, ids);
+    if (!contactsOk.ok) {
+      res.status(400).json({ error: contactsOk.error });
+      return;
+    }
+    const auth = currentAuth(req);
+    const { shares } = computeSplitShares(
+      txn.amount,
+      v.value.method,
+      v.value.participants,
+      v.value.includeSelf,
+    );
+    await sequelize.transaction(async (t) => {
+      // Preserve received or repayment-linked split claims — only remove still-open ones.
+      await Reimbursement.destroy({
+        where: {
+          transactionId: txn.id,
+          fromSplit: true,
+          status: { [Op.ne]: 'received' },
+          repaymentTransactionId: null,
+        },
+        transaction: t,
+      });
+      await Reimbursement.bulkCreate(
+        shares.map((s) => ({
+          householdId: txn.householdId!,
+          transactionId: txn.id,
+          contactId: s.contactId,
+          partyName: null,
+          amount: s.amount,
+          currency: txn.currency,
+          dueDate: null,
+          status: 'expected' as const,
+          repaymentTransactionId: null,
+          receivedAt: null,
+          createdByUserId: auth.user.id,
+          notes: `Multiway split (${v.value.method})`,
+          fromSplit: true,
+        })),
+        { transaction: t },
+      );
+      txn.ownershipType = 'me';
+      txn.splitOverride = 'me';
+      recomputeTransactionAmounts(txn);
+      await txn.save({ transaction: t });
+    });
+    const claims = await Reimbursement.findAll({
+      where: { transactionId: txn.id, fromSplit: true },
+      include: INCLUDE,
+      order: [['id', 'ASC']],
+    });
+    res.status(201).json({
+      transaction: { id: txn.id, ownershipType: txn.ownershipType, finalSplitType: txn.finalSplitType },
+      claims: claims.map((r) => serializeReimbursement(toRow(r))),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ----- DELETE /api/transactions/:id/split ---------------------------------
+router.delete('/transactions/:id/split', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const txn = await Transaction.findOne({ where: { id, ...visibleTransactionWhere(req) } });
+    if (!txn) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    if (txn.householdId == null) {
+      res.status(400).json({ error: 'Transaction has no household' });
+      return;
+    }
+    await sequelize.transaction(async (t) => {
+      // Preserve received or repayment-linked split claims — only remove still-open ones.
+      await Reimbursement.destroy({
+        where: {
+          transactionId: txn.id,
+          fromSplit: true,
+          status: { [Op.ne]: 'received' },
+          repaymentTransactionId: null,
+        },
+        transaction: t,
+      });
+      txn.ownershipType = 'me';
+      txn.splitOverride = 'me';
+      recomputeTransactionAmounts(txn);
+      await txn.save({ transaction: t });
+    });
+    res.status(200).json({
+      transaction: { id: txn.id, ownershipType: txn.ownershipType, finalSplitType: txn.finalSplitType },
+      claims: [],
+    });
+  } catch (e) {
+    next(e);
+  }
+});
 
 // ----- GET /api/reimbursements --------------------------------------------
 

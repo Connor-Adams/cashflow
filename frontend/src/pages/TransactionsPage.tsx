@@ -35,6 +35,8 @@ import {
   getJson,
   patchJson,
   postJson,
+  splitTransaction,
+  unsplitTransaction,
 } from '../lib/api'
 import {
   fromDateInputValue,
@@ -60,6 +62,7 @@ import { useAttachAndAnalyzeReceipt } from '../lib/useAttachAndAnalyzeReceipt'
 import { TAX_TREATMENTS } from '../lib/taxTreatment'
 import { TaxTreatmentSelect } from '../components/TaxTreatmentSelect'
 import type { TaxTreatment } from '../lib/taxTreatment'
+import { MultiwaySplitEditor } from '../components/MultiwaySplitEditor'
 import { useCategoryPaths } from '../lib/useCategoryPaths'
 import { useCategoryTree } from '../lib/useCategoryTree'
 import { buildPathById } from '../lib/categoryPathById'
@@ -232,6 +235,9 @@ export function TransactionsPage() {
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [contacts, setContacts] = useState<Contact[]>([])
+  // Track which transaction IDs have had a multiway split applied this session
+  // (gates the "multiway" row badge without a per-row fetch).
+  const [multiwayTxnIds, setMultiwayTxnIds] = useState<Set<number>>(new Set())
   const [aiEnabled, setAiEnabled] = useState(false)
   const [signalsDialogTxnId, setSignalsDialogTxnId] = useState<number | null>(null)
   // Issue #229: per-transaction edit history viewer + restore.
@@ -1890,6 +1896,21 @@ export function TransactionsPage() {
                     onOpenRevisions={(id) => setRevisionsDialogTxnId(id)}
                     availableLabels={allLabels}
                     onLabelsMutated={() => void refreshLabels()}
+                    hasMultiwaySplit={multiwayTxnIds.has(t.id)}
+                    onSplitMultiway={async (body) => {
+                      await splitTransaction(t.id, body)
+                      setMultiwayTxnIds((prev) => new Set([...prev, t.id]))
+                      await load()
+                    }}
+                    onClearMultiwaySplit={async () => {
+                      await unsplitTransaction(t.id)
+                      setMultiwayTxnIds((prev) => {
+                        const next = new Set(prev)
+                        next.delete(t.id)
+                        return next
+                      })
+                      await load()
+                    }}
                   />
                 ))
               )}
@@ -1996,6 +2017,9 @@ function TransactionRow({
   onOpenRevisions,
   availableLabels,
   onLabelsMutated,
+  hasMultiwaySplit,
+  onSplitMultiway,
+  onClearMultiwaySplit,
 }: {
   t: Transaction
   pathById: Map<number, string>
@@ -2013,6 +2037,9 @@ function TransactionRow({
   onOpenRevisions: (id: number) => void
   availableLabels: import('../types/api').Label[]
   onLabelsMutated: () => void
+  hasMultiwaySplit: boolean
+  onSplitMultiway: (body: import('@cashflow/shared').SplitTransactionRequest) => Promise<void>
+  onClearMultiwaySplit: () => Promise<void>
 }) {
   const [rowLabels, setRowLabels] = useState<TransactionLabelRef[]>(t.labels ?? [])
   const [aiRowBusy, setAiRowBusy] = useState(false)
@@ -2244,7 +2271,19 @@ function TransactionRow({
             <option value="me">me</option>
             <option value="partner">partner</option>
             <option value="shared">shared</option>
+            <option value="multiway">multiway</option>
           </NativeSelect>
+          {hasMultiwaySplit && split !== 'multiway' && (
+            <Badge variant="secondary" className="text-xs">multiway</Badge>
+          )}
+          {split === 'multiway' ? (
+            <MultiwaySplitEditor
+              amountAbs={Math.abs(Number(t.amount))}
+              contacts={contacts}
+              onApply={(body) => void onSplitMultiway(body)}
+              onClear={() => void onClearMultiwaySplit()}
+            />
+          ) : (
           <div className="txnSplitPercents">
             <Input
               value={pctMe}
@@ -2263,6 +2302,7 @@ function TransactionRow({
               aria-label={`Partner share override for transaction ${t.id}`}
             />
           </div>
+          )}
           <NativeSelect
             value={ownershipType}
             onChange={(e) => {

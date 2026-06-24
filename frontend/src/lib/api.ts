@@ -9,6 +9,8 @@ import type {
   SimplefinAccountsResponse,
   SimplefinLinkRequest,
   SimplefinLinkResponse,
+  SplitTransactionRequest,
+  SplitTransactionResponse,
 } from '@cashflow/shared'
 
 const base = import.meta.env.VITE_API_BASE ?? ''
@@ -161,6 +163,19 @@ export function unlinkSimplefinAccount(simplefinId: string): Promise<SimplefinLi
   return deleteJson<SimplefinLinkResponse>(
     `/api/simplefin/accounts/${encodeURIComponent(simplefinId)}/link`,
   )
+}
+
+// ── Multiway split ────────────────────────────────────────────────────────────
+
+export function splitTransaction(
+  txnId: number,
+  body: SplitTransactionRequest,
+): Promise<SplitTransactionResponse> {
+  return postJson<SplitTransactionResponse>(`/api/transactions/${txnId}/split`, body)
+}
+
+export function unsplitTransaction(txnId: number): Promise<SplitTransactionResponse> {
+  return deleteJson<SplitTransactionResponse>(`/api/transactions/${txnId}/split`)
 }
 
 async function apiError(res: Response, path: string): Promise<ApiError> {
