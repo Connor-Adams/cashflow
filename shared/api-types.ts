@@ -1405,6 +1405,9 @@ export const CATEGORY_ICON_NAMES = [
   'Trophy',
   'Gauge',
   'Monitor',
+  'Tooth',
+  'Lipstick',
+  'Vape',
 ] as const
 
 export type CategoryIconName = (typeof CATEGORY_ICON_NAMES)[number]
