@@ -30,6 +30,7 @@ export const CATEGORY_ICON_GLYPHS: Record<CategoryIconName, IconName> = {
   Calculator: 'calculator', Percent: 'percent', Repeat: 'repeat',
   ArrowRightLeft: 'arrow-right-left', Globe: 'globe', Server: 'server',
   Flag: 'flag', Trophy: 'trophy', Gauge: 'gauge', Monitor: 'monitor',
+  Tooth: 'tooth', Lipstick: 'lipstick', Vape: 'vape',
 }
 
 type Props = {
