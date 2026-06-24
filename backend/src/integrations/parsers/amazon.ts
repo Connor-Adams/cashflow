@@ -51,12 +51,22 @@ function parseAmount(raw: string): number {
   return Number(raw.replace(/,/g, ''));
 }
 
-/** Detects the currency symbol used in the email body. Returns null when ambiguous. */
+/**
+ * Detects the currency used in the email body. Returns null when ambiguous.
+ *
+ * Anchors every pattern to an adjacent digit so that an incidental currency
+ * symbol in non-price prose (e.g. "£ sterling deposits are handled …") does
+ * not flip the detected currency away from a clearly-priced CAD order.
+ */
 function detectCurrency(body: string): string | null {
-  if (/CDN\$|CA\$|\bCAD\b/.test(body)) return 'CAD';
-  if (/US\$|\bUSD\b/.test(body)) return 'USD';
-  if (/£|\bGBP\b/.test(body)) return 'GBP';
-  if (/€|\bEUR\b/.test(body)) return 'EUR';
+  // CDN$/CA$ prefix adjacent to digits, or CAD adjacent to digits (e.g. "44.97 CAD")
+  if (/CDN\$\s*\d|CA\$\s*\d|\d[\s.]*CAD\b|\bCAD\s*\d/.test(body)) return 'CAD';
+  // US$ prefix adjacent to digits, or USD adjacent to digits
+  if (/US\$\s*\d|\d[\s.]*USD\b|\bUSD\s*\d/.test(body)) return 'USD';
+  // £ adjacent to digits, or GBP adjacent to digits
+  if (/£\s*\d|\d[\s.]*GBP\b|\bGBP\s*\d/.test(body)) return 'GBP';
+  // € adjacent to digits, or EUR adjacent to digits
+  if (/€\s*\d|\d[\s.]*EUR\b|\bEUR\s*\d/.test(body)) return 'EUR';
   return null;
 }
 

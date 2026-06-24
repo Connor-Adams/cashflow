@@ -113,3 +113,48 @@ test('currency is null when no currency prefix present', () => {
   assert.ok(order);
   assert.equal(order!.currency, null);
 });
+
+test('incidental £ in non-price prose does NOT override CDN$-priced order currency', () => {
+  // A CDN$-priced Amazon.ca order whose body also contains "£" in a non-price
+  // context (e.g. footer text about payment policies) must still detect as CAD,
+  // not GBP.  We use a bare $ total so TOTAL_RE fires normally; the CDN$ prefix
+  // on the per-item price is what signals CAD.
+  const body = [
+    'Order #114-6666666-6666666',
+    'Placed on June 1, 2026',
+    'Widget',
+    'Quantity: 1',
+    'CDN$ 29.99',
+    'Order Subtotal: $29.99',
+    'Tax: $3.90',
+    'Order Total: $33.89',
+    // incidental non-price pound sign in footer prose — must NOT flip currency
+    'Prices shown in £ sterling for UK customers only.',
+  ].join('\n');
+  const order = parseAmazonReceiptEmail(body);
+  assert.ok(order);
+  assert.equal(order!.currency, 'CAD', 'incidental £ prose must not flip a CDN$-priced order to GBP');
+  assert.equal(order!.total, 33.89);
+});
+
+test('detectCurrency still works for standalone CAD/USD codes adjacent to amounts', () => {
+  // "44.97 CAD" — digit immediately followed by space then CAD
+  const cadBody = [
+    'Order #114-5555555-5555555',
+    'Order Total: $44.97',
+    'Total: 44.97 CAD',
+  ].join('\n');
+  const cadOrder = parseAmazonReceiptEmail(cadBody);
+  assert.ok(cadOrder);
+  assert.equal(cadOrder!.currency, 'CAD');
+
+  // "US$ 19.99" — US$ prefix adjacent to digit (existing pattern)
+  const usdBody = [
+    'Order #114-4444444-4444444',
+    'US$ 19.99',
+    'Order Total: $19.99',
+  ].join('\n');
+  const usdOrder = parseAmazonReceiptEmail(usdBody);
+  assert.ok(usdOrder);
+  assert.equal(usdOrder!.currency, 'USD');
+});
