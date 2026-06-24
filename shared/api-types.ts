@@ -1395,6 +1395,16 @@ export const CATEGORY_ICON_NAMES = [
   'HandCoins',
   'TrendingUp',
   'TrendingDown',
+  'Calculator',
+  'Percent',
+  'Repeat',
+  'ArrowRightLeft',
+  'Globe',
+  'Server',
+  'Flag',
+  'Trophy',
+  'Gauge',
+  'Monitor',
 ] as const
 
 export type CategoryIconName = (typeof CATEGORY_ICON_NAMES)[number]

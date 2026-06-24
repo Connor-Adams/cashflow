@@ -27,6 +27,9 @@ export const CATEGORY_ICON_GLYPHS: Record<CategoryIconName, IconName> = {
   Tag: 'tag', Bookmark: 'bookmark', Folder: 'folder', Box: 'box', Package: 'package',
   Truck: 'truck',
   HandCoins: 'hand-coins', TrendingUp: 'trending-up', TrendingDown: 'trending-down',
+  Calculator: 'calculator', Percent: 'percent', Repeat: 'repeat',
+  ArrowRightLeft: 'arrow-right-left', Globe: 'globe', Server: 'server',
+  Flag: 'flag', Trophy: 'trophy', Gauge: 'gauge', Monitor: 'monitor',
 }
 
 type Props = {
