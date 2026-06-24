@@ -237,15 +237,33 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
     }
   }
 
-  async function linkAction(path: string) {
-    setLoading(true)
+  function removeLinkFromState(linkId: number) {
+    setTxns((prev) =>
+      prev
+        .map((txn) => ({ ...txn, orderLinks: (txn.orderLinks ?? []).filter((l) => l.id !== linkId) }))
+        .filter((txn) => (txn.orderLinks ?? []).length > 0 || true),
+    )
+  }
+
+  async function acceptSuggestedLink(linkId: number) {
+    const snapshot = txns
+    removeLinkFromState(linkId)
     try {
-      await postJson(path)
-      await refresh()
+      await postJson(`/api/amazon/links/${linkId}/accept`)
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Link update failed')
-    } finally {
-      setLoading(false)
+      setTxns(snapshot)
+      setMessage(e instanceof Error ? e.message : 'Accept failed')
+    }
+  }
+
+  async function rejectSuggestedLink(linkId: number) {
+    const snapshot = txns
+    removeLinkFromState(linkId)
+    try {
+      await postJson(`/api/amazon/links/${linkId}/reject`)
+    } catch (e) {
+      setTxns(snapshot)
+      setMessage(e instanceof Error ? e.message : 'Reject failed')
     }
   }
 
@@ -425,14 +443,18 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
                       <span className="text-sm leading-6 text-muted-foreground">{categoryPreview(link.order)}</span>
                     </div>
                     <div className="flex flex-wrap items-center gap-3">
-                      <Button type="button" onClick={() => void linkAction(`/api/amazon/links/${link.id}/accept`)} disabled={loading}>
-                        <Icon name="check" aria-hidden="true" />
-                        Accept
-                      </Button>
-                      <Button type="button" variant="secondary" onClick={() => void linkAction(`/api/amazon/links/${link.id}/reject`)} disabled={loading}>
-                        <Icon name="x" aria-hidden="true" />
-                        Reject
-                      </Button>
+                      {link.status === 'suggested' && (
+                        <>
+                          <Button type="button" onClick={() => void acceptSuggestedLink(link.id)} disabled={loading}>
+                            <Icon name="check" aria-hidden="true" />
+                            Accept
+                          </Button>
+                          <Button type="button" variant="secondary" onClick={() => void rejectSuggestedLink(link.id)} disabled={loading}>
+                            <Icon name="x" aria-hidden="true" />
+                            Reject
+                          </Button>
+                        </>
+                      )}
                       <Button type="button" variant="ghost" onClick={() => link.order && setSelectedOrderId(link.order.id)}>
                         <Icon name="search" aria-hidden="true" />
                         View/Edit
