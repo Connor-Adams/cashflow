@@ -15,7 +15,9 @@ import { detectRecurring, type RecurringInputTxn } from './recurring';
 import { num } from '../util/numbers';
 import { isNonSpend } from '../summary/classifyTransactionFlow';
 import { summarizeReportingCashflow } from '../reporting/cashflowTotals';
-import { loadCategoryTree, buildRollupRows, rollupByCategoryId, type CategoryTree } from '../categories/rollup';
+import { loadCategoryTree, buildRollupRows, rollupByCategoryId } from '../categories/rollup';
+import { loadItemAllocationContext } from '../summary/loadItemAllocations';
+import { aggregateSpendByCategoryDecomposed } from './spendByCategoryDecompose';
 
 // Categories considered essential for runway calculation.
 const ESSENTIAL_CATEGORIES = new Set([
@@ -567,51 +569,6 @@ router.get('/runway', async (req, res, next) => {
   }
 });
 
-/** Raw transaction shape the by-category aggregator needs (accountType rides
- *  along so isNonSpend can drop unrecognized brokerage debits). */
-type SpendRow = {
-  amount: unknown;
-  finalCategory: string | null;
-  finalCategoryId: number | null;
-  txnType: string | null;
-  'account.accountType': string | null;
-};
-
-/**
- * Sum gross spend (and txn counts) per category id from raw rows, dropping
- * non-spend rows. Rows without a (live) category id fold into an Uncategorized
- * total. Pure over a CategoryTree so the caller can roll the result up.
- *
- * A flat per-row accumulation loop — the CRAP score is inflated by audit-mode
- * coverage being unavailable (it is covered by reporting.test.ts), not by real
- * branching, hence the suppression below.
- */
-// fallow-ignore-next-line complexity
-function aggregateSpendByCategoryId(
-  rows: SpendRow[],
-  tree: CategoryTree,
-): { amountById: Map<number, number>; countById: Map<number, number>; uncat: number; uncatCount: number } {
-  const amountById = new Map<number, number>();
-  const countById = new Map<number, number>();
-  let uncat = 0;
-  let uncatCount = 0;
-  for (const t of rows) {
-    if (isNonSpend(t.txnType, t['account.accountType'] ?? null)) continue;
-    const a = num(t.amount);
-    if (a == null) continue;
-    const spend = Math.abs(a);
-    const id = t.finalCategoryId;
-    if (id != null && tree.parentById.has(id)) {
-      amountById.set(id, (amountById.get(id) ?? 0) + spend);
-      countById.set(id, (countById.get(id) ?? 0) + 1);
-    } else {
-      uncat += spend;
-      uncatCount += 1;
-    }
-  }
-  return { amountById, countById, uncat, uncatCount };
-}
-
 // ── GET /api/v1/spending/by-category ─────────────────────────────────────────
 router.get('/spending/by-category', async (req, res, next) => {
   try {
@@ -643,7 +600,7 @@ router.get('/spending/by-category', async (req, res, next) => {
           date: { [Op.gte]: start, [Op.lte]: end },
           amount: { [Op.lt]: 0 },
         },
-        attributes: ['amount', 'finalCategory', 'finalCategoryId', 'txnType'], // B2: finalCategoryId selected for future rollup
+        attributes: ['id', 'amount', 'finalCategory', 'finalCategoryId', 'txnType'],
         include: [{ association: 'account', attributes: ['accountType'] }],
         raw: true,
       }),
@@ -654,7 +611,7 @@ router.get('/spending/by-category', async (req, res, next) => {
           date: { [Op.gte]: prevStart, [Op.lte]: prevEnd },
           amount: { [Op.lt]: 0 },
         },
-        attributes: ['amount', 'finalCategory', 'finalCategoryId', 'txnType'], // B2: finalCategoryId selected for future rollup
+        attributes: ['id', 'amount', 'finalCategory', 'finalCategoryId', 'txnType'],
         include: [{ association: 'account', attributes: ['accountType'] }],
         raw: true,
       }),
@@ -662,11 +619,26 @@ router.get('/spending/by-category', async (req, res, next) => {
 
     const tree = await loadCategoryTree(household.id);
 
+    const currIds = (currTxns as Array<{ id: number }>).map((r) => r.id);
+    const prevIds = (prevTxns as Array<{ id: number }>).map((r) => r.id);
+    const allocCtx = await loadItemAllocationContext([...currIds, ...prevIds]);
+
+    const toDecomposeRows = (rows: unknown[]) =>
+      (rows as Array<Record<string, unknown>>).map((r) => ({
+        id: Number(r.id),
+        amount: r.amount,
+        finalCategory: (r.finalCategory as string | null) ?? null,
+        finalCategoryId: (r.finalCategoryId as number | null) ?? null,
+        txnType: (r.txnType as string | null) ?? null,
+        accountType: (r['account.accountType'] as string | null) ?? null,
+      }));
+
     // Direct spend + transaction counts keyed by category id. Rows with no
     // category id (or a stale id no longer in the tree) collapse into a single
-    // Uncategorized bucket, which has no hierarchy.
-    const curr = aggregateSpendByCategoryId(currTxns as unknown as SpendRow[], tree);
-    const prev = aggregateSpendByCategoryId(prevTxns as unknown as SpendRow[], tree);
+    // Uncategorized bucket, which has no hierarchy. Accepted-linked itemized
+    // transactions are decomposed into per-item categories via splitTxnByItems.
+    const curr = aggregateSpendByCategoryDecomposed(toDecomposeRows(currTxns), tree, allocCtx, currency);
+    const prev = aggregateSpendByCategoryDecomposed(toDecomposeRows(prevTxns), tree, allocCtx, currency);
     const directAmountById = curr.amountById;
     const directCountById = curr.countById;
     const uncatAmount = curr.uncat;

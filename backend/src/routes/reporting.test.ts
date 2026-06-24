@@ -41,6 +41,9 @@ after(async () => {
 });
 
 beforeEach(async () => {
+  await models.TransactionOrderLink.destroy({ where: {}, truncate: true });
+  await models.ExternalOrderItem.destroy({ where: {}, truncate: true });
+  await models.ExternalOrder.destroy({ where: {}, truncate: true });
   await models.Transaction.destroy({ where: {}, truncate: true });
   await models.HoldingSnapshot.destroy({ where: {}, truncate: true });
   await models.SecurityPrice.destroy({ where: {}, truncate: true });
@@ -63,6 +66,53 @@ async function seedAccount(name: string, accountType: string): Promise<number> {
     shortCode: name.slice(0, 3).toUpperCase(),
   });
   return acc.id;
+}
+
+async function seedTxnReturningId(
+  accountId: number,
+  date: string,
+  amount: number,
+  txnType: string,
+  category: string | null = null,
+  categoryId: number | null = null,
+): Promise<number> {
+  const txn = await models.Transaction.create({
+    accountId,
+    householdId: household.id,
+    visibility: 'shared',
+    ownershipType: 'me',
+    ownershipContactId: null,
+    importBatch: 'reporting-test',
+    date,
+    merchantRaw: 'Test merchant',
+    merchantClean: 'Test merchant',
+    amount: amount.toFixed(4),
+    currency: 'CAD',
+    txnType,
+    notes: null,
+    sourceReference: null,
+    sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
+    appliedRuleId: null,
+    autoCategory: null,
+    categoryOverride: null,
+    finalCategory: category,
+    ...(categoryId != null ? { finalCategoryId: categoryId } : {}),
+    autoBusiness: null,
+    businessOverride: null,
+    autoSplitType: null,
+    splitOverride: null,
+    autoPctMe: null,
+    pctMeOverride: null,
+    finalPctMe: null,
+    autoPctPartner: null,
+    pctPartnerOverride: null,
+    finalPctPartner: null,
+    reviewFlag: false,
+    reviewedAt: null,
+    createdByUserId: null,
+  });
+  return txn.id;
 }
 
 async function seedTxn(
@@ -303,4 +353,107 @@ test('GET /spending/by-category: a parent rolls up its child spend', async () =>
   assert.equal(cRow.rolledAmount, 10);
   assert.equal(cRow.path, 'Dining / Coffee');
   assert.equal(cRow.parentId, dining.id);
+});
+
+test('GET /spending/by-category: accepted-linked itemized txn decomposes into per-item categories', async () => {
+  // Two top-level categories for items from a single order.
+  const groceries = await models.Category.create({ householdId: household.id, name: 'Groceries', parentId: null });
+  const electronics = await models.Category.create({ householdId: household.id, name: 'Electronics', parentId: null });
+  const chq = await seedAccount('ChqDecompose', 'checking');
+
+  // Transaction A: $120 spend — linked to a two-item Amazon order ($80 groceries + $40 electronics).
+  const txnAId = await seedTxnReturningId(chq, '2026-04-10', -120, 'purchase', 'Groceries', groceries.id);
+  // Transaction B: $30 plain spend directly on Electronics (no link).
+  await seedTxn(chq, '2026-04-12', -30, 'purchase', 'Electronics', electronics.id);
+
+  // Seed the Amazon order: total=$120 CAD with two items.
+  const order = await models.ExternalOrder.create({
+    householdId: household.id,
+    createdByUserId: null,
+    vendor: 'amazon',
+    vendorOrderId: 'TEST-ORDER-01',
+    dedupeKey: 'test-order-decompose-01',
+    orderDate: '2026-04-09',
+    shipmentDate: null,
+    subtotal: '120.0000',
+    tax: '0.0000',
+    shipping: '0.0000',
+    total: '120.0000',
+    currency: 'CAD',
+    paymentLast4: null,
+    source: 'test',
+    rawPayload: null,
+  });
+
+  // Item 1: $80 Groceries. Supply ids directly to bypass the beforeSave hook (test isolation).
+  await models.ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'Pantry item',
+    quantity: 1,
+    unitPrice: '80.0000',
+    totalPrice: '80.0000',
+    inferredCategory: 'Groceries',
+    inferredCategoryId: groceries.id,
+    categoryOverride: null,
+    categoryOverrideId: null,
+    businessUsePercent: null,
+    businessUseOverride: null,
+    displayName: null,
+    displayNameConfidence: null,
+    itemNumber: null,
+    confidence: null,
+    rawPayload: null,
+  } as never);
+
+  // Item 2: $40 Electronics.
+  await models.ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'USB cable',
+    quantity: 1,
+    unitPrice: '40.0000',
+    totalPrice: '40.0000',
+    inferredCategory: 'Electronics',
+    inferredCategoryId: electronics.id,
+    categoryOverride: null,
+    categoryOverrideId: null,
+    businessUsePercent: null,
+    businessUseOverride: null,
+    displayName: null,
+    displayNameConfidence: null,
+    itemNumber: null,
+    confidence: null,
+    rawPayload: null,
+  } as never);
+
+  // Accept the link between txnA and the order.
+  await models.TransactionOrderLink.create({
+    transactionId: txnAId,
+    externalOrderId: order.id,
+    confidence: '1.00',
+    matchReason: 'test',
+    status: 'accepted',
+    linkedAmount: null,
+  });
+
+  const res = await request(app).get('/spending/by-category?start=2026-04-01&end=2026-04-30');
+  assert.equal(res.status, 200);
+
+  const gRow = res.body.categories.find((c: { name: string }) => c.name === 'Groceries');
+  const eRow = res.body.categories.find((c: { name: string }) => c.name === 'Electronics');
+
+  // (a) Mixed txn ($120) decomposes: $80 → Groceries, $40 → Electronics.
+  // gRow gets the $80 item allocation from txnA (txnA was categorised as Groceries,
+  // but item decomposition overrides it to item-level).
+  assert.ok(gRow, 'Groceries row must exist');
+  assert.ok(eRow, 'Electronics row must exist');
+  assert.equal(gRow.amount, 80);
+  // Electronics gets $40 from txnA item + $30 from txnB plain = $70.
+  assert.equal(eRow.amount, 70);
+
+  // (b) Invariant: sum of all category direct amounts equals sum of all transaction spend.
+  const totalCategorySpend = res.body.categories
+    .filter((c: { name: string }) => c.name !== 'Uncategorized')
+    .reduce((s: number, c: { amount: number }) => s + c.amount, 0);
+  // Two transactions: $120 + $30 = $150.
+  assert.equal(Math.round(totalCategorySpend * 100), 15000);
 });
