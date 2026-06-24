@@ -11,11 +11,11 @@ import { CASHFLOW_SETTINGS_DEFAULTS } from '../models/CashflowSettings';
 import { currentAuth } from '../auth/middleware';
 import { num } from '../util/numbers';
 import {
-  buildFairnessByCurrency,
-  buildFairnessMonthly,
-  buildSettlementRecommendation,
-  computePartnerTransferDelta,
+  buildFairnessByContact,
+  buildFairnessMonthlyByContact,
+  buildSettlementRecommendationByContact,
   projectSettlementContribution,
+  type RawSettlementForPayback,
   type SettlementTotals,
   type SharedTxnRow,
 } from '../summary/partnerFairness';
@@ -88,14 +88,17 @@ type RawSettlementRow = {
   amount: unknown;
   settledDate: string;
   recordedByUserId: number | null;
+  notes: string | null;
 };
 
 async function loadSharedTxns(req: Request): Promise<{
   sharedRows: SharedTxnRow[];
   settlementTotals: SettlementTotals[];
   monthlySettlements: Array<SettlementTotals & { month: string }>;
+  rawSettlements: RawSettlementForPayback[];
   partnerContactIds: Set<number>;
   viewerUserId: number | null;
+  contactsMeta: Map<number, { name: string; isPartner: boolean }>;
 }> {
   // Resolve the viewing user so fairness/settlement projection is relative to
   // them. Tests may bypass auth — fall back to owner POV (null).
@@ -127,7 +130,7 @@ async function loadSharedTxns(req: Request): Promise<{
     }),
     PartnerSettlement.findAll({
       where: settlementWhere(req),
-      attributes: ['contactId', 'currency', 'direction', 'amount', 'settledDate', 'recordedByUserId'],
+      attributes: ['contactId', 'currency', 'direction', 'amount', 'settledDate', 'recordedByUserId', 'notes'],
       raw: true,
     }),
     Contact.findAll({
@@ -137,15 +140,13 @@ async function loadSharedTxns(req: Request): Promise<{
     }),
   ]);
 
-  const contactsById = new Map(
-    (contacts as Array<{ id: number; name: string; isPartner: boolean | number }>).map(
-      (c) => [c.id, c.name],
-    ),
+  const typedContacts = contacts as Array<{ id: number; name: string; isPartner: boolean | number }>;
+  const contactsById = new Map(typedContacts.map((c) => [c.id, c.name]));
+  const contactsMeta = new Map<number, { name: string; isPartner: boolean }>(
+    typedContacts.map((c) => [c.id, { name: c.name, isPartner: Boolean(c.isPartner) }]),
   );
   const partnerContactIds = new Set<number>(
-    (contacts as Array<{ id: number; name: string; isPartner: boolean | number }>)
-      .filter((c) => Boolean(c.isPartner))
-      .map((c) => c.id),
+    typedContacts.filter((c) => Boolean(c.isPartner)).map((c) => c.id),
   );
 
   const sharedRows: SharedTxnRow[] = (txns as unknown as RawTxnRow[]).map((r) => ({
@@ -207,12 +208,25 @@ async function loadSharedTxns(req: Request): Promise<{
     monthlyByKey.set(monthKey, monthly);
   }
 
+  const rawSettlements: RawSettlementForPayback[] = (settlements as unknown as RawSettlementRow[]).map(
+    (s) => ({
+      contactId: s.contactId,
+      currency: s.currency,
+      direction: s.direction,
+      amount: num(s.amount) ?? 0,
+      settledDate: s.settledDate,
+      note: s.notes ?? null,
+    }),
+  );
+
   return {
     sharedRows,
     settlementTotals: Array.from(totalsByKey.values()),
     monthlySettlements: Array.from(monthlyByKey.values()),
+    rawSettlements,
     partnerContactIds,
     viewerUserId,
+    contactsMeta,
   };
 }
 
@@ -248,40 +262,32 @@ function currentMonthBoundaries(now: Date): { start: string; nextStart: string }
 }
 
 /**
- * GET /api/partner/fairness — per-currency fairness summary:
- *   - sharedSpendTotal, myShareTotal, partnerShareTotal, sharedTransactionCount
- *   - currentMonthSharedSpend (purchases only)
- *   - balance + direction
- *   - paidMore { youCovered, partnerCovered }
- *   - categoryBreakdown (top-8)
- *   - largestShared (top-10)
+ * GET /api/partner/fairness — per-contact fairness summary:
+ *   - contacts[]: { contactId, contactName, isPartner, byCurrency[], paybacks[] }
+ *   - excludeNonPartnerInflows
  *
  * Query: ?currency, ?dateFrom, ?dateTo — same shape as /api/summary/partner.
  */
 router.get('/fairness', async (req, res, next) => {
   try {
-    const { sharedRows, settlementTotals, partnerContactIds, viewerUserId } =
+    const { sharedRows, settlementTotals, rawSettlements, partnerContactIds, viewerUserId, contactsMeta } =
       await loadSharedTxns(req);
     const excludeNonPartnerInflows = await resolveExcludeNonPartnerInflows(req);
     const { start, nextStart } = currentMonthBoundaries(new Date());
-    const partnerTransfersByCurrency = computePartnerTransferDelta(sharedRows, partnerContactIds);
-    const byCurrency = buildFairnessByCurrency(
-      sharedRows,
-      settlementTotals,
-      start,
-      nextStart,
-      { partnerContactIds, excludeNonPartnerInflows, viewerUserId, partnerTransfersByCurrency },
+    const contacts = buildFairnessByContact(
+      sharedRows, settlementTotals, rawSettlements, start, nextStart,
+      { partnerContactIds, excludeNonPartnerInflows, viewerUserId }, contactsMeta,
     );
-    res.json({ byCurrency, excludeNonPartnerInflows });
+    res.json({ contacts, excludeNonPartnerInflows });
   } catch (e) {
     next(e);
   }
 });
 
 /**
- * GET /api/partner/monthly — historical fairness trend per (currency, YYYY-MM):
- *   - sharedSpend, myShare, partnerShare
- *   - settlementDelta, netDelta, cumulativeBalance
+ * GET /api/partner/monthly — historical fairness trend per (contact, currency, YYYY-MM):
+ *   - contacts[]: { contactId, contactName, isPartner, points[] }
+ *   - excludeNonPartnerInflows
  *
  * cumulativeBalance runs from the earliest month in the dataset (within the
  * requested date range, if any) — caller can omit dateFrom/dateTo for the
@@ -289,15 +295,14 @@ router.get('/fairness', async (req, res, next) => {
  */
 router.get('/monthly', async (req, res, next) => {
   try {
-    const { sharedRows, monthlySettlements, partnerContactIds, viewerUserId } =
+    const { sharedRows, monthlySettlements, partnerContactIds, viewerUserId, contactsMeta } =
       await loadSharedTxns(req);
     const excludeNonPartnerInflows = await resolveExcludeNonPartnerInflows(req);
-    const points = buildFairnessMonthly(sharedRows, monthlySettlements, {
-      partnerContactIds,
-      excludeNonPartnerInflows,
-      viewerUserId,
-    });
-    res.json({ points, excludeNonPartnerInflows });
+    const contacts = buildFairnessMonthlyByContact(
+      sharedRows, monthlySettlements,
+      { partnerContactIds, excludeNonPartnerInflows, viewerUserId }, contactsMeta,
+    );
+    res.json({ contacts, excludeNonPartnerInflows });
   } catch (e) {
     next(e);
   }
@@ -305,27 +310,25 @@ router.get('/monthly', async (req, res, next) => {
 
 /**
  * GET /api/partner/settlement-recommendation — what should be paid right
- * now to bring the balance to zero, per currency.
+ * now to bring the balance to zero, per contact and currency.
+ *   - contacts[]: { contactId, contactName, recommendations[] }
+ *   - excludeNonPartnerInflows
  *
  * Mirrors the same scope rules as /fairness; in practice callers will hit
  * this without date filters to get a lifetime recommendation.
  */
 router.get('/settlement-recommendation', async (req, res, next) => {
   try {
-    const { sharedRows, settlementTotals, partnerContactIds, viewerUserId } =
+    const { sharedRows, settlementTotals, rawSettlements, partnerContactIds, viewerUserId, contactsMeta } =
       await loadSharedTxns(req);
     const excludeNonPartnerInflows = await resolveExcludeNonPartnerInflows(req);
     const { start, nextStart } = currentMonthBoundaries(new Date());
-    const partnerTransfersByCurrency = computePartnerTransferDelta(sharedRows, partnerContactIds);
-    const fairness = buildFairnessByCurrency(
-      sharedRows,
-      settlementTotals,
-      start,
-      nextStart,
-      { partnerContactIds, excludeNonPartnerInflows, viewerUserId, partnerTransfersByCurrency },
+    const fairnessContacts = buildFairnessByContact(
+      sharedRows, settlementTotals, rawSettlements, start, nextStart,
+      { partnerContactIds, excludeNonPartnerInflows, viewerUserId }, contactsMeta,
     );
-    const recommendations = buildSettlementRecommendation(fairness);
-    res.json({ recommendations, excludeNonPartnerInflows });
+    const contacts = buildSettlementRecommendationByContact(fairnessContacts);
+    res.json({ contacts, excludeNonPartnerInflows });
   } catch (e) {
     next(e);
   }

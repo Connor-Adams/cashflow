@@ -8,6 +8,11 @@
  * Postgres test DB, one superadmin, two scoped households. Fixtures
  * are hand-built via `Transaction.create` to mirror the single-payer
  * model: I always pay, partnerShareAmount is what partner owes me.
+ *
+ * All routes now return per-contact shapes:
+ *   /fairness → { contacts: FairnessContact[], excludeNonPartnerInflows }
+ *   /monthly  → { contacts: [{contactId, contactName, isPartner, points[]}], excludeNonPartnerInflows }
+ *   /settlement-recommendation → { contacts: [{contactId, contactName, recommendations[]}], excludeNonPartnerInflows }
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -158,6 +163,60 @@ after(async () => {
   await teardownPgTestDb(testDb);
 });
 
+// Helper: find the CAD bucket for contactAId inside contacts[].byCurrency
+type ContactsEntry = {
+  contactId: number | null;
+  contactName: string;
+  isPartner: boolean;
+  byCurrency: Array<Record<string, unknown>>;
+  paybacks: Array<Record<string, unknown>>;
+};
+
+function findContactCad(
+  contacts: ContactsEntry[],
+  contactId: number,
+): Record<string, unknown> | undefined {
+  const c = contacts.find((e) => e.contactId === contactId);
+  if (!c) return undefined;
+  return (c.byCurrency as Array<{ currency: string } & Record<string, unknown>>).find(
+    (r) => r.currency === 'CAD',
+  );
+}
+
+// Helper: find recommendations for contactAId inside contacts[].recommendations
+type RecsEntry = {
+  contactId: number | null;
+  contactName: string;
+  recommendations: Array<Record<string, unknown>>;
+};
+
+function findContactCadRec(
+  contacts: RecsEntry[],
+  contactId: number,
+): Record<string, unknown> | undefined {
+  const c = contacts.find((e) => e.contactId === contactId);
+  if (!c) return undefined;
+  return (c.recommendations as Array<{ currency: string } & Record<string, unknown>>).find(
+    (r) => r.currency === 'CAD',
+  );
+}
+
+// Helper: find points for contactAId inside contacts[].points
+type MonthlyEntry = {
+  contactId: number | null;
+  contactName: string;
+  isPartner: boolean;
+  points: Array<Record<string, unknown>>;
+};
+
+function findContactPoints(
+  contacts: MonthlyEntry[],
+  contactId: number,
+): Array<Record<string, unknown>> {
+  const c = contacts.find((e) => e.contactId === contactId);
+  return c?.points ?? [];
+}
+
 // ---------------- GET /api/partner/fairness ----------------
 
 test('/fairness: includes shared transactions in totals + currentMonthSharedSpend', async () => {
@@ -180,13 +239,13 @@ test('/fairness: includes shared transactions in totals + currentMonthSharedSpen
     .get('/api/partner/fairness')
     .query({ currency: 'CAD', dateFrom: '2027-04-01', dateTo: '2027-04-30' });
   assert.equal(res.status, 200);
-  const cad = (res.body.byCurrency as Array<{
+  const cad = findContactCad(res.body.contacts, contactAId) as {
     currency: string;
     sharedTransactionCount: number;
     partnerShareTotal: number;
     sharedSpendTotal: number;
-  }>).find((r) => r.currency === 'CAD');
-  assert.ok(cad, `expected CAD entry: ${JSON.stringify(res.body)}`);
+  } | undefined;
+  assert.ok(cad, `expected CAD entry for contactAId: ${JSON.stringify(res.body)}`);
   assert.equal(cad.sharedTransactionCount, 1);
   assert.equal(cad.partnerShareTotal, -100);
   assert.equal(cad.sharedSpendTotal, -200);
@@ -207,11 +266,11 @@ test('/fairness: settlements applied → balance shifts', async () => {
     .get('/api/partner/fairness')
     .query({ currency: 'CAD', dateFrom: '2027-04-01', dateTo: '2027-04-30' });
   assert.equal(res.status, 200);
-  const cad = (res.body.byCurrency as Array<{
+  const cad = findContactCad(res.body.contacts, contactAId) as {
     currency: string;
     balance: number;
     partnerShareTotal: number;
-  }>).find((r) => r.currency === 'CAD');
+  } | undefined;
   assert.ok(cad);
   // partnerShareTotal=-100, settlement: iPaid=0, partnerPaid=30 → balance = -(-100) + (0-30) = 100-30 = 70
   assert.equal(cad.balance, 70);
@@ -242,16 +301,16 @@ test('/fairness: AC1 currentMonthSharedSpend computed from today', async () => {
 
   const res = await agentA.get('/api/partner/fairness');
   assert.equal(res.status, 200);
-  const cad = (res.body.byCurrency as Array<{
+  const cad = findContactCad(res.body.contacts, contactAId) as {
     currency: string;
     currentMonthSharedSpend: number;
-  }>).find((r) => r.currency === 'CAD');
+  } | undefined;
   assert.ok(cad);
   // currentMonthSharedSpend is the sum of |amount| for shared purchases in
   // the current month. Our $77 seed contributes 77; other tests in this file
   // may add to it, so we assert >= 77.
   assert.ok(
-    cad.currentMonthSharedSpend >= 77,
+    (cad.currentMonthSharedSpend as number) >= 77,
     `expected currentMonthSharedSpend >= 77, got ${cad.currentMonthSharedSpend}`,
   );
 });
@@ -276,10 +335,10 @@ test('/fairness: AC2 paidMore reports youCovered for shared spend', async () => 
     .get('/api/partner/fairness')
     .query({ currency: 'CAD', dateFrom: '2027-05-01', dateTo: '2027-05-31' });
   assert.equal(res.status, 200);
-  const cad = (res.body.byCurrency as Array<{
+  const cad = findContactCad(res.body.contacts, contactAId) as {
     currency: string;
     paidMore: { youCovered: number; partnerCovered: number };
-  }>).find((r) => r.currency === 'CAD');
+  } | undefined;
   assert.ok(cad);
   // myShareTotal=-200 → youCovered=200, no settlements in window → partnerCovered=0.
   assert.equal(cad.paidMore.youCovered, 200);
@@ -306,10 +365,10 @@ test('/fairness: AC5 category breakdown buckets shared spend per category', asyn
     .get('/api/partner/fairness')
     .query({ currency: 'CAD', dateFrom: '2027-05-01', dateTo: '2027-05-31' });
   assert.equal(res.status, 200);
-  const cad = (res.body.byCurrency as Array<{
+  const cad = findContactCad(res.body.contacts, contactAId) as {
     currency: string;
     categoryBreakdown: Array<{ category: string; sharedSpend: number }>;
-  }>).find((r) => r.currency === 'CAD');
+  } | undefined;
   assert.ok(cad);
   const cats = cad.categoryBreakdown.map((c) => c.category).sort();
   assert.deepEqual(cats, ['Housing', 'Subscriptions']);
@@ -322,10 +381,10 @@ test('/fairness: AC7 largestShared lists shared rows descending |amount|', async
     .get('/api/partner/fairness')
     .query({ currency: 'CAD', dateFrom: '2027-05-01', dateTo: '2027-05-31' });
   assert.equal(res.status, 200);
-  const cad = (res.body.byCurrency as Array<{
+  const cad = findContactCad(res.body.contacts, contactAId) as {
     currency: string;
     largestShared: Array<{ amount: number; merchant: string }>;
-  }>).find((r) => r.currency === 'CAD');
+  } | undefined;
   assert.ok(cad);
   // We seeded 2 in this window: -400 Rent Split, -60 Streaming.
   assert.equal(cad.largestShared.length, 2);
@@ -338,11 +397,9 @@ test('/fairness: household scoping — household B sees no household A data', as
     .get('/api/partner/fairness')
     .query({ currency: 'CAD', dateFrom: '2027-04-01', dateTo: '2027-05-31' });
   assert.equal(res.status, 200);
-  // Without any seeded rows for B, no CAD entry should surface.
-  const cad = (res.body.byCurrency as Array<{ currency: string }>).find(
-    (r) => r.currency === 'CAD',
-  );
-  assert.equal(cad, undefined);
+  // Without any seeded rows for B, contacts should be empty.
+  assert.ok(Array.isArray(res.body.contacts));
+  assert.equal(res.body.contacts.length, 0);
 });
 
 // ---------------- GET /api/partner/monthly ----------------
@@ -384,7 +441,7 @@ test('/monthly: AC6 returns per-month points with cumulativeBalance running tota
     .get('/api/partner/monthly')
     .query({ currency: 'CAD', dateFrom: '2028-01-01', dateTo: '2028-02-28' });
   assert.equal(res.status, 200);
-  const pts = res.body.points as Array<{
+  const pts = findContactPoints(res.body.contacts, contactAId) as Array<{
     month: string;
     currency: string;
     cumulativeBalance: number;
@@ -393,7 +450,7 @@ test('/monthly: AC6 returns per-month points with cumulativeBalance running tota
   }>;
   const jan = pts.find((p) => p.month === '2028-01');
   const feb = pts.find((p) => p.month === '2028-02');
-  assert.ok(jan, `expected 2028-01 point: ${JSON.stringify(pts)}`);
+  assert.ok(jan, `expected 2028-01 point: ${JSON.stringify(res.body.contacts)}`);
   assert.ok(feb);
   assert.equal(jan.partnerShare, -100);
   assert.equal(jan.cumulativeBalance, 100);
@@ -419,8 +476,10 @@ test('/monthly: rows with partnerShare=0 do not produce monthly points', async (
     .get('/api/partner/monthly')
     .query({ currency: 'CAD', dateFrom: '2029-03-01', dateTo: '2029-03-31' });
   assert.equal(res.status, 200);
-  const pts = res.body.points as Array<{ month: string }>;
-  assert.equal(pts.length, 0, `me-only row should not surface a monthly point: ${JSON.stringify(pts)}`);
+  // No shared rows in window → contacts should be empty (no contact has any points).
+  const contacts = res.body.contacts as Array<{ contactId: number | null; points: unknown[] }>;
+  const totalPoints = contacts.reduce((sum, c) => sum + c.points.length, 0);
+  assert.equal(totalPoints, 0, `me-only row should not surface any monthly points: ${JSON.stringify(contacts)}`);
 });
 
 // ---------------- GET /api/partner/settlement-recommendation ----------------
@@ -433,13 +492,12 @@ test('/settlement-recommendation: AC4 positive balance → partner_pays_you', as
     .get('/api/partner/settlement-recommendation')
     .query({ currency: 'CAD', dateFrom: '2027-05-01', dateTo: '2027-05-31' });
   assert.equal(res.status, 200);
-  const recs = res.body.recommendations as Array<{
+  const cad = findContactCadRec(res.body.contacts, contactAId) as {
     currency: string;
     direction: string;
     amount: number;
     outstandingBalance: number;
-  }>;
-  const cad = recs.find((r) => r.currency === 'CAD');
+  } | undefined;
   assert.ok(cad);
   assert.equal(cad.direction, 'partner_pays_you');
   assert.equal(cad.amount, 230);
@@ -475,11 +533,11 @@ test('/settlement-recommendation: positive balance → partner_pays_you', async 
     .get('/api/partner/settlement-recommendation')
     .query({ currency: 'CAD', dateFrom: '2029-07-01', dateTo: '2029-07-31' });
   assert.equal(res.status, 200);
-  const cad = (res.body.recommendations as Array<{
+  const cad = findContactCadRec(res.body.contacts, contactAId) as {
     currency: string;
     direction: string;
     amount: number;
-  }>).find((r) => r.currency === 'CAD');
+  } | undefined;
   assert.ok(cad);
   assert.equal(cad.direction, 'partner_pays_you');
   assert.equal(cad.amount, 250);
@@ -491,9 +549,8 @@ test('/settlement-recommendation: zero balance → direction none', async () => 
     .get('/api/partner/settlement-recommendation')
     .query({ currency: 'CAD', dateFrom: '2030-01-01', dateTo: '2030-01-31' });
   assert.equal(res.status, 200);
-  // No shared rows, no settlements → recommendations may be empty array.
-  // That's the correct behavior; the UI surfaces this as "you're square".
-  assert.ok(Array.isArray(res.body.recommendations));
+  // No shared rows, no settlements → contacts should be empty.
+  assert.ok(Array.isArray(res.body.contacts));
 });
 
 test('cross-cutting: household B cannot see household A settlement recommendation', async () => {
@@ -516,11 +573,12 @@ test('cross-cutting: household B cannot see household A settlement recommendatio
     .get('/api/partner/settlement-recommendation')
     .query({ currency: 'CAD', dateFrom: '2030-03-01', dateTo: '2030-03-31' });
   assert.equal(res.status, 200);
-  const cad = (res.body.recommendations as Array<{ currency: string }>).find(
-    (r) => r.currency === 'CAD',
+  // B's me-only row has partnerShare=0 → no contacts with CAD recommendation.
+  const contacts = res.body.contacts as RecsEntry[];
+  const cadRec = contacts.flatMap((c) => c.recommendations).find(
+    (r) => (r as { currency: string }).currency === 'CAD',
   );
-  // B's me-only row has partnerShare=0 → no CAD recommendation.
-  assert.equal(cad, undefined);
+  assert.equal(cadRec, undefined);
 });
 
 // ---------------- #375 partner_inflows / non_partner_inflows ---------------
@@ -606,13 +664,13 @@ test('/fairness: #375 AC3 returns partnerInflows and nonPartnerInflows split', a
     });
   assert.equal(off.status, 200);
   assert.equal(off.body.excludeNonPartnerInflows, false);
-  const cadOff = (off.body.byCurrency as Array<{
+  const cadOff = findContactCad(off.body.contacts, contactAId) as {
     currency: string;
     partnerInflows: number;
     nonPartnerInflows: number;
     sharedTransactionCount: number;
     partnerShareTotal: number;
-  }>).find((r) => r.currency === 'CAD');
+  } | undefined;
   assert.ok(cadOff, `expected CAD entry: ${JSON.stringify(off.body)}`);
   assert.equal(cadOff.partnerInflows, 500);
   assert.equal(cadOff.nonPartnerInflows, 130);
@@ -634,14 +692,14 @@ test('/fairness: #375 AC4 excludeNonPartnerInflows=true drops non-partner inflow
     });
   assert.equal(on.status, 200);
   assert.equal(on.body.excludeNonPartnerInflows, true);
-  const cadOn = (on.body.byCurrency as Array<{
+  const cadOn = findContactCad(on.body.contacts, contactAId) as {
     currency: string;
     partnerInflows: number;
     nonPartnerInflows: number;
     sharedTransactionCount: number;
     partnerShareTotal: number;
     balance: number;
-  }>).find((r) => r.currency === 'CAD');
+  } | undefined;
   assert.ok(cadOn);
   // Inflow split is reported regardless of the toggle.
   assert.equal(cadOn.partnerInflows, 500);
@@ -667,11 +725,11 @@ test('/settlement-recommendation: #375 toggle ON flips the recommendation total'
       excludeNonPartnerInflows: 'true',
     });
   assert.equal(on.status, 200);
-  const onCad = (on.body.recommendations as Array<{
+  const onCad = findContactCadRec(on.body.contacts, contactAId) as {
     currency: string;
     amount: number;
     direction: string;
-  }>).find((r) => r.currency === 'CAD');
+  } | undefined;
   assert.ok(onCad);
   assert.equal(onCad.direction, 'you_pay_partner');
   assert.equal(onCad.amount, 250);
@@ -685,11 +743,11 @@ test('/settlement-recommendation: #375 toggle ON flips the recommendation total'
       excludeNonPartnerInflows: 'false',
     });
   assert.equal(off.status, 200);
-  const offCad = (off.body.recommendations as Array<{
+  const offCad = findContactCadRec(off.body.contacts, contactAId) as {
     currency: string;
     amount: number;
     direction: string;
-  }>).find((r) => r.currency === 'CAD');
+  } | undefined;
   assert.ok(offCad);
   assert.equal(offCad.direction, 'you_pay_partner');
   assert.equal(offCad.amount, 315);
@@ -708,12 +766,12 @@ test('/monthly: #375 toggle ON respects partner classification in trend', async 
     });
   assert.equal(res.status, 200);
   assert.equal(res.body.excludeNonPartnerInflows, true);
-  const pts = res.body.points as Array<{
+  const pts = findContactPoints(res.body.contacts, contactAId) as Array<{
     month: string;
     partnerShare: number;
   }>;
   const feb = pts.find((p) => p.month === '2031-02');
-  assert.ok(feb, `expected 2031-02 point: ${JSON.stringify(pts)}`);
+  assert.ok(feb, `expected 2031-02 point: ${JSON.stringify(res.body.contacts)}`);
   assert.equal(feb.partnerShare, 250);
 });
 
@@ -746,12 +804,14 @@ test('partner direct transfer nets into fairness balance (period-scoped)', async
     .get('/api/partner/fairness')
     .query({ dateFrom: '2027-03-01', dateTo: '2027-03-31', currency: 'CAD' });
   assert.equal(res.status, 200);
-  const cad = (res.body.byCurrency as Array<{
-    currency: string;
-    balance: number;
-    partnerTransfers: { in: number; out: number };
-  }>).find((c) => c.currency === 'CAD');
-  assert.ok(cad, `expected CAD entry: ${JSON.stringify(res.body.byCurrency)}`);
+  // The transfer contact appears in contacts[]; find it by contactId.
+  const contacts = res.body.contacts as ContactsEntry[];
+  const partnerEntry = contacts.find((c) => c.contactId === partner.id);
+  assert.ok(partnerEntry, `expected entry for partner.id=${partner.id}: ${JSON.stringify(contacts)}`);
+  const cad = (partnerEntry.byCurrency as Array<{ currency: string; balance: number; partnerTransfers: { in: number; out: number } }>).find(
+    (c) => c.currency === 'CAD',
+  );
+  assert.ok(cad, `expected CAD entry: ${JSON.stringify(partnerEntry.byCurrency)}`);
   assert.deepEqual(cad.partnerTransfers, { in: 2000, out: 0 });
   assert.equal(cad.balance, -2000, 'partner-sent money reduces balance (I owe partner)');
 });
@@ -774,4 +834,48 @@ test('/fairness: #375 override query param wins over CashflowSettings', async ()
     });
   assert.equal(res.status, 200);
   assert.equal(res.body.excludeNonPartnerInflows, false);
+});
+
+// ---------------- New per-contact shape assertion ----------------
+
+test('GET /api/partner/fairness returns per-contact buckets', async () => {
+  // contactAId is already marked isPartner=true from the #375 AC3 test.
+  // Seed one shared txn + one inbound transfer (counterpartyContactId = contactAId).
+  await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2032-01-15',
+    amount: -120,
+    currency: 'CAD',
+    finalSplitType: 'shared',
+    ownershipType: 'contact',
+    ownershipContactId: contactAId,
+    myShareAmount: -60,
+    partnerShareAmount: -60,
+    merchantRaw: 'Shape Test Purchase',
+    finalCategory: 'Groceries',
+  });
+  await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2032-01-20',
+    amount: 50,
+    currency: 'CAD',
+    finalSplitType: 'me',
+    ownershipType: 'me',
+    myShareAmount: 50,
+    partnerShareAmount: 0,
+    merchantRaw: 'Shape Test Transfer',
+    counterpartyContactId: contactAId,
+  });
+
+  const res = await agentA
+    .get('/api/partner/fairness')
+    .query({ currency: 'CAD', dateFrom: '2032-01-01', dateTo: '2032-01-31' });
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.body.contacts));
+  const alex = res.body.contacts.find((c: { isPartner: boolean }) => c.isPartner);
+  assert.ok(alex, `expected a partner contact: ${JSON.stringify(res.body.contacts)}`);
+  assert.ok(Array.isArray(alex.byCurrency));
+  assert.ok(Array.isArray(alex.paybacks));
 });
