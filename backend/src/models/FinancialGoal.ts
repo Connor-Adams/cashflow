@@ -55,6 +55,14 @@ export class FinancialGoal extends Model<
   declare priority: CreationOptional<number>;
   declare status: CreationOptional<FinancialGoalStatus>;
   declare notes: string | null;
+  /**
+   * Optimistic-lock counter (issue #845). Sequelize `version: true` bumps this
+   * on every full-instance save and adds `WHERE version = N`, so a concurrent
+   * stale write fails with OptimisticLockError instead of silently clobbering
+   * `currentAmount` (the lost-update bug). Contributions take the atomic
+   * `increment` path instead, which is lock-free at the DB level.
+   */
+  declare version: CreationOptional<number>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -112,6 +120,11 @@ export function initFinancialGoal(sequelize: Sequelize): typeof FinancialGoal {
         defaultValue: 'active',
       },
       notes: { type: DataTypes.TEXT, allowNull: true },
+      version: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+      },
     } as ModelAttributes<FinancialGoal>,
     {
       sequelize,
@@ -119,6 +132,9 @@ export function initFinancialGoal(sequelize: Sequelize): typeof FinancialGoal {
       tableName: 'financial_goals',
       underscored: true,
       timestamps: true,
+      // Optimistic locking on the `version` column (issue #845). Guards
+      // full-instance saves against the goal-progress lost-update race.
+      version: true,
     }
   );
   return FinancialGoal;

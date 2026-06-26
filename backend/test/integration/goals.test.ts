@@ -574,6 +574,146 @@ test('DELETE /api/goals/:id removes the row for the owning household', async () 
   assert.equal(gone.status, 404);
 });
 
+// ---- #845: goal-progress lost update ----------------------------------------
+
+test('POST /api/goals/:id/contribute adds a delta atomically', async () => {
+  const created = await primaryAgent.post('/api/goals').send({
+    name: 'Contribute single',
+    targetAmount: 5000,
+    currentAmount: 1000,
+    currency: 'CAD',
+  });
+  const id = created.body.id as number;
+
+  const res = await primaryAgent
+    .post(`/api/goals/${id}/contribute`)
+    .send({ amount: 250 });
+  assert.equal(res.status, 200);
+  assert.equal(Number(res.body.currentAmount), 1250);
+});
+
+test('POST /api/goals/:id/contribute supports a negative delta, clamped at 0', async () => {
+  const created = await primaryAgent.post('/api/goals').send({
+    name: 'Withdraw',
+    targetAmount: 5000,
+    currentAmount: 100,
+    currency: 'CAD',
+  });
+  const id = created.body.id as number;
+
+  const ok = await primaryAgent
+    .post(`/api/goals/${id}/contribute`)
+    .send({ amount: -40 });
+  assert.equal(ok.status, 200);
+  assert.equal(Number(ok.body.currentAmount), 60);
+
+  // Overdraw clamps to 0 rather than going negative.
+  const clamp = await primaryAgent
+    .post(`/api/goals/${id}/contribute`)
+    .send({ amount: -1000 });
+  assert.equal(clamp.status, 200);
+  assert.equal(Number(clamp.body.currentAmount), 0);
+});
+
+test('POST /api/goals/:id/contribute rejects a zero / non-numeric amount', async () => {
+  const created = await primaryAgent.post('/api/goals').send({
+    name: 'Bad contribute',
+    targetAmount: 5000,
+    currency: 'CAD',
+  });
+  const id = created.body.id as number;
+
+  const zero = await primaryAgent
+    .post(`/api/goals/${id}/contribute`)
+    .send({ amount: 0 });
+  assert.equal(zero.status, 400);
+
+  const nan = await primaryAgent
+    .post(`/api/goals/${id}/contribute`)
+    .send({ amount: 'lots' });
+  assert.equal(nan.status, 400);
+});
+
+test('POST /api/goals/:id/contribute 404s for another household (no cross-write)', async () => {
+  const otherCreated = await otherAgent.post('/api/goals').send({
+    name: 'Other untouchable balance',
+    targetAmount: 5000,
+    currentAmount: 1000,
+    currency: 'CAD',
+  });
+  const otherId = otherCreated.body.id as number;
+
+  const sneak = await primaryAgent
+    .post(`/api/goals/${otherId}/contribute`)
+    .send({ amount: 500 });
+  assert.equal(sneak.status, 404);
+
+  // The victim row is untouched — the household-scoped WHERE matched no row.
+  const check = await otherAgent.get(`/api/goals/${otherId}`);
+  assert.equal(Number(check.body.currentAmount), 1000);
+});
+
+test('two concurrent contributions both land (no lost update)', async () => {
+  const created = await primaryAgent.post('/api/goals').send({
+    name: 'Concurrent contributions',
+    targetAmount: 5000,
+    currentAmount: 1000,
+    currency: 'CAD',
+  });
+  const id = created.body.id as number;
+
+  // Fire both contributions concurrently. With a blind read-modify-write PUT
+  // both would read 1000 and one delta would be lost (final 1300, not 1500).
+  // The atomic increment path makes both land: 1000 + 200 + 300 = 1500.
+  const [a, b] = await Promise.all([
+    primaryAgent.post(`/api/goals/${id}/contribute`).send({ amount: 200 }),
+    primaryAgent.post(`/api/goals/${id}/contribute`).send({ amount: 300 }),
+  ]);
+  assert.equal(a.status, 200);
+  assert.equal(b.status, 200);
+
+  const final = await primaryAgent.get(`/api/goals/${id}`);
+  assert.equal(Number(final.body.currentAmount), 1500);
+});
+
+test('PUT carries an optimistic-lock version that bumps on save', async () => {
+  const created = await primaryAgent.post('/api/goals').send({
+    name: 'Versioned',
+    targetAmount: 5000,
+    currency: 'CAD',
+  });
+  const id = created.body.id as number;
+  assert.equal(created.body.version, 0);
+
+  const patched = await primaryAgent.put(`/api/goals/${id}`).send({
+    name: 'Versioned renamed',
+  });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.body.version, 1);
+});
+
+test('concurrent PUTs of disjoint fields do not clobber each other', async () => {
+  const created = await primaryAgent.post('/api/goals').send({
+    name: 'No clobber',
+    targetAmount: 5000,
+    currentAmount: 1000,
+    currency: 'CAD',
+    priority: 1,
+  });
+  const id = created.body.id as number;
+
+  // Sequential disjoint PUTs (status vs priority) both stick — the targeted
+  // update writes only the patched column, so neither stale-saves the other.
+  await primaryAgent.put(`/api/goals/${id}`).send({ status: 'paused' });
+  await primaryAgent.put(`/api/goals/${id}`).send({ priority: 9 });
+
+  const final = await primaryAgent.get(`/api/goals/${id}`);
+  assert.equal(final.body.status, 'paused');
+  assert.equal(final.body.priority, 9);
+  // currentAmount untouched by either PUT.
+  assert.equal(Number(final.body.currentAmount), 1000);
+});
+
 test('households are isolated: otherHouseholdId is distinct', () => {
   assert.notEqual(primaryHouseholdId, otherHouseholdId);
 });
