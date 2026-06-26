@@ -4,6 +4,7 @@ import * as env from './config/env';
 
 import { mountRoutes, captureCors } from './routeRegistry';
 import { attachAuth } from './auth/middleware';
+import { csrfGuard } from './auth/csrf';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
 import { withContext } from './observability/requestContext';
@@ -35,6 +36,11 @@ app.use(
   })
 );
 app.use(requestLogger);
+// CSRF defense (issue #825): reject cookie-authed cross-origin writes under /api
+// via an Origin/Referer allow-list. Mounted before body parsing so a forged
+// request is turned away before its payload is read; it self-exempts safe
+// methods and any request without the session cookie (token-authed flows).
+app.use('/api', csrfGuard);
 app.use(express.json({ limit: '2mb' }));
 app.use(attachAuth);
 app.use((req: Request, _res: Response, next: NextFunction) => {
