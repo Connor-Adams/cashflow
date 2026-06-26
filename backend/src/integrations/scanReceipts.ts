@@ -53,6 +53,7 @@ import { logger } from '../observability/logger';
 import { runInteracCounterpartySync } from './interacCounterparty';
 import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
 import { categorizeAndApplyReceiptItems } from '../import/categorizeReceiptItems';
+import { openDailyAiBudget, type AiExtractionBudget } from './aiExtractionBudget';
 
 /**
  * Default sender allowlist baked into the app. Every household gets these
@@ -169,11 +170,26 @@ export async function parseReceiptText(opts: {
   subject: string | null;
   text: string;
   extractFromText: (text: string) => Promise<ExtractedReceiptOrder>;
-}): Promise<{ extracted: ExtractedReceiptOrder; parser: string; usedAi: boolean }> {
+  /**
+   * Daily AI-extraction budget (issue #870). When the deterministic parsers
+   * miss and an AI call would be needed, `budget.tryConsume()` is checked: if it
+   * returns false the household has hit its daily AI cap, so we DON'T call AI and
+   * return `aiCapped: true` with no extraction. Omit to leave AI uncapped.
+   */
+  budget?: AiExtractionBudget;
+}): Promise<{
+  extracted: ExtractedReceiptOrder | null;
+  parser: string;
+  usedAi: boolean;
+  aiCapped: boolean;
+}> {
   const det = tryDeterministicParse({ fromAddress: opts.fromAddress, subject: opts.subject, body: opts.text });
-  if (det.ok) return { extracted: det.order, parser: det.parser, usedAi: false };
+  if (det.ok) return { extracted: det.order, parser: det.parser, usedAi: false, aiCapped: false };
+  if (opts.budget && !opts.budget.tryConsume()) {
+    return { extracted: null, parser: 'ai', usedAi: false, aiCapped: true };
+  }
   const extracted = await opts.extractFromText(opts.text);
-  return { extracted, parser: 'ai', usedAi: true };
+  return { extracted, parser: 'ai', usedAi: true, aiCapped: false };
 }
 
 /** Senders the household explicitly dismissed during discovery — excluded from
@@ -375,6 +391,9 @@ export interface ScanResult {
   failedExtractions: number;
   byParser: Record<string, number>;
   aiExtractions: number;
+  /** Messages skipped without an AI call because the household hit its daily
+   *  AI-extraction cap (issue #870). */
+  aiCappedMessages: number;
   messages: ScanResultMessage[];
   query: string;
   sinceDate: string | null;
@@ -471,6 +490,12 @@ export async function scanInbox(
   let aiExtractions = 0;
   const byParser: Record<string, number> = {};
 
+  // Daily AI-extraction budget (issue #870): cap minus what this household has
+  // already spent today. Once exhausted, AI fallbacks are skipped for the rest
+  // of the run so an inbox flood can't drive unbounded OpenAI spend.
+  const aiBudget = await openDailyAiBudget(opts.householdId);
+  let aiCappedMessages = 0;
+
   async function recordProcessed(opts2: {
     messageId: string;
     status: string;
@@ -555,25 +580,46 @@ export async function scanInbox(
       let extracted: ExtractedReceiptOrder | null = null;
       let parser: string = 'ai';
       let fromPdf = false;
+      let aiCapped = false;
       if (body.trim()) {
-        const parsed = await parseReceiptText({ fromAddress: result.from, subject: result.subject, text: body, extractFromText });
+        const parsed = await parseReceiptText({ fromAddress: result.from, subject: result.subject, text: body, extractFromText, budget: aiBudget });
         extracted = parsed.extracted;
         parser = parsed.parser;
         if (parsed.usedAi) aiExtractions++;
+        if (parsed.aiCapped) aiCapped = true;
       }
 
       const bodyClean = extracted != null && extracted.total != null && extracted.items.length > 0;
       if (!bodyClean && collectPdfParts(full.payload).length > 0) {
         const pdfText = await extractPdfReceiptText({ accessToken, messageId: summary.id, payload: full.payload });
         if (pdfText.trim()) {
-          const parsed = await parseReceiptText({ fromAddress: result.from, subject: result.subject, text: pdfText, extractFromText });
-          if (parsed.extracted.total != null && parsed.extracted.items.length > 0) {
+          const parsed = await parseReceiptText({ fromAddress: result.from, subject: result.subject, text: pdfText, extractFromText, budget: aiBudget });
+          if (parsed.aiCapped) aiCapped = true;
+          if (parsed.extracted != null && parsed.extracted.total != null && parsed.extracted.items.length > 0) {
             extracted = parsed.extracted;
             parser = parsed.parser;
             fromPdf = true;
             if (parsed.usedAi) aiExtractions++;
           }
         }
+      }
+
+      // Daily AI cap hit and no deterministic parser could handle it: skip this
+      // message without an OpenAI call. Records as 'ai_capped' so the run shows
+      // why it stopped extracting (issue #870).
+      if (extracted == null && aiCapped) {
+        result.status = 'ai_capped';
+        result.error = 'daily AI extraction cap reached';
+        aiCappedMessages++;
+        await recordProcessed({
+          messageId: summary.id,
+          status: 'ai_capped',
+          parser: null,
+          errorMessage: 'daily AI extraction cap reached',
+          subject: result.subject,
+          fromAddr: result.from,
+        });
+        return result;
       }
 
       if (extracted == null) {
@@ -767,6 +813,7 @@ export async function scanInbox(
     failedExtractions: failed,
     byParser,
     aiExtractions,
+    aiCappedMessages,
     messages: results,
     query,
     sinceDate: sinceDate ? sinceDate.toISOString() : null,
