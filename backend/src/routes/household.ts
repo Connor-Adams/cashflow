@@ -5,7 +5,11 @@ import { isHouseholdOwner } from '../auth/scope';
 import { Household } from '../models/Household';
 import { HouseholdMember } from '../models/HouseholdMember';
 import { Security } from '../models/Security';
+import { Session } from '../models/Session';
 import { User } from '../models/User';
+import { UserAuditToken } from '../models/UserAuditToken';
+import { UserCaptureToken } from '../models/UserCaptureToken';
+import { UserReportingToken } from '../models/UserReportingToken';
 import { ensureDailyPrices } from '../portfolio/backfill';
 import { DEFAULT_TIMEZONE } from '../time/householdToday';
 import { apiReadLimiter, apiWriteLimiter } from './apiRateLimit';
@@ -88,6 +92,33 @@ router.delete('/members/:userId', async (req, res, next) => {
     }
 
     await member.destroy();
+
+    // #852 — revoke the removed user's live credentials. Sessions and
+    // capture/reporting/audit tokens are keyed by user_id only (not household);
+    // `attachAuth`/`captureAuth` resolve a household via the user's first
+    // remaining membership, so a stale session/token would keep authenticating
+    // until natural expiry. A user holds exactly one membership in practice
+    // (registration grants one; there is no multi-household join path), so
+    // dropping all of the removed user's sessions and revoking all of their
+    // tokens is the correct, unambiguous scope. Sessions have no revokedAt —
+    // delete the rows; the token tables carry revokedAt — stamp it.
+    const now = new Date();
+    await Promise.all([
+      Session.destroy({ where: { userId: targetUserId } }),
+      UserCaptureToken.update(
+        { revokedAt: now },
+        { where: { userId: targetUserId, revokedAt: null } }
+      ),
+      UserReportingToken.update(
+        { revokedAt: now },
+        { where: { userId: targetUserId, revokedAt: null } }
+      ),
+      UserAuditToken.update(
+        { revokedAt: now },
+        { where: { userId: targetUserId, revokedAt: null } }
+      ),
+    ]);
+
     res.status(204).send();
   } catch (err) {
     next(err);
