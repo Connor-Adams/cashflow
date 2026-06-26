@@ -6,6 +6,13 @@
  *   LOW  → upsert a 'suggested' sender row; write NO order.
  * Reuses scanInbox's parse pipeline; the fast scan path is untouched.
  *
+ * Security (issue #867): every sender discovery sees is, by construction,
+ * non-allowlisted, and the From header is attacker-settable. The HIGH path is
+ * therefore additionally gated on Gmail having authenticated the message
+ * (DKIM=pass aligned to the From domain — see emailAuthentication.ts). A spoofed
+ * or unauthenticated hit is demoted to a suggestion: no ExternalOrder is
+ * written and the sender is NOT promoted to the allowlist.
+ *
  * Gmail access (list/fetch) and AI extraction are injectable via `deps` so the
  * orchestrator is unit-testable on SQLite without network.
  */
@@ -38,6 +45,7 @@ import { classifySubject } from './subjectFilter';
 import { extractReceiptFromText } from '../ai/extractReceiptItems';
 import type { ExtractedReceiptOrder } from '../ai/extractReceiptItems';
 import { isPurchasesLabel, classifyDiscoveryConfidence } from './discoveryConfidence';
+import { isSenderAuthenticated } from './emailAuthentication';
 import { hasMatchingTransaction, matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
 import { categorizeAndApplyReceiptItems } from '../import/categorizeReceiptItems';
 import { upsertSenderSuggestion, parseEmailAddress } from './receiptSenderSuggestions';
@@ -328,9 +336,21 @@ export async function discoverReceiptSources(
         hasCleanExtract,
         amountMatched,
       });
-      r.confidence = confidence;
 
-      if (confidence === 'high') {
+      // Security gate: discovery only sees non-allowlisted senders, and the From
+      // header is attacker-settable. Auto-creating a financial record + promoting
+      // the sender requires Gmail to have verified the message (DKIM=pass aligned
+      // with the From domain). An unauthenticated/spoofed hit — even one that
+      // classifies as high — is demoted to a suggestion requiring explicit user
+      // promotion. See issue #867.
+      const authenticated = isSenderAuthenticated({
+        from: r.from,
+        authenticationResults: getHeader(full.payload, 'Authentication-Results'),
+      });
+      const autoIngestAllowed = confidence === 'high' && authenticated;
+      r.confidence = autoIngestAllowed ? 'high' : 'low';
+
+      if (autoIngestAllowed) {
         const orderId = await persistHighConfidenceOrder({ extracted, parser, gmailMessageId: summary.id, fromPdf });
         r.orderId = orderId;
         r.status = 'auto_learned';
