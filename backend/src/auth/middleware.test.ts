@@ -66,6 +66,8 @@ test('production cookie WITHOUT a cookie domain uses SameSite=Lax (not None)', (
   const header = captureSetCookie((res) => setSessionCookie(res, 'tok', expires));
   assert.match(header, /SameSite=Lax/);
   assert.doesNotMatch(header, /SameSite=None/);
+  // Production cookies stay Secure regardless of SameSite (served over HTTPS).
+  assert.match(header, /Secure/);
 });
 
 test('expired cookie WITHOUT a cookie domain also uses SameSite=Lax', () => {

@@ -16,21 +16,23 @@ function cookieDomainAttr(): string {
   return domain ? ` Domain=${domain};` : '';
 }
 
-// SameSite/Secure attribute for the session cookie.
+// SameSite/Secure attributes for the session cookie.
 //
 // `SameSite=None` lets the cookie ride cross-site requests — necessary only for
 // the cross-subdomain deployment where the UI (`app.`) and API (`api.`) are
-// different hosts under a shared parent and SESSION_COOKIE_DOMAIN is set. In
-// that case we must also mark it `Secure` (browsers reject `SameSite=None`
-// without it). When no cookie domain is configured the API is same-host with
-// the UI, so `SameSite=Lax` is both sufficient and safer: it stops the cookie
-// from being attached to cross-site state-changing requests, shrinking the CSRF
-// attack surface (issue #825). Outside production we always use Lax.
+// different hosts under a shared parent and SESSION_COOKIE_DOMAIN is set. When
+// no cookie domain is configured the API is same-host with the UI, so
+// `SameSite=Lax` is both sufficient and safer: it stops the cookie from being
+// attached to cross-site state-changing requests, shrinking the CSRF attack
+// surface (issue #825).
+//
+// In production the cookie is always `Secure` (served over HTTPS, and browsers
+// reject `SameSite=None` without it); outside production we use `SameSite=Lax`
+// without `Secure` so it works over plain http during local dev.
 function sameSiteAttr(): string {
   if (process.env.NODE_ENV !== 'production') return 'SameSite=Lax';
-  return process.env.SESSION_COOKIE_DOMAIN?.trim()
-    ? 'SameSite=None; Secure'
-    : 'SameSite=Lax';
+  const crossSite = Boolean(process.env.SESSION_COOKIE_DOMAIN?.trim());
+  return `${crossSite ? 'SameSite=None' : 'SameSite=Lax'}; Secure`;
 }
 
 function sessionCookieAttributes(expiresAt: Date): string {
