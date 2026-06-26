@@ -41,6 +41,7 @@ const GROUPS: SettingsNavGroup[] = [
       { to: '/settings/data', label: 'Data export' },
       { to: '/settings/feedback', label: 'Feedback', ownerOnly: true },
       { to: '/settings/whatsnew', label: "What's new" },
+      { to: '/settings/account', label: 'Delete account', ownerOnly: true },
     ],
   },
 ]
