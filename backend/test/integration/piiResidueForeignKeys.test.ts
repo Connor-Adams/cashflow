@@ -44,12 +44,13 @@ after(async () => {
   await teardownPgTestDb(testDb);
 });
 
-/** Seed household + account + transaction via the models so the beforeCreate
- *  hooks fill the NOT NULL entity_id columns. Returns their ids. */
-async function seed(label: string): Promise<{
+/** Seed household + account via the models so the beforeCreate hooks fill the
+ *  NOT NULL entity_id column. No transaction — used by the statement-cascade
+ *  tests, which delete the account/household directly (a lingering transaction
+ *  would block the account delete via transactions.account_id RESTRICT). */
+async function seedAccount(label: string): Promise<{
   householdId: number;
   accountId: number;
-  transactionId: number;
 }> {
   const household = await models.Household.create({ name: `${label} hh` });
   const account = await models.Account.create({
@@ -62,9 +63,19 @@ async function seed(label: string): Promise<{
     defaultCurrency: 'CAD',
     shortCode: null,
   });
+  return { householdId: household.id, accountId: account.id };
+}
+
+/** seedAccount + a transaction (entity_id filled by the txn hook). */
+async function seed(label: string): Promise<{
+  householdId: number;
+  accountId: number;
+  transactionId: number;
+}> {
+  const { householdId, accountId } = await seedAccount(label);
   const txn = await models.Transaction.create({
-    accountId: account.id,
-    householdId: household.id,
+    accountId,
+    householdId,
     importBatch: 'pii-fk-test',
     date: '2026-01-15',
     merchantRaw: 'Coffee Co',
@@ -75,7 +86,7 @@ async function seed(label: string): Promise<{
     sourceIdentityFingerprint: `id-${crypto.randomBytes(8).toString('hex')}`,
     finalCategory: 'Food',
   });
-  return { householdId: household.id, accountId: account.id, transactionId: txn.id };
+  return { householdId, accountId, transactionId: txn.id };
 }
 
 async function insertRevision(transactionId: number, householdId: number): Promise<void> {
@@ -131,7 +142,7 @@ test('bulk DELETE FROM transactions cascades transaction_revisions away (no PII 
 });
 
 test('deleting an account cascades its account_statements away (via account_id FK)', async () => {
-  const { householdId, accountId } = await seed('stmt-acct-cascade');
+  const { householdId, accountId } = await seedAccount('stmt-acct-cascade');
   await insertStatement(accountId, householdId);
   assert.equal(await countStatements(accountId), 1, 'statement seeded');
 
@@ -143,7 +154,7 @@ test('deleting an account cascades its account_statements away (via account_id F
 });
 
 test('deleting a household cascades its account_statements away (via household_id FK)', async () => {
-  const { householdId, accountId } = await seed('stmt-hh-cascade');
+  const { householdId, accountId } = await seedAccount('stmt-hh-cascade');
   await insertStatement(accountId, householdId);
   assert.equal(await countStatements(accountId), 1, 'statement seeded');
 
@@ -170,7 +181,7 @@ test('inserting a transaction_revision with a dangling transaction_id is rejecte
 });
 
 test('inserting an account_statement with a dangling account_id is rejected', async () => {
-  const { householdId } = await seed('stmt-fk-reject');
+  const { householdId } = await seedAccount('stmt-fk-reject');
   const now = new Date().toISOString();
   await assert.rejects(
     () =>
