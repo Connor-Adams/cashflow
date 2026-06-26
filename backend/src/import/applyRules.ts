@@ -1,5 +1,6 @@
 import { Rule } from '../models';
 import type { RuleAction } from '../rules/actions';
+import { validateUserPattern, safeRegexTest } from '../util/safeRegex';
 
 export interface RuleRow {
   id: number;
@@ -33,12 +34,11 @@ export function findBestRule(
     const pattern = rule.merchantPattern || '';
     let ok = false;
     if (rule.matchKind === 'regex') {
-      try {
-        const re = new RegExp(pattern, 'i');
-        ok = re.test(merchantClean);
-      } catch {
-        ok = false;
-      }
+      // Issue #818: never compile/run an unvalidated user regex on the event
+      // loop. validateUserPattern rejects over-long / catastrophic-backtracking
+      // patterns; safeRegexTest bounds the haystack length.
+      const v = validateUserPattern(pattern, 'i');
+      ok = v.ok ? safeRegexTest(v.re, merchantClean) : false;
     } else {
       ok = merchantClean.toLowerCase().includes(pattern.toLowerCase());
     }

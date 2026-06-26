@@ -30,6 +30,22 @@ import {
   deriveScalarsFromActions,
   type RuleAction,
 } from '../rules/actions';
+import { validateUserPattern, safeRegexTest } from '../util/safeRegex';
+
+/**
+ * Issue #818: reject an unsafe user regex at rule-creation/update time so a
+ * catastrophic-backtracking pattern is never persisted (and then re-run on every
+ * import). Only applies when matchKind is 'regex'; substring/exact are inert.
+ * Returns null when OK, or a typed error for the route to surface as a 400.
+ */
+function checkRulePattern(
+  matchKind: unknown,
+  merchantPattern: unknown,
+): { error: string; message: string } | null {
+  if (matchKind !== 'regex') return null;
+  const v = validateUserPattern(String(merchantPattern ?? ''), 'i');
+  return v.ok ? null : { error: v.error, message: v.message };
+}
 
 /**
  * Resolve the household's Label id set for `set_label` validation. Returns null
@@ -156,6 +172,11 @@ router.post('/', async (req, res, next) => {
     const { user, household } = currentAuth(req);
     if (!b.merchantPattern) {
       res.status(400).json({ error: 'merchantPattern is required' });
+      return;
+    }
+    const patternErr = checkRulePattern((b.matchKind as string) || 'substring', b.merchantPattern);
+    if (patternErr) {
+      res.status(400).json(patternErr);
       return;
     }
     const fromParsed = parseEffectiveDate(b.effectiveFrom);
@@ -336,6 +357,14 @@ router.patch('/:id', async (req, res, next) => {
     const fields = ['merchantPattern', 'matchKind', 'priority'] as const;
     for (const f of fields) {
       if (Object.prototype.hasOwnProperty.call(b, f)) row.set(f, b[f] as never);
+    }
+    // Issue #818: validate the resulting (post-merge) pattern so an edit can't
+    // turn a safe rule into a ReDoS one, even if only one of pattern/matchKind
+    // is supplied in the body.
+    const patternErr = checkRulePattern(row.get('matchKind'), row.get('merchantPattern'));
+    if (patternErr) {
+      res.status(400).json(patternErr);
+      return;
     }
 
     // Issue #795 effect sync. If `actions[]` is present it is authoritative:
@@ -930,6 +959,12 @@ router.post('/import', async (req, res, next) => {
         errors.push({ name: String(rule.merchantPattern ?? '(unknown)'), reason: 'merchantPattern is required' });
         continue;
       }
+      const importMatchKind = typeof rule.matchKind === 'string' ? rule.matchKind : 'substring';
+      const patternErr = checkRulePattern(importMatchKind, rule.merchantPattern);
+      if (patternErr) {
+        errors.push({ name: rule.merchantPattern, reason: patternErr.message });
+        continue;
+      }
       const fromParsed = parseEffectiveDate(rule.effectiveFrom ?? null);
       if (!fromParsed.ok) {
         errors.push({ name: rule.merchantPattern, reason: `effectiveFrom ${fromParsed.error}` });
@@ -974,7 +1009,7 @@ router.post('/import', async (req, res, next) => {
 
       validated.push({
         merchantPattern: rule.merchantPattern,
-        matchKind: typeof rule.matchKind === 'string' ? rule.matchKind : 'substring',
+        matchKind: importMatchKind,
         priority: typeof rule.priority === 'number' ? rule.priority : 0,
         category: scalar.category,
         isBusiness: scalar.isBusiness,
@@ -1036,14 +1071,17 @@ router.post('/preview-pattern', async (req, res, next) => {
     const patternStr = pattern != null ? String(pattern) : '';
     const kindStr = matchType != null ? String(matchType) : 'substring';
 
+    // Issue #818: validate the user regex ONCE up front (length bound + ReDoS
+    // structural rejection + compile). Reuse the single compiled RegExp for all
+    // rows instead of recompiling per transaction.
+    let compiledRe: RegExp | null = null;
     if (kindStr === 'regex') {
-      try {
-        new RegExp(patternStr, 'i');
-      } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : String(e);
-        res.status(400).json({ error: 'INVALID_PATTERN', message });
+      const v = validateUserPattern(patternStr, 'i');
+      if (!v.ok) {
+        res.status(400).json({ error: v.error, message: v.message });
         return;
       }
+      compiledRe = v.re;
     }
 
     const where = {
@@ -1067,11 +1105,7 @@ router.post('/preview-pattern', async (req, res, next) => {
       const merchant = (t.merchantClean || t.merchantRaw || '').toLowerCase();
       let ok = false;
       if (kindStr === 'regex') {
-        try {
-          ok = new RegExp(patternStr, 'i').test(merchant);
-        } catch {
-          ok = false;
-        }
+        ok = compiledRe != null && safeRegexTest(compiledRe, merchant);
       } else {
         ok = merchant.includes(patternStr.toLowerCase());
       }
