@@ -28,11 +28,17 @@ ENV VITE_APP_VERSION=$APP_VERSION
 
 RUN yarn workspace frontend build
 
-FROM nginx:alpine AS runner
+# nginx-unprivileged runs the master + workers as the non-root `nginx` user
+# (UID 101) and ships writable temp/pid dirs under that user. Issue #861.
+# It still runs the official nginx entrypoint, so envsubst over
+# /etc/nginx/templates/*.template (our ${PORT} substitution) works unchanged.
+FROM nginxinc/nginx-unprivileged:alpine AS runner
 
-ENV PORT=80
+# Non-root nginx cannot bind privileged ports (<1024); default to 8080. Railway
+# injects its own PORT at runtime, which envsubst applies to the listen directive.
+ENV PORT=8080
 
 COPY --from=builder /app/frontend/dist /usr/share/nginx/html
 COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 
-EXPOSE 80
+EXPOSE 8080
