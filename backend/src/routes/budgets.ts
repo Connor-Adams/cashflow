@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { Op, type WhereOptions } from 'sequelize';
+import { Op, OptimisticLockError, type WhereOptions } from 'sequelize';
 import {
   BudgetTarget,
   BUDGET_TARGET_PERIODS,
@@ -998,18 +998,32 @@ router.post('/', async (req, res, next) => {
   }
 });
 
-router.put('/:id', async (req, res, next) => {
+/**
+ * Shared PUT/PATCH handler for a single budget target (issue #848). PUT and
+ * PATCH were byte-identical blind read-modify-write handlers; they are now one
+ * implementation mounted on both verbs.
+ *
+ * The lost-update fix is the *targeted* column update: only the columns the
+ * caller actually sent are written (`validateBudgetPatch` strips `undefined`
+ * fields, so `patch` maps 1:1 to columns). A concurrent `PUT {scope}` therefore
+ * no longer clobbers a concurrent `PATCH {amount}` — disjoint edits both land.
+ * `version: true` on the model is the secondary guard: any full-instance save
+ * still carries `WHERE version = N` and fails loudly on a stale write. When two
+ * concurrent disjoint edits race, one save loses the version check and throws
+ * `OptimisticLockError`; we reload the now-current row and re-apply only this
+ * request's columns, so both edits ultimately persist (bounded retry below).
+ */
+const MAX_OPTIMISTIC_LOCK_RETRIES = 5;
+
+const updateBudgetTarget: import('express').RequestHandler = async (
+  req,
+  res,
+  next
+) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id < 1) {
       res.status(400).json({ error: 'Invalid id' });
-      return;
-    }
-    const row = await BudgetTarget.findOne({
-      where: { id, ...householdWhere(req) },
-    });
-    if (!row) {
-      res.status(404).json({ error: 'Not found' });
       return;
     }
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -1018,67 +1032,51 @@ router.put('/:id', async (req, res, next) => {
       res.status(result.status).json({ error: result.error });
       return;
     }
-    const patch = result.value;
-    if (patch.category !== undefined) row.set('category', patch.category);
-    if (patch.currency !== undefined) row.set('currency', patch.currency);
-    if (patch.amount !== undefined) row.set('amount', patch.amount);
-    if (patch.period !== undefined) row.set('period', patch.period);
-    if (patch.scope !== undefined) row.set('scope', patch.scope);
-    if (patch.rolloverEnabled !== undefined)
-      row.set('rolloverEnabled', patch.rolloverEnabled);
-    if (patch.excludeRefundedPurchases !== undefined)
-      row.set('excludeRefundedPurchases', patch.excludeRefundedPurchases);
-    if (patch.alertThresholds !== undefined)
-      row.set('alertThresholds', patch.alertThresholds);
-    await row.save();
-    res.json(serializeBudget(row));
+    const patch = result.value as Parameters<
+      InstanceType<typeof BudgetTarget>['update']
+    >[0];
+
+    // Retry the read-modify-write on a stale-version conflict: a concurrent edit
+    // bumped `version` between our findOne and save. Reloading picks up the other
+    // edit's columns; re-applying our disjoint columns lets both land (issue #848).
+    for (let attempt = 0; ; attempt += 1) {
+      const row = await BudgetTarget.findOne({
+        where: { id, ...householdWhere(req) },
+      });
+      if (!row) {
+        res.status(404).json({ error: 'Not found' });
+        return;
+      }
+      if (Object.keys(patch).length === 0) {
+        res.json(serializeBudget(row));
+        return;
+      }
+      try {
+        await row.update(patch);
+        res.json(serializeBudget(row));
+        return;
+      } catch (err) {
+        if (
+          err instanceof OptimisticLockError &&
+          attempt < MAX_OPTIMISTIC_LOCK_RETRIES
+        ) {
+          continue;
+        }
+        throw err;
+      }
+    }
   } catch (e) {
     next(e);
   }
-});
+};
+
+router.put('/:id', updateBudgetTarget);
 
 /**
  * Alias for PUT so consumers that prefer PATCH semantics can use the same
- * partial-patch shape. Internally identical handling.
+ * partial-patch shape. Identical handling — both verbs share one handler.
  */
-router.patch('/:id', async (req, res, next) => {
-  try {
-    const id = parseInt(req.params.id, 10);
-    if (!Number.isInteger(id) || id < 1) {
-      res.status(400).json({ error: 'Invalid id' });
-      return;
-    }
-    const row = await BudgetTarget.findOne({
-      where: { id, ...householdWhere(req) },
-    });
-    if (!row) {
-      res.status(404).json({ error: 'Not found' });
-      return;
-    }
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const result = validateBudgetPatch(body);
-    if (!result.ok) {
-      res.status(result.status).json({ error: result.error });
-      return;
-    }
-    const patch = result.value;
-    if (patch.category !== undefined) row.set('category', patch.category);
-    if (patch.currency !== undefined) row.set('currency', patch.currency);
-    if (patch.amount !== undefined) row.set('amount', patch.amount);
-    if (patch.period !== undefined) row.set('period', patch.period);
-    if (patch.scope !== undefined) row.set('scope', patch.scope);
-    if (patch.rolloverEnabled !== undefined)
-      row.set('rolloverEnabled', patch.rolloverEnabled);
-    if (patch.excludeRefundedPurchases !== undefined)
-      row.set('excludeRefundedPurchases', patch.excludeRefundedPurchases);
-    if (patch.alertThresholds !== undefined)
-      row.set('alertThresholds', patch.alertThresholds);
-    await row.save();
-    res.json(serializeBudget(row));
-  } catch (e) {
-    next(e);
-  }
-});
+router.patch('/:id', updateBudgetTarget);
 
 router.delete('/:id', async (req, res, next) => {
   try {

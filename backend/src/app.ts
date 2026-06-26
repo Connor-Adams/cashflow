@@ -4,11 +4,17 @@ import helmet from 'helmet';
 import * as env from './config/env';
 
 import { mountRoutes, captureCors } from './routeRegistry';
+import { noStore } from './http/noStore';
 import { attachAuth } from './auth/middleware';
 import { csrfGuard } from './auth/csrf';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
 import { withContext } from './observability/requestContext';
+import {
+  getErrorCode,
+  getErrorStatus,
+  getClientErrorMessage,
+} from './http/errorResponse';
 import { ServerErrorEvent } from './models';
 
 const app = express();
@@ -27,6 +33,12 @@ app.set('trust proxy', env.trustProxy);
 //  - `Cross-Origin-Resource-Policy: cross-origin` so the SPA on its own origin
 //    can still fetch API responses (the helmet default `same-origin` would
 //    block legitimate cross-origin XHR/fetch from the frontend host).
+//  - `X-Frame-Options: DENY` (issue #853): the API must never be framed. helmet's
+//    default is SAMEORIGIN; DENY is strictly tighter and matches the CSP
+//    `frame-ancestors 'none'` authority for legacy browsers without CSP support.
+//  - `Referrer-Policy: no-referrer` (helmet default, issue #853): full request
+//    URLs (resource ids, any token query params) must not leak via `Referer` to
+//    third-party resources (logo.dev, external images).
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -37,8 +49,14 @@ app.use(
       },
     },
     crossOriginResourcePolicy: { policy: 'cross-origin' },
+    frameguard: { action: 'deny' },
   }),
 );
+
+// Global no-store for the entire /api surface (issue #853). Financial PII must
+// never be persisted to a browser/proxy cache. Mounted before the routers so a
+// streaming handler can still override with `no-store, no-transform`.
+app.use('/api', noStore);
 
 app.get('/', (_req, res) => {
   res.json({
@@ -93,42 +111,6 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 // pipeline and the terminal error handlers below.
 mountRoutes(app);
 
-type ErrorWithMetadata = {
-  code?: unknown;
-  status?: unknown;
-  statusCode?: unknown;
-};
-
-const isObjectError = (err: unknown): err is ErrorWithMetadata =>
-  Boolean(err) && typeof err === 'object';
-
-const getErrorCode = (err: unknown): string =>
-  isObjectError(err) && 'code' in err ? String(err.code) : '';
-
-const getErrorStatus = (err: unknown, code: string): number => {
-  if (code === 'LIMIT_FILE_SIZE') {
-    return 400;
-  }
-
-  const rawStatus =
-    isObjectError(err) && 'status' in err
-      ? err.status
-      : isObjectError(err) && 'statusCode' in err
-        ? err.statusCode
-        : undefined;
-  const status = Number(rawStatus) || 500;
-
-  return status >= 400 && status < 600 ? status : 500;
-};
-
-const getErrorMessage = (err: unknown): string => {
-  if (err instanceof Error && err.message && !err.message.includes('ENOENT')) {
-    return err.message;
-  }
-
-  return 'Internal Server Error';
-};
-
 app.use((err: unknown, req: Request, _res: Response, next: NextFunction) => {
   const status = (err as { status?: number })?.status ?? 500;
   if (status >= 500) {
@@ -172,7 +154,7 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   }
 
   res.status(responseStatus).json({
-    error: getErrorMessage(err),
+    error: getClientErrorMessage(err, responseStatus),
   });
 });
 

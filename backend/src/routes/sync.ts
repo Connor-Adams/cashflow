@@ -204,6 +204,7 @@ router.post('/restore', aiSuggestLimiter, async (req, res, next) => {
     try {
       result = await restoreBundle(sequelize, payload, {
         householdId: auth.household.id,
+        userId: auth.user.id,
         mode,
         dryRun: false,
       });

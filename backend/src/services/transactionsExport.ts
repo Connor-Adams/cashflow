@@ -123,7 +123,9 @@ export async function streamCsvExport(
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', exportContentDisposition(date));
-  res.setHeader('Cache-Control', 'no-cache');
+  // Financial-PII export: forbid caching, keep no-transform so proxies don't
+  // buffer/alter the stream (issue #853).
+  res.setHeader('Cache-Control', 'no-store, no-transform');
   res.setHeader('X-Accel-Buffering', 'no');
 
   // Write UTF-8 BOM so Excel detects encoding, then the header row.

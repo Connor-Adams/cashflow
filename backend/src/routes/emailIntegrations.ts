@@ -197,7 +197,8 @@ router.post('/scan/google', async (req, res, next) => {
     // NDJSON streaming path: emit one event per Gmail-list page, per
     // processed message, and a final summary event.
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache');
+    // Financial-PII stream: forbid caching, keep no-transform (issue #853).
+    res.setHeader('Cache-Control', 'no-store, no-transform');
     res.setHeader('X-Accel-Buffering', 'no');
     function emit(obj: unknown) {
       res.write(`${JSON.stringify(obj)}\n`);
@@ -270,7 +271,8 @@ router.post('/discover/google', async (req, res, next) => {
     }
 
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache');
+    // Financial-PII stream: forbid caching, keep no-transform (issue #853).
+    res.setHeader('Cache-Control', 'no-store, no-transform');
     res.setHeader('X-Accel-Buffering', 'no');
     const emit = (obj: unknown) => res.write(`${JSON.stringify(obj)}\n`);
     emit({ kind: 'started', maxMessages, sinceDays: body.sinceDays ?? null });
