@@ -15,6 +15,13 @@
  *
  * Mirrors the bootstrap pattern used by other integration tests.
  */
+// Raise the AI rate-limit ceiling BEFORE the app (and thus `aiRateLimit.ts`,
+// whose limiter reads this env once at construction) is imported in `before()`.
+// The audit-log routes share `aiSuggestLimiter` (per-IP), and this file makes
+// many audit-log GETs from a single supertest IP; the default max (20/min)
+// would otherwise 429 legitimate test traffic and make the suite flaky.
+process.env.AI_RATE_LIMIT_MAX = '1000';
+
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
@@ -374,4 +381,184 @@ test('Audit transaction-history endpoint 404s across households', async () => {
   });
   const res = await otherAgent.get(`/api/audit-log/transactions/${txnId}`);
   assert.equal(res.status, 404);
+});
+
+/**
+ * Add a SECOND member to an existing household and return an authed agent +
+ * userId for them. Used to prove intra-household row-level visibility (#838):
+ * a member must not read another member's PRIVATE transaction edits through
+ * the audit log even though both share the household scope.
+ */
+async function seedHouseholdMember(args: {
+  householdId: number;
+  emailPrefix: string;
+}): Promise<{ agent: ReturnType<typeof request.agent>; userId: number }> {
+  const models = await import('../../src/models');
+  const { hashPassword, hashToken } = await import('../../src/auth/password.js');
+  const password = await hashPassword('password123');
+  const user = await models.User.create({
+    email: `${args.emailPrefix}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`,
+    displayName: args.emailPrefix,
+    globalRole: 'user',
+    passwordHash: password.hash,
+    passwordSalt: password.salt,
+    passwordParams: password.params,
+  });
+  await models.HouseholdMember.create({
+    householdId: args.householdId,
+    userId: user.id,
+    role: 'member',
+  });
+  const token = crypto.randomBytes(32).toString('hex');
+  await models.Session.create({
+    userId: user.id,
+    tokenHash: hashToken(token),
+    expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+  });
+  const agent = testAgent(app);
+  agent.jar.setCookie(`cashflow_session=${token}; Path=/`);
+  return { agent, userId: user.id };
+}
+
+async function seedPrivateTransaction(args: {
+  householdId: number;
+  accountId: number;
+  userId: number;
+  notes: string;
+}): Promise<number> {
+  const models = await import('../../src/models');
+  const row = await models.Transaction.create({
+    accountId: args.accountId,
+    householdId: args.householdId,
+    visibility: 'private',
+    ownershipType: 'me',
+    ownershipContactId: null,
+    importBatch: 'audit-log-test-private',
+    date: new Date().toISOString().slice(0, 10),
+    merchantRaw: 'Secret Merchant',
+    merchantClean: 'Secret Merchant',
+    amount: '-99.0000',
+    currency: 'CAD',
+    notes: args.notes,
+    sourceReference: null,
+    sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
+    appliedRuleId: null,
+    autoCategory: null,
+    categoryOverride: null,
+    finalCategory: null,
+    autoBusiness: null,
+    businessOverride: null,
+    autoSplitType: null,
+    splitOverride: null,
+    autoPctMe: null,
+    pctMeOverride: null,
+    finalPctMe: null,
+    autoPctPartner: null,
+    pctPartnerOverride: null,
+    finalPctPartner: null,
+    reviewFlag: false,
+    reviewedAt: null,
+    createdByUserId: args.userId,
+  });
+  return row.id;
+}
+
+test('Member cannot read another member\'s PRIVATE transaction edit via audit list (#838)', async () => {
+  // Owner (primaryUser) makes a private transaction and edits it, writing the
+  // secret note into the audit before/after snapshot.
+  const txnId = await seedPrivateTransaction({
+    householdId: primaryHouseholdId,
+    accountId: primaryAccountId,
+    userId: primaryUserId,
+    notes: 'PRIVATE-baseline',
+  });
+  const patch = await primaryAgent
+    .patch(`/api/transactions/${txnId}`)
+    .send({ notes: 'PRIVATE-SECRET-NOTE' });
+  assert.equal(patch.status, 200);
+
+  // A second member of the SAME household.
+  const member = await seedHouseholdMember({
+    householdId: primaryHouseholdId,
+    emailPrefix: 'Member838',
+  });
+
+  // The owner still sees their own private row's audit detail.
+  const ownerList = await primaryAgent.get(
+    `/api/audit-log?entityType=transaction&entityId=${txnId}`,
+  );
+  assert.equal(ownerList.status, 200);
+  assert.ok(
+    (ownerList.body.items as unknown[]).length >= 1,
+    'owner should see their own private-row audit history',
+  );
+
+  // The other member must NOT see any audit row for that private transaction,
+  // and must never receive the secret note.
+  const memberList = await member.agent.get(
+    `/api/audit-log?entityType=transaction&entityId=${txnId}`,
+  );
+  assert.equal(memberList.status, 200);
+  assert.equal(
+    (memberList.body.items as unknown[]).length,
+    0,
+    'member must not see a private (non-owned) transaction audit row',
+  );
+
+  // Belt-and-suspenders: an unfiltered list must not leak the secret note.
+  const memberAll = await member.agent.get('/api/audit-log?limit=200');
+  assert.equal(memberAll.status, 200);
+  assert.equal(
+    JSON.stringify(memberAll.body).includes('PRIVATE-SECRET-NOTE'),
+    false,
+    'secret note from a private row must never appear in another member\'s audit list',
+  );
+});
+
+test('Member is 404d on the per-transaction audit history of a private row (#838)', async () => {
+  const txnId = await seedPrivateTransaction({
+    householdId: primaryHouseholdId,
+    accountId: primaryAccountId,
+    userId: primaryUserId,
+    notes: 'PRIVATE-detail',
+  });
+  await primaryAgent.patch(`/api/transactions/${txnId}`).send({ notes: 'x' });
+
+  const member = await seedHouseholdMember({
+    householdId: primaryHouseholdId,
+    emailPrefix: 'Member838b',
+  });
+  const res = await member.agent.get(`/api/audit-log/transactions/${txnId}`);
+  assert.equal(res.status, 404, 'private transaction history must 404 for a non-owner member');
+
+  // The owner still gets it.
+  const ownerRes = await primaryAgent.get(`/api/audit-log/transactions/${txnId}`);
+  assert.equal(ownerRes.status, 200);
+});
+
+test('Member CAN read a SHARED transaction edit via audit log (no over-restriction) (#838)', async () => {
+  const txnId = await seedTransaction({
+    householdId: primaryHouseholdId,
+    accountId: primaryAccountId,
+    userId: primaryUserId,
+  });
+  await primaryAgent
+    .patch(`/api/transactions/${txnId}`)
+    .send({ categoryOverride: 'SharedCat' });
+
+  const member = await seedHouseholdMember({
+    householdId: primaryHouseholdId,
+    emailPrefix: 'Member838c',
+  });
+  const list = await member.agent.get(
+    `/api/audit-log?entityType=transaction&entityId=${txnId}`,
+  );
+  assert.equal(list.status, 200);
+  assert.ok(
+    (list.body.items as unknown[]).length >= 1,
+    'shared-row audit history must remain visible to all household members',
+  );
+  const hist = await member.agent.get(`/api/audit-log/transactions/${txnId}`);
+  assert.equal(hist.status, 200);
 });

@@ -189,32 +189,47 @@ export async function reconcileDividendsForSecurity(
         amount: totalAmount,
       });
       try {
-        await InvestmentActivity.create({
-          accountId,
-          householdId: snapshot.householdId,
-          // Use the ex-date as the canonical tradeDate so the ±dedupDays
-          // window check (which keys on tradeDate) naturally matches our
-          // own rows on a subsequent reconcile pass. The payment-date
-          // goes into settlementDate when present.
-          securityId,
-          activityType: 'dividend',
-          tradeDate: ev.exDividendDate,
-          settlementDate: ev.paymentDate || null,
-          description: `Dividend reconciled from Alpha Vantage (${perShare}/sh × ${qty})`,
-          quantity: null,
-          price: null,
-          amount: totalAmount,
-          fees: null,
-          splitRatio: null,
-          currency: ev.currency,
-          sourceReference: `av-dividend:${ev.exDividendDate}`,
-          sourceRowFingerprint: fp,
-          importBatch: RECONCILER_IMPORT_BATCH,
+        // `findOrCreate` is atomic on the unique
+        // (account_id, source_row_fingerprint) index, so two overlapping
+        // reconcile passes (request + scheduler) that both COUNT 0 in
+        // `existingBrokerDividendNearby` above can't both INSERT and
+        // double-count the synthetic dividend as income. The loser of the
+        // race re-reads the existing row and `created` is false, so
+        // `result.inserted` only counts the row we actually wrote. This
+        // replaces the prior create-then-catch, where the catch merely
+        // logged and the run kept whatever `inserted` it had already
+        // bumped (issue #847). The fingerprint embeds accountId, so the
+        // `where` is exactly the unique-index tuple.
+        const [, created] = await InvestmentActivity.findOrCreate({
+          where: { accountId, sourceRowFingerprint: fp },
+          defaults: {
+            accountId,
+            householdId: snapshot.householdId,
+            // Use the ex-date as the canonical tradeDate so the ±dedupDays
+            // window check (which keys on tradeDate) naturally matches our
+            // own rows on a subsequent reconcile pass. The payment-date
+            // goes into settlementDate when present.
+            securityId,
+            activityType: 'dividend',
+            tradeDate: ev.exDividendDate,
+            settlementDate: ev.paymentDate || null,
+            description: `Dividend reconciled from Alpha Vantage (${perShare}/sh × ${qty})`,
+            quantity: null,
+            price: null,
+            amount: totalAmount,
+            fees: null,
+            splitRatio: null,
+            currency: ev.currency,
+            sourceReference: `av-dividend:${ev.exDividendDate}`,
+            sourceRowFingerprint: fp,
+            importBatch: RECONCILER_IMPORT_BATCH,
+          },
         });
-        result.inserted += 1;
+        if (created) result.inserted += 1;
       } catch (err) {
-        // Race: another reconcile-and-insert path may have just landed
-        // the same row. Surface for observability but don't fail the run.
+        // Defensive: findOrCreate already serializes on the unique index,
+        // so a throw here is unexpected (e.g. a transient DB error).
+        // Surface for observability but don't fail the whole run.
         logger.warn({
           accountId,
           securityId,
