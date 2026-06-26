@@ -293,12 +293,14 @@ export async function autoMatchDividends(
 
       const expectedAmount = shares * perShare;
 
-      // Upsert the reconciliation row (idempotent on the unique pair).
-      let recon = await DividendReconciliation.findOne({
+      // Upsert the reconciliation row. `findOrCreate` is atomic on the unique
+      // (security_dividend_id, account_id) index, so two overlapping passes
+      // can't both INSERT and throw a uncaught SequelizeUniqueConstraintError
+      // that would abort the whole run (issue #844, Bug B). The loser of the
+      // race re-reads the existing row instead.
+      const [recon, created] = await DividendReconciliation.findOrCreate({
         where: { securityDividendId: dividend.id, accountId },
-      });
-      if (!recon) {
-        recon = await DividendReconciliation.create({
+        defaults: {
           securityDividendId: dividend.id,
           accountId,
           householdId: snapshot.householdId,
@@ -306,9 +308,9 @@ export async function autoMatchDividends(
           expectedAmount: expectedAmount.toFixed(8),
           shares: shares.toFixed(10),
           currency: dividend.currency,
-        });
-        result.reconciliationsCreated += 1;
-      }
+        },
+      });
+      if (created) result.reconciliationsCreated += 1;
 
       // Already matched (auto or manual) → leave it alone.
       if (recon.matchedTransactionId != null) continue;
@@ -342,12 +344,23 @@ export async function autoMatchDividends(
       };
       const picked = pickAutoMatch(expectation, candidates, tol);
       if (picked) {
-        await recon.update({
-          matchedTransactionId: picked.id,
-          matchedAt: now,
-          matchSource: 'auto',
-        });
-        result.autoMatched += 1;
+        // State-conditional update: only claim the row if it is STILL
+        // unmatched. A concurrent manual `POST /dividends/:id/match` (or a
+        // racing auto-run) may have matched it since our in-memory `recon`
+        // was read — the `matchedTransactionId: null` predicate makes the
+        // UPDATE a no-op in that case so we never clobber a deliberate match
+        // (issue #844, Bug A). Count the auto-match only when we actually
+        // claimed the row (exactly one affected).
+        const [affected] = await DividendReconciliation.update(
+          {
+            matchedTransactionId: picked.id,
+            matchedAt: now,
+            matchSource: 'auto',
+          },
+          { where: { id: recon.id, matchedTransactionId: null } },
+        );
+        if (affected === 1) result.autoMatched += 1;
+        else result.leftUnmatched += 1;
       } else {
         result.leftUnmatched += 1;
       }

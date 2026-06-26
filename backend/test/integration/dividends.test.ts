@@ -436,6 +436,138 @@ test('GET ?status=upcoming excludes past-dated dividends (AC #555-3)', async () 
   assert.equal(row, undefined, `PST should be excluded but found ${JSON.stringify(row)}`);
 });
 
+test('auto-run does not clobber a concurrent manual match (issue #844 Bug A)', async () => {
+  const { seedAccount, seedSecurity, seedHolding, seedDividend } = await import(
+    './portfolioFixtures.js'
+  );
+  const hh = await makeHousehold('clobber');
+  const acct = await seedAccount(models, hh.household.id, hh.user.id, 'Brokerage', 'CLB');
+  const sec = await seedSecurity(models, hh.household.id, 'CLB', 'Clobber Corp', 'stock', 'USD');
+  await seedHolding(models, {
+    accountId: acct.id,
+    householdId: hh.household.id,
+    securityId: sec.id,
+    statementDate: '2026-01-01',
+    quantity: 100,
+  });
+  const payDate = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+  await seedDividend(models, {
+    securityId: sec.id,
+    exDividendDate: new Date(Date.now() - 12 * 86400000).toISOString().slice(0, 10),
+    paymentDate: payDate,
+    amount: 1.0,
+    currency: 'USD',
+  });
+  // The credit the user deliberately matched by hand (kept alive throughout).
+  const manualTxnId = await seedCredit({
+    householdId: hh.household.id,
+    accountId: acct.id,
+    date: payDate,
+    amount: 100,
+    merchant: 'CLB DIV MANUAL',
+  });
+
+  // First pass creates the reconciliation row. With a single viable candidate
+  // it WOULD auto-match, but we want the row present and unclaimed so we can
+  // simulate a manual match landing first — so seed a second ambiguous credit
+  // for this pass, then remove it before the racing pass.
+  const ambiguousTxnId = await seedCredit({
+    householdId: hh.household.id,
+    accountId: acct.id,
+    date: payDate,
+    amount: 99.6,
+  });
+  const { autoMatchDividends } = await import('../../src/portfolio/dividendMatcher.js');
+  await autoMatchDividends();
+  const recon = await models.DividendReconciliation.findOne({ where: { accountId: acct.id } });
+  assert.ok(recon, 'reconciliation row exists');
+  assert.equal(recon!.matchedTransactionId, null, 'left unmatched (ambiguous) by first pass');
+
+  // Simulate the user's deliberate manual match landing.
+  await recon!.update({
+    matchedTransactionId: manualTxnId,
+    matchedAt: new Date(),
+    matchSource: 'manual',
+  });
+
+  // Drop the ambiguous credit so the racing auto-run now sees EXACTLY ONE
+  // viable candidate (the manual txn) and WANTS to (re)match it as 'auto'.
+  // The state-conditional `WHERE matchedTransactionId IS NULL` must refuse,
+  // preserving the user's manual match and matchSource.
+  await models.Transaction.destroy({ where: { id: ambiguousTxnId } });
+  const res = await autoMatchDividends();
+
+  await recon!.reload();
+  assert.equal(
+    recon!.matchedTransactionId,
+    manualTxnId,
+    'manual match must survive the auto-run',
+  );
+  assert.equal(recon!.matchSource, 'manual', 'matchSource must stay manual');
+  assert.equal(res.autoMatched, 0, 'no-op update must not count as an auto-match');
+});
+
+test('overlapping auto-runs do not abort the pass (issue #844 Bug B)', async () => {
+  const { seedAccount, seedSecurity, seedHolding, seedDividend } = await import(
+    './portfolioFixtures.js'
+  );
+  const hh = await makeHousehold('race');
+  const acct = await seedAccount(models, hh.household.id, hh.user.id, 'Brokerage', 'RCE');
+  const sec = await seedSecurity(models, hh.household.id, 'RCE', 'Race Corp', 'stock', 'USD');
+  await seedHolding(models, {
+    accountId: acct.id,
+    householdId: hh.household.id,
+    securityId: sec.id,
+    statementDate: '2026-01-01',
+    quantity: 100,
+  });
+  const payDate = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+  await seedDividend(models, {
+    securityId: sec.id,
+    exDividendDate: new Date(Date.now() - 12 * 86400000).toISOString().slice(0, 10),
+    paymentDate: payDate,
+    amount: 1.0,
+    currency: 'USD',
+  });
+  // A later dividend in the same pass — proves the pass continues past a race.
+  const sec2 = await seedSecurity(models, hh.household.id, 'RC2', 'Race2 Corp', 'stock', 'USD');
+  await seedHolding(models, {
+    accountId: acct.id,
+    householdId: hh.household.id,
+    securityId: sec2.id,
+    statementDate: '2026-01-01',
+    quantity: 100,
+  });
+  await seedDividend(models, {
+    securityId: sec2.id,
+    exDividendDate: new Date(Date.now() - 11 * 86400000).toISOString().slice(0, 10),
+    paymentDate: new Date(Date.now() - 4 * 86400000).toISOString().slice(0, 10),
+    amount: 1.0,
+    currency: 'USD',
+  });
+
+  const { autoMatchDividends } = await import('../../src/portfolio/dividendMatcher.js');
+  // First pass creates the reconciliation rows for both dividends.
+  await autoMatchDividends();
+  const after1 = await models.DividendReconciliation.findAll({ where: { accountId: acct.id } });
+  assert.equal(after1.length, 2, `expected 2 rows after first pass, got ${after1.length}`);
+
+  // A second pass re-encounters the existing (dividend, account) pairs. With
+  // the OLD `findOne`-then-`create` code, a row that another pass had already
+  // inserted would make `.create()` throw SequelizeUniqueConstraintError and
+  // abort the whole run. With `findOrCreate` the pass resolves cleanly and
+  // re-processes every pair without throwing (issue #844, Bug B).
+  await assert.doesNotReject(autoMatchDividends(), 'second pass must not throw a unique violation');
+
+  // Still exactly one row per (dividend, account) for THIS account — no
+  // duplicate inserts, and both dividends still have their row (nothing was
+  // skipped by an aborted pass).
+  const after2 = await models.DividendReconciliation.findAll({ where: { accountId: acct.id } });
+  assert.equal(after2.length, 2, `expected 2 rows after second pass, got ${after2.length}`);
+  const divIds = new Set(after2.map((r) => r.securityDividendId));
+  assert.equal(divIds.size, 2, 'both dividends got a reconciliation row');
+});
+
 test('notifyUnmatchedDividends fires once per row after grace window (AC #9)', async () => {
   const { seedAccount, seedSecurity, seedHolding, seedDividend } = await import(
     './portfolioFixtures.js'
