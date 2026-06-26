@@ -5,6 +5,11 @@
  * no-op (mirrors 20260618000001-entity-id-foreign-keys), so the DB-level
  * cascade cannot be exercised there.
  *
+ * Seeding goes through the Sequelize models (not raw INSERT) so the
+ * beforeCreate hooks fill accounts.entity_id / transactions.entity_id — those
+ * columns are NOT NULL on Postgres (20260619000001-entity-id-not-null) and a
+ * raw INSERT that omits them is rejected (mirrors entityIdNotNull.test.ts).
+ *
  * Proves:
  *   1. transaction_revisions.transaction_id is a real FK ON DELETE CASCADE:
  *      bulk `DELETE FROM transactions` (the path account-delete actually uses)
@@ -24,87 +29,75 @@ import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestD
 
 let testDb: PgTestDb;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+let models: any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let sequelize: any;
 
 before(async () => {
   process.env.NODE_ENV = 'test';
   testDb = await setupPgTestDb('pii_residue_fks');
-  const mod = await import('../../src/db.js');
-  sequelize = mod.sequelize;
+  models = await import('../../src/models');
+  sequelize = models.sequelize;
 });
 
 after(async () => {
   await teardownPgTestDb(testDb);
 });
 
-const now = new Date().toISOString();
-
-/** Seed a household + account + transaction via raw SQL; returns their ids. */
+/** Seed household + account + transaction via the models so the beforeCreate
+ *  hooks fill the NOT NULL entity_id columns. Returns their ids. */
 async function seed(label: string): Promise<{
   householdId: number;
   accountId: number;
   transactionId: number;
 }> {
-  const [hh] = await sequelize.query(
-    'INSERT INTO households (name, created_at, updated_at) VALUES (:name, :now, :now) RETURNING id',
-    { replacements: { name: `${label} hh`, now }, type: QueryTypes.SELECT },
-  );
-  const householdId = hh.id;
-
-  const [acct] = await sequelize.query(
-    `INSERT INTO accounts (name, household_id, account_type, default_currency, visibility, owner, created_at, updated_at)
-     VALUES (:name, :hid, 'checking', 'CAD', 'private', 'me', :now, :now) RETURNING id`,
-    { replacements: { name: `${label} acct`, hid: householdId, now }, type: QueryTypes.SELECT },
-  );
-  const accountId = acct.id;
-
-  const [txn] = await sequelize.query(
-    `INSERT INTO transactions
-       (account_id, household_id, import_batch, date, merchant_raw, merchant_clean,
-        amount, currency, source_row_fingerprint, source_identity_fingerprint, final_category,
-        created_at, updated_at)
-     VALUES (:aid, :hid, 'pii-fk-test', '2026-01-15', 'Coffee Co', 'Coffee Co',
-        '4.50', 'CAD', :rfp, :ifp, 'Food', :now, :now) RETURNING id`,
-    {
-      replacements: {
-        aid: accountId,
-        hid: householdId,
-        rfp: `fp-${crypto.randomBytes(8).toString('hex')}`,
-        ifp: `id-${crypto.randomBytes(8).toString('hex')}`,
-        now,
-      },
-      type: QueryTypes.SELECT,
-    },
-  );
-  return { householdId, accountId, transactionId: txn.id };
+  const household = await models.Household.create({ name: `${label} hh` });
+  const account = await models.Account.create({
+    householdId: household.id,
+    ownerUserId: null,
+    owner: 'me',
+    visibility: 'private',
+    name: `${label} acct`,
+    accountType: 'checking',
+    defaultCurrency: 'CAD',
+    shortCode: null,
+  });
+  const txn = await models.Transaction.create({
+    accountId: account.id,
+    householdId: household.id,
+    importBatch: 'pii-fk-test',
+    date: '2026-01-15',
+    merchantRaw: 'Coffee Co',
+    merchantClean: 'Coffee Co',
+    amount: '4.50',
+    currency: 'CAD',
+    sourceRowFingerprint: `fp-${crypto.randomBytes(8).toString('hex')}`,
+    sourceIdentityFingerprint: `id-${crypto.randomBytes(8).toString('hex')}`,
+    finalCategory: 'Food',
+  });
+  return { householdId: household.id, accountId: account.id, transactionId: txn.id };
 }
 
 async function insertRevision(transactionId: number, householdId: number): Promise<void> {
-  await sequelize.query(
-    `INSERT INTO transaction_revisions
-       (transaction_id, household_id, source, changes, created_at, updated_at)
-     VALUES (:tid, :hid, 'user_edit', :changes, :now, :now)`,
-    {
-      replacements: {
-        tid: transactionId,
-        hid: householdId,
-        changes: JSON.stringify([{ field: 'merchantClean', before: 'Coffee Co', after: 'Cafe' }]),
-        now,
-      },
-      type: QueryTypes.INSERT,
-    },
-  );
+  await models.TransactionRevision.create({
+    transactionId,
+    householdId,
+    source: 'user_edit',
+    changes: JSON.stringify([{ field: 'merchantClean', before: 'Coffee Co', after: 'Cafe' }]),
+  });
 }
 
 async function insertStatement(accountId: number, householdId: number): Promise<void> {
-  await sequelize.query(
-    `INSERT INTO account_statements
-       (household_id, account_id, visibility, period_start, period_end,
-        opening_balance, closing_balance, currency, created_at, updated_at)
-     VALUES (:hid, :aid, 'shared', '2026-01-01', '2026-01-31',
-        '1000.0000', '950.0000', 'CAD', :now, :now)`,
-    { replacements: { hid: householdId, aid: accountId, now }, type: QueryTypes.INSERT },
-  );
+  await models.AccountStatement.create({
+    householdId,
+    accountId,
+    visibility: 'shared',
+    periodStart: '2026-01-01',
+    periodEnd: '2026-01-31',
+    openingBalance: '1000.0000',
+    closingBalance: '950.0000',
+    currency: 'CAD',
+  });
 }
 
 async function countRevisions(transactionId: number): Promise<number> {
@@ -162,6 +155,7 @@ test('deleting a household cascades its account_statements away (via household_i
 });
 
 test('inserting a transaction_revision with a dangling transaction_id is rejected', async () => {
+  const now = new Date().toISOString();
   await assert.rejects(
     () =>
       sequelize.query(
@@ -177,6 +171,7 @@ test('inserting a transaction_revision with a dangling transaction_id is rejecte
 
 test('inserting an account_statement with a dangling account_id is rejected', async () => {
   const { householdId } = await seed('stmt-fk-reject');
+  const now = new Date().toISOString();
   await assert.rejects(
     () =>
       sequelize.query(
