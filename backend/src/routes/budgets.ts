@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { Op, type WhereOptions } from 'sequelize';
+import { Op, OptimisticLockError, type WhereOptions } from 'sequelize';
 import {
   BudgetTarget,
   BUDGET_TARGET_PERIODS,
@@ -1036,7 +1036,30 @@ const updateBudgetTarget: import('express').RequestHandler = async (
     }
     const patch = result.value as Parameters<typeof row.update>[0];
     if (Object.keys(patch).length > 0) {
-      await row.update(patch);
+      // `version: true` makes `update` carry `WHERE version = N`, so two
+      // concurrent edits race: the first wins, the second throws
+      // OptimisticLockError. Retry the loser against a freshly-read row so
+      // disjoint edits (e.g. PATCH {amount} + PUT {scope}) both land instead of
+      // 500-ing the second writer.
+      let current = row;
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          await current.update(patch);
+          break;
+        } catch (err) {
+          if (!(err instanceof OptimisticLockError) || attempt >= 5) throw err;
+          const fresh = await BudgetTarget.findOne({
+            where: { id, ...householdWhere(req) },
+          });
+          if (!fresh) {
+            res.status(404).json({ error: 'Not found' });
+            return;
+          }
+          current = fresh;
+        }
+      }
+      res.json(serializeBudget(current));
+      return;
     }
     res.json(serializeBudget(row));
   } catch (e) {
