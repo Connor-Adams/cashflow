@@ -13,6 +13,7 @@ import {
 import { loadAllRules } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { findExistingForDedup } from './dedupExisting';
+import { normalizeSourceRef } from './normalizeSourceRef';
 import { findExistingInvestmentByFuzzyMatch } from './fuzzyDedupInvestmentActivity';
 import { stableIdentityFingerprint } from './fingerprint';
 import { findMerchantMemory } from '../ai/merchantMemory';
@@ -137,7 +138,7 @@ async function createInvestmentActivity(
           amount: conv.amount == null ? null : String(conv.amount),
           fees: conv.fees == null ? null : String(conv.fees),
           currency: conv.currency ?? row.currency,
-          sourceReference: row.sourceReference,
+          sourceReference: normalizeSourceRef(row.sourceReference),
           sourceRowFingerprint: row.sourceRowFingerprint,
           importBatch: preview.importBatch,
         },
@@ -175,7 +176,7 @@ async function createHolding(
           unrealizedGainLoss:
             row.unrealizedGainLoss == null ? null : String(row.unrealizedGainLoss),
           currency: row.currency,
-          sourceReference: row.sourceReference,
+          sourceReference: normalizeSourceRef(row.sourceReference),
           sourceRowFingerprint: row.sourceRowFingerprint,
           importBatch: preview.importBatch,
         },
@@ -271,7 +272,7 @@ export async function commitStatementImport(
       const dedup = await findExistingForDedup({
         accountId: account.id,
         sourceIdentityFingerprint: identityFp,
-        sourceReference: row.sourceReference ?? null,
+        sourceReference: normalizeSourceRef(row.sourceReference),
         t,
         incomingStatus: 'posted',
         incomingDate: row.date,
@@ -310,7 +311,7 @@ export async function commitStatementImport(
           merchantRaw: row.merchantRaw,
           date: row.date,
           amount: row.amount,
-          sourceReference: row.sourceReference ?? null,
+          sourceReference: normalizeSourceRef(row.sourceReference),
           notes: null,
         },
         accountId: account.id,
@@ -382,7 +383,7 @@ export async function commitStatementImport(
         amount: String(row.amount),
         currency: row.currency,
         notes: f.notes,
-        sourceReference: row.sourceReference ?? null,
+        sourceReference: normalizeSourceRef(row.sourceReference),
         sourceRowFingerprint: row.sourceRowFingerprint,
         sourceIdentityFingerprint: identityFp,
         status: 'posted',

@@ -6,6 +6,7 @@ import { parseCsvRecords } from './csvParse';
 import { inferCsvDateOrdering, mapCsvRow } from './mapRow';
 import { resolveProfileIdForImport } from './inferProfile';
 import { normalizeMerchant } from './normalizeMerchant';
+import { normalizeSourceRef } from './normalizeSourceRef';
 import { parseDateFlexible } from './parseDateFlexible';
 import { hashContent, rowFingerprint, stableFingerprint } from './fingerprint';
 import { saveStatementPreview } from './statementPreviewStore';
@@ -388,10 +389,6 @@ export function txnDupKey(r: TxnDupKeyFields): string {
   return `${r.date}|${Number(r.amount)}|${r.currency}|${r.merchantRaw}`;
 }
 
-function normalizeSourceRef(v: string | null | undefined): string | null {
-  return v == null || v === '' ? null : v;
-}
-
 function isTxnDuplicate(newRef: string | null, existingRefs: Array<string | null>): boolean {
   if (existingRefs.length === 0) return false;
   if (existingRefs.includes(newRef)) return true;
@@ -419,7 +416,7 @@ async function markDuplicates(preview: Omit<StatementPreview, 'previewToken'>): 
   for (const e of existingTxns) {
     const k = txnDupKey(e);
     const list = txnIndex.get(k) ?? [];
-    list.push(e.sourceReference ?? null);
+    list.push(normalizeSourceRef(e.sourceReference));
     txnIndex.set(k, list);
   }
   preview.transactions.forEach((r) => {
