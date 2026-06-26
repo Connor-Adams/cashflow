@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { extractPdfLines } from './extractLines';
+import { extractPdfLines, bucketByY } from './extractLines';
+
+type TextItem = { str: string; transform: number[]; width: number };
+const item = (str: string, x: number, y: number, width = str.length): TextItem => ({
+  str,
+  transform: [1, 0, 0, 1, x, y],
+  width,
+});
 
 const fixturesDir = join(__dirname, 'fixtures', 'pdf');
 const hasFixtures = existsSync(join(fixturesDir, 'cibc-costco-2026-01-12.pdf'));
@@ -45,4 +52,41 @@ test('extractPdfLines can be called twice on the same Buffer', { skip: skipNoFix
   const second = await extractPdfLines(buf);
   assert.equal(first.length, second.length, 'second extraction must return same line count');
   assert.equal(buf.byteLength > 0, true, 'caller Buffer must still be readable');
+});
+
+// --- bucketByY: O(N log N) line grouping (issue #872, no fixtures needed) ---
+
+test('bucketByY returns [] for empty input', () => {
+  assert.deepEqual(bucketByY([]), []);
+});
+
+test('bucketByY groups items within Y_TOLERANCE onto one line', () => {
+  // Three items at y=100, 100.5, 99.5 are all within tolerance (1) of each other.
+  const buckets = bucketByY([item('a', 0, 100), item('b', 10, 100.5), item('c', 20, 99.5)]);
+  assert.equal(buckets.length, 1, 'expected a single bucket');
+  assert.equal(buckets[0].items.length, 3);
+});
+
+test('bucketByY separates items beyond Y_TOLERANCE into distinct lines', () => {
+  const buckets = bucketByY([item('top', 0, 100), item('mid', 0, 80), item('bot', 0, 60)]);
+  assert.equal(buckets.length, 3, 'three distinct y-bands → three buckets');
+});
+
+test('bucketByY returns buckets top-of-page first (descending y)', () => {
+  // Supply out-of-order; output must be sorted by descending y regardless.
+  const buckets = bucketByY([item('mid', 0, 80), item('bot', 0, 60), item('top', 0, 100)]);
+  assert.deepEqual(buckets.map((b) => b.items[0].str), ['top', 'mid', 'bot']);
+});
+
+test('bucketByY scales linearly — 40k distinct y-coords parse fast (not O(N²))', () => {
+  // Worst case for the old find()-in-loop code: every item on its own line.
+  const N = 40_000;
+  const items: TextItem[] = [];
+  for (let i = 0; i < N; i++) items.push(item('x', 0, i * 10));
+  const start = Date.now();
+  const buckets = bucketByY(items);
+  const elapsed = Date.now() - start;
+  assert.equal(buckets.length, N, 'each distinct y-band is its own bucket');
+  // O(N²) on 40k items would take many seconds; the linear sweep is sub-second.
+  assert.ok(elapsed < 2000, `expected <2s for ${N} items, took ${elapsed}ms`);
 });
