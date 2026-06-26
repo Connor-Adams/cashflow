@@ -1,5 +1,6 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import * as env from './config/env';
 
 import { mountRoutes, captureCors } from './routeRegistry';
@@ -12,6 +13,31 @@ import { ServerErrorEvent } from './models';
 const app = express();
 
 app.set('trust proxy', env.trustProxy);
+
+// Security headers (issue #819). This is a JSON + file-download API consumed by
+// a separate-origin SPA, so we lean on helmet's safe defaults but tune two
+// things for the cross-origin frontend:
+//  - `X-Content-Type-Options: nosniff` (helmet default) is the core fix — it
+//    stops content-sniffing browsers from rendering attacker-controlled upload
+//    bytes (vault/receipt downloads) as HTML on the app origin (stored XSS).
+//  - A locked-down CSP. The API never returns HTML it wants a browser to
+//    render, so `default-src 'none'` is the tightest correct policy; it also
+//    neutralizes any HTML that does slip through (e.g. an error page).
+//  - `Cross-Origin-Resource-Policy: cross-origin` so the SPA on its own origin
+//    can still fetch API responses (the helmet default `same-origin` would
+//    block legitimate cross-origin XHR/fetch from the frontend host).
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        'default-src': ["'none'"],
+        'frame-ancestors': ["'none'"],
+      },
+    },
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  }),
+);
 
 app.get('/', (_req, res) => {
   res.json({
