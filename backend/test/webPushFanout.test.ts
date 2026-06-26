@@ -15,11 +15,15 @@ process.env.VAPID_PRIVATE_KEY = 'test-private-key';
 
 let models: typeof import('../src/models');
 let fanOutWebPush: typeof import('../src/notifications/webPush').fanOutWebPush;
+let defaultWebPushSender: typeof import('../src/notifications/webPush').defaultWebPushSender;
+let isAllowedPushEndpoint: typeof import('../src/notifications/webPush').isAllowedPushEndpoint;
 let userId: number;
 
 before(async () => {
   models = await import('../src/models');
-  ({ fanOutWebPush } = await import('../src/notifications/webPush'));
+  ({ fanOutWebPush, defaultWebPushSender, isAllowedPushEndpoint } = await import(
+    '../src/notifications/webPush'
+  ));
   await models.sequelize.sync({ force: true });
 });
 
@@ -48,8 +52,8 @@ async function addSub(endpoint: string) {
 }
 
 test('AC1: fans out to every active subscription the user owns', async () => {
-  await addSub('https://push.example/a');
-  await addSub('https://push.example/b');
+  await addSub('https://fcm.googleapis.com/fcm/send/a');
+  await addSub('https://fcm.googleapis.com/fcm/send/b');
   const seen: string[] = [];
   const result = await fanOutWebPush(
     userId,
@@ -61,7 +65,7 @@ test('AC1: fans out to every active subscription the user owns', async () => {
   );
   assert.equal(result.sent, 2);
   assert.equal(result.pruned, 0);
-  assert.deepEqual(seen.sort(), ['https://push.example/a', 'https://push.example/b']);
+  assert.deepEqual(seen.sort(), ['https://fcm.googleapis.com/fcm/send/a', 'https://fcm.googleapis.com/fcm/send/b']);
 });
 
 test('AC2: no subscriptions → no send, zeroed counts', async () => {
@@ -79,8 +83,8 @@ test('AC2: no subscriptions → no send, zeroed counts', async () => {
 });
 
 test('AC6: a 410/gone endpoint is pruned; the rest still receive the push', async () => {
-  await addSub('https://push.example/dead');
-  await addSub('https://push.example/live');
+  await addSub('https://fcm.googleapis.com/fcm/send/dead');
+  await addSub('https://fcm.googleapis.com/fcm/send/live');
   const result = await fanOutWebPush(
     userId,
     { title: 'T', body: 'B' },
@@ -91,11 +95,11 @@ test('AC6: a 410/gone endpoint is pruned; the rest still receive the push', asyn
 
   const remaining = await models.PushSubscription.findAll({ where: { userId } });
   assert.equal(remaining.length, 1);
-  assert.equal(remaining[0].endpoint, 'https://push.example/live');
+  assert.equal(remaining[0].endpoint, 'https://fcm.googleapis.com/fcm/send/live');
 });
 
 test('a transient failure keeps the row (not pruned)', async () => {
-  await addSub('https://push.example/flaky');
+  await addSub('https://fcm.googleapis.com/fcm/send/flaky');
   const result = await fanOutWebPush(
     userId,
     { title: 'T', body: 'B' },
@@ -108,7 +112,7 @@ test('a transient failure keeps the row (not pruned)', async () => {
 });
 
 test('payload is serialized with title/body/severity/dataJson', async () => {
-  await addSub('https://push.example/p');
+  await addSub('https://fcm.googleapis.com/fcm/send/p');
   let payloadJson = '';
   await fanOutWebPush(
     userId,
@@ -123,4 +127,33 @@ test('payload is serialized with title/body/severity/dataJson', async () => {
   assert.equal(parsed.body, 'World');
   assert.equal(parsed.severity, 'critical');
   assert.deepEqual(parsed.dataJson, { link: '/budgets' });
+});
+
+// SSRF allowlist + defense-in-depth (issue #855)
+test('isAllowedPushEndpoint: accepts known services, rejects internal/non-https', () => {
+  assert.equal(isAllowedPushEndpoint('https://fcm.googleapis.com/fcm/send/x'), true);
+  assert.equal(
+    isAllowedPushEndpoint('https://updates.push.services.mozilla.com/wpush/v2/x'),
+    true,
+  );
+  assert.equal(isAllowedPushEndpoint('https://wns2-bn3p.notify.windows.com/w/?t=x'), true);
+  assert.equal(isAllowedPushEndpoint('https://web.push.apple.com/Qabc'), true);
+
+  assert.equal(isAllowedPushEndpoint('http://169.254.169.254/latest/meta-data/'), false);
+  assert.equal(isAllowedPushEndpoint('http://localhost:9090/x'), false);
+  assert.equal(isAllowedPushEndpoint('http://fcm.googleapis.com/fcm/send/x'), false); // non-https
+  assert.equal(isAllowedPushEndpoint('https://evil.attacker.test/x'), false);
+  assert.equal(isAllowedPushEndpoint('https://fcm.googleapis.com.attacker.test/x'), false);
+  assert.equal(isAllowedPushEndpoint('not a url'), false);
+});
+
+test('defaultWebPushSender treats a non-allowlisted endpoint as gone (no outbound send)', async () => {
+  // VAPID is configured (env set at top), so we exercise the real sender. A
+  // non-allowlisted endpoint must short-circuit to 'gone' BEFORE any network
+  // call to web-push — proving the SSRF defense-in-depth guard.
+  const outcome = await defaultWebPushSender(
+    { endpoint: 'http://169.254.169.254/latest/', keys: { p256dh: 'p', auth: 'a' } },
+    '{}',
+  );
+  assert.equal(outcome, 'gone');
 });
