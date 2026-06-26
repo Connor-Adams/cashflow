@@ -910,15 +910,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@connor-adams/designsystem@npm:^0.11.0":
-  version: 0.11.0
-  resolution: "@connor-adams/designsystem@npm:0.11.0::__archiveUrl=https%3A%2F%2Fnpm.pkg.github.com%2Fdownload%2F%40connor-adams%2Fdesignsystem%2F0.11.0%2Fd8bf3d103c65c1f119a7795a43410e1133d3b70e"
+"@connor-adams/designsystem@npm:^1.0.0":
+  version: 1.0.0
+  resolution: "@connor-adams/designsystem@npm:1.0.0::__archiveUrl=https%3A%2F%2Fnpm.pkg.github.com%2Fdownload%2F%40connor-adams%2Fdesignsystem%2F1.0.0%2F6f427bce7bbb143a728a28bc4441b77dd50cc167"
   dependencies:
     "@connor-adams/tokens": "npm:0.1.1"
   peerDependencies:
     react: ">=18"
     react-dom: ">=18"
-  checksum: 10c0/91d6dc9eeb1199f3d087521dc3d6872649d422e5517f562e35d38ea6567b24bebd8f0c48f460e2a4598403c12a6ac953c876f2d23c467190241873574592c124
+  checksum: 10c0/05abc2723d07fa2309373e92f83a2d4c66c344bf812de7e7b07f0c8070179f7919f80ce8cecf6b2ab3d91db2abd9d2611355a75bf52468f935ce47e0f4c67619
   languageName: node
   linkType: hard
 
@@ -7779,7 +7779,7 @@ __metadata:
   resolution: "frontend@workspace:frontend"
   dependencies:
     "@cashflow/shared": "npm:*"
-    "@connor-adams/designsystem": "npm:^0.11.0"
+    "@connor-adams/designsystem": "npm:^1.0.0"
     "@connor-adams/tokens": "npm:^0.1.0"
     "@eslint/js": "npm:^9.39.4"
     "@radix-ui/react-slot": "npm:^1.2.4"
