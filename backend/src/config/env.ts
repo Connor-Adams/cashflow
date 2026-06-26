@@ -501,3 +501,15 @@ export const googleOauthRedirectUri =
 export const emailIntegrationEnabled = Boolean(
   googleOauthClientId && googleOauthClientSecret && process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY,
 );
+
+/**
+ * Cost-DoS guard (issue #870): the maximum number of *AI* receipt extractions a
+ * single household may incur per UTC day across all email scan + discovery runs.
+ * Deterministic vendor parses are free and never counted. An inbox flood of
+ * receipt-shaped emails would otherwise drive one OpenAI call per new message;
+ * this caps the daily blast radius. Read dynamically (not memoized) so tests and
+ * ops can tune it without a restart. `0` is treated as the default, not "off".
+ */
+export function dailyAiExtractionCap(): number {
+  return parseIntEnv('EMAIL_AI_EXTRACTIONS_PER_DAY', 250) || 250;
+}
