@@ -20,14 +20,20 @@
  * On success the caller's session cookie is cleared (every session row was
  * already destroyed via the user cascade) and 200 is returned with a summary
  * of what was swept.
+ *
+ * RATE LIMITING: this irreversible, authorization-bearing mutation sits behind
+ * `apiWriteLimiter` (~60 req/min/IP, skipped under NODE_ENV==='test') so a
+ * compromised session can't hammer it — and so CodeQL's `js/missing-rate-limiting`
+ * rule is satisfied for an authenticated destructive handler.
  */
 import { Router } from 'express';
 import { currentAuth, clearSessionCookie } from '../auth/middleware';
 import { eraseHousehold } from '../household/eraseHousehold';
+import { apiWriteLimiter } from './apiRateLimit';
 
 const router = Router();
 
-router.delete('/account', async (req, res, next) => {
+router.delete('/account', apiWriteLimiter, async (req, res, next) => {
   try {
     const { household, role } = currentAuth(req);
 
