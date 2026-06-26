@@ -28,19 +28,30 @@ WORKDIR /app
 RUN corepack enable
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/backend ./backend
-COPY --from=builder /app/shared ./shared
-COPY --from=builder /app/package.json ./
-COPY --from=builder /app/yarn.lock ./
-COPY --from=builder /app/.yarnrc.yml ./
+# Copy the built app owned by the non-root `node` user (UID 1000, baked into the
+# official node image). `yarn run db:migrate` and corepack need a writable HOME
+# and project tree; chowning at COPY time avoids a separate recursive `chown`
+# layer over node_modules.
+COPY --from=builder --chown=node:node /app/node_modules ./node_modules
+COPY --from=builder --chown=node:node /app/backend ./backend
+COPY --from=builder --chown=node:node /app/shared ./shared
+COPY --from=builder --chown=node:node /app/package.json ./
+COPY --from=builder --chown=node:node /app/yarn.lock ./
+COPY --from=builder --chown=node:node /app/.yarnrc.yml ./
 
 WORKDIR /app/backend
 
 ARG APP_VERSION=dev
 ENV APP_VERSION=$APP_VERSION
 ENV NODE_ENV=production
+# Corepack/yarn write their cache under $HOME; point it at the node user's home
+# so the migrate step doesn't try to write to a root-owned /root.
+ENV HOME=/home/node
 
 EXPOSE 3001
+
+# Drop root: the backend handles financial data + DB credentials, so it runs
+# least-privilege. Issue #861.
+USER node
 
 CMD ["sh", "-c", "yarn run db:migrate && exec node dist/server.js"]

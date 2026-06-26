@@ -2,7 +2,9 @@ import type { Response } from 'express';
 
 export function writeSseHeaders(res: Response) {
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  // no-store forbids caching the PII-bearing stream; no-transform stops proxies
+  // from buffering/altering SSE frames (issue #853).
+  res.setHeader('Cache-Control', 'no-store, no-transform');
   res.setHeader('Connection', 'keep-alive');
   // Disable buffering on proxies that respect this hint
   res.setHeader('X-Accel-Buffering', 'no');
