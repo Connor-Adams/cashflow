@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { Op } from 'sequelize';
 import { Account, IncomeEntry, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
+import { deleteReceiptFilesForTransactions } from '../storage/receiptCleanup';
 
 const router = Router();
 
@@ -201,6 +202,10 @@ router.delete('/:id', async (req, res, next) => {
       return;
     }
     if (entry.linkedTransactionId) {
+      // Delete on-disk receipt blobs before the cascade drops the rows (#851):
+      // the Transaction→Receipt FK cascade fires in the DB and skips the
+      // Sequelize hook, so the receipt files would otherwise orphan on disk.
+      await deleteReceiptFilesForTransactions([entry.linkedTransactionId]);
       await Transaction.destroy({ where: { id: entry.linkedTransactionId, householdId: household.id } });
     }
     await entry.destroy();
