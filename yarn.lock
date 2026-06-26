@@ -5868,6 +5868,7 @@ __metadata:
     express: "npm:^4.21.2"
     express-rate-limit: "npm:^8.3.2"
     gray-matter: "npm:^4.0.3"
+    helmet: "npm:^8.2.0"
     marked: "npm:^18.0.4"
     multer: "npm:^2.2.0"
     node-cron: "npm:^4.2.1"
@@ -8073,6 +8074,13 @@ __metadata:
   dependencies:
     function-bind: "npm:^1.1.2"
   checksum: 10c0/2d8de939e270b70618f8cebb69746620db10617dbb495bc66ddad326955ea24d3ca4af133aff3eb7c1853e0218f867bc2b050ec26fe02e3aea58f880ffc5e506
+  languageName: node
+  linkType: hard
+
+"helmet@npm:^8.2.0":
+  version: 8.2.0
+  resolution: "helmet@npm:8.2.0"
+  checksum: 10c0/3aff1bb04123866a573eaafd7df4a5dc21b649c8fe6b39e1fb0e586f7be35709bf6003d72eed35c8deefd74573dff47d19409943cf2816125cc9597a8205a882
   languageName: node
   linkType: hard
 

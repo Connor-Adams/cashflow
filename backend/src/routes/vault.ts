@@ -30,6 +30,7 @@ import {
 } from '../models/VaultDocument';
 import { currentAuth } from '../auth/middleware';
 import { isSuperadmin } from '../auth/scope';
+import { setSafeDownloadHeaders } from '../http/safeDownload';
 import { aiSuggestLimiter } from './aiRateLimit';
 import {
   deleteVaultObject,
@@ -451,11 +452,10 @@ router.get('/documents/:id/file', async (req, res, next) => {
       row.storedFilename,
       row.encryptionAlgorithm,
     );
-    res.setHeader(
-      'Content-Disposition',
-      `inline; filename="${encodeURIComponent(row.originalName)}"`,
-    );
-    res.type(row.mimeType);
+    setSafeDownloadHeaders(res, {
+      mimeType: row.mimeType,
+      originalName: row.originalName,
+    });
     res.send(buffer);
   } catch (e) {
     next(e);
