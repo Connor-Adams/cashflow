@@ -69,9 +69,35 @@ test('parseTrustProxy: accepts numeric hop count', () => {
   assert.equal(parseTrustProxy('1'), 1);
 });
 
-test('parseTrustProxy: accepts boolean strings', () => {
-  assert.equal(parseTrustProxy('true'), true);
-  assert.equal(parseTrustProxy('false'), false);
+test('parseTrustProxy: accepts boolean strings outside production', () => {
+  assert.equal(parseTrustProxy('true', 'development'), true);
+  assert.equal(parseTrustProxy('false', 'development'), false);
+});
+
+test('parseTrustProxy: rejects trust-all (true) in production, clamps to 1', () => {
+  // The footgun: TRUST_PROXY=true makes the whole X-Forwarded-For chain
+  // trusted, so req.ip is attacker-spoofable. In production we must never
+  // honor it — fall back to the safe single-hop default.
+  assert.equal(parseTrustProxy('true', 'production'), 1);
+  assert.equal(parseTrustProxy('TRUE', 'production'), 1);
+});
+
+test('parseTrustProxy: rejects false in production, clamps to 1', () => {
+  assert.equal(parseTrustProxy('false', 'production'), 1);
+});
+
+test('parseTrustProxy: rejects non-numeric (e.g. subnet) in production, clamps to 1', () => {
+  assert.equal(parseTrustProxy('loopback', 'production'), 1);
+  assert.equal(parseTrustProxy('10.0.0.0/8', 'production'), 1);
+});
+
+test('parseTrustProxy: accepts numeric hop count in production', () => {
+  assert.equal(parseTrustProxy('0', 'production'), 0);
+  assert.equal(parseTrustProxy('2', 'production'), 2);
+});
+
+test('parseTrustProxy: rejects negative hop count in production, clamps to 1', () => {
+  assert.equal(parseTrustProxy('-1', 'production'), 1);
 });
 
 test('loadEnvConfig: happy path with minimal env', () => {
