@@ -12,20 +12,15 @@
  * the route optionally forwards a sanitized payload to FEEDBACK_WEBHOOK_URL;
  * that forward never throws, so a webhook failure cannot affect the response.
  */
-import { Router, type Request } from 'express';
+import { Router } from 'express';
 import { Feedback } from '../models';
 import { currentAuth } from '../auth/middleware';
-import { householdWhere, isSuperadmin } from '../auth/scope';
+import { householdWhere, isHouseholdOwner } from '../auth/scope';
 import { feedbackLimiter } from './feedbackRateLimit';
 import { validateFeedback } from '../feedback/validate';
 import { forwardFeedback } from '../services/feedbackWebhook';
 
 const router = Router();
-
-/** True when the caller may read/resolve household feedback (owner or god). */
-function canReview(req: Request): boolean {
-  return currentAuth(req).role === 'owner' || isSuperadmin(req);
-}
 
 type SerializedFeedback = {
   id: number;
@@ -107,7 +102,7 @@ router.post('/feedback', feedbackLimiter, async (req, res, next) => {
 
 router.get('/feedback', async (req, res, next) => {
   try {
-    if (!canReview(req)) {
+    if (!isHouseholdOwner(req)) {
       res.status(403).json({ error: 'FORBIDDEN' });
       return;
     }
@@ -128,7 +123,7 @@ router.get('/feedback', async (req, res, next) => {
 
 router.post('/feedback/:id/resolve', async (req, res, next) => {
   try {
-    if (!canReview(req)) {
+    if (!isHouseholdOwner(req)) {
       res.status(403).json({ error: 'FORBIDDEN' });
       return;
     }

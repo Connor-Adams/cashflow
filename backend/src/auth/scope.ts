@@ -7,6 +7,16 @@ export function isSuperadmin(req: Request): boolean {
   return currentAuth(req).user.globalRole === 'superadmin';
 }
 
+/**
+ * True when the caller may perform household-owner-gated actions: the owner of
+ * the active household, or a superadmin (who can already read every household
+ * via {@link householdWhere}). Use this for owner-only gates that a superadmin
+ * is expected to be able to exercise too (feedback review, sync backup/restore).
+ */
+export function isHouseholdOwner(req: Request): boolean {
+  return currentAuth(req).role === 'owner' || isSuperadmin(req);
+}
+
 export function householdWhere(req: Request): WhereOptions {
   if (isSuperadmin(req)) return {};
   const { household } = currentAuth(req);
