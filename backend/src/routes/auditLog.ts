@@ -24,7 +24,8 @@ import { Router } from 'express';
 import { Op, type WhereOptions } from 'sequelize';
 import { AuditLog, User } from '../models';
 import { currentAuth } from '../auth/middleware';
-import { householdWhere } from '../auth/scope';
+import { householdWhere, visibleTransactionWhere } from '../auth/scope';
+import { scopeAuditRowsToVisibility } from '../audit/visibility';
 import { aiSuggestLimiter } from './aiRateLimit';
 
 const router = Router();
@@ -192,9 +193,15 @@ router.get('/', aiSuggestLimiter, async (req, res, next) => {
       offset: parsed.offset,
     });
 
+    // Re-apply row-level visibility: drop snapshots for private rows the
+    // caller may not see (#838). Filtering happens on the fetched page; the
+    // household `total` is an upper bound on what may be visible.
+    const visibleRows = await scopeAuditRowsToVisibility(req, rows);
+    const hiddenOnPage = rows.length - visibleRows.length;
+
     const actorIds = Array.from(
       new Set(
-        rows
+        visibleRows
           .map((r) => r.actorUserId)
           .filter((id): id is number => id != null),
       ),
@@ -202,10 +209,10 @@ router.get('/', aiSuggestLimiter, async (req, res, next) => {
     const actorNames = await fetchActorNames(actorIds);
 
     res.json({
-      total: count,
+      total: Math.max(0, count - hiddenOnPage),
       limit: parsed.limit,
       offset: parsed.offset,
-      items: rows.map((r) => serialize(r, actorNames)),
+      items: visibleRows.map((r) => serialize(r, actorNames)),
     });
   } catch (e) {
     next(e);
@@ -224,11 +231,14 @@ router.get('/transactions/:id', aiSuggestLimiter, async (req, res, next) => {
       res.status(400).json({ error: 'Invalid id' });
       return;
     }
-    // Ensure the transaction belongs to the caller's household before
-    // returning audit rows for it; otherwise an attacker could probe IDs.
+    // Ensure the transaction is VISIBLE to the caller before returning its
+    // audit history: a member must not read a private (non-owned) row's
+    // before/after snapshots through the audit log (#838). Using
+    // `visibleTransactionWhere` (not plain `householdWhere`) makes a private,
+    // not-yours transaction 404 here exactly as it would in normal queries.
     const { Transaction } = await import('../models');
     const txn = await Transaction.findOne({
-      where: { id, ...householdWhere(req) },
+      where: { id, ...visibleTransactionWhere(req) },
       attributes: ['id'],
     });
     if (!txn) {
