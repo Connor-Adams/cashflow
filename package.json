@@ -42,6 +42,14 @@
     "jscpd": "^4.2.4",
     "lint-staged": "^16.4.0"
   },
+  "dependenciesMeta": {
+    "esbuild": {
+      "built": true
+    },
+    "sqlite3": {
+      "built": true
+    }
+  },
   "resolutions": {
     "shell-quote": "^1.9.0",
     "tar": "^7.5.10",

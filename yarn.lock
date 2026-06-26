@@ -5899,6 +5899,11 @@ __metadata:
     husky: "npm:^9.1.7"
     jscpd: "npm:^4.2.4"
     lint-staged: "npm:^16.4.0"
+  dependenciesMeta:
+    esbuild:
+      built: true
+    sqlite3:
+      built: true
   languageName: unknown
   linkType: soft
 
