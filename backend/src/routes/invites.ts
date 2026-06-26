@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { Op } from 'sequelize';
 import { currentAuth } from '../auth/middleware';
+import { isHouseholdOwner } from '../auth/scope';
 import { HouseholdInvite } from '../models/HouseholdInvite';
 import { hashToken, randomToken } from '../auth/password';
 
@@ -53,6 +54,13 @@ router.get('/', async (req, res, next) => {
 // only persists the hash. Optional `optionalEmail` is record-keeping only.
 router.post('/', async (req, res, next) => {
   try {
+    // #816 — only a household owner (or a superadmin) may mint an invite.
+    // A member-minted invite would let a low-privilege user onboard an
+    // attacker-controlled account into the household.
+    if (!isHouseholdOwner(req)) {
+      res.status(403).json({ error: 'Only the household owner can create invites.' });
+      return;
+    }
     const { user, household } = currentAuth(req);
     const body = (req.body ?? {}) as Record<string, unknown>;
 
