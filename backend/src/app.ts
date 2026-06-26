@@ -9,6 +9,11 @@ import { csrfGuard } from './auth/csrf';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
 import { withContext } from './observability/requestContext';
+import {
+  getErrorCode,
+  getErrorStatus,
+  getClientErrorMessage,
+} from './http/errorResponse';
 import { ServerErrorEvent } from './models';
 
 const app = express();
@@ -93,42 +98,6 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 // pipeline and the terminal error handlers below.
 mountRoutes(app);
 
-type ErrorWithMetadata = {
-  code?: unknown;
-  status?: unknown;
-  statusCode?: unknown;
-};
-
-const isObjectError = (err: unknown): err is ErrorWithMetadata =>
-  Boolean(err) && typeof err === 'object';
-
-const getErrorCode = (err: unknown): string =>
-  isObjectError(err) && 'code' in err ? String(err.code) : '';
-
-const getErrorStatus = (err: unknown, code: string): number => {
-  if (code === 'LIMIT_FILE_SIZE') {
-    return 400;
-  }
-
-  const rawStatus =
-    isObjectError(err) && 'status' in err
-      ? err.status
-      : isObjectError(err) && 'statusCode' in err
-        ? err.statusCode
-        : undefined;
-  const status = Number(rawStatus) || 500;
-
-  return status >= 400 && status < 600 ? status : 500;
-};
-
-const getErrorMessage = (err: unknown): string => {
-  if (err instanceof Error && err.message && !err.message.includes('ENOENT')) {
-    return err.message;
-  }
-
-  return 'Internal Server Error';
-};
-
 app.use((err: unknown, req: Request, _res: Response, next: NextFunction) => {
   const status = (err as { status?: number })?.status ?? 500;
   if (status >= 500) {
@@ -172,7 +141,7 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   }
 
   res.status(responseStatus).json({
-    error: getErrorMessage(err),
+    error: getClientErrorMessage(err, responseStatus),
   });
 });
 
