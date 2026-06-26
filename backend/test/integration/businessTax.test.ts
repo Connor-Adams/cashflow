@@ -362,6 +362,8 @@ test('GET /api/exports/tax returns CSV with content-disposition', async () => {
   assert.equal(res.status, 200);
   assert.match(res.headers['content-type'], /text\/csv/);
   assert.match(res.headers['content-disposition'], /attachment;.*tax-business-/);
+  // Financial-PII CSV must not be cached on disk by browsers/proxies (#853).
+  assert.equal(res.headers['cache-control'], 'no-store');
   const body = res.text;
   // Header line present.
   assert.match(

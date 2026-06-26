@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import * as env from './config/env';
 
 import { mountRoutes, captureCors } from './routeRegistry';
+import { noStore } from './http/noStore';
 import { attachAuth } from './auth/middleware';
 import { csrfGuard } from './auth/csrf';
 import { logger } from './observability/logger';
@@ -27,6 +28,12 @@ app.set('trust proxy', env.trustProxy);
 //  - `Cross-Origin-Resource-Policy: cross-origin` so the SPA on its own origin
 //    can still fetch API responses (the helmet default `same-origin` would
 //    block legitimate cross-origin XHR/fetch from the frontend host).
+//  - `X-Frame-Options: DENY` (issue #853): the API must never be framed. helmet's
+//    default is SAMEORIGIN; DENY is strictly tighter and matches the CSP
+//    `frame-ancestors 'none'` authority for legacy browsers without CSP support.
+//  - `Referrer-Policy: no-referrer` (helmet default, issue #853): full request
+//    URLs (resource ids, any token query params) must not leak via `Referer` to
+//    third-party resources (logo.dev, external images).
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -37,8 +44,14 @@ app.use(
       },
     },
     crossOriginResourcePolicy: { policy: 'cross-origin' },
+    frameguard: { action: 'deny' },
   }),
 );
+
+// Global no-store for the entire /api surface (issue #853). Financial PII must
+// never be persisted to a browser/proxy cache. Mounted before the routers so a
+// streaming handler can still override with `no-store, no-transform`.
+app.use('/api', noStore);
 
 app.get('/', (_req, res) => {
   res.json({

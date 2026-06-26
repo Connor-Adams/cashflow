@@ -207,6 +207,46 @@ test('global helmet headers are present on API responses', async () => {
   );
 });
 
+// ---- Global response-header hardening (issue #853) -----------------------
+// All three are set globally for /api: no-store (cacheable-PII), clickjacking
+// defense (frame-ancestors 'none' + X-Frame-Options: DENY), and Referrer-Policy.
+
+test('authed JSON /api responses set no-store + clickjacking + referrer headers', async () => {
+  const list = await primaryAgent.get('/api/vault/documents');
+  assert.equal(list.status, 200);
+  // Cacheable financial PII (#853): no-store, not no-cache (which permits
+  // on-disk storage with revalidation). A shared-machine next user must not be
+  // able to read this from the browser/proxy cache.
+  assert.equal(list.headers['cache-control'], 'no-store');
+  // Clickjacking: legacy header + the modern CSP authority.
+  assert.equal(list.headers['x-frame-options'], 'DENY');
+  assert.match(
+    String(list.headers['content-security-policy']),
+    /frame-ancestors 'none'/,
+  );
+  // Referrer-Policy: don't leak full URLs (ids/tokens) via Referer to third
+  // parties (logo.dev, external images).
+  assert.match(
+    String(list.headers['referrer-policy']),
+    /^(no-referrer|strict-origin-when-cross-origin)$/,
+  );
+});
+
+test('authed file download sets no-store (PII not cached on disk)', async () => {
+  const bytes = Buffer.from('confidential statement bytes', 'utf8');
+  const upload = await primaryAgent
+    .post('/api/vault/documents')
+    .attach('file', bytes, { filename: 'statement.pdf', contentType: 'application/pdf' });
+  assert.equal(upload.status, 201);
+  const docId = upload.body.data.id as number;
+
+  const download = await primaryAgent.get(`/api/vault/documents/${docId}/file`);
+  assert.equal(download.status, 200);
+  // The download path must not downgrade the global no-store to no-cache/absent.
+  assert.equal(download.headers['cache-control'], 'no-store');
+  assert.equal(download.headers['x-frame-options'], 'DENY');
+});
+
 test('stored bytes on disk are encrypted (not equal to plaintext)', async () => {
   const bytes = Buffer.from('top secret receipt', 'utf8');
   const res = await primaryAgent
