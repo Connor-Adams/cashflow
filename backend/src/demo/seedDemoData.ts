@@ -126,31 +126,25 @@ const demoRules = [
 export async function seedDemoData(): Promise<void> {
   if (!demoSeedEnabled()) return;
 
-  const passwordData = await hashPassword(resolveDemoPassword(process.env.DEMO_ACCOUNT_PASSWORD));
   await sequelize.transaction(async (t) => {
     const existingUser = await User.findOne({
       where: { email: DEMO_EMAIL },
       transaction: t,
     });
 
-    const user =
-      existingUser ??
-      (await User.create(
+    // scrypt (N=16384) is CPU-expensive; only hash when we actually need to
+    // create the demo user. Re-hashing on every demo-login when the user
+    // already exists was an unauthenticated CPU-amplification vector (#833).
+    let user: User;
+    if (existingUser) {
+      user = existingUser;
+    } else {
+      const passwordData = await hashPassword(resolveDemoPassword(process.env.DEMO_ACCOUNT_PASSWORD));
+      user = await User.create(
         {
           email: DEMO_EMAIL,
           displayName: DEMO_NAME,
           globalRole: 'user',
-          passwordHash: passwordData.hash,
-          passwordSalt: passwordData.salt,
-          passwordParams: passwordData.params,
-        },
-        { transaction: t }
-      ));
-
-    if (existingUser) {
-      await existingUser.update(
-        {
-          displayName: existingUser.displayName || DEMO_NAME,
           passwordHash: passwordData.hash,
           passwordSalt: passwordData.salt,
           passwordParams: passwordData.params,
