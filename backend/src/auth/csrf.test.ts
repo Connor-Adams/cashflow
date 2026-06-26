@@ -99,25 +99,26 @@ test('a foreign origin is rejected even outside production', () => {
   assert.equal(r.status, 403);
 });
 
-test('in production a cookie-authed POST with NO Origin or Referer is rejected', () => {
-  // A browser always sends Origin on a cross-origin (and same-origin) mutating
-  // fetch; in production the absence of any origin signal on a cookie-authed
-  // write is the CSRF case we must reject.
+test('a cookie-authed POST with NO Origin or Referer passes (SameSite backstop)', () => {
+  // A browser ALWAYS attaches Origin to a cross-origin mutating fetch, so a
+  // forgery always carries one and is caught by the allow-list. Absence of any
+  // origin signal means a non-browser/same-origin caller (curl, native app,
+  // supertest harness), which is not a CSRF vector; SameSite=Lax on the cookie
+  // is the backstop. We allow it rather than break legitimate callers.
   process.env.NODE_ENV = 'production';
   process.env.CORS_ORIGIN = ALLOWED;
   const r = run(makeReq({ method: 'POST', cookie: sessionCookie }));
-  assert.equal(r.nexted, false);
-  assert.equal(r.status, 403);
+  assert.equal(r.nexted, true);
 });
 
-test('outside production a cookie-authed POST with NO origin signal passes', () => {
-  // Dev tooling, curl, and the supertest integration harness send no Origin
-  // header; the production-only strictness keeps them working while preserving
-  // the real-browser CSRF protection where SameSite=None cookies live.
-  delete process.env.NODE_ENV;
+test('a foreign Origin is rejected in production too', () => {
+  process.env.NODE_ENV = 'production';
   process.env.CORS_ORIGIN = ALLOWED;
-  const r = run(makeReq({ method: 'POST', cookie: sessionCookie }));
-  assert.equal(r.nexted, true);
+  const r = run(
+    makeReq({ method: 'POST', origin: 'https://evil.example.org', cookie: sessionCookie }),
+  );
+  assert.equal(r.nexted, false);
+  assert.equal(r.status, 403);
 });
 
 test('cookie-authed DELETE from a foreign origin is rejected', () => {

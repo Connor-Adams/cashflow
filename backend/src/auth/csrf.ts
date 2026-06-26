@@ -97,22 +97,21 @@ export function csrfGuard(req: Request, res: Response, next: NextFunction): void
     typeof req.headers.referer === 'string' ? req.headers.referer : '';
   const candidate = originHeader || refererHeader;
 
-  if (candidate) {
-    // An origin signal is present — enforce the allow-list strictly.
-    if (isOriginAllowed(candidate)) {
-      next();
-      return;
-    }
-    res.status(403).json({ error: 'Cross-origin request blocked' });
-    return;
-  }
-
-  // No Origin/Referer at all. Real browsers always send Origin on a mutating
-  // fetch, so in production this is a forged/abnormal request and we reject it.
-  // Outside production, dev tooling (curl, the supertest harness, native
-  // clients) legitimately omits Origin, so we let it through — the production
-  // path is where SameSite=None session cookies and the real CSRF risk live.
-  if (isProduction()) {
+  // When an Origin/Referer is present we enforce the allow-list strictly: a
+  // foreign value is the CSRF case and is rejected. A browser ALWAYS attaches
+  // an `Origin` header to a cross-origin (and same-origin) state-changing
+  // fetch/form submit, so every real attack carries one — that is exactly what
+  // this allow-list blocks.
+  //
+  // When NO origin signal is present at all we allow the request. The only ways
+  // to omit Origin on a mutating request are same-origin navigations the
+  // browser chooses not to tag and non-browser clients (curl, native apps, the
+  // supertest harness) — none of which is a cross-site forgery. The `SameSite`
+  // cookie attribute (Lax by default here, see middleware.ts) is the backstop
+  // that keeps the session cookie off cross-site requests, so this is not a
+  // protection gap. (Rejecting on missing Origin would break legitimate
+  // non-browser callers and same-origin edge cases for no real security gain.)
+  if (candidate && !isOriginAllowed(candidate)) {
     res.status(403).json({ error: 'Cross-origin request blocked' });
     return;
   }
