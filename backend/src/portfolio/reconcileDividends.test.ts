@@ -247,6 +247,109 @@ test('reconcile: idempotent — second run inserts no new rows', async () => {
   assert.equal(rows.length, 1);
 });
 
+test('reconcile: duplicate synthetic-dividend insert is blocked (no double-count)', async () => {
+  // Simulates the race the window check can't catch: a prior reconcile pass
+  // already landed the AV synthetic row, but we bypass the ±dedupDays window
+  // (dedupDays: 0 means even our own ex-date row doesn't fall in the broker
+  // window unless it shares the exact tradeDate, and we test the fingerprint
+  // backstop directly). The unique (account_id, source_row_fingerprint) index
+  // + findOrCreate must make the second pass a no-op so the synthetic
+  // dividend is never counted as income twice (issue #847).
+  const sec = await setupSecurityAndDividend({ exDate: '2026-03-14', perShare: '0.50' });
+  const acct = await makeAccount();
+  await seedHolding({ accountId: acct.id, securityId: sec.id, statementDate: '2026-02-28', quantity: '20' });
+
+  const first = await reconcileDividendsForSecurity(sec.id);
+  assert.equal(first.inserted, 1);
+
+  // Delete via the window's blind spot is not possible; instead assert that a
+  // second concurrent-style pass — run after manually clearing the window
+  // guard's match — still cannot create a second row because the fingerprint
+  // is unique. Re-running normally is already covered by the idempotency test;
+  // here we prove the fingerprint backstop itself by attempting a raw insert
+  // of the same synthetic row.
+  const existing = await models.InvestmentActivity.findOne({
+    where: { importBatch: 'alpha_vantage:dividends' },
+  });
+  assert.ok(existing);
+  await assert.rejects(
+    () =>
+      models.InvestmentActivity.create({
+        accountId: existing!.accountId,
+        householdId: existing!.householdId,
+        securityId: existing!.securityId,
+        activityType: 'dividend',
+        tradeDate: existing!.tradeDate,
+        settlementDate: existing!.settlementDate,
+        description: existing!.description,
+        quantity: null,
+        price: null,
+        amount: existing!.amount,
+        fees: null,
+        splitRatio: null,
+        currency: existing!.currency,
+        sourceReference: existing!.sourceReference,
+        sourceRowFingerprint: existing!.sourceRowFingerprint,
+        importBatch: existing!.importBatch,
+      }),
+    /unique|constraint|UNIQUE/i,
+    'duplicate fingerprint must be rejected by the unique index',
+  );
+
+  const rows = await models.InvestmentActivity.findAll({
+    where: { importBatch: 'alpha_vantage:dividends' },
+  });
+  assert.equal(rows.length, 1, 'synthetic dividend must not be double-counted');
+});
+
+test('reconcile: findOrCreate is a no-op when the synthetic row already exists', async () => {
+  // Isolate the fingerprint-keyed findOrCreate from the ±dedupDays window
+  // check. Pre-seed the exact AV synthetic row the reconciler would produce,
+  // but with a tradeDate FAR outside any dedup window so
+  // `existingBrokerDividendNearby` returns false and the run falls through to
+  // findOrCreate. findOrCreate must match on (accountId, fingerprint) and NOT
+  // insert a duplicate (issue #847).
+  const sec = await setupSecurityAndDividend({ exDate: '2026-03-14', perShare: '0.50' });
+  const acct = await makeAccount();
+  await seedHolding({ accountId: acct.id, securityId: sec.id, statementDate: '2026-02-28', quantity: '20' });
+
+  // Compute the fingerprint exactly as the reconciler does: sha1 over
+  // 'av-dividend-reconciler:' + accountId:securityId:exDate:amount(4dp).
+  const { createHash } = await import('crypto');
+  const totalAmount = (20 * 0.5).toFixed(4); // 10.0000
+  const h = createHash('sha1');
+  h.update('av-dividend-reconciler:');
+  h.update(`${acct.id}:${sec.id}:2026-03-14:${totalAmount}`);
+  const fp = h.digest('hex');
+
+  await models.InvestmentActivity.create({
+    accountId: acct.id,
+    householdId: 1,
+    securityId: sec.id,
+    activityType: 'dividend',
+    // tradeDate far from the ex-date → window check can't catch it.
+    tradeDate: '2024-01-01',
+    settlementDate: null,
+    description: 'pre-existing AV row',
+    quantity: null,
+    price: null,
+    amount: totalAmount,
+    fees: null,
+    splitRatio: null,
+    currency: 'USD',
+    sourceReference: 'av-dividend:2026-03-14',
+    sourceRowFingerprint: fp,
+    importBatch: 'alpha_vantage:dividends',
+  });
+
+  const result = await reconcileDividendsForSecurity(sec.id);
+  assert.equal(result.inserted, 0, 'findOrCreate must not re-insert the synthetic row');
+  const rows = await models.InvestmentActivity.findAll({
+    where: { sourceRowFingerprint: fp },
+  });
+  assert.equal(rows.length, 1, 'no duplicate synthetic dividend');
+});
+
 test('reconcile: snapshot far older than the ex-date is too stale to fabricate a dividend', async () => {
   const sec = await setupSecurityAndDividend({ exDate: '2026-03-14' });
   const acct = await makeAccount();

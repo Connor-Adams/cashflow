@@ -335,6 +335,74 @@ test('POST /:id/match links own txn; cross-household txn is 403 (AC #5)', async 
   assert.equal(recon!.matchedTransactionId, null);
 });
 
+test('POST /:id/match on an already-matched row → 409, first match wins (issue #847)', async () => {
+  const { seedAccount, seedSecurity, seedHolding, seedDividend } = await import(
+    './portfolioFixtures.js'
+  );
+  const hh = await makeHousehold('match409');
+  const acct = await seedAccount(models, hh.household.id, hh.user.id, 'Brokerage', 'M409');
+  const sec = await seedSecurity(models, hh.household.id, 'M49', 'Race Corp', 'stock', 'USD');
+  await seedHolding(models, {
+    accountId: acct.id,
+    householdId: hh.household.id,
+    securityId: sec.id,
+    statementDate: '2026-01-01',
+    quantity: 100,
+  });
+  const payDate = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+  await seedDividend(models, {
+    securityId: sec.id,
+    exDividendDate: new Date(Date.now() - 13 * 86400000).toISOString().slice(0, 10),
+    paymentDate: payDate,
+    // Two candidates so auto-match leaves it unmatched, giving us a row to match by hand.
+    amount: 1.0,
+    currency: 'USD',
+  });
+  // Two distinct credits, both valid candidates for the same dividend.
+  const firstTxnId = await seedCredit({
+    householdId: hh.household.id,
+    accountId: acct.id,
+    date: payDate,
+    amount: 100,
+    merchant: 'M49 DIV PAYMENT A',
+  });
+  const secondTxnId = await seedCredit({
+    householdId: hh.household.id,
+    accountId: acct.id,
+    date: payDate,
+    amount: 99.5,
+    merchant: 'M49 DIV PAYMENT B',
+  });
+
+  const { autoMatchDividends } = await import('../../src/portfolio/dividendMatcher.js');
+  await autoMatchDividends();
+  const recon = await models.DividendReconciliation.findOne({ where: { accountId: acct.id } });
+  assert.ok(recon, 'reconciliation row exists');
+  assert.equal(recon!.matchedTransactionId, null, 'left unmatched by auto');
+
+  // First manual match claims the row.
+  const first = await hh.agent
+    .post(`/api/dividends/${recon!.id}/match`)
+    .send({ transactionId: firstTxnId });
+  assert.equal(first.status, 200, first.text);
+
+  // Second manual match to a DIFFERENT txn must NOT clobber the first — it
+  // returns 409 Conflict and leaves the original match intact (the loser is
+  // rejected loudly, not dropped silently — issue #847).
+  const second = await hh.agent
+    .post(`/api/dividends/${recon!.id}/match`)
+    .send({ transactionId: secondTxnId });
+  assert.equal(second.status, 409, second.text);
+
+  await recon!.reload();
+  assert.equal(
+    recon!.matchedTransactionId,
+    firstTxnId,
+    'first match wins deterministically; loser did not overwrite',
+  );
+  assert.equal(recon!.matchSource, 'manual');
+});
+
 test('GET ?status=upcoming returns a future-dated dividend (AC #555-1)', async () => {
   const { seedAccount, seedSecurity, seedHolding, seedDividend } = await import(
     './portfolioFixtures.js'
