@@ -110,8 +110,15 @@ export async function eraseHousehold(householdId: number): Promise<EraseHousehol
   //    the member users (their personal data cascades off users.id).
   await sequelize.transaction(async (t: DbTransaction) => {
     // No-FK household-scoped tables (would orphan on a naive household delete).
+    // NOTE: tax_entities (Entity) is deliberately NOT purged here — it must be
+    // deleted AFTER the Household cascade below. accounts.entity_id /
+    // transactions.entity_id are NOT NULL FKs to tax_entities with ON DELETE
+    // SET NULL (see migrations 20260618000001 / 20260619000001); SET NULL is
+    // incompatible with NOT NULL, so deleting a tax_entities row while any
+    // account/transaction still references it raises a FK violation ("reassign
+    // the accounts first"). The Household cascade removes accounts/transactions,
+    // clearing every reference, so Entity.destroy is safe only once that's done.
     await Security.destroy({ where: { householdId }, transaction: t });
-    await Entity.destroy({ where: { householdId }, transaction: t });
     await TaxTag.destroy({ where: { householdId }, transaction: t });
     await MerchantEmbedding.destroy({ where: { householdId }, transaction: t });
     await AuditLog.destroy({ where: { householdId }, transaction: t });
@@ -128,6 +135,11 @@ export async function eraseHousehold(householdId: number): Promise<EraseHousehol
     // FK-backed household-scoped data (accounts, transactions, receipts, rules,
     // budgets, goals, contacts, vault docs, …) cascades from the household row.
     await Household.destroy({ where: { id: householdId }, transaction: t });
+
+    // Now that accounts/transactions are gone, no rows reference tax_entities,
+    // so purging the (no-FK to household) tax_entities rows can't violate the
+    // entity_id FK. Must run AFTER the Household cascade above.
+    await Entity.destroy({ where: { householdId }, transaction: t });
 
     // Member users + all user-scoped personal data (sessions, integrations,
     // tokens, push, notifications, settings, exports …) cascade off users.id.
