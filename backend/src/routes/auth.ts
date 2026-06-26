@@ -14,6 +14,7 @@ import {
 } from '../models';
 import { hashPassword, hashToken, randomToken, verifyPassword } from '../auth/password';
 import { clearSessionCookie, currentAuth, setSessionCookie } from '../auth/middleware';
+import { isHouseholdOwner } from '../auth/scope';
 import { DEMO_EMAIL, demoSeedEnabled, seedDemoData } from '../demo/seedDemoData';
 import { resolveOrCreatePartnerContact } from '../household/linkPartnerContact';
 
@@ -246,6 +247,11 @@ router.post('/logout', async (req, res, next) => {
 
 router.post('/invites', async (req, res, next) => {
   try {
+    // #816 — legacy invite surface; gate on owner role just like /api/invites.
+    if (!isHouseholdOwner(req)) {
+      res.status(403).json({ error: 'Only the household owner can create invites.' });
+      return;
+    }
     const { user, household } = currentAuth(req);
     const token = randomToken(24);
     const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);

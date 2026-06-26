@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { HouseholdSettings, HouseholdTimezoneResponse } from '@cashflow/shared';
 import { currentAuth } from '../auth/middleware';
+import { isHouseholdOwner } from '../auth/scope';
 import { Household } from '../models/Household';
 import { HouseholdMember } from '../models/HouseholdMember';
 import { Security } from '../models/Security';
@@ -56,6 +57,12 @@ router.get('/members', async (req, res, next) => {
 // household can never probe or mutate another's membership.
 router.delete('/members/:userId', async (req, res, next) => {
   try {
+    // #816 — only a household owner (or a superadmin) may evict members.
+    // Without this gate any `member`-role session could remove co-members.
+    if (!isHouseholdOwner(req)) {
+      res.status(403).json({ error: 'Only the household owner can remove members.' });
+      return;
+    }
     const { user, household } = currentAuth(req);
     const targetUserId = Number(req.params.userId);
     if (!Number.isInteger(targetUserId)) {
