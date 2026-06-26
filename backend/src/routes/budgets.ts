@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { Op, type WhereOptions } from 'sequelize';
+import { Op, OptimisticLockError, type WhereOptions } from 'sequelize';
 import {
   BudgetTarget,
   BUDGET_TARGET_PERIODS,
@@ -1008,8 +1008,13 @@ router.post('/', async (req, res, next) => {
  * fields, so `patch` maps 1:1 to columns). A concurrent `PUT {scope}` therefore
  * no longer clobbers a concurrent `PATCH {amount}` — disjoint edits both land.
  * `version: true` on the model is the secondary guard: any full-instance save
- * still carries `WHERE version = N` and fails loudly on a stale write.
+ * carries `WHERE version = N`, so the slower of two concurrent saves loses the
+ * version bump and Sequelize raises `OptimisticLockError`. We absorb that below
+ * with a bounded reload-and-reapply retry loop, so the loser's disjoint edit
+ * still lands on top of the winner's instead of returning a 500.
  */
+const MAX_OPTIMISTIC_LOCK_RETRIES = 5;
+
 const updateBudgetTarget: import('express').RequestHandler = async (
   req,
   res,
@@ -1021,24 +1026,45 @@ const updateBudgetTarget: import('express').RequestHandler = async (
       res.status(400).json({ error: 'Invalid id' });
       return;
     }
-    const row = await BudgetTarget.findOne({
-      where: { id, ...householdWhere(req) },
-    });
-    if (!row) {
-      res.status(404).json({ error: 'Not found' });
-      return;
-    }
     const body = (req.body ?? {}) as Record<string, unknown>;
     const result = validateBudgetPatch(body);
     if (!result.ok) {
       res.status(result.status).json({ error: result.error });
       return;
     }
-    const patch = result.value as Parameters<typeof row.update>[0];
-    if (Object.keys(patch).length > 0) {
-      await row.update(patch);
+    const patch = result.value as Parameters<
+      InstanceType<typeof BudgetTarget>['update']
+    >[0];
+
+    for (let attempt = 0; ; attempt++) {
+      const row = await BudgetTarget.findOne({
+        where: { id, ...householdWhere(req) },
+      });
+      if (!row) {
+        res.status(404).json({ error: 'Not found' });
+        return;
+      }
+      if (Object.keys(patch).length === 0) {
+        res.json(serializeBudget(row));
+        return;
+      }
+      try {
+        await row.update(patch);
+        res.json(serializeBudget(row));
+        return;
+      } catch (e) {
+        // A concurrent writer bumped the version between our read and save.
+        // Reload the fresh row and re-apply our disjoint patch on top of the
+        // winner's committed columns, so both edits deterministically persist.
+        if (
+          e instanceof OptimisticLockError &&
+          attempt < MAX_OPTIMISTIC_LOCK_RETRIES
+        ) {
+          continue;
+        }
+        throw e;
+      }
     }
-    res.json(serializeBudget(row));
   } catch (e) {
     next(e);
   }
