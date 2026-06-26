@@ -9,10 +9,11 @@ export function isSuperadmin(req: Request): boolean {
 
 /**
  * True iff the caller may perform owner-only household mutations — removing a
- * member, or minting a household invite (#816). The owning role is server-
- * derived by `attachAuth` from `HouseholdMember.role` (never client-supplied),
- * so a `role === 'owner'` check is a sufficient privilege gate. Superadmins
- * bypass the gate, mirroring every other scope helper in this file.
+ * member, minting a household invite (#816), or backing up / restoring the
+ * household (sync, #836). The owning role is server-derived by `attachAuth`
+ * from `HouseholdMember.role` (never client-supplied), so a `role === 'owner'`
+ * check is a sufficient privilege gate. Superadmins bypass the gate, mirroring
+ * every other scope helper in this file.
  */
 export function isHouseholdOwner(req: Request): boolean {
   if (isSuperadmin(req)) return true;
