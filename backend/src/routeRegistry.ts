@@ -198,7 +198,7 @@ export { captureCors } from './routes/capture';
  * ORDER PRESERVED exactly from the prior app.ts sequence.
  */
 export const preAuthRoutes: RouteEntry[] = [
-  { paths: '/api/health', handlers: [healthRouter], why: 'Public health probe — no auth.' },
+  { paths: '/api/health', handlers: [healthRouter], why: 'Public liveness + readiness probes — no auth.' },
   { paths: '/api/version', handlers: [versionRouter], why: 'Public build/version info — no auth.' },
   { paths: '/api/config', handlers: [configRouter], why: 'Public client bootstrap config — no auth.' },
   { paths: '/api/auth', handlers: [authRouter], why: 'Login/register/logout — must be reachable without a session.' },
