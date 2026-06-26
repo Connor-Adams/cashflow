@@ -211,3 +211,76 @@ test('legacy POST /api/auth/invites is unchanged and still issues a token (AC #1
   assert.ok(typeof res.body.token === 'string' && res.body.token.length > 0);
   assert.ok(res.body.expiresAt);
 });
+
+// ─── #816: owner-role authorization on household-mutating endpoints ───────────
+
+/**
+ * Create a `member`-role session inside household A and return a supertest
+ * agent carrying its cookie. `attachAuth` resolves a user's membership by
+ * `order: [['id', 'ASC']]`, so a brand-new user with a single member-role
+ * membership in household A is reliably seen as a non-owner member of A.
+ */
+async function memberAgentInHouseholdA() {
+  const { hashToken } = await import('../../src/auth/password.js');
+  const user = await models.User.create({
+    email: `lowpriv-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`,
+    displayName: 'Low Priv',
+    globalRole: 'user',
+    passwordHash: 'x',
+    passwordSalt: 'x',
+    passwordParams: 'x',
+  });
+  await models.HouseholdMember.create({
+    householdId: householdAId,
+    userId: user.id,
+    role: 'member',
+  });
+  const token = (await import('crypto')).randomBytes(32).toString('hex');
+  await models.Session.create({
+    userId: user.id,
+    tokenHash: hashToken(token),
+    expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+  });
+  const agent = testAgent(app);
+  agent.jar.setCookie(`cashflow_session=${token}; Path=/`);
+  return { agent, userId: user.id };
+}
+
+test('#816 DELETE /api/household/members/:userId returns 403 for a member role', async () => {
+  const { agent } = await memberAgentInHouseholdA();
+  // Seed a second non-owner member as the eviction target.
+  const target = await models.User.create({
+    email: `evict-target-${Date.now()}@example.com`,
+    displayName: 'Evict Target',
+    globalRole: 'user',
+    passwordHash: 'x',
+    passwordSalt: 'x',
+    passwordParams: 'x',
+  });
+  await models.HouseholdMember.create({
+    householdId: householdAId,
+    userId: target.id,
+    role: 'member',
+  });
+
+  const res = await agent.delete(`/api/household/members/${target.id}`);
+  assert.equal(res.status, 403, JSON.stringify(res.body));
+
+  // The target must still be a member — the eviction was rejected.
+  const stillThere = await models.HouseholdMember.findOne({
+    where: { householdId: householdAId, userId: target.id },
+  });
+  assert.ok(stillThere, 'member-role caller must not be able to evict a co-member');
+});
+
+test('#816 POST /api/invites returns 403 for a member role', async () => {
+  const { agent } = await memberAgentInHouseholdA();
+  const res = await agent.post('/api/invites').send({});
+  assert.equal(res.status, 403, JSON.stringify(res.body));
+});
+
+test('#816 legacy POST /api/auth/invites returns 403 for a member role', async () => {
+  const { agent } = await memberAgentInHouseholdA();
+  const res = await agent.post('/api/auth/invites').send({});
+  assert.equal(res.status, 403, JSON.stringify(res.body));
+});

@@ -16,8 +16,7 @@ package-lock.json
 .next
 .turbo
 .env
-*.sqlite
-*.sqlite-journal
+*.sqlite*
 .DS_Store
 .serena/
 .superpowers/

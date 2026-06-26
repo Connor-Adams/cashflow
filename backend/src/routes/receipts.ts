@@ -12,6 +12,7 @@ import {
   maybeExpandItemNamesForOrder,
 } from '../import/enrichment/expandItemNames';
 import { currentAuth } from '../auth/middleware';
+import { setSafeDownloadHeaders } from '../http/safeDownload';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
 import { visibleTransactionWhere } from '../auth/scope';
@@ -320,11 +321,10 @@ router.get('/receipts/:id/file', async (req, res, next) => {
       return;
     }
     const buffer = await readReceiptObject(row.storedFilename);
-    res.setHeader(
-      'Content-Disposition',
-      `inline; filename="${encodeURIComponent(row.originalName)}"`,
-    );
-    res.type(row.mimeType);
+    setSafeDownloadHeaders(res, {
+      mimeType: row.mimeType,
+      originalName: row.originalName,
+    });
     res.send(buffer);
   } catch (e) {
     next(e);

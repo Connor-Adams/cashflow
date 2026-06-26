@@ -5,6 +5,7 @@ export interface CaptureTokenRow {
   label: string
   lastUsedAt: string | null
   createdAt: string
+  expiresAt: string | null
 }
 
 export interface CaptureTokenMintResult {
@@ -12,6 +13,7 @@ export interface CaptureTokenMintResult {
   plaintext: string
   label: string
   createdAt: string
+  expiresAt: string | null
 }
 
 export function listCaptureTokens(): Promise<CaptureTokenRow[]> {

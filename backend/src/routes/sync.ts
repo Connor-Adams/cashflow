@@ -14,8 +14,9 @@
  * inside a `bundle` field. The browser decodes/encodes base64 natively
  * and the user downloads the JSON file directly.
  */
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { currentAuth } from '../auth/middleware';
+import { isHouseholdOwner } from '../auth/scope';
 import { sequelize, SyncBackup } from '../models';
 import {
   BUNDLE_SCHEMA_VERSION,
@@ -48,15 +49,22 @@ function badRequest(message: string): Error & { status: number } {
 
 /**
  * Backup and restore operate on the WHOLE household: backup exfiltrates every
- * member's data, and restore (mode=replace) wipes it. These are owner-only by
+ * member's data, and restore (mode=replace) wipes it. These are owner-gated by
  * the same posture household member removal already enforces — a non-owner
  * member must not be able to export or destroy the household (#836).
+ *
+ * Gate via the shared {@link isHouseholdOwner}, which also admits a superadmin
+ * (consistent with feedback review and the rest of the owner-gated surface). A
+ * superadmin already reads every household via the scope helpers, and sync is
+ * bound to the caller's *active* household, so this widens nothing they cannot
+ * already reach — it just folds the gate onto the canonical helper. (#836's AC
+ * said strictly role==='owner'; #816's superadmin carve-out supersedes it.)
  *
  * Throwing a 403 here keeps the gate at the very top of each handler, before
  * any passphrase validation, decryption, or destructive table scan runs.
  */
-function requireOwner(auth: ReturnType<typeof currentAuth>): void {
-  if (auth.role !== 'owner') {
+function requireOwner(req: Request): void {
+  if (!isHouseholdOwner(req)) {
     const e = new Error('Only the household owner can back up or restore data') as Error & {
       status: number;
     };
@@ -75,7 +83,7 @@ function requireOwner(auth: ReturnType<typeof currentAuth>): void {
 router.post('/backup', aiSuggestLimiter, async (req, res, next) => {
   try {
     const auth = currentAuth(req);
-    requireOwner(auth);
+    requireOwner(req);
     const passphrase = validatePassphrase(req.body?.passphrase);
 
     const payload = await buildBundle(sequelize, {
@@ -123,7 +131,7 @@ router.post('/backup', aiSuggestLimiter, async (req, res, next) => {
  */
 router.post('/restore/preview', aiSuggestLimiter, async (req, res, next) => {
   try {
-    requireOwner(currentAuth(req));
+    requireOwner(req);
     const passphrase = validatePassphrase(req.body?.passphrase);
     const bundle = req.body?.bundle;
     if (typeof bundle !== 'string' || bundle.length === 0) {
@@ -170,7 +178,7 @@ router.post('/restore/preview', aiSuggestLimiter, async (req, res, next) => {
 router.post('/restore', aiSuggestLimiter, async (req, res, next) => {
   try {
     const auth = currentAuth(req);
-    requireOwner(auth);
+    requireOwner(req);
     const passphrase = validatePassphrase(req.body?.passphrase);
     const bundle = req.body?.bundle;
     if (typeof bundle !== 'string' || bundle.length === 0) {
@@ -196,6 +204,7 @@ router.post('/restore', aiSuggestLimiter, async (req, res, next) => {
     try {
       result = await restoreBundle(sequelize, payload, {
         householdId: auth.household.id,
+        userId: auth.user.id,
         mode,
         dryRun: false,
       });

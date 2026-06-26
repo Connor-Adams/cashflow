@@ -158,3 +158,48 @@ test('findBestRule resolves cleanly when only the date-scoped rule is in scope',
   assert.equal(ambiguous, false);
   assert.equal(rule?.id, 2);
 });
+
+test('findBestRule does not block on a catastrophic-backtracking regex rule (#818)', () => {
+  // A stored regex rule with an evil pattern must NOT hang the loop; the safe
+  // wrapper rejects it so it simply does not match.
+  const rules: RuleRow[] = [
+    {
+      id: 1,
+      merchantPattern: '(a+)+$',
+      priority: 1,
+      matchKind: 'regex',
+      category: 'Bad',
+      isBusiness: false,
+      splitType: 'me',
+      pctMe: null,
+      pctPartner: null,
+      effectiveFrom: null,
+      effectiveTo: null,
+    },
+  ];
+  const evilInput = 'a'.repeat(40) + '!';
+  const start = Date.now();
+  const { rule } = findBestRule(rules, evilInput);
+  assert.ok(Date.now() - start < 100, 'evaluation must return promptly');
+  assert.equal(rule, null, 'evil pattern is rejected, so no rule matches');
+});
+
+test('findBestRule still honors a normal regex rule (#818 regression)', () => {
+  const rules: RuleRow[] = [
+    {
+      id: 1,
+      merchantPattern: 'amazon|amzn',
+      priority: 1,
+      matchKind: 'regex',
+      category: 'Shopping',
+      isBusiness: false,
+      splitType: 'me',
+      pctMe: null,
+      pctPartner: null,
+      effectiveFrom: null,
+      effectiveTo: null,
+    },
+  ];
+  const { rule } = findBestRule(rules, 'amzn mktp ca');
+  assert.equal(rule?.id, 1);
+});

@@ -29,6 +29,11 @@ export type RestoreMode = 'merge' | 'replace';
 export interface RestoreOptions {
   /** Target household id rows should land in. */
   householdId: number;
+  /** Restoring user's id — the only known-member value. Used to normalize
+   *  bundle-supplied user-id columns (owner_user_id / created_by_user_id) so a
+   *  crafted bundle can't plant a foreign user id (#837). When omitted, those
+   *  columns are nulled rather than trusted. */
+  userId?: number;
   /** Restore strategy — defaults to 'merge'. */
   mode?: RestoreMode;
   /** Dry-run: validate + count, do not write. */
@@ -66,6 +71,20 @@ const FK_REMAP: Record<string, Array<{ column: string; refTable: string }>> = {
  *  restoreBundle) rather than nulling-then-fixing. */
 const NULL_ON_RESTORE: Record<string, string[]> = {
   transactions: ['linked_transaction_id'],
+};
+
+/** User-id columns whose bundle value is NEVER trusted (#837, security): a
+ *  crafted bundle could set them to a user id from another household, which
+ *  would mis-attribute ownership/authorship and corrupt owner-scoped
+ *  `visibility` queries. On restore we force any non-null value to the
+ *  restoring user's id (the only safe known-member value); a null source value
+ *  stays null, and when no restoring user is supplied we null them rather than
+ *  trust the bundle. Keep this in sync with the `*_user_id` columns in
+ *  tables.ts. */
+const USER_ID_COLUMNS: Record<string, string[]> = {
+  accounts: ['owner_user_id'],
+  rules: ['created_by_user_id'],
+  transactions: ['created_by_user_id'],
 };
 
 function targetIsEmpty(
@@ -152,7 +171,7 @@ export async function restoreBundle(
   payload: BundlePayload,
   options: RestoreOptions,
 ): Promise<RestoreResult> {
-  const { householdId, mode = 'merge', dryRun = false } = options;
+  const { householdId, userId, mode = 'merge', dryRun = false } = options;
   if (!Number.isInteger(householdId) || householdId < 1) {
     throw new Error('restoreBundle requires a positive integer householdId');
   }
@@ -232,6 +251,14 @@ export async function restoreBundle(
         // NULL out columns we can't remap in V1.
         for (const col of NULL_ON_RESTORE[spec.table] ?? []) {
           if (col in row) row[col] = null;
+        }
+        // Never trust bundle-supplied user ids (#837): normalize any non-null
+        // value to the restoring user (a known member), or null it when no
+        // restoring user is known. A null source value stays null.
+        for (const col of USER_ID_COLUMNS[spec.table] ?? []) {
+          if (col in row && row[col] != null) {
+            row[col] = userId ?? null;
+          }
         }
         // entity_id is mandatory (NOT NULL, migration 20260619000001) and the
         // bundle's source entity id is meaningless in the target DB — set the

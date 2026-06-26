@@ -4,7 +4,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { UserCaptureToken } from '../models';
 import { currentAuth, requireAuth } from '../auth/middleware';
-import { hashCaptureToken, mintCaptureTokenPlaintext } from '../auth/captureToken';
+import { hashCaptureToken, mintCaptureTokenPlaintext, captureTokenExpiry } from '../auth/captureToken';
 import { captureAuth } from '../auth/captureAuth';
 import { captureOrders, type CapturedOrderInput, type CaptureResult } from '../import/vendorCapture';
 import { scheduleInternalBackfill } from '../import/backfillCoordinator';
@@ -17,6 +17,11 @@ class CapturePayloadError extends Error {
     this.name = 'CapturePayloadError';
   }
 }
+
+// A payload under the 2 MB body cap can still carry a pathological number of
+// line items on a single order, inflating post-write enrichment/backfill work
+// (issue #829). Real Amazon/Apple orders are well under this; cap per order.
+const MAX_ITEMS_PER_ORDER = 500;
 
 /**
  * Validate a capture payload, persist the orders, and schedule the post-write
@@ -67,6 +72,11 @@ async function processCapturePayload(args: {
       throw new CapturePayloadError(`orders[${idx}].total must be a number`);
     }
     const items = Array.isArray(o.items) ? o.items : [];
+    if (items.length > MAX_ITEMS_PER_ORDER) {
+      throw new CapturePayloadError(
+        `orders[${idx}].items cap is ${MAX_ITEMS_PER_ORDER} per order`,
+      );
+    }
     return {
       vendorOrderId: typeof o.vendorOrderId === 'string' ? o.vendorOrderId : null,
       orderDate,
@@ -184,12 +194,14 @@ router.post('/tokens', async (req, res, next) => {
       label,
       lastUsedAt: null,
       revokedAt: null,
+      expiresAt: captureTokenExpiry(),
     });
     res.status(201).json({
       id: row.id,
       plaintext,
       label: row.label,
       createdAt: row.createdAt,
+      expiresAt: row.expiresAt,
     });
   } catch (e) {
     next(e);
@@ -209,6 +221,7 @@ router.get('/tokens', async (req, res, next) => {
         label: r.label,
         lastUsedAt: r.lastUsedAt,
         createdAt: r.createdAt,
+        expiresAt: r.expiresAt,
       })),
     );
   } catch (e) {

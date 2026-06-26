@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import request from 'supertest';
 import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
+import { hashCaptureToken, mintCaptureTokenPlaintext } from '../../src/auth/captureToken.js';
 
 let app: import('express').Express;
 let authed: ReturnType<typeof request.agent>;
@@ -123,6 +124,74 @@ test('rejects POST with invalid calendar date in YYYY-MM-DD format', async () =>
     });
   assert.equal(res.status, 400);
   assert.match(String(res.body.error ?? ''), /orders\[0\]\.orderDate/);
+});
+
+test('rejects POST with an over-cap items array (issue #829)', async () => {
+  const items = Array.from({ length: 501 }, (_, i) => ({ title: `Item ${i}` }));
+  const res = await testRequest(app)
+    .post('/api/capture/orders')
+    .set('Authorization', `Bearer ${token}`)
+    .send({
+      vendor: 'amazon',
+      orders: [
+        {
+          vendorOrderId: 'OVER-CAP-ITEMS',
+          orderDate: '2026-05-09',
+          total: 100,
+          currency: 'CAD',
+          paymentLast4: null,
+          items,
+          rawSource: 'bookmarklet-amazon-v1',
+        },
+      ],
+    });
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error ?? ''), /items cap is 500/);
+  const created = await models.ExternalOrder.findOne({ where: { vendorOrderId: 'OVER-CAP-ITEMS' } });
+  assert.equal(created, null, 'over-cap order must not be persisted');
+});
+
+test('accepts an order at exactly the items cap (issue #829)', async () => {
+  const items = Array.from({ length: 500 }, (_, i) => ({ title: `Item ${i}` }));
+  const res = await testRequest(app)
+    .post('/api/capture/orders')
+    .set('Authorization', `Bearer ${token}`)
+    .send({
+      vendor: 'amazon',
+      orders: [
+        {
+          vendorOrderId: 'AT-CAP-ITEMS',
+          orderDate: '2026-05-10',
+          total: 100,
+          currency: 'CAD',
+          paymentLast4: null,
+          items,
+          rawSource: 'bookmarklet-amazon-v1',
+        },
+      ],
+    });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.created, 1);
+});
+
+test('rejects POST /capture/orders with an expired token (issue #829)', async () => {
+  const expiredPlaintext = mintCaptureTokenPlaintext();
+  const owner = await models.User.findOne();
+  assert.ok(owner);
+  await models.UserCaptureToken.create({
+    userId: owner.id,
+    tokenHash: hashCaptureToken(expiredPlaintext),
+    label: 'Expired',
+    lastUsedAt: null,
+    revokedAt: null,
+    expiresAt: new Date(Date.now() - 1000),
+  } as never);
+  const res = await testRequest(app)
+    .post('/api/capture/orders')
+    .set('Authorization', `Bearer ${expiredPlaintext}`)
+    .send({ vendor: 'amazon', orders: [] });
+  assert.equal(res.status, 401);
+  assert.match(String(res.body.error ?? ''), /expired/i);
 });
 
 test('rejects POST /capture/orders-from-paste without a session', async () => {

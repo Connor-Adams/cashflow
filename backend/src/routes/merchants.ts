@@ -31,6 +31,7 @@ import { Router, type Request } from 'express';
 import { Op, fn, col, where as sqlWhere, QueryTypes } from 'sequelize';
 import { Account, Category, Receipt, Rule, Transaction, sequelize } from '../models';
 import { serializeTransaction } from '../util/serializeTransaction';
+import { validateUserPattern, safeRegexTest } from '../util/safeRegex';
 import {
   aggregateMerchantTimeline,
   resolveMerchantKey,
@@ -486,7 +487,9 @@ router.get('/:name', aiSuggestLimiter, async (req, res, next) => {
       if (!pat) return false;
       try {
         if (r.matchKind === 'regex') {
-          return new RegExp(pat, 'i').test(name);
+          // Issue #818: validate + bound the user regex before running it.
+          const v = validateUserPattern(pat, 'i');
+          return v.ok ? safeRegexTest(v.re, name) : false;
         }
         if (r.matchKind === 'exact') {
           return pat.toLowerCase() === lowerName;

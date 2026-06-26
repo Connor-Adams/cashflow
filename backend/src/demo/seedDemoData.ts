@@ -14,9 +14,9 @@ import { hashPassword } from '../auth/password';
 import { recomputeTransactionAmounts } from '../import/calculateShares';
 import { rowFingerprint, stableIdentityFingerprint } from '../import/fingerprint';
 import { logger } from '../observability/logger';
+import { isDemoEnabled, resolveDemoPassword } from './demoConfig';
 
 export const DEMO_EMAIL = process.env.DEMO_ACCOUNT_EMAIL?.trim().toLowerCase() || 'dev@cashflow.local';
-const DEMO_PASSWORD = process.env.DEMO_ACCOUNT_PASSWORD || 'cashflow-demo';
 const DEMO_NAME = process.env.DEMO_ACCOUNT_NAME?.trim() || 'Dev Demo';
 
 type DemoTxn = {
@@ -31,7 +31,7 @@ type DemoTxn = {
 };
 
 export function demoSeedEnabled(): boolean {
-  return process.env.DEMO_ACCOUNT_ENABLED !== 'false';
+  return isDemoEnabled(process.env.DEMO_ACCOUNT_ENABLED, process.env.NODE_ENV);
 }
 
 export function isDemoUserEmail(email: string | null | undefined): boolean {
@@ -126,7 +126,7 @@ const demoRules = [
 export async function seedDemoData(): Promise<void> {
   if (!demoSeedEnabled()) return;
 
-  const passwordData = await hashPassword(DEMO_PASSWORD);
+  const passwordData = await hashPassword(resolveDemoPassword(process.env.DEMO_ACCOUNT_PASSWORD));
   await sequelize.transaction(async (t) => {
     const existingUser = await User.findOne({
       where: { email: DEMO_EMAIL },

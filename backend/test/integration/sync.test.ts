@@ -25,6 +25,7 @@ let app: import('express').Express;
 let primaryAgent: ReturnType<typeof request.agent>;
 let otherAgent: ReturnType<typeof request.agent>;
 let memberAgent: ReturnType<typeof request.agent>;
+let superadminMemberAgent: ReturnType<typeof request.agent>;
 let primaryHouseholdId: number;
 let primaryAccountId: number;
 let otherHouseholdId: number;
@@ -39,7 +40,12 @@ type Seeded = {
 
 async function seed(
   emailPrefix: string,
-  opts: { role?: 'owner' | 'member'; householdId?: number; accountId?: number } = {},
+  opts: {
+    role?: 'owner' | 'member';
+    householdId?: number;
+    accountId?: number;
+    globalRole?: 'user' | 'superadmin';
+  } = {},
 ): Promise<Seeded> {
   const models = await import('../../src/models');
   const { hashPassword, hashToken } = await import('../../src/auth/password.js');
@@ -47,7 +53,7 @@ async function seed(
   const user = await models.User.create({
     email: `${emailPrefix}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`,
     displayName: emailPrefix,
-    globalRole: 'user',
+    globalRole: opts.globalRole ?? 'user',
     passwordHash: password.hash,
     passwordSalt: password.salt,
     passwordParams: password.params,
@@ -209,6 +215,13 @@ before(async () => {
   });
   memberAgent = testAgent(app);
   memberAgent.jar.setCookie(`cashflow_session=${member.token}; Path=/`);
+
+  // A superadmin who is only a *member* (role!=='owner') of their own
+  // household — the gate must admit them via the superadmin carve-out (#816),
+  // so backup/restore returns 200 even though their household role is 'member'.
+  const superMember = await seed('SuperMember', { role: 'member', globalRole: 'superadmin' });
+  superadminMemberAgent = testAgent(app);
+  superadminMemberAgent.jar.setCookie(`cashflow_session=${superMember.token}; Path=/`);
 });
 
 after(async () => {
@@ -383,6 +396,16 @@ test('POST /api/sync/backup is 403 for a non-owner member (#836)', async () => {
     .send({ passphrase: 'member-cannot-export' });
   assert.equal(res.status, 403);
   assert.match(res.body.error, /owner|forbidden/i);
+});
+
+test('POST /api/sync/backup is 200 for a superadmin who is only a member (#816)', async () => {
+  // role==='member' but globalRole==='superadmin' — the shared isHouseholdOwner
+  // gate admits the superadmin even though they are not the household owner.
+  const res = await superadminMemberAgent
+    .post('/api/sync/backup')
+    .send({ passphrase: 'superadmin-can-export' });
+  assert.equal(res.status, 200);
+  assert.ok(typeof res.body.bundle === 'string' && res.body.bundle.length > 0, 'has bundle');
 });
 
 test('POST /api/sync/restore is 403 for a non-owner member (#836)', async () => {
