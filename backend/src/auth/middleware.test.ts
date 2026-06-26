@@ -55,3 +55,23 @@ test('production cookie keeps SameSite=None; Secure alongside Domain', () => {
   assert.match(header, /Secure/);
   assert.match(header, /Domain=\.cashflow\.example\.com/);
 });
+
+test('production cookie WITHOUT a cookie domain uses SameSite=Lax (not None)', () => {
+  // SameSite=None opens the cookie to cross-site delivery — only justified for
+  // the cross-subdomain deployment that needs SESSION_COOKIE_DOMAIN. With no
+  // domain configured the API is same-host with the UI, so Lax is both safe and
+  // sufficient, and it shrinks the CSRF attack surface (issue #825).
+  process.env.NODE_ENV = 'production';
+  delete process.env.SESSION_COOKIE_DOMAIN;
+  const header = captureSetCookie((res) => setSessionCookie(res, 'tok', expires));
+  assert.match(header, /SameSite=Lax/);
+  assert.doesNotMatch(header, /SameSite=None/);
+});
+
+test('expired cookie WITHOUT a cookie domain also uses SameSite=Lax', () => {
+  process.env.NODE_ENV = 'production';
+  delete process.env.SESSION_COOKIE_DOMAIN;
+  const header = captureSetCookie((res) => clearSessionCookie(res));
+  assert.match(header, /SameSite=Lax/);
+  assert.doesNotMatch(header, /SameSite=None/);
+});
