@@ -379,11 +379,26 @@ router.post('/:id/match', async (req, res, next) => {
       });
       return;
     }
-    await recon.update({
-      matchedTransactionId: txn.id,
-      matchedAt: new Date(),
-      matchSource: 'manual',
-    });
+    // State-conditional update: only claim the row if it is STILL unmatched.
+    // A concurrent manual match (two clients) or a racing auto-match may have
+    // matched it since our in-memory `recon` was read — the
+    // `matchedTransactionId: null` predicate makes the UPDATE a no-op in that
+    // case, so the loser of the race never silently clobbers the winner's
+    // match (last-writer-wins data loss, issue #847). When zero rows are
+    // affected the row is already matched → 409 Conflict. Mirrors the
+    // auto-match guard added in #844.
+    const [affected] = await DividendReconciliation.update(
+      {
+        matchedTransactionId: txn.id,
+        matchedAt: new Date(),
+        matchSource: 'manual',
+      },
+      { where: { id: recon.id, matchedTransactionId: null } },
+    );
+    if (affected !== 1) {
+      res.status(409).json({ error: 'Dividend is already matched' });
+      return;
+    }
     logger.info(
       { reconciliationId: recon.id, transactionId: txn.id },
       'dividend_matched_manual',
