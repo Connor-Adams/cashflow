@@ -16,6 +16,11 @@ import { hashPassword, hashToken, randomToken, verifyPassword } from '../auth/pa
 import { clearSessionCookie, currentAuth, setSessionCookie } from '../auth/middleware';
 import { DEMO_EMAIL, demoSeedEnabled, seedDemoData } from '../demo/seedDemoData';
 import { resolveOrCreatePartnerContact } from '../household/linkPartnerContact';
+import {
+  demoLoginRateLimiter,
+  loginRateLimiter,
+  registerRateLimiter,
+} from './authRateLimit';
 
 const router = Router();
 const SESSION_DAYS = 30;
@@ -85,7 +90,7 @@ router.get('/me', async (req, res, next) => {
   }
 });
 
-router.post('/register', async (req, res, next) => {
+router.post('/register', registerRateLimiter, async (req, res, next) => {
   try {
     const body = (req.body || {}) as Record<string, unknown>;
     const email = normalizeEmail(body.email);
@@ -182,7 +187,7 @@ router.post('/register', async (req, res, next) => {
   }
 });
 
-router.post('/login', async (req, res, next) => {
+router.post('/login', loginRateLimiter, async (req, res, next) => {
   try {
     const email = normalizeEmail((req.body as Record<string, unknown> | undefined)?.email);
     const password = String((req.body as Record<string, unknown> | undefined)?.password ?? '');
@@ -203,7 +208,7 @@ router.post('/login', async (req, res, next) => {
   }
 });
 
-router.post('/demo-login', async (_req, res, next) => {
+router.post('/demo-login', demoLoginRateLimiter, async (_req, res, next) => {
   try {
     if (!demoSeedEnabled()) {
       res.status(404).json({ error: 'Demo account is disabled' });
