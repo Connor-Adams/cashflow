@@ -1104,6 +1104,8 @@ export type FinancialGoal = {
   priority: number
   status: FinancialGoalStatus
   notes: string | null
+  /** Optimistic-lock counter (issue #845); bumps on every save. */
+  version: number
   createdAt: string
   updatedAt: string
 }

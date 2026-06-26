@@ -1,4 +1,13 @@
 # infra/otel-collector/config.yaml
+# SECURITY (issue #858): the OTLP receivers below are UNAUTHENTICATED. The
+# `cors.allowed_origins` list is browser-enforced only — curl / any OTLP SDK / a
+# compromised container ignores CORS and the collector accepts the POST. Binding
+# 0.0.0.0 is required for Railway PRIVATE networking (the backend reaches the
+# collector at otel-collector.railway.internal:4318); it does NOT make the port
+# internet-routable on its own. Therefore this service MUST NOT be assigned a
+# public Railway domain. If browser OTLP is ever needed, proxy it through an
+# authenticated backend endpoint — never expose 4318/4317 publicly. See
+# docs/observability.md "Create the otel-collector Railway service".
 receivers:
   otlp:
     protocols:

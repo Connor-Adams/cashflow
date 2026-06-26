@@ -8,13 +8,16 @@ export function isSuperadmin(req: Request): boolean {
 }
 
 /**
- * True when the caller may perform household-owner-gated actions: the owner of
- * the active household, or a superadmin (who can already read every household
- * via {@link householdWhere}). Use this for owner-only gates that a superadmin
- * is expected to be able to exercise too (feedback review, sync backup/restore).
+ * True iff the caller may perform owner-only household mutations — removing a
+ * member, minting a household invite (#816), or backing up / restoring the
+ * household (sync, #836). The owning role is server-derived by `attachAuth`
+ * from `HouseholdMember.role` (never client-supplied), so a `role === 'owner'`
+ * check is a sufficient privilege gate. Superadmins bypass the gate, mirroring
+ * every other scope helper in this file.
  */
 export function isHouseholdOwner(req: Request): boolean {
-  return currentAuth(req).role === 'owner' || isSuperadmin(req);
+  if (isSuperadmin(req)) return true;
+  return currentAuth(req).role === 'owner';
 }
 
 export function householdWhere(req: Request): WhereOptions {

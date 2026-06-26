@@ -516,6 +516,136 @@ test('summary nets a partial repayment instead of the claim face value', async (
   assert.equal(group!.received, '150.0000');
 });
 
+// ---- concurrency safety (issue #846) --------------------------------------
+
+test('a repayment cannot be linked to two claims (no double-credit)', async () => {
+  const fresh = await seed('NoDouble');
+  const agent = testAgent(app);
+  agent.jar.setCookie(`cashflow_session=${fresh.token}; Path=/`);
+
+  // One outlay → two open claims (1:N is intended: e.g. a split).
+  const outlay = await createTransaction(fresh.householdId, fresh.accountId, '2026-11-01', -100);
+  const a = await agent
+    .post(`/api/transactions/${outlay}/reimbursable`)
+    .send({ partyName: 'A', amount: 100 });
+  const b = await agent
+    .post(`/api/transactions/${outlay}/reimbursable`)
+    .send({ partyName: 'B', amount: 100 });
+  const claimA = a.body.data.id as number;
+  const claimB = b.body.data.id as number;
+
+  // A single $100 inflow.
+  const repayment = await createTransaction(fresh.householdId, fresh.accountId, '2026-11-05', 100);
+
+  // Fire both links concurrently against the SAME repayment txn.
+  const [r1, r2] = await Promise.all([
+    agent.post(`/api/reimbursements/${claimA}/link-repayment`).send({ transactionId: repayment }),
+    agent.post(`/api/reimbursements/${claimB}/link-repayment`).send({ transactionId: repayment }),
+  ]);
+  const statuses = [r1.status, r2.status].sort();
+  assert.deepEqual(statuses, [200, 409], 'exactly one link wins; the other is a 409 conflict');
+
+  // The inflow is credited exactly once across the household summary.
+  const sum = await agent.get('/api/reimbursements/summary');
+  const received = (sum.body.groups as { received: string }[]).reduce(
+    (acc, g) => acc + Number(g.received),
+    0,
+  );
+  assert.equal(received, 100, 'the single inflow must be credited exactly once');
+
+  // Exactly one of the two claims holds the repayment.
+  const [getA, getB] = await Promise.all([
+    agent.get(`/api/reimbursements/${claimA}`),
+    agent.get(`/api/reimbursements/${claimB}`),
+  ]);
+  const linkedCount = [getA, getB].filter(
+    (g) => g.body.data.repaymentTransactionId === repayment,
+  ).length;
+  assert.equal(linkedCount, 1, 'only one claim ends up linked');
+});
+
+test('re-linking the same repayment to the same claim is idempotent', async () => {
+  const fresh = await seed('Idempotent');
+  const agent = testAgent(app);
+  agent.jar.setCookie(`cashflow_session=${fresh.token}; Path=/`);
+
+  const outlay = await createTransaction(fresh.householdId, fresh.accountId, '2026-11-10', -50);
+  const created = await agent
+    .post(`/api/transactions/${outlay}/reimbursable`)
+    .send({ partyName: 'Repeat' });
+  const claimId = created.body.data.id as number;
+  const repayment = await createTransaction(fresh.householdId, fresh.accountId, '2026-11-11', 50);
+
+  const first = await agent
+    .post(`/api/reimbursements/${claimId}/link-repayment`)
+    .send({ transactionId: repayment });
+  assert.equal(first.status, 200);
+  const second = await agent
+    .post(`/api/reimbursements/${claimId}/link-repayment`)
+    .send({ transactionId: repayment });
+  assert.equal(second.status, 200, 're-link of the same pair should not 409');
+  assert.equal(second.body.data.repaymentTransactionId, repayment);
+});
+
+test('concurrent link + unlink leave the claim internally consistent', async () => {
+  const fresh = await seed('Interleave');
+  const agent = testAgent(app);
+  agent.jar.setCookie(`cashflow_session=${fresh.token}; Path=/`);
+
+  const outlay = await createTransaction(fresh.householdId, fresh.accountId, '2026-11-15', -80);
+  const created = await agent
+    .post(`/api/transactions/${outlay}/reimbursable`)
+    .send({ partyName: 'Race' });
+  const claimId = created.body.data.id as number;
+  const repayment = await createTransaction(fresh.householdId, fresh.accountId, '2026-11-16', 80);
+
+  // Seed it as linked, then race a link(same) against an unlink.
+  await agent
+    .post(`/api/reimbursements/${claimId}/link-repayment`)
+    .send({ transactionId: repayment });
+  await Promise.all([
+    agent.post(`/api/reimbursements/${claimId}/link-repayment`).send({ transactionId: repayment }),
+    agent.post(`/api/reimbursements/${claimId}/unlink-repayment`).send({}),
+  ]);
+
+  // Whatever the winner, status and link must agree: received <=> linked.
+  const get = await agent.get(`/api/reimbursements/${claimId}`);
+  const { status, repaymentTransactionId, receivedAt } = get.body.data;
+  if (repaymentTransactionId == null) {
+    assert.notEqual(status, 'received', 'unlinked claim must not be received');
+    assert.equal(receivedAt, null, 'unlinked claim must clear receivedAt');
+  } else {
+    assert.equal(repaymentTransactionId, repayment);
+    assert.equal(status, 'received', 'linked claim must be received');
+    assert.ok(receivedAt, 'linked claim must stamp receivedAt');
+  }
+});
+
+test('concurrent PUTs do not clobber each other\'s untouched fields', async () => {
+  const fresh = await seed('NoClobber');
+  const agent = testAgent(app);
+  agent.jar.setCookie(`cashflow_session=${fresh.token}; Path=/`);
+
+  const outlay = await createTransaction(fresh.householdId, fresh.accountId, '2026-11-20', -300);
+  const created = await agent
+    .post(`/api/transactions/${outlay}/reimbursable`)
+    .send({ partyName: 'Clobber', amount: 300 });
+  const claimId = created.body.data.id as number;
+
+  // One PUT changes amount, another changes status — disjoint fields.
+  const [pa, pb] = await Promise.all([
+    agent.put(`/api/reimbursements/${claimId}`).send({ amount: 250 }),
+    agent.put(`/api/reimbursements/${claimId}`).send({ status: 'received' }),
+  ]);
+  assert.equal(pa.status, 200);
+  assert.equal(pb.status, 200);
+
+  // Both edits must survive — neither blind full-instance save wiped the other.
+  const get = await agent.get(`/api/reimbursements/${claimId}`);
+  assert.equal(get.body.data.amount, '250.0000', 'amount edit survived');
+  assert.equal(get.body.data.status, 'received', 'status edit survived');
+});
+
 // ---- cross-household scope -------------------------------------------------
 
 test('reimbursement endpoints scope to the requesting household', async () => {
