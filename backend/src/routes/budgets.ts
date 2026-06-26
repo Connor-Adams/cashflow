@@ -998,7 +998,23 @@ router.post('/', async (req, res, next) => {
   }
 });
 
-router.put('/:id', async (req, res, next) => {
+/**
+ * Shared PUT/PATCH handler for a single budget target (issue #848). PUT and
+ * PATCH were byte-identical blind read-modify-write handlers; they are now one
+ * implementation mounted on both verbs.
+ *
+ * The lost-update fix is the *targeted* column update: only the columns the
+ * caller actually sent are written (`validateBudgetPatch` strips `undefined`
+ * fields, so `patch` maps 1:1 to columns). A concurrent `PUT {scope}` therefore
+ * no longer clobbers a concurrent `PATCH {amount}` — disjoint edits both land.
+ * `version: true` on the model is the secondary guard: any full-instance save
+ * still carries `WHERE version = N` and fails loudly on a stale write.
+ */
+const updateBudgetTarget: import('express').RequestHandler = async (
+  req,
+  res,
+  next
+) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id < 1) {
@@ -1018,67 +1034,23 @@ router.put('/:id', async (req, res, next) => {
       res.status(result.status).json({ error: result.error });
       return;
     }
-    const patch = result.value;
-    if (patch.category !== undefined) row.set('category', patch.category);
-    if (patch.currency !== undefined) row.set('currency', patch.currency);
-    if (patch.amount !== undefined) row.set('amount', patch.amount);
-    if (patch.period !== undefined) row.set('period', patch.period);
-    if (patch.scope !== undefined) row.set('scope', patch.scope);
-    if (patch.rolloverEnabled !== undefined)
-      row.set('rolloverEnabled', patch.rolloverEnabled);
-    if (patch.excludeRefundedPurchases !== undefined)
-      row.set('excludeRefundedPurchases', patch.excludeRefundedPurchases);
-    if (patch.alertThresholds !== undefined)
-      row.set('alertThresholds', patch.alertThresholds);
-    await row.save();
+    const patch = result.value as Parameters<typeof row.update>[0];
+    if (Object.keys(patch).length > 0) {
+      await row.update(patch);
+    }
     res.json(serializeBudget(row));
   } catch (e) {
     next(e);
   }
-});
+};
+
+router.put('/:id', updateBudgetTarget);
 
 /**
  * Alias for PUT so consumers that prefer PATCH semantics can use the same
- * partial-patch shape. Internally identical handling.
+ * partial-patch shape. Identical handling — both verbs share one handler.
  */
-router.patch('/:id', async (req, res, next) => {
-  try {
-    const id = parseInt(req.params.id, 10);
-    if (!Number.isInteger(id) || id < 1) {
-      res.status(400).json({ error: 'Invalid id' });
-      return;
-    }
-    const row = await BudgetTarget.findOne({
-      where: { id, ...householdWhere(req) },
-    });
-    if (!row) {
-      res.status(404).json({ error: 'Not found' });
-      return;
-    }
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const result = validateBudgetPatch(body);
-    if (!result.ok) {
-      res.status(result.status).json({ error: result.error });
-      return;
-    }
-    const patch = result.value;
-    if (patch.category !== undefined) row.set('category', patch.category);
-    if (patch.currency !== undefined) row.set('currency', patch.currency);
-    if (patch.amount !== undefined) row.set('amount', patch.amount);
-    if (patch.period !== undefined) row.set('period', patch.period);
-    if (patch.scope !== undefined) row.set('scope', patch.scope);
-    if (patch.rolloverEnabled !== undefined)
-      row.set('rolloverEnabled', patch.rolloverEnabled);
-    if (patch.excludeRefundedPurchases !== undefined)
-      row.set('excludeRefundedPurchases', patch.excludeRefundedPurchases);
-    if (patch.alertThresholds !== undefined)
-      row.set('alertThresholds', patch.alertThresholds);
-    await row.save();
-    res.json(serializeBudget(row));
-  } catch (e) {
-    next(e);
-  }
-});
+router.patch('/:id', updateBudgetTarget);
 
 router.delete('/:id', async (req, res, next) => {
   try {
