@@ -79,7 +79,19 @@ To onboard:
      - `LOKI_HOST=loki.railway.internal`
      - `TEMPO_HOST=tempo.railway.internal`
      - `PUBLIC_FRONTEND_ORIGIN=cashflow.<your-domain>` (frontend origin without protocol)
-   - Expose port 4318 publicly (for browser OTLP later) AND internally (for the backend).
+   - **Do NOT assign a public domain to this service.** The OTLP receiver on
+     4318 (HTTP) and 4317 (gRPC) is **unauthenticated** — it only has a CORS
+     `allowed_origins` list, which browsers enforce but `curl` / any OTLP SDK /
+     a compromised container ignores. A public 4318 lets anyone POST arbitrary
+     telemetry: log/trace injection, Grafana→GitHub-issue alert poisoning, and
+     Loki/Tempo/Prometheus storage-cost DoS. Keep the collector on **private
+     networking only** — the backend reaches it at
+     `otel-collector.railway.internal:4318`, which needs no public port.
+   - If browser OTLP is ever wanted, do **not** expose 4318 directly — proxy it
+     through an **authenticated** backend endpoint (e.g. `/api/otlp`) that
+     forwards to `otel-collector.railway.internal:4318` after the request passes
+     the normal `requireAuth` boundary.
+   - Keep 4317 (gRPC) internal-only as well.
    - Deploy.
 
 3. **Create the `prometheus` Railway service.**
