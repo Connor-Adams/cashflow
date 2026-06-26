@@ -1,8 +1,32 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyBash, REPO_ROOT } from './guard-bash.mjs';
+import { classifyBash, addedOrModifiedFromNameStatus, REPO_ROOT } from './guard-bash.mjs';
 
 const WT = `${REPO_ROOT}/.claude/worktrees/feat-x`;
+
+test('addedOrModifiedFromNameStatus keeps A/M/R but drops D (deletions)', () => {
+  // Untracking a forbidden file is a DELETION — it must not be reported as staged,
+  // otherwise G4a would block the very cleanup it exists to encourage (issue #824).
+  const out = [
+    'D\tbackend/data/cashflow.sqlite.pre-reimport-backup',
+    'M\t.gitignore',
+    'A\tbackend/src/models/Foo.ts',
+    'R100\told/path.ts\tnew/path.ts',
+  ].join('\n');
+  assert.deepEqual(addedOrModifiedFromNameStatus(out), [
+    '.gitignore',
+    'backend/src/models/Foo.ts',
+    'new/path.ts',
+  ]);
+});
+
+test('G4a does NOT deny when the sqlite file is only being deleted', () => {
+  // Simulate what gitStagedFiles now returns for a `git rm --cached` of the backup:
+  // the deletion is filtered out, leaving only the gitignore edit.
+  const r = classifyBash({ command: 'git commit -m x', cwd: WT,
+    stagedFiles: ['.gitignore'], worktreeRoot: WT, worktreeHasNodeModules: true });
+  assert.equal(r.deny, undefined);
+});
 
 test('G4a denies staging a sqlite file', () => {
   const r = classifyBash({ command: 'git commit -m x', cwd: WT,
