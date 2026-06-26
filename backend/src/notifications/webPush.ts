@@ -51,6 +51,46 @@ export type WebPushSender = (
   payloadJson: string,
 ) => Promise<SendOutcome>;
 
+/**
+ * Host suffixes of the four browser push services we accept subscriptions for.
+ * Matched as a suffix against the endpoint hostname (with a leading-dot guard so
+ * `evilgoogleapis.com` can't pass `googleapis.com`). This is the SSRF allowlist
+ * for issue #855: without it, an authenticated user could register an endpoint
+ * pointing at `169.254.169.254` or `localhost`, and the push fan-out would issue
+ * an outbound POST to that internal address on the next notification.
+ *   - FCM (Chrome/Edge/Android): *.fcm.googleapis.com
+ *   - Mozilla (Firefox):          updates.push.services.mozilla.com
+ *   - WNS (legacy Edge/Windows):  *.notify.windows.com
+ *   - Apple (Safari):             web.push.apple.com
+ */
+const ALLOWED_PUSH_HOST_SUFFIXES = [
+  'fcm.googleapis.com',
+  'updates.push.services.mozilla.com',
+  'notify.windows.com',
+  'web.push.apple.com',
+] as const;
+
+/**
+ * True when `endpoint` is a well-formed `https:` URL whose host is one of the
+ * known push services. Used by the subscribe route (reject at registration) and
+ * re-checked in `defaultWebPushSender` (defense-in-depth before the outbound
+ * send). Anything else — non-https, malformed, internal/metadata hosts, or an
+ * unknown public host — returns false.
+ */
+export function isAllowedPushEndpoint(endpoint: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:') return false;
+  const host = url.hostname.toLowerCase();
+  return ALLOWED_PUSH_HOST_SUFFIXES.some(
+    (suffix) => host === suffix || host.endsWith(`.${suffix}`),
+  );
+}
+
 /** True when both VAPID keys are configured — push is otherwise a no-op. */
 export function isPushConfigured(): boolean {
   return Boolean(env.vapidPublicKey && env.vapidPrivateKey);
@@ -64,6 +104,11 @@ let vapidApplied = false;
  */
 export const defaultWebPushSender: WebPushSender = async (target, payloadJson) => {
   if (!isPushConfigured()) return 'failed';
+  // Defense-in-depth (issue #855): even though the subscribe route allowlists
+  // the host, re-validate before issuing the outbound request so a row that
+  // predates the allowlist (or was written via another path) can never trigger
+  // an SSRF. A non-allowlisted endpoint is a permanent failure → prune it.
+  if (!isAllowedPushEndpoint(target.endpoint)) return 'gone';
   if (!vapidApplied) {
     webpush.setVapidDetails(
       env.vapidSubject,
