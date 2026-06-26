@@ -304,43 +304,26 @@ test('reconcile: duplicate synthetic-dividend insert is blocked (no double-count
 
 test('reconcile: findOrCreate is a no-op when the synthetic row already exists', async () => {
   // Isolate the fingerprint-keyed findOrCreate from the ±dedupDays window
-  // check. Pre-seed the exact AV synthetic row the reconciler would produce,
-  // but with a tradeDate FAR outside any dedup window so
-  // `existingBrokerDividendNearby` returns false and the run falls through to
+  // check. First run produces the real AV synthetic row; we then move its
+  // tradeDate FAR outside any dedup window so `existingBrokerDividendNearby`
+  // returns false on the second run and the pass falls through to
   // findOrCreate. findOrCreate must match on (accountId, fingerprint) and NOT
-  // insert a duplicate (issue #847).
+  // insert a duplicate (issue #847). We reuse the row's actual fingerprint
+  // rather than recomputing it, so the test never hashes anything itself.
   const sec = await setupSecurityAndDividend({ exDate: '2026-03-14', perShare: '0.50' });
   const acct = await makeAccount();
   await seedHolding({ accountId: acct.id, securityId: sec.id, statementDate: '2026-02-28', quantity: '20' });
 
-  // Compute the fingerprint exactly as the reconciler does: sha1 over
-  // 'av-dividend-reconciler:' + accountId:securityId:exDate:amount(4dp).
-  const { createHash } = await import('crypto');
-  const totalAmount = (20 * 0.5).toFixed(4); // 10.0000
-  const h = createHash('sha1');
-  h.update('av-dividend-reconciler:');
-  h.update(`${acct.id}:${sec.id}:2026-03-14:${totalAmount}`);
-  const fp = h.digest('hex');
-
-  await models.InvestmentActivity.create({
-    accountId: acct.id,
-    householdId: 1,
-    securityId: sec.id,
-    activityType: 'dividend',
-    // tradeDate far from the ex-date → window check can't catch it.
-    tradeDate: '2024-01-01',
-    settlementDate: null,
-    description: 'pre-existing AV row',
-    quantity: null,
-    price: null,
-    amount: totalAmount,
-    fees: null,
-    splitRatio: null,
-    currency: 'USD',
-    sourceReference: 'av-dividend:2026-03-14',
-    sourceRowFingerprint: fp,
-    importBatch: 'alpha_vantage:dividends',
+  const first = await reconcileDividendsForSecurity(sec.id);
+  assert.equal(first.inserted, 1);
+  const seeded = await models.InvestmentActivity.findOne({
+    where: { importBatch: 'alpha_vantage:dividends' },
   });
+  assert.ok(seeded);
+  const fp = seeded!.sourceRowFingerprint;
+  // Push the existing row's tradeDate far from the ex-date so the window
+  // check on the second pass can't catch it — only the fingerprint can.
+  await seeded!.update({ tradeDate: '2024-01-01' });
 
   const result = await reconcileDividendsForSecurity(sec.id);
   assert.equal(result.inserted, 0, 'findOrCreate must not re-insert the synthetic row');
