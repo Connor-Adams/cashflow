@@ -798,3 +798,37 @@ test('PATCH /:id can toggle excludeRefundedPurchases', async () => {
   assert.equal(patched.status, 200);
   assert.equal(patched.body.excludeRefundedPurchases, true);
 });
+
+// Issue #848: concurrent disjoint edits must BOTH persist. Before the fix both
+// PUT and PATCH did a blind full-instance read-modify-write, so the slower save
+// reverted whatever field the other request had just changed (the config
+// lost-update). Targeted column updates (`row.update(patch)`) write only the
+// patched columns, so an `amount` edit and a `scope` edit racing each other
+// both land. We fire them concurrently and assert the final row carries both.
+test('concurrent amount (PATCH) + scope (PUT) edits both persist', async () => {
+  const created = await primaryAgent.post('/api/budgets').send({
+    category: 'Race',
+    currency: 'CAD',
+    amount: 500,
+    scope: 'household',
+  });
+  assert.equal(created.status, 201);
+  const id = created.body.id as number;
+
+  const [amountRes, scopeRes] = await Promise.all([
+    primaryAgent.patch(`/api/budgets/${id}`).send({ amount: 600 }),
+    primaryAgent.put(`/api/budgets/${id}`).send({ scope: 'personal' }),
+  ]);
+  assert.equal(amountRes.status, 200);
+  assert.equal(scopeRes.status, 200);
+
+  const after = await primaryAgent.get('/api/budgets');
+  const row = (after.body.data as Array<{
+    id: number;
+    amount: string;
+    scope: string;
+  }>).find((b) => b.id === id);
+  assert.ok(row, 'budget row present after concurrent edits');
+  assert.equal(Number(row.amount), 600, 'amount edit persisted');
+  assert.equal(row.scope, 'personal', 'scope edit persisted');
+});

@@ -82,6 +82,15 @@ export class BudgetTarget extends Model<
    * are integers in 1–500; the cron iterates whatever values are present.
    */
   declare alertThresholds: CreationOptional<number[]>;
+  /**
+   * Optimistic-lock counter (issue #848). Sequelize `version: true` bumps this
+   * on every full-instance save and adds `WHERE version = N`, so a concurrent
+   * stale write fails with OptimisticLockError instead of silently clobbering
+   * the budget's `amount`/`scope`/config (the config lost-update bug). The PUT
+   * and PATCH handlers take the targeted `update(patch)` path, which writes only
+   * the patched columns so disjoint concurrent edits both persist regardless.
+   */
+  declare version: CreationOptional<number>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -136,6 +145,11 @@ export function initBudgetTarget(sequelize: Sequelize): typeof BudgetTarget {
         allowNull: false,
         defaultValue: [...BUDGET_TARGET_DEFAULT_ALERT_THRESHOLDS],
       },
+      version: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+      },
     } as ModelAttributes<BudgetTarget>,
     {
       sequelize,
@@ -143,6 +157,9 @@ export function initBudgetTarget(sequelize: Sequelize): typeof BudgetTarget {
       tableName: 'budget_targets',
       underscored: true,
       timestamps: true,
+      // Optimistic locking on the `version` column (issue #848). Guards
+      // full-instance saves against the budget-config lost-update race.
+      version: true,
     }
   );
   BudgetTarget.addHook('beforeSave', async (instance: BudgetTarget, options) => {
