@@ -2197,7 +2197,9 @@ router.post('/enrichment/backfill', async (req, res, next) => {
 
     if (wantsStream) {
       res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-cache');
+      // Financial-PII stream: forbid caching, keep no-transform so proxies
+      // don't buffer/alter the stream (issue #853).
+      res.setHeader('Cache-Control', 'no-store, no-transform');
       res.setHeader('X-Accel-Buffering', 'no');
       function emit(obj: unknown) {
         res.write(`${JSON.stringify(obj)}\n`);
@@ -2367,7 +2369,9 @@ router.post('/counterparty/backfill', async (req, res, next) => {
 
     if (wantsStream) {
       res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-cache');
+      // Financial-PII stream: forbid caching, keep no-transform so proxies
+      // don't buffer/alter the stream (issue #853).
+      res.setHeader('Cache-Control', 'no-store, no-transform');
       res.setHeader('X-Accel-Buffering', 'no');
       function emit(obj: unknown) {
         res.write(`${JSON.stringify(obj)}\n`);
