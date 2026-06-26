@@ -24,6 +24,7 @@ import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestD
 let app: import('express').Express;
 let primaryAgent: ReturnType<typeof request.agent>;
 let otherAgent: ReturnType<typeof request.agent>;
+let memberAgent: ReturnType<typeof request.agent>;
 let primaryHouseholdId: number;
 let primaryAccountId: number;
 let otherHouseholdId: number;
@@ -36,7 +37,10 @@ type Seeded = {
   accountId: number;
 };
 
-async function seed(emailPrefix: string): Promise<Seeded> {
+async function seed(
+  emailPrefix: string,
+  opts: { role?: 'owner' | 'member'; householdId?: number; accountId?: number } = {},
+): Promise<Seeded> {
   const models = await import('../../src/models');
   const { hashPassword, hashToken } = await import('../../src/auth/password.js');
   const password = await hashPassword('password123');
@@ -48,12 +52,32 @@ async function seed(emailPrefix: string): Promise<Seeded> {
     passwordSalt: password.salt,
     passwordParams: password.params,
   });
-  const household = await models.Household.create({ name: `${emailPrefix} household` });
+  // Reuse an existing household when one is passed so we can model a
+  // non-owner *member* of the same household as the owner.
+  const household =
+    opts.householdId != null
+      ? (await models.Household.findByPk(opts.householdId))!
+      : await models.Household.create({ name: `${emailPrefix} household` });
   await models.HouseholdMember.create({
     householdId: household.id,
     userId: user.id,
-    role: 'owner',
+    role: opts.role ?? 'owner',
   });
+  if (opts.accountId != null) {
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24);
+    await models.Session.create({
+      userId: user.id,
+      tokenHash: hashToken(token),
+      expiresAt,
+    });
+    return {
+      token,
+      householdId: household.id,
+      userId: user.id,
+      accountId: opts.accountId,
+    };
+  }
   const account = await models.Account.create({
     householdId: household.id,
     ownerUserId: user.id,
@@ -175,6 +199,16 @@ before(async () => {
   otherHouseholdId = other.householdId;
   otherAgent = testAgent(app);
   otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
+
+  // A non-owner *member* of the primary household — sync backup/restore
+  // must be 403 for this role (#836).
+  const member = await seed('Member', {
+    role: 'member',
+    householdId: primary.householdId,
+    accountId: primary.accountId,
+  });
+  memberAgent = testAgent(app);
+  memberAgent.jar.setCookie(`cashflow_session=${member.token}; Path=/`);
 });
 
 after(async () => {
@@ -341,6 +375,58 @@ test('GET /api/sync/history is household-scoped', async () => {
       `row ${row.id} from other household leaked into primary history`,
     );
   }
+});
+
+test('POST /api/sync/backup is 403 for a non-owner member (#836)', async () => {
+  const res = await memberAgent
+    .post('/api/sync/backup')
+    .send({ passphrase: 'member-cannot-export' });
+  assert.equal(res.status, 403);
+  assert.match(res.body.error, /owner|forbidden/i);
+});
+
+test('POST /api/sync/restore is 403 for a non-owner member (#836)', async () => {
+  // First the owner makes a real bundle the member could try to weaponise.
+  const backup = await primaryAgent
+    .post('/api/sync/backup')
+    .send({ passphrase: 'owner-made-bundle' });
+  assert.equal(backup.status, 200);
+
+  const before = await (await import('../../src/models')).Transaction.count({
+    where: { householdId: primaryHouseholdId },
+  });
+
+  const res = await memberAgent
+    .post('/api/sync/restore')
+    .send({
+      passphrase: 'owner-made-bundle',
+      bundle: backup.body.bundle,
+      mode: 'replace',
+    });
+  assert.equal(res.status, 403);
+  assert.match(res.body.error, /owner|forbidden/i);
+
+  // The destructive replace must NOT have run — household data is intact.
+  const after = await (await import('../../src/models')).Transaction.count({
+    where: { householdId: primaryHouseholdId },
+  });
+  assert.equal(after, before);
+});
+
+test('POST /api/sync/restore/preview is 403 for a non-owner member (#836)', async () => {
+  const backup = await primaryAgent
+    .post('/api/sync/backup')
+    .send({ passphrase: 'owner-preview-bundle' });
+  assert.equal(backup.status, 200);
+
+  const res = await memberAgent
+    .post('/api/sync/restore/preview')
+    .send({
+      passphrase: 'owner-preview-bundle',
+      bundle: backup.body.bundle,
+    });
+  assert.equal(res.status, 403);
+  assert.match(res.body.error, /owner|forbidden/i);
 });
 
 test('unauthenticated /api/sync calls return 401', async () => {
