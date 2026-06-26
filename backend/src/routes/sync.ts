@@ -47,6 +47,25 @@ function badRequest(message: string): Error & { status: number } {
 }
 
 /**
+ * Backup and restore operate on the WHOLE household: backup exfiltrates every
+ * member's data, and restore (mode=replace) wipes it. These are owner-only by
+ * the same posture household member removal already enforces — a non-owner
+ * member must not be able to export or destroy the household (#836).
+ *
+ * Throwing a 403 here keeps the gate at the very top of each handler, before
+ * any passphrase validation, decryption, or destructive table scan runs.
+ */
+function requireOwner(auth: ReturnType<typeof currentAuth>): void {
+  if (auth.role !== 'owner') {
+    const e = new Error('Only the household owner can back up or restore data') as Error & {
+      status: number;
+    };
+    e.status = 403;
+    throw e;
+  }
+}
+
+/**
  * POST /api/sync/backup { passphrase }
  *
  * Builds a bundle for the active household, encrypts it with the
@@ -56,6 +75,7 @@ function badRequest(message: string): Error & { status: number } {
 router.post('/backup', aiSuggestLimiter, async (req, res, next) => {
   try {
     const auth = currentAuth(req);
+    requireOwner(auth);
     const passphrase = validatePassphrase(req.body?.passphrase);
 
     const payload = await buildBundle(sequelize, {
@@ -103,7 +123,7 @@ router.post('/backup', aiSuggestLimiter, async (req, res, next) => {
  */
 router.post('/restore/preview', aiSuggestLimiter, async (req, res, next) => {
   try {
-    currentAuth(req);
+    requireOwner(currentAuth(req));
     const passphrase = validatePassphrase(req.body?.passphrase);
     const bundle = req.body?.bundle;
     if (typeof bundle !== 'string' || bundle.length === 0) {
@@ -150,6 +170,7 @@ router.post('/restore/preview', aiSuggestLimiter, async (req, res, next) => {
 router.post('/restore', aiSuggestLimiter, async (req, res, next) => {
   try {
     const auth = currentAuth(req);
+    requireOwner(auth);
     const passphrase = validatePassphrase(req.body?.passphrase);
     const bundle = req.body?.bundle;
     if (typeof bundle !== 'string' || bundle.length === 0) {
