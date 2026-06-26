@@ -10,6 +10,7 @@
 import { Router } from 'express';
 import { currentAuth } from '../auth/middleware';
 import { PushSubscription } from '../models';
+import { isAllowedPushEndpoint } from '../notifications/webPush';
 
 const router = Router();
 
@@ -31,6 +32,12 @@ export function parseSubscribeBody(
   const keys = body.keys;
   if (typeof endpoint !== 'string' || endpoint.trim() === '') {
     return { ok: false, error: 'endpoint is required' };
+  }
+  // SSRF guard (issue #855): the endpoint becomes an outbound POST target in the
+  // push fan-out, so it must be an https: URL on a known push service — never an
+  // internal/metadata host the caller picked.
+  if (!isAllowedPushEndpoint(endpoint)) {
+    return { ok: false, error: 'endpoint host is not an allowed push service' };
   }
   if (keys == null || typeof keys !== 'object') {
     return { ok: false, error: 'keys is required' };
