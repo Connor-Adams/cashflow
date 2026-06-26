@@ -31,6 +31,9 @@ test('mints a token, lists it (without plaintext), then revokes', async () => {
   assert.equal(mint.status, 201);
   assert.match(mint.body.plaintext, /^cfc_[A-Za-z0-9_-]{32}$/);
   assert.equal(mint.body.label, 'My Mac');
+  // Issue #829: minted tokens carry a server-side expiry in the future.
+  assert.ok(mint.body.expiresAt, 'mint response must include expiresAt');
+  assert.ok(new Date(mint.body.expiresAt).getTime() > Date.now());
   const tokenId = mint.body.id;
 
   const list = await authed.get('/api/capture/tokens');
@@ -41,6 +44,7 @@ test('mints a token, lists it (without plaintext), then revokes', async () => {
   assert.equal(list.body[0].tokenHash, undefined, 'list must never include tokenHash');
   assert.equal(list.body[0].userId, undefined, 'list must never include userId');
   assert.equal(list.body[0].label, 'My Mac');
+  assert.ok(list.body[0].expiresAt, 'list must include expiresAt');
 
   const revoke = await authed.delete(`/api/capture/tokens/${tokenId}`);
   assert.equal(revoke.status, 204);

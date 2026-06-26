@@ -147,6 +147,66 @@ test('POST /api/vault/documents uploads + GET file decrypts', async () => {
   assert.equal(Buffer.from(download.body as Buffer).toString('utf8'), 'hello vault world');
 });
 
+// ---- Stored-XSS hardening (issue #819) -----------------------------------
+
+test('vault download is served as attachment with nosniff + safe type', async () => {
+  // Attacker uploads HTML markup declared as an allowed type (text/plain).
+  const evil = Buffer.from('<html><script>alert(1)</script></html>', 'utf8');
+  const upload = await primaryAgent
+    .post('/api/vault/documents')
+    .attach('file', evil, { filename: 'evil.txt', contentType: 'text/plain' });
+  assert.equal(upload.status, 201);
+  const docId = upload.body.data.id as number;
+
+  const download = await primaryAgent.get(`/api/vault/documents/${docId}/file`);
+  assert.equal(download.status, 200);
+  // Forced download, not inline render.
+  assert.match(
+    String(download.headers['content-disposition']),
+    /^attachment;/,
+  );
+  // Renderable type neutralized to octet-stream so a sniffing browser cannot
+  // execute it as a document on the app origin.
+  assert.match(
+    String(download.headers['content-type']),
+    /^application\/octet-stream/,
+  );
+  // Belt-and-suspenders nosniff on the response (also set globally by helmet).
+  assert.equal(download.headers['x-content-type-options'], 'nosniff');
+  // Bytes themselves are unchanged — we only changed how they're served.
+  assert.equal(
+    Buffer.from(download.body as Buffer).toString('utf8'),
+    '<html><script>alert(1)</script></html>',
+  );
+});
+
+test('image vault downloads keep their real (inert) content-type', async () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const upload = await primaryAgent
+    .post('/api/vault/documents')
+    .attach('file', png, { filename: 'shot.png', contentType: 'image/png' });
+  assert.equal(upload.status, 201);
+  const docId = upload.body.data.id as number;
+
+  const download = await primaryAgent.get(`/api/vault/documents/${docId}/file`);
+  assert.equal(download.status, 200);
+  assert.match(String(download.headers['content-type']), /^image\/png/);
+  assert.match(String(download.headers['content-disposition']), /^attachment;/);
+  assert.equal(download.headers['x-content-type-options'], 'nosniff');
+});
+
+test('global helmet headers are present on API responses', async () => {
+  const list = await primaryAgent.get('/api/vault/documents');
+  assert.equal(list.status, 200);
+  // helmet sets nosniff globally.
+  assert.equal(list.headers['x-content-type-options'], 'nosniff');
+  // Locked-down CSP for this JSON/file API.
+  assert.match(
+    String(list.headers['content-security-policy']),
+    /default-src 'none'/,
+  );
+});
+
 test('stored bytes on disk are encrypted (not equal to plaintext)', async () => {
   const bytes = Buffer.from('top secret receipt', 'utf8');
   const res = await primaryAgent

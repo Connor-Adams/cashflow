@@ -67,21 +67,31 @@ beforeEach(async () => {
   } as never);
 });
 
-function fakeMessage(over: Partial<GmailMessageFull> & { from: string; subject: string }): GmailMessageFull {
+function fakeMessage(
+  over: Partial<GmailMessageFull> & { from: string; subject: string; authResults?: string | null },
+): GmailMessageFull {
+  const headers: Array<{ name: string; value: string }> = [
+    { name: 'From', value: over.from },
+    { name: 'Subject', value: over.subject },
+  ];
+  if (over.authResults != null) headers.push({ name: 'Authentication-Results', value: over.authResults });
   return {
     id: over.id ?? 'm1',
     threadId: 't1',
     internalDate: '1718000000000',
     labelIds: over.labelIds ?? [],
     payload: {
-      headers: [
-        { name: 'From', value: over.from },
-        { name: 'Subject', value: over.subject },
-      ],
+      headers,
       mimeType: 'text/plain',
       body: { data: Buffer.from('Thanks for your order at FooShop. Total $42.00').toString('base64url') },
     },
   } as GmailMessageFull;
+}
+
+/** A Gmail-inserted Authentication-Results header showing DKIM passed and the
+ *  signing domain aligns with the given From domain. */
+function dkimPassFor(domain: string): string {
+  return `mx.google.com; dkim=pass header.i=@${domain}; spf=pass; dmarc=pass`;
 }
 
 function deps(messages: GmailMessageFull[], extract: () => Promise<unknown>) {
@@ -112,7 +122,7 @@ test('AI extract from a purchases-labelled mail with an amount match auto-ingest
     merchantRaw: 'FOOSHOP', merchantClean: 'Fooshop',
     importBatch: 'test', sourceRowFingerprint: 'fp1', sourceIdentityFingerprint: 'fi1',
   } as never);
-  const msg = fakeMessage({ id: 'm1', from: 'FooShop <orders@fooshop.com>', subject: 'Your order confirmation', labelIds: ['CATEGORY_PURCHASES'] });
+  const msg = fakeMessage({ id: 'm1', from: 'FooShop <orders@fooshop.com>', subject: 'Your order confirmation', labelIds: ['CATEGORY_PURCHASES'], authResults: dkimPassFor('fooshop.com') });
   const result = await discoverReceiptSources(
     { userId: 1, householdId: 1 },
     {},
@@ -123,6 +133,141 @@ test('AI extract from a purchases-labelled mail with an amount match auto-ingest
   const learned = await ReceiptSenderAllowlist.findOne({ where: { emailAddress: 'orders@fooshop.com' } });
   assert.equal(learned?.status, 'enabled');
   assert.equal(learned?.source, 'discovery');
+});
+
+test('a spoofed sender (DKIM signed by a different domain) does NOT auto-ingest or learn the sender', async () => {
+  // The exploit from issue #867: an attacker sends an order-confirmation-shaped
+  // email spoofing From: auto-confirm@amazon.com with a clean total that even
+  // matches a real transaction — but the mail is DKIM-signed by attacker.test.
+  await Transaction.create({
+    accountId: TEST_ACCOUNT_ID, householdId: TEST_HOUSEHOLD_ID,
+    date: '2026-06-10', amount: '42.00', currency: 'CAD',
+    merchantRaw: 'AMAZON', merchantClean: 'Amazon',
+    importBatch: 'test', sourceRowFingerprint: 'fp-spoof', sourceIdentityFingerprint: 'fi-spoof',
+  } as never);
+  const msg = fakeMessage({
+    id: 'spoof1',
+    from: 'Amazon <auto-confirm@amazon.com>',
+    subject: 'Your order confirmation',
+    labelIds: ['CATEGORY_PURCHASES'],
+    authResults: 'mx.google.com; dkim=pass header.i=@attacker.test; spf=fail; dmarc=fail',
+  });
+  const result = await discoverReceiptSources(
+    { userId: 1, householdId: 1 },
+    {},
+    deps([msg], async () => ({ ...cleanExtract, vendor: 'amazon' })),
+  );
+  assert.equal(result.autoIngested, 0);
+  assert.equal(await ExternalOrder.count(), 0);
+  const row = await ReceiptSenderAllowlist.findOne({ where: { emailAddress: 'auto-confirm@amazon.com' } });
+  // Surfaced as a suggestion for the user to decide — never auto-enabled.
+  assert.equal(row?.status, 'suggested');
+  assert.equal(result.suggestionsAdded, 1);
+});
+
+test('deterministic-parser spoof (From: amazon.com, body the amazon parser accepts) does NOT auto-ingest without aligned DKIM', async () => {
+  // Issue #867 path A: a deterministic vendor parser dispatches purely on the
+  // From address, and classifyDiscoveryConfidence makes any deterministic match
+  // 'high' unconditionally. An attacker spoofs From: auto-confirm@amazon.com with
+  // a body the amazon parser accepts. Without an aligned DKIM pass it must NOT
+  // become an ExternalOrder nor promote the sender.
+  const amazonBody = [
+    'Order #114-1234567-1234567',
+    'Placed on May 21, 2026',
+    'Widget',
+    'Quantity: 1',
+    '$44.97',
+    'Order Subtotal: $44.97',
+    'Tax: $5.39',
+    'Order Total: $50.36',
+  ].join('\n');
+  const msg = {
+    id: 'detspoof', threadId: 't', internalDate: '1718000000000', labelIds: ['INBOX'],
+    payload: {
+      headers: [
+        { name: 'From', value: 'Amazon <auto-confirm@amazon.com>' },
+        { name: 'Subject', value: 'Your Amazon.com order' },
+        // DKIM passes but is signed by the attacker's domain, not amazon.com.
+        { name: 'Authentication-Results', value: 'mx.google.com; dkim=pass header.i=@attacker.test; dmarc=fail' },
+      ],
+      mimeType: 'text/plain',
+      body: { data: Buffer.from(amazonBody).toString('base64url') },
+    },
+  } as unknown as GmailMessageFull;
+
+  let aiCalled = false;
+  const result = await discoverReceiptSources(
+    { userId: 1, householdId: 1 },
+    {},
+    {
+      listMessageIds: async () => [{ id: 'detspoof', threadId: 't' }],
+      fetchMessage: async () => msg,
+      extractFromText: (async () => { aiCalled = true; return cleanExtract; }) as never,
+    },
+  );
+  // The deterministic parser handled it (no AI fallback), and it was 'high'
+  // pre-gate — but the gate demoted it.
+  assert.equal(aiCalled, false);
+  assert.equal(result.autoIngested, 0);
+  assert.equal(await ExternalOrder.count(), 0);
+  const row = await ReceiptSenderAllowlist.findOne({ where: { emailAddress: 'auto-confirm@amazon.com' } });
+  assert.equal(row?.status, 'suggested');
+});
+
+test('deterministic-parser hit WITH aligned DKIM auto-ingests (the legitimate Amazon case)', async () => {
+  const amazonBody = [
+    'Order #114-9999999-9999999',
+    'Placed on May 21, 2026',
+    'Gadget',
+    'Quantity: 1',
+    '$10.00',
+    'Order Total: $10.00',
+  ].join('\n');
+  const msg = {
+    id: 'detok', threadId: 't', internalDate: '1718000000000', labelIds: ['CATEGORY_PURCHASES'],
+    payload: {
+      headers: [
+        { name: 'From', value: 'Amazon <auto-confirm@amazon.com>' },
+        { name: 'Subject', value: 'Your Amazon.com order' },
+        { name: 'Authentication-Results', value: 'mx.google.com; dkim=pass header.i=@amazon.com; spf=pass; dmarc=pass' },
+      ],
+      mimeType: 'text/plain',
+      body: { data: Buffer.from(amazonBody).toString('base64url') },
+    },
+  } as unknown as GmailMessageFull;
+
+  const result = await discoverReceiptSources(
+    { userId: 1, householdId: 1 },
+    {},
+    {
+      listMessageIds: async () => [{ id: 'detok', threadId: 't' }],
+      fetchMessage: async () => msg,
+      extractFromText: (async () => cleanExtract) as never,
+    },
+  );
+  assert.equal(result.autoIngested, 1);
+  assert.equal(await ExternalOrder.count(), 1);
+  const row = await ReceiptSenderAllowlist.findOne({ where: { emailAddress: 'auto-confirm@amazon.com' } });
+  assert.equal(row?.status, 'enabled');
+});
+
+test('an unauthenticated sender (no Authentication-Results header) does NOT auto-ingest', async () => {
+  await Transaction.create({
+    accountId: TEST_ACCOUNT_ID, householdId: TEST_HOUSEHOLD_ID,
+    date: '2026-06-10', amount: '42.00', currency: 'CAD',
+    merchantRaw: 'FOOSHOP', merchantClean: 'Fooshop',
+    importBatch: 'test', sourceRowFingerprint: 'fp-noauth', sourceIdentityFingerprint: 'fi-noauth',
+  } as never);
+  const msg = fakeMessage({ id: 'noauth1', from: 'FooShop <orders@fooshop.com>', subject: 'Your order confirmation', labelIds: ['CATEGORY_PURCHASES'] });
+  const result = await discoverReceiptSources(
+    { userId: 1, householdId: 1 },
+    {},
+    deps([msg], async () => cleanExtract),
+  );
+  assert.equal(result.autoIngested, 0);
+  assert.equal(await ExternalOrder.count(), 0);
+  const row = await ReceiptSenderAllowlist.findOne({ where: { emailAddress: 'orders@fooshop.com' } });
+  assert.equal(row?.status, 'suggested');
 });
 
 test('AI extract with NO amount match becomes a suggestion and writes no order', async () => {
@@ -163,7 +308,11 @@ test('a PDF attachment on an empty-body message is extracted and auto-ingested w
   const msg = {
     id: 'pdf1', threadId: 't', internalDate: '1718000000000', labelIds: ['CATEGORY_PURCHASES'],
     payload: {
-      headers: [{ name: 'From', value: 'Shop <orders@pdfshop.test>' }, { name: 'Subject', value: 'Your invoice' }],
+      headers: [
+        { name: 'From', value: 'Shop <orders@pdfshop.test>' },
+        { name: 'Subject', value: 'Your invoice' },
+        { name: 'Authentication-Results', value: 'mx.google.com; dkim=pass header.i=@pdfshop.test; dmarc=pass' },
+      ],
       mimeType: 'multipart/mixed',
       parts: [
         { mimeType: 'text/plain', body: { data: Buffer.from('   ').toString('base64url') } },

@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { HouseholdMember, User, UserCaptureToken, Household } from '../models';
-import { hashCaptureToken, isCaptureTokenFormat } from './captureToken';
+import { hashCaptureToken, isCaptureTokenFormat, isCaptureTokenExpired } from './captureToken';
 
 export interface CaptureAuthContext {
   user: User;
@@ -26,6 +26,10 @@ export async function captureAuth(req: Request, res: Response, next: NextFunctio
     const token = await UserCaptureToken.findOne({ where: { tokenHash: hashCaptureToken(plaintext) } });
     if (!token || token.revokedAt != null) {
       res.status(401).json({ error: 'Invalid capture token' });
+      return;
+    }
+    if (isCaptureTokenExpired(token.expiresAt)) {
+      res.status(401).json({ error: 'Capture token has expired — mint a new one' });
       return;
     }
     const user = await User.findByPk(token.userId);

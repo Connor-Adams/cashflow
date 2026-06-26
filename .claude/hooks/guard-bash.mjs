@@ -71,10 +71,30 @@ function worktreeRootOf(cwd) {
   return m ? m[1] : null;
 }
 
+// Parse `git diff --cached --name-status` and return only paths being ADDED,
+// MODIFIED, copied, or RENAMED — NOT deletions. Untracking a forbidden file
+// (e.g. `git rm --cached backend/data/*.sqlite*`) is a DELETION and is exactly
+// what G4a wants to encourage, so it must never trip the deny (issue #824).
+// For renames (`R100\told\tnew`) the destination path is what lands in the tree.
+export function addedOrModifiedFromNameStatus(stdout) {
+  return (stdout || '')
+    .split('\n')
+    .map((line) => line.replace(/\s+$/, ''))
+    .filter(Boolean)
+    .flatMap((line) => {
+      const parts = line.split('\t');
+      const status = parts[0]?.[0]; // first char: A, M, D, R, C, T, U
+      if (!status || status === 'D') return [];
+      // Renames/copies put the new path last; everything else uses parts[1].
+      const dest = parts[parts.length - 1];
+      return dest ? [dest] : [];
+    });
+}
+
 function gitStagedFiles(cwd) {
   try {
-    return execSync('git diff --cached --name-only', { cwd, encoding: 'utf8' })
-      .split('\n').map((s) => s.trim()).filter(Boolean);
+    return addedOrModifiedFromNameStatus(
+      execSync('git diff --cached --name-status', { cwd, encoding: 'utf8' }));
   } catch { return []; }
 }
 

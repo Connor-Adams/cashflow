@@ -347,6 +347,8 @@ type FinancialGoalResponse = {
   priority: number;
   status: FinancialGoalStatus;
   notes: string | null;
+  /** Optimistic-lock counter (issue #845); bumps on every save. */
+  version: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -369,6 +371,7 @@ function serializeFinancialGoal(
     priority: row.priority,
     status: row.status,
     notes: row.notes,
+    version: row.version,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -588,22 +591,73 @@ router.put('/:id', async (req, res, next) => {
       }
     }
 
-    if (patch.name !== undefined) row.set('name', patch.name);
-    if (patch.targetAmount !== undefined) row.set('targetAmount', patch.targetAmount);
-    if (patch.currentAmount !== undefined) row.set('currentAmount', patch.currentAmount);
-    if (patch.currency !== undefined) row.set('currency', patch.currency);
-    if (patch.targetDate !== undefined) row.set('targetDate', patch.targetDate);
-    if (patch.monthlyContribution !== undefined) {
-      row.set('monthlyContribution', patch.monthlyContribution);
+    // Targeted column update (issue #845): only the patched columns are written,
+    // so a PUT of `status` no longer clobbers a concurrent PUT of `amount` (and
+    // vice versa). `version: true` still bumps the lock counter on this update.
+    // `patch` already contains exactly the keys the caller sent (the validator
+    // skips `undefined` fields), so it maps 1:1 to the columns to write.
+    const patchedColumns = patch as Parameters<typeof row.update>[0];
+    if (Object.keys(patchedColumns).length > 0) {
+      await row.update(patchedColumns);
     }
-    if (patch.linkedAccountId !== undefined) {
-      row.set('linkedAccountId', patch.linkedAccountId);
-    }
-    if (patch.priority !== undefined) row.set('priority', patch.priority);
-    if (patch.status !== undefined) row.set('status', patch.status);
-    if (patch.notes !== undefined) row.set('notes', patch.notes);
+    res.json(serializeFinancialGoal(row));
+  } catch (e) {
+    next(e);
+  }
+});
 
-    await row.save();
+/**
+ * Atomic contribution endpoint (issue #845). Adds a signed delta to
+ * `currentAmount` via a single `increment` (SQL `SET current_amount =
+ * current_amount + :by`), so concurrent contributions both land — no
+ * read-modify-write race, no lost update. Prefer this over client-sent totals.
+ *
+ * Body: { amount: number } — the delta to apply. Positive adds progress;
+ * negative withdraws. The resulting `currentAmount` is clamped to >= 0 so a
+ * withdrawal can never drive the goal negative.
+ */
+router.post('/:id/contribute', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const delta = Number(body.amount);
+    if (!Number.isFinite(delta) || delta === 0) {
+      res.status(400).json({ error: 'amount must be a non-zero number' });
+      return;
+    }
+
+    const where = { id, ...householdWhere(req) };
+
+    // Atomic, lock-free progress write. `increment` issues a single UPDATE
+    // scoped to the household, so two concurrent +200 / +300 contributions both
+    // apply (1000 -> 1500), instead of both reading 1000 and racing to a total.
+    await FinancialGoal.increment('currentAmount', { by: delta, where });
+    // `increment` returns dialect-shaped metadata, so re-fetch to confirm
+    // existence + ownership and to clamp/serialize.
+    let row = await FinancialGoal.findOne({ where });
+    if (!row) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+
+    // Clamp a withdrawal that would otherwise drive progress negative. Use the
+    // static `update` (lock-free, scoped by the same WHERE) rather than an
+    // instance save, so a concurrent contribution landing between the fetch and
+    // the clamp can't trip optimistic locking — then re-fetch the settled row.
+    if (Number(row.currentAmount) < 0) {
+      await FinancialGoal.update({ currentAmount: '0.0000' }, { where });
+      row = await FinancialGoal.findOne({ where });
+      if (!row) {
+        res.status(404).json({ error: 'Not found' });
+        return;
+      }
+    }
+
     res.json(serializeFinancialGoal(row));
   } catch (e) {
     next(e);

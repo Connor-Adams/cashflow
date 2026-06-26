@@ -251,6 +251,7 @@ export function ImportsTab() {
         label: result.label,
         lastUsedAt: null,
         createdAt: result.createdAt,
+        expiresAt: result.expiresAt,
       })
       setCaptureTokenPlaintext(result.plaintext)
       const [amazonHref, appleHref] = await Promise.all([
@@ -576,6 +577,9 @@ export function ImportsTab() {
             <p className="muted">
               Token created — copy or install now. You won't see it again after you leave this
               page.
+              {captureToken?.expiresAt && (
+                <> It expires {new Date(captureToken.expiresAt).toLocaleDateString()}; re-mint before then.</>
+              )}
             </p>
             <Input
               readOnly
@@ -591,6 +595,19 @@ export function ImportsTab() {
             {captureToken.lastUsedAt && (
               <> · Last used {new Date(captureToken.lastUsedAt).toLocaleString()}</>
             )}
+            {captureToken.expiresAt &&
+              (new Date(captureToken.expiresAt).getTime() <= Date.now() ? (
+                <>
+                  {' '}
+                  ·{' '}
+                  <span className="error">
+                    Expired {new Date(captureToken.expiresAt).toLocaleDateString()} — revoke and
+                    mint a new one
+                  </span>
+                </>
+              ) : (
+                <> · Expires {new Date(captureToken.expiresAt).toLocaleDateString()}</>
+              ))}
           </p>
         )}
         {captureBookmarklets && (

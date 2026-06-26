@@ -18,6 +18,7 @@ export class UserCaptureToken extends Model<
   declare label: string;
   declare lastUsedAt: Date | null;
   declare revokedAt: Date | null;
+  declare expiresAt: CreationOptional<Date | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -39,6 +40,7 @@ export function initUserCaptureToken(sequelize: Sequelize): typeof UserCaptureTo
       label: { type: DataTypes.STRING(64), allowNull: false },
       lastUsedAt: { type: DataTypes.DATE, field: 'last_used_at', allowNull: true },
       revokedAt: { type: DataTypes.DATE, field: 'revoked_at', allowNull: true },
+      expiresAt: { type: DataTypes.DATE, field: 'expires_at', allowNull: true },
     } as ModelAttributes<UserCaptureToken>,
     {
       sequelize,

@@ -11,6 +11,7 @@ import {
   hasMergedSources,
   AccountMergeError,
 } from '../accounts/accountMerge';
+import { deleteReceiptFilesForTransactions } from '../storage/receiptCleanup';
 
 // Revolving-credit kinds carry a creditLimit + utilization (#437). Credit cards
 // and lines of credit (stored as the `loan` type) both draw against a limit, and
@@ -303,6 +304,19 @@ router.delete('/:id', async (req, res, next) => {
       return;
     }
     await sequelize.transaction(async (t) => {
+      // Delete on-disk receipt blobs before the DB cascade drops the rows (#851):
+      // the Transaction→Receipt FK cascades at the SQL level and never fires the
+      // Sequelize hook that removes the actual files, so without this the receipt
+      // PII would orphan on disk forever.
+      const txns = await Transaction.findAll({
+        where: { accountId: id },
+        attributes: ['id'],
+        transaction: t,
+      });
+      await deleteReceiptFilesForTransactions(
+        txns.map((txn) => txn.id),
+        { transaction: t },
+      );
       await Transaction.destroy({ where: { accountId: id }, transaction: t });
       await account.destroy({ transaction: t });
     });

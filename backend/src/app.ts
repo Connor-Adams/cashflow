@@ -1,9 +1,11 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import * as env from './config/env';
 
 import { mountRoutes, captureCors } from './routeRegistry';
 import { attachAuth } from './auth/middleware';
+import { csrfGuard } from './auth/csrf';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
 import { withContext } from './observability/requestContext';
@@ -12,6 +14,31 @@ import { ServerErrorEvent } from './models';
 const app = express();
 
 app.set('trust proxy', env.trustProxy);
+
+// Security headers (issue #819). This is a JSON + file-download API consumed by
+// a separate-origin SPA, so we lean on helmet's safe defaults but tune two
+// things for the cross-origin frontend:
+//  - `X-Content-Type-Options: nosniff` (helmet default) is the core fix — it
+//    stops content-sniffing browsers from rendering attacker-controlled upload
+//    bytes (vault/receipt downloads) as HTML on the app origin (stored XSS).
+//  - A locked-down CSP. The API never returns HTML it wants a browser to
+//    render, so `default-src 'none'` is the tightest correct policy; it also
+//    neutralizes any HTML that does slip through (e.g. an error page).
+//  - `Cross-Origin-Resource-Policy: cross-origin` so the SPA on its own origin
+//    can still fetch API responses (the helmet default `same-origin` would
+//    block legitimate cross-origin XHR/fetch from the frontend host).
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        'default-src': ["'none'"],
+        'frame-ancestors': ["'none'"],
+      },
+    },
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  }),
+);
 
 app.get('/', (_req, res) => {
   res.json({
@@ -35,6 +62,11 @@ app.use(
   })
 );
 app.use(requestLogger);
+// CSRF defense (issue #825): reject cookie-authed cross-origin writes under /api
+// via an Origin/Referer allow-list. Mounted before body parsing so a forged
+// request is turned away before its payload is read; it self-exempts safe
+// methods and any request without the session cookie (token-authed flows).
+app.use('/api', csrfGuard);
 app.use(express.json({ limit: '2mb' }));
 app.use(attachAuth);
 app.use((req: Request, _res: Response, next: NextFunction) => {
