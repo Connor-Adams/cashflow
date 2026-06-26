@@ -24,7 +24,11 @@
  * `aiSuggestLimiter` (no-op in test) per CodeQL's rate-limit guidance.
  */
 import { Router, type Request } from 'express';
-import { Op, type WhereOptions } from 'sequelize';
+import {
+  Op,
+  type WhereOptions,
+  type Transaction as DbTransaction,
+} from 'sequelize';
 import {
   Transaction,
   Reimbursement,
@@ -569,11 +573,6 @@ router.get('/reimbursements/:id', async (req, res, next) => {
 router.put('/reimbursements/:id', async (req, res, next) => {
   try {
     currentAuth(req);
-    const r = await loadOwned(req);
-    if (!r) {
-      res.status(404).json({ error: 'Not found' });
-      return;
-    }
     const patch = validateReimbursementPatch(
       (req.body || {}) as Record<string, unknown>,
     );
@@ -581,25 +580,43 @@ router.put('/reimbursements/:id', async (req, res, next) => {
       res.status(patch.status).json({ error: patch.error });
       return;
     }
+    // Validate the contact (a household-scoped read) BEFORE opening the write
+    // transaction so we don't hold a row lock across an unrelated query.
     if ('contactId' in patch.value) {
       if (!(await contactInHousehold(req, patch.value.contactId))) {
         res.status(400).json({ error: 'contactId not found in household' });
         return;
       }
-      r.contactId = patch.value.contactId ?? null;
     }
-    if ('partyName' in patch.value) r.partyName = patch.value.partyName ?? null;
-    if ('amount' in patch.value && patch.value.amount) r.amount = patch.value.amount;
-    if ('currency' in patch.value && patch.value.currency) {
-      r.currency = patch.value.currency;
+
+    // Lock the row, then apply ONLY the patched fields. The previous code did a
+    // blind full-instance save() of a separately-loaded instance, so two
+    // concurrent PUTs (e.g. {amount} vs {status:received}) clobbered each
+    // other's untouched fields. Loading under LOCK.UPDATE inside the tx
+    // serializes the read-modify-write (issue #846).
+    const out = await sequelize.transaction(async (t) => {
+      const r = await loadOwnedForUpdate(req, t);
+      if (!r) return { ok: false as const };
+      if ('contactId' in patch.value) r.contactId = patch.value.contactId ?? null;
+      if ('partyName' in patch.value) r.partyName = patch.value.partyName ?? null;
+      if ('amount' in patch.value && patch.value.amount) r.amount = patch.value.amount;
+      if ('currency' in patch.value && patch.value.currency) {
+        r.currency = patch.value.currency;
+      }
+      if ('dueDate' in patch.value) r.dueDate = patch.value.dueDate ?? null;
+      if ('notes' in patch.value) r.notes = patch.value.notes ?? null;
+      if ('status' in patch.value && patch.value.status) {
+        applyStatus(r, patch.value.status);
+      }
+      await r.save({ transaction: t });
+      return { ok: true as const, id: r.id };
+    });
+
+    if (!out.ok) {
+      res.status(404).json({ error: 'Not found' });
+      return;
     }
-    if ('dueDate' in patch.value) r.dueDate = patch.value.dueDate ?? null;
-    if ('notes' in patch.value) r.notes = patch.value.notes ?? null;
-    if ('status' in patch.value && patch.value.status) {
-      applyStatus(r, patch.value.status);
-    }
-    await r.save();
-    const reloaded = await Reimbursement.findByPk(r.id, { include: INCLUDE });
+    const reloaded = await Reimbursement.findByPk(out.id, { include: INCLUDE });
     res.json({ data: serializeReimbursement(toRow(reloaded as Reimbursement)) });
   } catch (e) {
     next(e);
@@ -692,11 +709,6 @@ router.get('/reimbursements/:id/match-candidates', async (req, res, next) => {
 router.post('/reimbursements/:id/link-repayment', async (req, res, next) => {
   try {
     currentAuth(req);
-    const r = await loadOwned(req);
-    if (!r) {
-      res.status(404).json({ error: 'Not found' });
-      return;
-    }
     const body = (req.body || {}) as Record<string, unknown>;
     const txnId = Number(body.transactionId);
     if (!Number.isInteger(txnId) || txnId <= 0) {
@@ -718,23 +730,75 @@ router.post('/reimbursements/:id/link-repayment', async (req, res, next) => {
       res.status(400).json({ error: 'Repayment must be a positive inflow' });
       return;
     }
-    if (repayment.currency !== r.currency) {
+    // Lock the claim, verify currency against the LOCKED row, then take the
+    // repayment with a conditional UPDATE that only succeeds if no other claim
+    // already holds it. This + the partial-unique index on
+    // repayment_transaction_id stops the double-credit race where the same
+    // inflow closes two claims (issue #846).
+    const out = await sequelize.transaction(async (t) => {
+      const r = await loadOwnedForUpdate(req, t);
+      if (!r) return { kind: 'not-found' as const };
+      if (repayment.currency !== r.currency) {
+        return { kind: 'currency-mismatch' as const, expected: r.currency };
+      }
+      if (r.repaymentTransactionId === repayment.id) {
+        // Idempotent re-link of the same repayment to the same claim.
+        return { kind: 'ok' as const, id: r.id };
+      }
+      // Guard: the target repayment must not already be claimed by another
+      // (non-this) row. SELECT under the same tx; the partial-unique index is
+      // the backstop if a racer slips between this read and our UPDATE.
+      const claimedElsewhere = await Reimbursement.findOne({
+        where: {
+          repaymentTransactionId: repayment.id,
+          ...householdWhere(req),
+          id: { [Op.ne]: r.id },
+        },
+        attributes: ['id'],
+        transaction: t,
+      });
+      if (claimedElsewhere) {
+        return { kind: 'conflict' as const };
+      }
+      r.repaymentTransactionId = repayment.id;
+      // Linking a repayment closes the claim as received (unless explicitly
+      // waived already — keep waived as a terminal user choice).
+      if (r.status !== 'waived') {
+        r.status = 'received';
+        r.receivedAt = new Date();
+      }
+      await r.save({ transaction: t });
+      return { kind: 'ok' as const, id: r.id };
+    });
+
+    if (out.kind === 'not-found') {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    if (out.kind === 'currency-mismatch') {
       res.status(400).json({
-        error: `Repayment currency must match the claim (${r.currency})`,
+        error: `Repayment currency must match the claim (${out.expected})`,
       });
       return;
     }
-    r.repaymentTransactionId = repayment.id;
-    // Linking a repayment closes the claim as received (unless explicitly
-    // waived already — keep waived as a terminal user choice).
-    if (r.status !== 'waived') {
-      r.status = 'received';
-      r.receivedAt = new Date();
+    if (out.kind === 'conflict') {
+      res.status(409).json({
+        error: 'Repayment transaction is already linked to another claim',
+      });
+      return;
     }
-    await r.save();
-    const reloaded = await Reimbursement.findByPk(r.id, { include: INCLUDE });
+    const reloaded = await Reimbursement.findByPk(out.id, { include: INCLUDE });
     res.json({ data: serializeReimbursement(toRow(reloaded as Reimbursement)) });
   } catch (e) {
+    // The partial-unique index is the last-line backstop: if two requests race
+    // past the in-tx guard, the DB rejects the second with a unique violation.
+    // Translate that to the same 409 the guard returns.
+    if (isUniqueRepaymentViolation(e)) {
+      res
+        .status(409)
+        .json({ error: 'Repayment transaction is already linked to another claim' });
+      return;
+    }
     next(e);
   }
 });
@@ -744,19 +808,25 @@ router.post('/reimbursements/:id/link-repayment', async (req, res, next) => {
 router.post('/reimbursements/:id/unlink-repayment', async (req, res, next) => {
   try {
     currentAuth(req);
-    const r = await loadOwned(req);
-    if (!r) {
+    // Lock + mutate inside the tx so an interleaved link/unlink can't leave the
+    // claim in a torn state (status=received but link=null, or vice versa).
+    const out = await sequelize.transaction(async (t) => {
+      const r = await loadOwnedForUpdate(req, t);
+      if (!r) return { ok: false as const };
+      r.repaymentTransactionId = null;
+      // Reopen a received claim; leave waived/overdue pins as-is.
+      if (r.status === 'received') {
+        r.status = 'expected';
+        r.receivedAt = null;
+      }
+      await r.save({ transaction: t });
+      return { ok: true as const, id: r.id };
+    });
+    if (!out.ok) {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    r.repaymentTransactionId = null;
-    // Reopen a received claim; leave waived/overdue pins as-is.
-    if (r.status === 'received') {
-      r.status = 'expected';
-      r.receivedAt = null;
-    }
-    await r.save();
-    const reloaded = await Reimbursement.findByPk(r.id, { include: INCLUDE });
+    const reloaded = await Reimbursement.findByPk(out.id, { include: INCLUDE });
     res.json({ data: serializeReimbursement(toRow(reloaded as Reimbursement)) });
   } catch (e) {
     next(e);
@@ -772,6 +842,58 @@ async function loadOwned(req: Request): Promise<Reimbursement | null> {
     where: { id, ...householdWhere(req) },
     include: INCLUDE,
   });
+}
+
+/**
+ * Load the household-scoped claim inside an open transaction WITH a row lock
+ * (SELECT ... FOR UPDATE on Postgres). Used by the mutating handlers so a
+ * concurrent writer blocks until we commit, closing the read-modify-write race
+ * (issue #846). No `include` here: eager-loaded JOINs can't be row-locked
+ * portably, and the locked row is all the guard logic needs — we re-fetch the
+ * hydrated row for the response after commit.
+ */
+async function loadOwnedForUpdate(
+  req: Request,
+  t: DbTransaction,
+): Promise<Reimbursement | null> {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  return Reimbursement.findOne({
+    where: { id, ...householdWhere(req) },
+    transaction: t,
+    lock: t.LOCK.UPDATE,
+  });
+}
+
+/**
+ * True iff `e` is a unique-constraint violation on the partial-unique
+ * `repayment_transaction_id` index (migration 20260626000001). Cross-dialect:
+ * SQLite reports "SQLITE_CONSTRAINT", Postgres "23505"; Sequelize wraps both as
+ * SequelizeUniqueConstraintError. We narrow to the repayment index so an
+ * unrelated unique violation isn't masked as a 409 — falling back to the
+ * generic name check only when no index/field detail is available.
+ */
+function isUniqueRepaymentViolation(e: unknown): boolean {
+  const err = e as {
+    name?: string;
+    fields?: Record<string, unknown> | string[];
+    original?: { code?: string; constraint?: string };
+    parent?: { code?: string; constraint?: string };
+  };
+  const code = err?.original?.code ?? err?.parent?.code;
+  const isUnique =
+    err?.name === 'SequelizeUniqueConstraintError' ||
+    code === '23505' ||
+    code === 'SQLITE_CONSTRAINT';
+  if (!isUnique) return false;
+  const constraint = err?.original?.constraint ?? err?.parent?.constraint ?? '';
+  const fields = Array.isArray(err?.fields)
+    ? err.fields.join(',')
+    : Object.keys(err?.fields ?? {}).join(',');
+  const detail = `${constraint} ${fields}`;
+  // When the dialect tells us which index/field tripped, require it to be the
+  // repayment one; otherwise (no detail) trust the unique signal.
+  return detail.trim() === '' || /repayment_transaction_id/.test(detail);
 }
 
 /**
