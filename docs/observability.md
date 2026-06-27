@@ -158,7 +158,10 @@ The cashflow stack includes a self-hosted Grafana instance for querying Loki, Te
    - Add a persistent volume mounted at `/var/lib/grafana` (5GB).
    - Set env vars:
      - `GF_SECURITY_ADMIN_USER=admin`
-     - `GF_SECURITY_ADMIN_PASSWORD=<strong-password>`
+     - `GF_SECURITY_ADMIN_PASSWORD=<strong-password>` — **required**. The
+       container's entrypoint refuses to boot if this is unset/empty (issue
+       #860); there is deliberately no default fallback, so a misconfigured
+       service fails loudly instead of coming up with a known credential.
      - `PORT=3000`
    - Generate a public domain forwarding port 3000.
 2. Add the service ID to `.github/workflows/promote-to-production.yml` (`RAILWAY_GRAFANA_SERVICE_ID`).

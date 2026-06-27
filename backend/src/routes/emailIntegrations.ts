@@ -26,6 +26,7 @@ import {
 } from '../integrations/receiptSenderSuggestions';
 import { logger } from '../observability/logger';
 import { emailIntegrationEnabled, corsOrigin } from '../config/env';
+import { emailScanLimiter } from './emailRateLimit';
 
 const router = Router();
 
@@ -155,7 +156,7 @@ router.post('/disconnect/google', async (req, res, next) => {
   }
 });
 
-router.post('/scan/google', async (req, res, next) => {
+router.post('/scan/google', emailScanLimiter, async (req, res, next) => {
   try {
     const { user, household } = currentAuth(req);
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -242,7 +243,7 @@ router.post('/scan/google', async (req, res, next) => {
   }
 });
 
-router.post('/discover/google', async (req, res, next) => {
+router.post('/discover/google', emailScanLimiter, async (req, res, next) => {
   try {
     const { user, household } = currentAuth(req);
     const body = (req.body ?? {}) as Record<string, unknown>;

@@ -49,6 +49,7 @@ import { isSenderAuthenticated } from './emailAuthentication';
 import { hasMatchingTransaction, matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
 import { categorizeAndApplyReceiptItems } from '../import/categorizeReceiptItems';
 import { upsertSenderSuggestion, parseEmailAddress } from './receiptSenderSuggestions';
+import { openDailyAiBudget } from './aiExtractionBudget';
 import { logger } from '../observability/logger';
 
 export interface DiscoveryDeps {
@@ -80,6 +81,9 @@ export interface DiscoveryResult {
   skippedAlreadySeen: number;
   filteredBySubject: number;
   failed: number;
+  /** Messages skipped without an AI call because the household hit its daily
+   *  AI-extraction cap (issue #870). */
+  aiCappedMessages: number;
   messages: DiscoveryResultMessage[];
   query: string;
   sinceDate: string | null;
@@ -151,6 +155,11 @@ export async function discoverReceiptSources(
   let skippedAlreadySeen = 0;
   let filteredBySubject = 0;
   let failed = 0;
+  let aiCappedMessages = 0;
+
+  // Daily AI-extraction budget shared with the fast scan path (issue #870):
+  // cap minus what this household already spent today across scan + discovery.
+  const aiBudget = await openDailyAiBudget(opts.householdId);
 
   async function recordProcessed(p: {
     messageId: string;
@@ -269,10 +278,12 @@ export async function discoverReceiptSources(
       let extracted: ExtractedReceiptOrder | null = null;
       let parser = 'ai';
       let fromPdf = false;
+      let aiCapped = false;
       if (body.trim()) {
-        const parsed = await parseReceiptText({ fromAddress: r.from, subject: r.subject, text: body, extractFromText });
+        const parsed = await parseReceiptText({ fromAddress: r.from, subject: r.subject, text: body, extractFromText, budget: aiBudget });
         extracted = parsed.extracted;
         parser = parsed.parser;
+        if (parsed.aiCapped) aiCapped = true;
       }
 
       let hasCleanExtract = extracted != null && extracted.total != null && extracted.items.length > 0;
@@ -281,14 +292,26 @@ export async function discoverReceiptSources(
       if (!hasCleanExtract && collectPdfParts(full.payload).length > 0) {
         const pdfText = await extractPdfReceiptText({ accessToken, messageId: summary.id, payload: full.payload });
         if (pdfText.trim()) {
-          const parsed = await parseReceiptText({ fromAddress: r.from, subject: r.subject, text: pdfText, extractFromText });
-          if (parsed.extracted.total != null && parsed.extracted.items.length > 0) {
+          const parsed = await parseReceiptText({ fromAddress: r.from, subject: r.subject, text: pdfText, extractFromText, budget: aiBudget });
+          if (parsed.aiCapped) aiCapped = true;
+          if (parsed.extracted != null && parsed.extracted.total != null && parsed.extracted.items.length > 0) {
             extracted = parsed.extracted;
             parser = parsed.parser;
             fromPdf = true;
             hasCleanExtract = true;
           }
         }
+      }
+
+      // Daily AI cap hit and no deterministic parser could handle it: skip
+      // without an OpenAI call (issue #870). No suggestion is written — a
+      // capped run must not let an attacker's flood seed sender suggestions.
+      if (extracted == null && aiCapped) {
+        r.status = 'ai_capped';
+        r.error = 'daily AI extraction cap reached';
+        aiCappedMessages++;
+        await recordProcessed({ messageId: summary.id, status: 'ai_capped', errorMessage: 'daily AI extraction cap reached', subject: r.subject, fromAddr: r.from });
+        return r;
       }
 
       if (extracted == null) {
@@ -401,6 +424,7 @@ export async function discoverReceiptSources(
     skippedAlreadySeen,
     filteredBySubject,
     failed,
+    aiCappedMessages,
     messages: results,
     query,
     sinceDate: sinceDate ? sinceDate.toISOString() : null,

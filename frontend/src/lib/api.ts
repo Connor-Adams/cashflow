@@ -101,6 +101,32 @@ export async function deleteJson<T>(path: string): Promise<T> {
   return parseJson<T>(r)
 }
 
+/** Response from DELETE /api/me/account — the right-to-erasure sweep summary (issue #850). */
+export type AccountErasureResponse = {
+  deleted: boolean
+  householdId: number
+  deletedUserIds: number[]
+  filesSwept: number
+}
+
+/**
+ * DELETE /api/me/account — owner-gated right-to-erasure. Permanently deletes the
+ * caller's household and every member, all household-scoped data, and the on-disk
+ * files those rows point at. The body must echo the household name exactly
+ * (the server 400s on a mismatch). On success the server clears the session
+ * cookie, so the caller must redirect to the login screen.
+ */
+export async function deleteAccount(confirm: string): Promise<AccountErasureResponse> {
+  const r = await fetch(`${base}/api/me/account`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirm }),
+  })
+  if (!r.ok) throw await apiError(r, '/api/me/account')
+  return parseJson<AccountErasureResponse>(r)
+}
+
 export async function postFormData<T>(path: string, form: FormData): Promise<T> {
   const r = await fetch(`${base}${path}`, {
     method: 'POST',

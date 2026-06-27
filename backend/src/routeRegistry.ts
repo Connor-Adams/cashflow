@@ -115,6 +115,7 @@ import vaultRouter from './routes/vault';
 import financeEventsRouter from './routes/financeEvents';
 import syncRouter from './routes/sync';
 import dataExportsRouter from './routes/dataExports';
+import accountErasureRouter from './routes/accountErasure';
 import jobsRouter from './jobs/api';
 import searchRouter from './routes/search';
 import incomeRouter from './routes/income';
@@ -197,7 +198,7 @@ export { captureCors } from './routes/capture';
  * ORDER PRESERVED exactly from the prior app.ts sequence.
  */
 export const preAuthRoutes: RouteEntry[] = [
-  { paths: '/api/health', handlers: [healthRouter], why: 'Public health probe — no auth.' },
+  { paths: '/api/health', handlers: [healthRouter], why: 'Public liveness + readiness probes — no auth.' },
   { paths: '/api/version', handlers: [versionRouter], why: 'Public build/version info — no auth.' },
   { paths: '/api/config', handlers: [configRouter], why: 'Public client bootstrap config — no auth.' },
   { paths: '/api/auth', handlers: [authRouter], why: 'Login/register/logout — must be reachable without a session.' },
@@ -306,6 +307,11 @@ export const gatedRoutes: RouteEntry[] = [
   { paths: '/api/vault', handlers: [vaultRouter] },
   { paths: '/api/finance-events', handlers: [financeEventsRouter] },
   { paths: '/api/sync', handlers: [syncRouter] },
+  {
+    paths: '/api/me',
+    handlers: [accountErasureRouter],
+    why: 'Right-to-erasure (issue #850): DELETE /api/me/account. Mounts on the same /api/me personal-account prefix as dataExports, BEFORE it so /account is unambiguous. Owner-gated + explicit-confirmation in-router; permanently deletes the household + all member users + on-disk files.',
+  },
   {
     paths: '/api/me',
     handlers: [dataExportsRouter],
