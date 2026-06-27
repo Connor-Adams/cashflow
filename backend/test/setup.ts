@@ -39,3 +39,14 @@ if (!process.env.DATABASE_URL) {
     process.exit(143);
   });
 }
+
+// Encrypted-column fields (Account.bankAccountNumber via symmetricEncryption,
+// #871; email/SimpleFIN integration tokens) require EMAIL_INTEGRATION_ENCRYPTION_KEY
+// to encrypt at rest. Provide a fixed 32-byte (64-hex) test key process-wide so any
+// test that creates a record with such a field works without each file wiring its
+// own key. Tests that specifically exercise the unset/invalid-key path override or
+// delete this in their own setup.
+if (!process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY) {
+  process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY =
+    '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff';
+}
