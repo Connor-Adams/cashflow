@@ -28,6 +28,13 @@ WORKDIR /app
 RUN corepack enable
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
+# gosu lets the entrypoint chown the root-owned Railway volume as root, then
+# drop to `node` and exec the app as PID 1 (see docker-entrypoint.sh). Issue #861.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends gosu \
+  && rm -rf /var/lib/apt/lists/* \
+  && gosu nobody true
+
 # Copy the built app owned by the non-root `node` user (UID 1000, baked into the
 # official node image). `yarn run db:migrate` and corepack need a writable HOME
 # and project tree; chowning at COPY time avoids a separate recursive `chown`
@@ -55,10 +62,12 @@ EXPOSE 3001
 # `yarn run db:migrate` writes Yarn's install-state.gz to the project root's
 # .yarn/ (= /app/.yarn), so the `node` user needs /app writable or the container
 # crash-loops on `EACCES: mkdir '/app/.yarn'`. Issue #861 regressed this.
-RUN chown node:node /app
+RUN chown node:node /app && chmod +x docker-entrypoint.sh
 
-# Drop root: the backend handles financial data + DB credentials, so it runs
-# least-privilege. Issue #861.
-USER node
-
+# No `USER node` here on purpose: the container must start as root to chown the
+# root-owned Railway /data volume (else `EACCES: mkdir '/data/uploads/csv'`).
+# docker-entrypoint.sh does that, then drops to `node` via gosu before exec'ing
+# the CMD — so the financial/DB-creds app process still runs least-privilege
+# (issue #861), it just isn't pinned via a static USER directive.
+ENTRYPOINT ["/app/backend/docker-entrypoint.sh"]
 CMD ["sh", "-c", "yarn run db:migrate && exec node dist/server.js"]

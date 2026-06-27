@@ -3,7 +3,9 @@
  * running as root.
  *
  * Hardening contract:
- *  - backend runner stage drops to the non-root `node` user.
+ *  - backend runner runs the app as the non-root `node` user. It may *start* as
+ *    root (to chown the root-owned Railway /data volume) but its entrypoint MUST
+ *    drop to `node` via gosu before exec'ing the app — see docker-entrypoint.sh.
  *  - frontend runner uses the nginx-unprivileged image (non-root nginx master).
  *  - the otel-collector (stateless, no persistent volume) drops to a non-root UID.
  *
@@ -37,19 +39,40 @@ function userDirectives(dockerfile: string): string[] {
     .filter((line) => /^USER\s+/.test(line));
 }
 
-test('backend Dockerfile: runner drops to the non-root `node` user (#861)', () => {
+test('backend Dockerfile + entrypoint: app drops to non-root `node` via gosu (#861)', () => {
   const df = readDockerfile('backend', 'Dockerfile');
+  const entrypoint = fs.readFileSync(
+    path.resolve(REPO_ROOT, 'backend', 'docker-entrypoint.sh'),
+    'utf8',
+  );
+
+  // The container starts as root only to chown the root-owned Railway volume,
+  // then the entrypoint MUST drop to `node` before running the app.
+  assert.match(
+    entrypoint,
+    /exec\s+gosu\s+node\b/,
+    'backend/docker-entrypoint.sh must drop privileges to `node` via gosu before exec',
+  );
+  assert.match(
+    df,
+    /install[^\n]*\bgosu\b/,
+    'backend/Dockerfile must install gosu so the entrypoint can drop privileges',
+  );
+  assert.match(
+    df,
+    /ENTRYPOINT\s+\[\s*"\/app\/backend\/docker-entrypoint\.sh"/,
+    'backend/Dockerfile must wire the drop-privilege entrypoint',
+  );
+
+  // If a static USER directive is present, it must not pin root as the final user.
   const users = userDirectives(df);
-  assert.ok(
-    users.includes('USER node'),
-    `backend/Dockerfile must contain a \`USER node\` directive so the runner is non-root; found USER directives: ${JSON.stringify(users)}`,
-  );
-  // The last (effective) USER directive must not be root.
-  assert.notStrictEqual(
-    users.at(-1),
-    'USER root',
-    'backend/Dockerfile must not end up running as root',
-  );
+  if (users.length > 0) {
+    assert.notStrictEqual(
+      users.at(-1),
+      'USER root',
+      'backend/Dockerfile must not end up running as root',
+    );
+  }
 });
 
 test('frontend Dockerfile: runner uses nginx-unprivileged (non-root nginx) (#861)', () => {
