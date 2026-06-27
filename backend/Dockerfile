@@ -50,6 +50,13 @@ ENV HOME=/home/node
 
 EXPOSE 3001
 
+# The COPY --chown lines above own the copied subdirs (node_modules, backend,
+# shared) but NOT /app itself, which WORKDIR created as root. At startup
+# `yarn run db:migrate` writes Yarn's install-state.gz to the project root's
+# .yarn/ (= /app/.yarn), so the `node` user needs /app writable or the container
+# crash-loops on `EACCES: mkdir '/app/.yarn'`. Issue #861 regressed this.
+RUN chown node:node /app
+
 # Drop root: the backend handles financial data + DB credentials, so it runs
 # least-privilege. Issue #861.
 USER node
