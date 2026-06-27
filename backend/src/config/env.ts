@@ -90,18 +90,37 @@ export function assertCorsOrigin(raw: string | undefined): string {
   return raw;
 }
 
+/**
+ * Resolve Express's `trust proxy` setting from the `TRUST_PROXY` env var.
+ *
+ * In production `TRUST_PROXY` MUST be the integer proxy hop count, never
+ * `true`. A trust-all value (`true`) tells Express to trust the entire
+ * `X-Forwarded-For` chain, which makes `req.ip` attacker-spoofable: a request
+ * can carry `X-Forwarded-For: <anything>` and the leftmost spoofed entry
+ * becomes `req.ip`, trivially bypassing every IP-keyed rate limiter. So in
+ * production we reject `true`/`false`/non-numeric/negative values and clamp to
+ * the safe single-hop default (`1`, one Railway hop). Outside production we
+ * still accept the boolean strings for local-dev convenience.
+ */
 export function parseTrustProxy(
   raw: string | undefined,
   nodeEnv: string = process.env.NODE_ENV || 'development'
 ): boolean | number | string {
+  const isProd = nodeEnv === 'production';
   if (raw === undefined || raw === '') {
-    return nodeEnv === 'production' ? 1 : false;
+    return isProd ? 1 : false;
   }
   const trimmed = raw.trim().toLowerCase();
+  const numeric = Number(trimmed);
+  const isHopCount = Number.isInteger(numeric) && numeric >= 0;
+  if (isProd) {
+    // Only an integer hop count (>= 0) is honored in production; everything
+    // else (true/false/subnets/keywords) falls back to the safe default.
+    return isHopCount ? numeric : 1;
+  }
   if (trimmed === 'true') return true;
   if (trimmed === 'false') return false;
-  const numeric = Number(trimmed);
-  if (Number.isInteger(numeric) && numeric >= 0) return numeric;
+  if (isHopCount) return numeric;
   return raw.trim();
 }
 
@@ -482,3 +501,15 @@ export const googleOauthRedirectUri =
 export const emailIntegrationEnabled = Boolean(
   googleOauthClientId && googleOauthClientSecret && process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY,
 );
+
+/**
+ * Cost-DoS guard (issue #870): the maximum number of *AI* receipt extractions a
+ * single household may incur per UTC day across all email scan + discovery runs.
+ * Deterministic vendor parses are free and never counted. An inbox flood of
+ * receipt-shaped emails would otherwise drive one OpenAI call per new message;
+ * this caps the daily blast radius. Read dynamically (not memoized) so tests and
+ * ops can tune it without a restart. `0` is treated as the default, not "off".
+ */
+export function dailyAiExtractionCap(): number {
+  return parseIntEnv('EMAIL_AI_EXTRACTIONS_PER_DAY', 250) || 250;
+}

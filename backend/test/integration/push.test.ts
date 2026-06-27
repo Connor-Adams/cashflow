@@ -90,7 +90,7 @@ beforeEach(async () => {
   await models.NotificationPreference.destroy({ where: {} });
 });
 
-const validBody = (endpoint = 'https://push.example/primary') => ({
+const validBody = (endpoint = 'https://fcm.googleapis.com/fcm/send/primary') => ({
   endpoint,
   keys: { p256dh: 'pkey', auth: 'akey' },
   userAgent: 'Chrome',
@@ -104,7 +104,7 @@ test('AC3: POST persists a user-scoped row and returns 201', async () => {
 
   const rows = await models.PushSubscription.findAll({ where: { userId: primaryUserId } });
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].endpoint, 'https://push.example/primary');
+  assert.equal(rows[0].endpoint, 'https://fcm.googleapis.com/fcm/send/primary');
   assert.equal(rows[0].p256dh, 'pkey');
   assert.equal(rows[0].userAgent, 'Chrome');
 });
@@ -135,15 +135,32 @@ test('AC4: POST with missing endpoint returns 400 and persists nothing', async (
 test('AC4: POST with missing keys.p256dh returns 400', async () => {
   const res = await primaryAgent
     .post('/api/push/subscriptions')
-    .send({ endpoint: 'https://push.example/x', keys: { auth: 'a' } });
+    .send({ endpoint: 'https://fcm.googleapis.com/fcm/send/x', keys: { auth: 'a' } });
   assert.equal(res.status, 400);
 });
 
 test('AC4: POST with missing keys.auth returns 400', async () => {
   const res = await primaryAgent
     .post('/api/push/subscriptions')
-    .send({ endpoint: 'https://push.example/x', keys: { p256dh: 'k' } });
+    .send({ endpoint: 'https://fcm.googleapis.com/fcm/send/x', keys: { p256dh: 'k' } });
   assert.equal(res.status, 400);
+});
+
+test('issue #855: POST with an internal/non-allowlisted endpoint is rejected (SSRF)', async () => {
+  const models = await import('../../src/models');
+  for (const endpoint of [
+    'http://169.254.169.254/latest/meta-data/',
+    'http://localhost:9090/x',
+    'https://internal.corp/x',
+    'http://fcm.googleapis.com/fcm/send/x', // non-https on an allowlisted host
+  ]) {
+    const res = await primaryAgent
+      .post('/api/push/subscriptions')
+      .send(validBody(endpoint));
+    assert.equal(res.status, 400, `should reject ${endpoint}`);
+  }
+  const count = await models.PushSubscription.count();
+  assert.equal(count, 0, 'no SSRF endpoint persisted');
 });
 
 test('AC5: DELETE removes the caller row and returns 204', async () => {
@@ -151,7 +168,7 @@ test('AC5: DELETE removes the caller row and returns 204', async () => {
   await primaryAgent.post('/api/push/subscriptions').send(validBody());
   const res = await primaryAgent
     .delete('/api/push/subscriptions')
-    .send({ endpoint: 'https://push.example/primary' });
+    .send({ endpoint: 'https://fcm.googleapis.com/fcm/send/primary' });
   assert.equal(res.status, 204);
   const count = await models.PushSubscription.count({ where: { userId: primaryUserId } });
   assert.equal(count, 0);
@@ -160,7 +177,7 @@ test('AC5: DELETE removes the caller row and returns 204', async () => {
 test('AC5: DELETE of a non-existent endpoint returns 404', async () => {
   const res = await primaryAgent
     .delete('/api/push/subscriptions')
-    .send({ endpoint: 'https://push.example/nope' });
+    .send({ endpoint: 'https://fcm.googleapis.com/fcm/send/nope' });
   assert.equal(res.status, 404);
 });
 
@@ -169,14 +186,14 @@ test('AC5: DELETE never removes another user row (404, row survives)', async () 
   // other user owns the endpoint
   await otherAgent
     .post('/api/push/subscriptions')
-    .send(validBody('https://push.example/shared'));
+    .send(validBody('https://fcm.googleapis.com/fcm/send/shared'));
   // primary tries to delete it
   const res = await primaryAgent
     .delete('/api/push/subscriptions')
-    .send({ endpoint: 'https://push.example/shared' });
+    .send({ endpoint: 'https://fcm.googleapis.com/fcm/send/shared' });
   assert.equal(res.status, 404);
   const stillThere = await models.PushSubscription.findOne({
-    where: { endpoint: 'https://push.example/shared', userId: otherUserId },
+    where: { endpoint: 'https://fcm.googleapis.com/fcm/send/shared', userId: otherUserId },
   });
   assert.ok(stillThere, "other user's row survived");
 });
@@ -200,7 +217,7 @@ test('AC1: enqueueNotification with channelPush=true sends one push AND writes i
   });
   await models.PushSubscription.create({
     userId: primaryUserId,
-    endpoint: 'https://push.example/primary',
+    endpoint: 'https://fcm.googleapis.com/fcm/send/primary',
     p256dh: 'p',
     auth: 'a',
     userAgent: null,
@@ -218,7 +235,7 @@ test('AC1: enqueueNotification with channelPush=true sends one push AND writes i
   );
 
   assert.equal(result.status, 'created');
-  assert.deepEqual(sent, ['https://push.example/primary'], 'exactly one push');
+  assert.deepEqual(sent, ['https://fcm.googleapis.com/fcm/send/primary'], 'exactly one push');
 
   const inApp = await models.Notification.findAll({ where: { userId: primaryUserId } });
   assert.equal(inApp.length, 1, 'in-app row still written');
@@ -238,7 +255,7 @@ test('AC2: enqueueNotification sends no push when channelPush=false; in-app unch
   });
   await models.PushSubscription.create({
     userId: primaryUserId,
-    endpoint: 'https://push.example/primary',
+    endpoint: 'https://fcm.googleapis.com/fcm/send/primary',
     p256dh: 'p',
     auth: 'a',
     userAgent: null,

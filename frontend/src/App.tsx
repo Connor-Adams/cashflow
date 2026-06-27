@@ -61,6 +61,7 @@ import { JobsTab } from './pages/settings/tabs/JobsTab'
 import { DataTab } from './pages/settings/tabs/DataTab'
 import { WhatsNewTab } from './pages/settings/tabs/WhatsNewTab'
 import { FeedbackInboxTab } from './pages/settings/tabs/FeedbackInboxTab'
+import { AccountTab } from './pages/settings/tabs/AccountTab'
 import { ApiTokensTab } from './pages/settings/tabs/ApiTokensTab'
 import { NotificationsTab } from './pages/settings/tabs/NotificationsTab'
 import { IncomePage } from './pages/IncomePage'
@@ -194,6 +195,7 @@ function AppRoutes() {
             <Route path="backup" element={<SyncPage />} />
             <Route path="data" element={<DataTab />} />
             <Route path="feedback" element={<FeedbackInboxTab />} />
+            <Route path="account" element={<AccountTab />} />
             <Route path="whatsnew" element={<WhatsNewTab />} />
             {/* Folded/moved routes — redirect old deep links */}
             <Route path="palette" element={<Navigate to="/settings/appearance" replace />} />
