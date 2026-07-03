@@ -23,7 +23,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run Fallow audit
-        uses: fallow-rs/fallow@8a83dc0e86232d874f845eee306c75f3fb9c95d7 # v2
+        uses: fallow-rs/fallow@e36026dfc0f00bfdf8dab889efc58ab86e5ec466 # v2
         with:
           command: audit
           # Summary comment is rendered by the ci.yml `code-audit` job (see
