@@ -12,8 +12,9 @@
  */
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { sequelize } from '../db';
-import { Household, User } from '../models';
+import { Household, User, Account, Transaction } from '../models';
 import { PlannedEvent } from '../models/PlannedEvent';
 import { getUpcomingRequiredExpenses } from './safeToSpend';
 
@@ -56,6 +57,44 @@ function basePlanned(over: Partial<Parameters<typeof PlannedEvent.create>[0]> = 
     cancellationUrl: null,
     category: null,
     ...over,
+  } as never);
+}
+
+/** Create an account of the given type; returns its id. */
+async function mkAccount(name: string, accountType: string): Promise<number> {
+  const acc = await Account.create({
+    name,
+    householdId: HH,
+    ownerUserId: USER,
+    owner: 'me',
+    visibility: 'household',
+    accountType,
+    defaultCurrency: 'CAD',
+    openingBalance: '0.0000',
+  } as never);
+  return acc.id;
+}
+
+/** Seed a single charge (negative amount) on an account for a given merchant. */
+async function mkCharge(
+  accountId: number,
+  date: string,
+  amount: number,
+  merchant: string,
+): Promise<void> {
+  await Transaction.create({
+    accountId,
+    householdId: HH,
+    visibility: 'household',
+    ownershipType: 'me',
+    importBatch: 'sts-cardfund-test',
+    date,
+    merchantRaw: merchant,
+    merchantClean: merchant,
+    amount: amount.toFixed(4),
+    currency: 'CAD',
+    sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
   } as never);
 }
 
@@ -134,4 +173,53 @@ test('ignores cancelled subscriptions and other currencies', async () => {
   });
   const total = await getUpcomingRequiredExpenses(HH, 'CAD', '2026-06-01', '2026-07-01');
   assert.equal(total, 0);
+});
+
+test('excludes a card-funded subscription (its spend is reserved by the CC-payment leg)', async () => {
+  // Spotify is charged to a credit card, so it rolls into the card balance the
+  // expected-credit-card-payment leg already reserves. Counting the projected
+  // occurrence here too would double-reserve the same recurring charge.
+  const cardId = await mkAccount('Amex', 'credit_card');
+  await mkCharge(cardId, '2026-05-14', -20, 'Spotify');
+  await basePlanned({
+    name: 'Spotify',
+    kind: 'subscription',
+    cadence: 'monthly',
+    normalizedName: 'spotify',
+    amount: '20.0000',
+    expectedDate: '2026-04-10',
+    nextExpectedDate: '2026-06-10',
+  });
+  const total = await getUpcomingRequiredExpenses(HH, 'CAD', '2026-06-01', '2026-07-01');
+  assert.equal(total, 0);
+});
+
+test('still counts a bank-funded subscription even when the household has cards', async () => {
+  // A card exists (with an unrelated charge), but the Gym membership is charged
+  // to a chequing account — a real in-window cash outflow the CC leg never sees.
+  const cardId = await mkAccount('Amex', 'credit_card');
+  await mkCharge(cardId, '2026-05-14', -20, 'Spotify');
+  const bankId = await mkAccount('Chequing', 'chequing');
+  await mkCharge(bankId, '2026-05-14', -50, 'Gym');
+  await basePlanned({
+    name: 'Gym',
+    kind: 'subscription',
+    cadence: 'monthly',
+    normalizedName: 'gym',
+    amount: '50.0000',
+    expectedDate: '2026-04-10',
+    nextExpectedDate: '2026-06-10',
+  });
+  const total = await getUpcomingRequiredExpenses(HH, 'CAD', '2026-06-01', '2026-07-01');
+  assert.equal(total, 50);
+});
+
+test('ordinary planned expenses are never dropped by the card-funded filter', async () => {
+  // Same merchant name on a card, but the row is kind=planned (a real bill),
+  // not a detected subscription — it must still count.
+  const cardId = await mkAccount('Amex', 'credit_card');
+  await mkCharge(cardId, '2026-05-14', -1000, 'Rent');
+  await basePlanned({ name: 'Rent', normalizedName: 'rent' });
+  const total = await getUpcomingRequiredExpenses(HH, 'CAD', '2026-06-01', '2026-07-01');
+  assert.equal(total, 1000);
 });
