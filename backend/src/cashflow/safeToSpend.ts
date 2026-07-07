@@ -22,7 +22,10 @@ import {
   FinancialGoal,
   CashflowSettings,
   LiabilityAccount,
+  Transaction,
 } from '../models';
+import type { PlannedEvent } from '../models/PlannedEvent';
+import { normalizeMerchantName } from '../subscriptions/detect';
 import { creditCardReservation } from './creditCardReservation';
 import { CASHFLOW_SETTINGS_DEFAULTS } from '../models/CashflowSettings';
 import { balanceAtDate } from '../networth/balanceAtDate';
@@ -48,6 +51,13 @@ import { toUnits, fromUnits } from '../util/numbers';
 
 /** History window scanned for recurring-income detection. */
 const INCOME_LOOKBACK_DAYS = 180;
+
+/**
+ * History window scanned to infer which merchants are funded by a credit card.
+ * Matches the recurring-detector window (routes/recurring.ts) so a subscription
+ * and its funding-account inference are derived from the same span of charges.
+ */
+const CARD_FUNDING_LOOKBACK_DAYS = 180;
 
 /** Transaction types that are positive but never count as recurring income. */
 const INCOME_EXCLUDED_TXN_TYPES = new Set([
@@ -346,13 +356,80 @@ export async function getUpcomingRequiredExpenses(
     to: windowEndDate,
     typeFilter: 'expense',
   });
+
+  // A subscription expectation is DETECTED from card/bank charges — its future
+  // occurrences are only a *cash* outflow in this window when the charge hits a
+  // bank account. When it lands on a credit card, that spend rolls into the card
+  // balance the expected-credit-card-payment leg already reserves; counting the
+  // projected occurrence here too double-reserves the same recurring charge. The
+  // #199 double-count guard only excluded `debt_payment`-type events and missed
+  // this, because subscriptions store no funding account (detection groups by
+  // merchant only). Infer it: drop any subscription whose merchant is charged to
+  // one of the household's cards. Ordinary planned events and bank-funded
+  // subscriptions are unaffected.
+  const cardFundedMerchants = await getCardFundedMerchantKeys(
+    householdId,
+    asOfDate,
+  );
+
   let totalU = 0;
   for (const { row } of occurrences) {
+    if (row.kind === 'subscription' && isCardFunded(row, cardFundedMerchants)) {
+      continue;
+    }
     const amount = Number(row.amount);
     if (!Number.isFinite(amount)) continue;
     totalU += toUnits(amount);
   }
   return fromUnits(totalU);
+}
+
+/** True when a subscription row's merchant is charged to a credit card. */
+function isCardFunded(
+  row: PlannedEvent,
+  cardFundedMerchants: ReadonlySet<string>,
+): boolean {
+  if (cardFundedMerchants.size === 0) return false;
+  return cardFundedMerchants.has(normalizeMerchantName(row.normalizedName ?? row.name));
+}
+
+/**
+ * Normalized merchant keys whose charges land on one of the household's
+ * credit-card accounts within the last CARD_FUNDING_LOOKBACK_DAYS. Keys are
+ * derived exactly as subscription `normalizedName` is (merchantClean ?? raw,
+ * `normalizeMerchantName`) so a card-funded subscription matches by equality.
+ * Empty set when the household has no cards (or no in-window card charges), so
+ * the required-expense leg is unchanged for card-free households.
+ */
+export async function getCardFundedMerchantKeys(
+  householdId: number,
+  asOfDate: string,
+): Promise<Set<string>> {
+  const accounts = await Account.findAll({ where: { householdId } });
+  const cardIds = accounts
+    .filter((a) => CREDIT_CARD_TYPES.has(a.accountType))
+    .map((a) => a.id);
+  if (cardIds.length === 0) return new Set();
+
+  const fromDate = addDaysIso(asOfDate, -CARD_FUNDING_LOOKBACK_DAYS);
+  const rows = await Transaction.findAll({
+    where: {
+      accountId: { [Op.in]: cardIds },
+      // Charges leave a card as a negative amount (codebase convention); credits
+      // and inbound payments are positive and never fund a subscription.
+      amount: { [Op.lt]: 0 },
+      date: { [Op.gt]: fromDate, [Op.lte]: asOfDate },
+    },
+    attributes: ['merchantClean', 'merchantRaw'],
+  });
+
+  const keys = new Set<string>();
+  for (const r of rows) {
+    const merchant =
+      (r.merchantClean ?? '').trim() || (r.merchantRaw ?? '').trim();
+    if (merchant) keys.add(normalizeMerchantName(merchant));
+  }
+  return keys;
 }
 
 /**
