@@ -84,9 +84,9 @@ async function seedSub(householdId: number, userId: number, merchant: string): P
     amount: '20.0000',
     currency: 'CAD',
     cadence: 'monthly',
-    lastChargeDate: '2026-05-15',
+    lastChargeDate: daysAgo(20),
     nextExpectedDate: null,
-    expectedDate: '2026-05-15',
+    expectedDate: daysAgo(20),
     annualizedCost: '240.0000',
     status: 'planned',
     statusUncertain: false,
@@ -95,6 +95,20 @@ async function seedSub(householdId: number, userId: number, merchant: string): P
     notes: null,
   });
   return row.id;
+}
+
+/**
+ * The detector's baseline window is 90 days ending at the real `Date.now()`
+ * (detectSubscriptionPriceChanges.ts), so fixed calendar dates silently rot out
+ * of range as the wall clock advances — a charge seeded at a hardcoded date
+ * eventually falls outside the window and the baseline collapses. Seed relative
+ * to today instead; offsets sit comfortably inside 90 days and preserve each
+ * test's ordering (older baseline charges first, most-recent charge last).
+ */
+function daysAgo(n: number): string {
+  return new Date(Date.now() - n * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
 }
 
 let fpCounter = 0;
@@ -126,9 +140,9 @@ async function seedTxn(
 test('emits a subscription_price_increase Insight on a >=5% increase vs 90d median', async () => {
   const { householdId, userId, accountId } = await seedHousehold();
   const subId = await seedSub(householdId, userId, 'Netflix');
-  await seedTxn(householdId, accountId, 'Netflix', '-10.00', '2026-03-01');
-  await seedTxn(householdId, accountId, 'Netflix', '-10.00', '2026-04-01');
-  await seedTxn(householdId, accountId, 'Netflix', '-11.00', '2026-05-01'); // +10% vs median 10
+  await seedTxn(householdId, accountId, 'Netflix', '-10.00', daysAgo(60));
+  await seedTxn(householdId, accountId, 'Netflix', '-10.00', daysAgo(35));
+  await seedTxn(householdId, accountId, 'Netflix', '-11.00', daysAgo(10)); // +10% vs median 10
   const r = await detect();
   assert.equal(r.detected, 1);
   const ins = await models.Insight.findOne({ where: { type: 'subscription_price_increase' } });
@@ -145,9 +159,9 @@ test('emits a subscription_price_increase Insight on a >=5% increase vs 90d medi
 test('does NOT emit on a price DROP', async () => {
   const { householdId, userId, accountId } = await seedHousehold();
   await seedSub(householdId, userId, 'Spotify');
-  await seedTxn(householdId, accountId, 'Spotify', '-10.00', '2026-03-01');
-  await seedTxn(householdId, accountId, 'Spotify', '-10.00', '2026-04-01');
-  await seedTxn(householdId, accountId, 'Spotify', '-8.00', '2026-05-01'); // -20%
+  await seedTxn(householdId, accountId, 'Spotify', '-10.00', daysAgo(60));
+  await seedTxn(householdId, accountId, 'Spotify', '-10.00', daysAgo(35));
+  await seedTxn(householdId, accountId, 'Spotify', '-8.00', daysAgo(10)); // -20%
   const r = await detect();
   assert.equal(r.detected, 0);
   assert.equal(await models.Insight.count(), 0);
@@ -156,9 +170,9 @@ test('does NOT emit on a price DROP', async () => {
 test('upserts (does not duplicate or reopen) on a re-run with the same increase', async () => {
   const { householdId, userId, accountId } = await seedHousehold();
   await seedSub(householdId, userId, 'Netflix');
-  await seedTxn(householdId, accountId, 'Netflix', '-10.00', '2026-03-01');
-  await seedTxn(householdId, accountId, 'Netflix', '-10.00', '2026-04-01');
-  await seedTxn(householdId, accountId, 'Netflix', '-11.00', '2026-05-01');
+  await seedTxn(householdId, accountId, 'Netflix', '-10.00', daysAgo(60));
+  await seedTxn(householdId, accountId, 'Netflix', '-10.00', daysAgo(35));
+  await seedTxn(householdId, accountId, 'Netflix', '-11.00', daysAgo(10));
   await detect();
   const ins = await models.Insight.findOne({ where: { type: 'subscription_price_increase' } });
   await ins!.update({ status: 'dismissed' });
@@ -175,9 +189,9 @@ test('does NOT emit when the most recent matching row is a refund/credit', async
   // latest charge — Math.abs would turn it into a fake +100% price hike.
   const { householdId, userId, accountId } = await seedHousehold();
   await seedSub(householdId, userId, 'Crave');
-  await seedTxn(householdId, accountId, 'Crave', '-9.99', '2026-04-20');
-  await seedTxn(householdId, accountId, 'Crave', '-9.99', '2026-05-20');
-  await seedTxn(householdId, accountId, 'Crave', '19.98', '2026-06-05'); // refund, most recent
+  await seedTxn(householdId, accountId, 'Crave', '-9.99', daysAgo(60));
+  await seedTxn(householdId, accountId, 'Crave', '-9.99', daysAgo(35));
+  await seedTxn(householdId, accountId, 'Crave', '19.98', daysAgo(10)); // refund, most recent
   const r = await detect();
   assert.equal(r.detected, 0);
   assert.equal(await models.Insight.count(), 0);
@@ -188,9 +202,9 @@ test('refunds inside the 90-day window do not pollute the median baseline', asyn
   // baseline must stay at the $10 charge median, not the charge/credit mix.
   const { householdId, userId, accountId } = await seedHousehold();
   await seedSub(householdId, userId, 'Disney');
-  await seedTxn(householdId, accountId, 'Disney', '-10.00', '2026-04-25');
-  await seedTxn(householdId, accountId, 'Disney', '1.00', '2026-05-10'); // credit
-  await seedTxn(householdId, accountId, 'Disney', '-11.00', '2026-06-01');
+  await seedTxn(householdId, accountId, 'Disney', '-10.00', daysAgo(60));
+  await seedTxn(householdId, accountId, 'Disney', '1.00', daysAgo(35)); // credit
+  await seedTxn(householdId, accountId, 'Disney', '-11.00', daysAgo(10));
   const r = await detect();
   assert.equal(r.detected, 1);
   const ins = await models.Insight.findOne({ where: { type: 'subscription_price_increase' } });
