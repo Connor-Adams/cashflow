@@ -4,8 +4,9 @@
  * Decides how much cash to reserve for a single credit card inside the
  * spending window. Reserves the *statement balance* (what is billed and due),
  * gated by the card's due day so a balance due next cycle isn't reserved this
- * window. Falls back to the full current balance only when no statement data
- * is captured, so we never silently under-reserve.
+ * window. Falls back to the full current balance when no statement data is
+ * captured — still gated by the due day when it's known, and reserved in full
+ * only when the due day is also unknown, so we never silently under-reserve.
  */
 
 export type CreditCardReservationInput = {
@@ -37,9 +38,18 @@ export function creditCardReservation(
   windowStartIso: string,
   windowEndIso: string,
 ): number {
-  // No statement data captured — fall back to the full current balance.
+  // No statement data captured — fall back to the full current balance, but
+  // still gate by the due day when it's known so we don't reserve a balance
+  // that isn't due until a later window.
   if (card.statementBalance == null) {
-    return card.currentBalanceOwed > 0 ? card.currentBalanceOwed : 0;
+    // Nothing owed (or a credit balance) — reserve nothing.
+    if (card.currentBalanceOwed <= 0) return 0;
+    // No due day either — cannot gate; reserve the full balance (never under-reserve).
+    if (card.dueDay == null) return card.currentBalanceOwed;
+    // Due day known — reserve only when it actually falls inside the window.
+    return dueDayInWindow(card.dueDay, windowStartIso, windowEndIso)
+      ? card.currentBalanceOwed
+      : 0;
   }
   // Nothing billed (or a credit balance) — reserve nothing.
   if (card.statementBalance <= 0) return 0;
