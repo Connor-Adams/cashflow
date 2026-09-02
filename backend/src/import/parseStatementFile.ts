@@ -12,6 +12,7 @@ import { hashContent, rowFingerprint, stableFingerprint } from './fingerprint';
 import { saveStatementPreview } from './statementPreviewStore';
 import { extractPdfLines } from './pdf/extractLines';
 import { findPdfParser, registerBuiltInPdfParsers } from './pdf/registry';
+import type { PdfParseContext } from './pdf/types';
 import { parseWsInvestRow, type WsRow } from './wealthsimpleInvestParse';
 import {
   parseActivitiesExportRow,
@@ -775,7 +776,13 @@ export async function parseStatementFile(opts: {
         error: 'No PDF parser registered for this statement layout',
       };
     }
-    const out = parser.parse(lines, { defaultCurrency });
+    const out = parser.parse(lines, {
+      defaultCurrency,
+      // Lets a parser that serves several account shapes under one layout
+      // (Wealthsimple: brokerage + Cash/Chequing/Save) route rows to the cash
+      // ledger vs investment activity by account rather than by row code.
+      accountType: account.accountType as PdfParseContext['accountType'],
+    });
     const transactions = out.transactions.map((v) => ({
       date: v.date,
       merchantRaw: v.merchantRaw,

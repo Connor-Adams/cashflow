@@ -8,6 +8,7 @@ import {
   wsPdfCodeToActivity,
   WS_PDF_SKIP_CODES,
   wsPdfCashCodeToTxnType,
+  wsPdfDepositCodeToTxnType,
 } from './wealthsimpleActivityCodes';
 
 /**
@@ -296,6 +297,33 @@ function buySell(code: string): boolean {
 }
 
 /**
+ * Security named by an activity description, or null for a cash-only row.
+ * The "SYM - Name:" form covers equities + commodities (e.g. "GOLD -
+ * Physically backed gold: …"); the crypto form has no such prefix, so the
+ * symbol doubles as the name and is tagged cryptocurrency.
+ */
+function securityFromDescription(
+  description: string,
+  currency: string,
+): Activity['security'] {
+  const secMatch = SECURITY_RE.exec(description);
+  if (secMatch) {
+    return {
+      symbol: secMatch[1].toUpperCase(),
+      name: secMatch[2].trim(),
+      assetType: null,
+      currency,
+    };
+  }
+  const cryptoMatch = SECURITY_CRYPTO_RE.exec(description);
+  if (cryptoMatch) {
+    const sym = cryptoMatch[1].toUpperCase();
+    return { symbol: sym, name: sym, assetType: 'cryptocurrency', currency };
+  }
+  return null;
+}
+
+/**
  * Parse the activity table(s). Single ("Activity - Current period") or split
  * ("CAD Activity"/"USD Activity") tables. Walks lines IN ORDER, starting a
  * pending row on each row line and accumulating every following non-row line
@@ -305,6 +333,7 @@ function buySell(code: string): boolean {
 function parseActivities(
   lines: PdfLine[],
   accountCurrency: string,
+  isDepositAccount: boolean,
 ): { activities: Activity[]; transactions: CashTxn[]; warnings: string[] } {
   const activities: Activity[] = [];
   const transactions: CashTxn[] = [];
@@ -322,6 +351,49 @@ function parseActivities(
 
     const code = row.code;
     const activityType = wsPdfCodeToActivity(code);
+    const description = row.descParts.join(' ').replace(/\s+/g, ' ').trim();
+    const tradeMatch = TRADE_DATE_RE.exec(description);
+    const tradeDate = tradeMatch ? tradeMatch[1] : row.date;
+    const amount = Number((row.credit - row.debit).toFixed(4));
+    const security = securityFromDescription(description, currency);
+
+    // Zero-cash bookkeeping events (stock lending, mark-to-market, journals)
+    // carry no ledger value on ANY account type. Checked up front so the
+    // deposit routing below cannot turn one into a $0.00 transaction. Every
+    // skip code is absent from MAP, so the activityType guard preserves the
+    // original ordering exactly.
+    if (activityType === null && WS_PDF_SKIP_CODES.has(code)) {
+      skipCounts[code] = (skipCounts[code] ?? 0) + 1;
+      return;
+    }
+
+    // Deposit accounts (WS Cash / Chequing / Save) share this parser and sniff
+    // with brokerage accounts, but they are bank accounts: every row on one is
+    // a cash-ledger event and belongs in `transactions`. This keys off the
+    // caller's account type rather than a code list because WS renames the
+    // codes between statement cycles — the recurring AMEX pre-authorized debit
+    // arrived as AFT_OUT in 2026-06 and WD in 2026-07, and WD/DEP/WDQ/CONT sit
+    // in MAP, so they were intercepted as investment activity and the July
+    // cash flow never reached the ledger.
+    //
+    // Security-bearing rows are the one exception: a deposit statement should
+    // never carry one, but flattening it to a cash row would drop the security.
+    if (isDepositAccount && security === null) {
+      transactions.push({
+        date: tradeDate,
+        merchantRaw: description,
+        merchantClean: normalizeMerchant(description),
+        amount,
+        currency,
+        sourceReference: null,
+        // An unrecognized code still reaches the ledger — it just falls
+        // through to the narrative detector for typing instead of being
+        // dropped as "unmapped".
+        overrideTxnType: wsPdfDepositCodeToTxnType(code) ?? undefined,
+      });
+      return;
+    }
+
     if (activityType === null) {
       // Cash-account spend codes (SPEND / AFT_OUT / E_TRFIN / …) are not in the
       // InvestmentActivity taxonomy. Emit them as cash Transaction rows BEFORE
@@ -330,13 +402,11 @@ function parseActivities(
       // (SPEND/AFT_OUT/P2P_OUT are outflows → negative; E_TRFIN/CASHBACK are
       // inflows → positive). The wrap-aware description doubles as the merchant.
       if (CASH_TXN_CODES.has(code)) {
-        const desc = row.descParts.join(' ').replace(/\s+/g, ' ').trim();
-        const tradeMatch = TRADE_DATE_RE.exec(desc);
         transactions.push({
-          date: tradeMatch ? tradeMatch[1] : row.date,
-          merchantRaw: desc,
-          merchantClean: normalizeMerchant(desc),
-          amount: Number((row.credit - row.debit).toFixed(4)),
+          date: tradeDate,
+          merchantRaw: description,
+          merchantClean: normalizeMerchant(description),
+          amount,
           currency,
           sourceReference: null,
           // The WS code authoritatively types the row (SPEND → purchase,
@@ -345,17 +415,10 @@ function parseActivities(
         });
         return;
       }
-      if (WS_PDF_SKIP_CODES.has(code)) {
-        skipCounts[code] = (skipCounts[code] ?? 0) + 1;
-      } else {
-        unmappedCounts[code] = (unmappedCounts[code] ?? 0) + 1;
-      }
+      unmappedCounts[code] = (unmappedCounts[code] ?? 0) + 1;
       return;
     }
 
-    const description = row.descParts.join(' ').replace(/\s+/g, ' ').trim();
-    const tradeMatch = TRADE_DATE_RE.exec(description);
-    const tradeDate = tradeMatch ? tradeMatch[1] : row.date;
     // Quantity is a position change only for trades. Equities quote "shares",
     // commodities quote "ounces/units", crypto uses "Purchase/Sale of N SYM".
     // Non-trade activity (dividend/interest/fee/etc.) keeps quantity null.
@@ -365,31 +428,6 @@ function parseActivities(
         QTY_CRYPTO_RE.exec(description)
       : null;
     const quantity = qtyMatch ? Number(qtyMatch[1]) : null;
-    // Security: the "SYM - Name:" form covers equities + commodities (e.g.
-    // "GOLD - Physically backed gold: …"); the crypto form has no such prefix,
-    // so the symbol doubles as the name and is tagged cryptocurrency.
-    const secMatch = SECURITY_RE.exec(description);
-    let security: Activity['security'] = null;
-    if (secMatch) {
-      security = {
-        symbol: secMatch[1].toUpperCase(),
-        name: secMatch[2].trim(),
-        assetType: null,
-        currency,
-      };
-    } else {
-      const cryptoMatch = SECURITY_CRYPTO_RE.exec(description);
-      if (cryptoMatch) {
-        const sym = cryptoMatch[1].toUpperCase();
-        security = {
-          symbol: sym,
-          name: sym,
-          assetType: 'cryptocurrency',
-          currency,
-        };
-      }
-    }
-    const amount = Number((row.credit - row.debit).toFixed(4));
 
     activities.push({
       activityType,
@@ -499,13 +537,19 @@ export const wealthsimpleBrokerageParser: PdfParser = {
     }
     return orderExec && ws;
   },
-  parse: (lines): PdfParseResult => {
+  parse: (lines, ctx): PdfParseResult => {
     const header = parseWsBrokerageHeader(lines);
     const accountCurrency = header.currency ?? 'CAD';
     const holdings = parseHoldings(lines, header.periodEnd, accountCurrency);
+    // WS Cash / Chequing / Save statements use this same layout. The caller
+    // knows which account the upload targets; the statement body does not say
+    // so reliably enough to key ledger routing off it.
+    const isDepositAccount =
+      ctx.accountType === 'checking' || ctx.accountType === 'savings';
     const { activities, transactions, warnings } = parseActivities(
       lines,
       accountCurrency,
+      isDepositAccount,
     );
     return {
       transactions,

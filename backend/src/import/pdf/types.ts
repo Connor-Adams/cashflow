@@ -31,6 +31,18 @@ export type PdfLine = {
 export type PdfParseContext = {
   /** Account default currency, e.g. 'CAD'. */
   defaultCurrency: string;
+  /**
+   * The target Account's type, when the caller already knows it. Wealthsimple
+   * runs Cash/Chequing/Save accounts and brokerage accounts through one
+   * statement layout (and so one parser + sniff), and the row codes alone no
+   * longer separate them — WS relabels them between statement cycles. The
+   * account type is the stable signal, so the WS brokerage parser reads it to
+   * decide whether a row belongs in the cash ledger or in investment activity.
+   * Omit when the account is not known yet: the bundle importers parse once
+   * just to read the header, resolve the account from it, then re-parse
+   * through `parseStatementFile`, which does supply this.
+   */
+  accountType?: 'checking' | 'savings' | 'credit_card' | 'investment' | 'loan';
 };
 
 /**
