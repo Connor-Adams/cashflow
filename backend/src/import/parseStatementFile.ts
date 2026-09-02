@@ -794,6 +794,9 @@ export async function parseStatementFile(opts: {
       // over enrichment's narrative guess in the commit pipeline. undefined for
       // parsers/rows that carry no such signal.
       overrideTxnType: v.overrideTxnType,
+      // The weaker sibling: a type the source guessed from an ambiguous code.
+      // The narrative detector may overrule it. See NormalizedCashTransaction.
+      txnTypeHint: v.txnTypeHint,
       sourceRowFingerprint: rowFingerprint({
         accountId: account.id,
         date: v.date,

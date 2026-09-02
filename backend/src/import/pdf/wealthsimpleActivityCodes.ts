@@ -129,3 +129,25 @@ export function wsPdfDepositCodeToTxnType(code: string | null | undefined): TxnT
   if (!code) return null;
   return DEPOSIT_CODE_TXN_TYPE[String(code).trim().toUpperCase()] ?? null;
 }
+
+/**
+ * Codes whose TxnType the statement genuinely establishes, as opposed to ones
+ * that only say which way the money went.
+ *
+ * SPEND is a card purchase, OBP is a bill payment, INT is interest, DCTFEE is a
+ * fee — nothing in the narrative can outrank those. The movement codes are
+ * different: Wealthsimple uses the SAME code for a plain withdrawal and for a
+ * credit-card bill payment (WD, AFT_OUT), and for both an account funding
+ * transfer and a payroll direct deposit (DEP, AFT_IN). Their TxnType is
+ * therefore emitted as `txnTypeHint`, which the narrative detector may beat —
+ * without that, "Pre-authorized Debit to AMEX BILL PYMT" is filed as a
+ * transfer, which is what prod holds for 38 rows.
+ */
+const AUTHORITATIVE_CODES = new Set<string>([
+  'SPEND', 'OBP', 'CASHBACK', 'GIVEAWAY', 'DCTFEE', 'FEE', 'DSCFEE', 'INT', 'FPLINT',
+]);
+
+export function wsPdfCodeTypeIsAuthoritative(code: string | null | undefined): boolean {
+  if (!code) return false;
+  return AUTHORITATIVE_CODES.has(String(code).trim().toUpperCase());
+}

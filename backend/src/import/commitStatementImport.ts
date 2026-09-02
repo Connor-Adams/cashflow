@@ -47,6 +47,22 @@ import type {
   NormalizedSecurity,
   StatementPreview,
 } from './statementTypes';
+import type { Signal, TxnType } from './enrichment/types';
+
+/**
+ * The txnType the narrative detector actually recognized, or null when it was
+ * only guessing. `runDetectTypeStage` emits 'high' confidence exactly when one
+ * of its patterns matched the merchant text, and drops to 'medium' (negative
+ * amount, no cue → purchase) or 'low' (positive, no cue → unknown) otherwise.
+ * That confidence is what lets a source's weak `txnTypeHint` yield to real
+ * evidence without yielding to a coin flip.
+ */
+function narrativeTxnType(signals: Signal[]): TxnType | null {
+  const detected = signals.find((s) => s.source === 'type-detect' && s.fields.txnType);
+  return detected && detected.confidence === 'high'
+    ? (detected.fields.txnType as TxnType)
+    : null;
+}
 
 function isUniqueLike(e: unknown): boolean {
   return (
@@ -337,7 +353,15 @@ export async function commitStatementImport(
       // dashboard's spend math correctly excludes these flows. See
       // wealthsimpleTxnType.ts for the mapping and root-cause analysis in
       // backend/scripts/backfill-ws-txn-types.ts.
-      const effectiveTxnType = row.overrideTxnType ?? f.txnType;
+      // Precedence: a source that KNOWS the type wins outright; a source that
+      // only guessed (`txnTypeHint`) loses to a narrative the detector actually
+      // recognized, and beats the detector's sign-based fallback. Without the
+      // middle tier a WS `WD`/`AFT_OUT` hint of 'transfer' suppressed
+      // detectTypeStage's "AMEX BILL PYMT" → payment rule, which is why prod
+      // holds 38 credit-card bill payments typed `transfer` against 24 typed
+      // `payment` — the same event, split by which importer wrote it.
+      const effectiveTxnType =
+        row.overrideTxnType ?? narrativeTxnType(enriched.signals) ?? row.txnTypeHint ?? f.txnType;
       const accountVisibility: 'private' | 'shared' =
         account.visibility === 'shared' ? 'shared' : 'private';
       const confidence = computeImportConfidence({

@@ -103,6 +103,13 @@ export type PdfParseResult = {
      * row by the source code instead of guessing. Omit to let enrichment decide.
      */
     overrideTxnType?: TxnType;
+    /**
+     * A TxnType the source only guessed at, because its code covers several
+     * kinds of movement (WS `WD`/`AFT_OUT` cover both a plain withdrawal and a
+     * credit-card bill payment). Loses to a high-confidence narrative match,
+     * beats the detector's sign-based fallback. Set at most one of the two.
+     */
+    txnTypeHint?: TxnType;
   }>;
   /**
    * Investment activity rows (mutual fund buys/sells, distributions,

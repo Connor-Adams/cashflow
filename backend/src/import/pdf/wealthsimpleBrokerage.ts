@@ -9,6 +9,7 @@ import {
   WS_PDF_SKIP_CODES,
   wsPdfCashCodeToTxnType,
   wsPdfDepositCodeToTxnType,
+  wsPdfCodeTypeIsAuthoritative,
 } from './wealthsimpleActivityCodes';
 
 /**
@@ -297,6 +298,21 @@ function buySell(code: string): boolean {
 }
 
 /**
+ * Turn a WS code's TxnType into the right field on the emitted transaction:
+ * an override when the code names what the row IS, a hint when it only names
+ * the direction the money moved and the narrative may know better.
+ */
+function cashTyping(
+  code: string,
+  txnType: ReturnType<typeof wsPdfCashCodeToTxnType>,
+): { overrideTxnType?: NonNullable<typeof txnType> } | { txnTypeHint?: NonNullable<typeof txnType> } {
+  if (!txnType) return {};
+  return wsPdfCodeTypeIsAuthoritative(code)
+    ? { overrideTxnType: txnType }
+    : { txnTypeHint: txnType };
+}
+
+/**
  * Security named by an activity description, or null for a cash-only row.
  * The "SYM - Name:" form covers equities + commodities (e.g. "GOLD -
  * Physically backed gold: …"); the crypto form has no such prefix, so the
@@ -389,7 +405,7 @@ function parseActivities(
         // An unrecognized code still reaches the ledger — it just falls
         // through to the narrative detector for typing instead of being
         // dropped as "unmapped".
-        overrideTxnType: wsPdfDepositCodeToTxnType(code) ?? undefined,
+        ...cashTyping(code, wsPdfDepositCodeToTxnType(code)),
       });
       return;
     }
@@ -409,9 +425,7 @@ function parseActivities(
           amount,
           currency,
           sourceReference: null,
-          // The WS code authoritatively types the row (SPEND → purchase,
-          // AFT_OUT/E_TRFIN → transfer, …). null → let enrichment decide.
-          overrideTxnType: wsPdfCashCodeToTxnType(code) ?? undefined,
+          ...cashTyping(code, wsPdfCashCodeToTxnType(code)),
         });
         return;
       }
