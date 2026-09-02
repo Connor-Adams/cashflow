@@ -40,6 +40,7 @@ import { sequelize } from '../src/models';
 import {
   classifyWsDepositActivities,
   migrateWsDepositActivities,
+  type Classification,
 } from '../src/import/wsDepositActivityMigration';
 
 const DEFAULT_ACCOUNTS = [14, 16, 24];
@@ -57,63 +58,73 @@ function money(n: number): string {
   return n.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-async function main(): Promise<void> {
-  const apply = flag('apply');
-  const verbose = flag('verbose');
-  const accountIds = (value('accounts') ?? DEFAULT_ACCOUNTS.join(','))
+function parseUserId(): number | null {
+  const raw = value('user-id');
+  return raw === null ? null : Number(raw);
+}
+
+function parseAccountIds(): number[] {
+  return (value('accounts') ?? DEFAULT_ACCOUNTS.join(','))
     .split(',')
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isInteger(n) && n > 0);
-  const userIdRaw = value('user-id');
-  const userId = userIdRaw ? Number(userIdRaw) : null;
+}
 
+function accountLine(accountId: number, c: Classification): string | null {
+  const s = c.shadows.filter((x) => x.accountId === accountId);
+  const o = c.orphans.filter((x) => x.accountId === accountId);
+  if (s.length + o.length === 0) return null;
+  const gross = s.reduce((acc, x) => acc + Math.abs(x.amount), 0);
+  return (
+    `  account ${accountId}: ${s.length} shadow(s) worth ${money(gross)} gross, ` +
+    `${o.length} orphan(s)`
+  );
+}
+
+function printSummary(accountIds: number[], c: Classification): void {
+  console.log(`Accounts: ${accountIds.join(', ')}`);
+  console.log(`  shadows (delete):  ${c.shadows.length}`);
+  console.log(`  orphans (convert): ${c.orphans.length}`);
+  if (c.skipped.length > 0) {
+    console.log(`  skipped (has a security, left alone): ${c.skipped.length}`);
+  }
+  for (const line of accountIds.map((id) => accountLine(id, c)).filter(Boolean)) {
+    console.log(line);
+  }
+}
+
+function printRows(c: Classification): void {
+  for (const s of c.shadows) {
+    console.log(
+      `    SHADOW acct ${s.accountId} ${s.date} ${money(s.amount)} ` +
+        `"${s.description}" → txn ${s.transactionId} "${s.transactionMerchantRaw}"`,
+    );
+  }
+  for (const o of c.orphans) {
+    console.log(
+      `    ORPHAN acct ${o.accountId} ${o.date} ${money(o.amount)} ` +
+        `"${o.description}" → ${o.txnType ?? '(narrative decides)'}`,
+    );
+  }
+}
+
+async function main(): Promise<void> {
+  const accountIds = parseAccountIds();
   if (accountIds.length === 0) {
     console.error('No valid account ids given.');
     process.exitCode = 1;
     return;
   }
+  const classification = await classifyWsDepositActivities(accountIds);
+  printSummary(accountIds, classification);
+  if (flag('verbose')) printRows(classification);
 
-  const { shadows, orphans, skipped } = await classifyWsDepositActivities(accountIds);
-
-  console.log(`Accounts: ${accountIds.join(', ')}`);
-  console.log(`  shadows (delete):  ${shadows.length}`);
-  console.log(`  orphans (convert): ${orphans.length}`);
-  if (skipped.length > 0) {
-    console.log(`  skipped (has a security, left alone): ${skipped.length}`);
-  }
-
-  for (const accountId of accountIds) {
-    const s = shadows.filter((x) => x.accountId === accountId);
-    const o = orphans.filter((x) => x.accountId === accountId);
-    if (s.length === 0 && o.length === 0) continue;
-    const gross = s.reduce((acc, x) => acc + Math.abs(x.amount), 0);
-    console.log(
-      `  account ${accountId}: ${s.length} shadow(s) worth ${money(gross)} gross, ` +
-        `${o.length} orphan(s)`,
-    );
-  }
-
-  if (verbose) {
-    for (const s of shadows) {
-      console.log(
-        `    SHADOW acct ${s.accountId} ${s.date} ${money(s.amount)} ` +
-          `"${s.description}" → txn ${s.transactionId} "${s.transactionMerchantRaw}"`,
-      );
-    }
-    for (const o of orphans) {
-      console.log(
-        `    ORPHAN acct ${o.accountId} ${o.date} ${money(o.amount)} ` +
-          `"${o.description}" → ${o.txnType ?? '(narrative decides)'}`,
-      );
-    }
-  }
-
-  if (!apply) {
+  if (!flag('apply')) {
     console.log('\nDry run — nothing written. Re-run with --apply to make these changes.');
     return;
   }
 
-  const report = await migrateWsDepositActivities({ accountIds, userId });
+  const report = await migrateWsDepositActivities({ accountIds, userId: parseUserId() });
   console.log('\nApplied:');
   console.log(`  transactions inserted: ${report.insertedTransactions}`);
   console.log(`  already present (deduped): ${report.skippedDuplicates}`);

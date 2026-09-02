@@ -340,6 +340,148 @@ function securityFromDescription(
 }
 
 /**
+ * Everything both routing branches need from a finished activity row, derived
+ * once: the two money columns are Charged ($) and Credit ($), so
+ * amount = credit − charged (SPEND/AFT_OUT/P2P_OUT are outflows → negative;
+ * E_TRFIN/CASHBACK are inflows → positive), and the wrap-aware description
+ * doubles as the merchant.
+ */
+type RowContext = {
+  code: string;
+  activityType: ReturnType<typeof wsPdfCodeToActivity>;
+  description: string;
+  tradeDate: string;
+  amount: number;
+  currency: string;
+  security: Activity['security'];
+};
+
+function rowContext(row: PendingRow, currency: string): RowContext {
+  const description = row.descParts.join(' ').replace(/\s+/g, ' ').trim();
+  const tradeMatch = TRADE_DATE_RE.exec(description);
+  return {
+    code: row.code,
+    activityType: wsPdfCodeToActivity(row.code),
+    description,
+    tradeDate: tradeMatch ? tradeMatch[1] : row.date,
+    amount: Number((row.credit - row.debit).toFixed(4)),
+    currency,
+    security: securityFromDescription(description, currency),
+  };
+}
+
+/**
+ * A cash-ledger row. An unrecognized code still reaches the ledger — it just
+ * carries no typing signal and falls through to the narrative detector,
+ * instead of being dropped as "unmapped".
+ */
+function cashTxnFrom(ctx: RowContext, txnType: ReturnType<typeof wsPdfCashCodeToTxnType>): CashTxn {
+  return {
+    date: ctx.tradeDate,
+    merchantRaw: ctx.description,
+    merchantClean: normalizeMerchant(ctx.description),
+    amount: ctx.amount,
+    currency: ctx.currency,
+    sourceReference: null,
+    ...cashTyping(ctx.code, txnType),
+  };
+}
+
+/**
+ * Quantity is a position change only for trades. Equities quote "shares",
+ * commodities quote "ounces/units", crypto uses "Purchase/Sale of N SYM".
+ * Non-trade activity (dividend/interest/fee/etc.) keeps quantity null.
+ */
+const QTY_PATTERNS = [QTY_RE, QTY_UNIT_RE, QTY_CRYPTO_RE];
+
+function tradeQuantity(ctx: RowContext): number | null {
+  if (!buySell(ctx.code)) return null;
+  for (const re of QTY_PATTERNS) {
+    const m = re.exec(ctx.description);
+    if (m) return Number(m[1]);
+  }
+  return null;
+}
+
+function activityFrom(ctx: RowContext, activityType: NonNullable<RowContext['activityType']>): Activity {
+  return {
+    activityType,
+    tradeDate: ctx.tradeDate,
+    settlementDate: null,
+    description: ctx.description,
+    security: ctx.security,
+    quantity: tradeQuantity(ctx),
+    price: null,
+    amount: ctx.amount,
+    fees: null,
+    currency: ctx.currency,
+    sourceReference: null,
+  };
+}
+
+type CountBucket = 'skip' | 'unmapped';
+
+/**
+ * What to do with a finished activity row. Splitting the decision out of
+ * `finalize` keeps the dispatch flat: the router owns the precedence, the
+ * caller owns the three sinks.
+ */
+type Routing =
+  | { kind: 'count'; bucket: CountBucket }
+  | { kind: 'cash'; txnType: ReturnType<typeof wsPdfCashCodeToTxnType> }
+  | { kind: 'activity'; activityType: NonNullable<RowContext['activityType']> };
+
+function bump(counts: Record<string, number>, code: string): void {
+  counts[code] = (counts[code] ?? 0) + 1;
+}
+
+/**
+ * Zero-cash bookkeeping events (stock lending, mark-to-market, journals) carry
+ * no ledger value on ANY account type. Checked before the deposit routing so
+ * it cannot turn one into a $0.00 transaction. Every skip code is absent from
+ * MAP, so the activityType guard preserves the original ordering exactly.
+ */
+function isZeroCashBookkeeping(ctx: RowContext): boolean {
+  return ctx.activityType === null && WS_PDF_SKIP_CODES.has(ctx.code);
+}
+
+/**
+ * Deposit accounts (WS Cash / Chequing / Save) share this parser and sniff with
+ * brokerage accounts, but they are bank accounts: every row on one is a
+ * cash-ledger event. This keys off the caller's account type rather than a code
+ * list because WS renames the codes between statement cycles — the recurring
+ * AMEX pre-authorized debit arrived as AFT_OUT in 2026-06 and WD in 2026-07,
+ * and WD/DEP/WDQ/CONT sit in MAP, so they were intercepted as investment
+ * activity and the July cash flow never reached the ledger.
+ *
+ * Security-bearing rows are the one exception: a deposit statement should never
+ * carry one, but flattening it to a cash row would drop the security.
+ */
+function depositRouting(ctx: RowContext, isDepositAccount: boolean): Routing | null {
+  if (!isDepositAccount) return null;
+  if (ctx.security !== null) return null;
+  return { kind: 'cash', txnType: wsPdfDepositCodeToTxnType(ctx.code) };
+}
+
+/**
+ * Brokerage routing. Cash-account spend codes (SPEND / AFT_OUT / E_TRFIN / …)
+ * are not in the InvestmentActivity taxonomy, so they become cash rows rather
+ * than being warn-skipped as unmapped.
+ */
+function brokerageRouting(ctx: RowContext): Routing {
+  if (ctx.activityType !== null) return { kind: 'activity', activityType: ctx.activityType };
+  if (CASH_TXN_CODES.has(ctx.code)) {
+    return { kind: 'cash', txnType: wsPdfCashCodeToTxnType(ctx.code) };
+  }
+  return { kind: 'count', bucket: 'unmapped' };
+}
+
+function routeRow(ctx: RowContext, isDepositAccount: boolean): Routing {
+  if (isZeroCashBookkeeping(ctx)) return { kind: 'count', bucket: 'skip' };
+  return depositRouting(ctx, isDepositAccount) ?? brokerageRouting(ctx);
+}
+
+/**
  * Parse the activity table(s). Single ("Activity - Current period") or split
  * ("CAD Activity"/"USD Activity") tables. Walks lines IN ORDER, starting a
  * pending row on each row line and accumulating every following non-row line
@@ -353,8 +495,9 @@ function parseActivities(
 ): { activities: Activity[]; transactions: CashTxn[]; warnings: string[] } {
   const activities: Activity[] = [];
   const transactions: CashTxn[] = [];
-  const skipCounts: Record<string, number> = {};
-  const unmappedCounts: Record<string, number> = {};
+  // Two tally buckets under one key so the dispatch below needs no branch to
+  // pick between them.
+  const counts: Record<CountBucket, Record<string, number>> = { skip: {}, unmapped: {} };
 
   let inSection = false;
   let currency = accountCurrency;
@@ -364,98 +507,11 @@ function parseActivities(
     if (!pending) return;
     const row = pending;
     pending = null;
-
-    const code = row.code;
-    const activityType = wsPdfCodeToActivity(code);
-    const description = row.descParts.join(' ').replace(/\s+/g, ' ').trim();
-    const tradeMatch = TRADE_DATE_RE.exec(description);
-    const tradeDate = tradeMatch ? tradeMatch[1] : row.date;
-    const amount = Number((row.credit - row.debit).toFixed(4));
-    const security = securityFromDescription(description, currency);
-
-    // Zero-cash bookkeeping events (stock lending, mark-to-market, journals)
-    // carry no ledger value on ANY account type. Checked up front so the
-    // deposit routing below cannot turn one into a $0.00 transaction. Every
-    // skip code is absent from MAP, so the activityType guard preserves the
-    // original ordering exactly.
-    if (activityType === null && WS_PDF_SKIP_CODES.has(code)) {
-      skipCounts[code] = (skipCounts[code] ?? 0) + 1;
-      return;
-    }
-
-    // Deposit accounts (WS Cash / Chequing / Save) share this parser and sniff
-    // with brokerage accounts, but they are bank accounts: every row on one is
-    // a cash-ledger event and belongs in `transactions`. This keys off the
-    // caller's account type rather than a code list because WS renames the
-    // codes between statement cycles — the recurring AMEX pre-authorized debit
-    // arrived as AFT_OUT in 2026-06 and WD in 2026-07, and WD/DEP/WDQ/CONT sit
-    // in MAP, so they were intercepted as investment activity and the July
-    // cash flow never reached the ledger.
-    //
-    // Security-bearing rows are the one exception: a deposit statement should
-    // never carry one, but flattening it to a cash row would drop the security.
-    if (isDepositAccount && security === null) {
-      transactions.push({
-        date: tradeDate,
-        merchantRaw: description,
-        merchantClean: normalizeMerchant(description),
-        amount,
-        currency,
-        sourceReference: null,
-        // An unrecognized code still reaches the ledger — it just falls
-        // through to the narrative detector for typing instead of being
-        // dropped as "unmapped".
-        ...cashTyping(code, wsPdfDepositCodeToTxnType(code)),
-      });
-      return;
-    }
-
-    if (activityType === null) {
-      // Cash-account spend codes (SPEND / AFT_OUT / E_TRFIN / …) are not in the
-      // InvestmentActivity taxonomy. Emit them as cash Transaction rows BEFORE
-      // the skip/unmapped tally so they are handled, not warn-skipped. The two
-      // money columns are Charged ($) and Credit ($); amount = credit − charged
-      // (SPEND/AFT_OUT/P2P_OUT are outflows → negative; E_TRFIN/CASHBACK are
-      // inflows → positive). The wrap-aware description doubles as the merchant.
-      if (CASH_TXN_CODES.has(code)) {
-        transactions.push({
-          date: tradeDate,
-          merchantRaw: description,
-          merchantClean: normalizeMerchant(description),
-          amount,
-          currency,
-          sourceReference: null,
-          ...cashTyping(code, wsPdfCashCodeToTxnType(code)),
-        });
-        return;
-      }
-      unmappedCounts[code] = (unmappedCounts[code] ?? 0) + 1;
-      return;
-    }
-
-    // Quantity is a position change only for trades. Equities quote "shares",
-    // commodities quote "ounces/units", crypto uses "Purchase/Sale of N SYM".
-    // Non-trade activity (dividend/interest/fee/etc.) keeps quantity null.
-    const qtyMatch = buySell(code)
-      ? QTY_RE.exec(description) ??
-        QTY_UNIT_RE.exec(description) ??
-        QTY_CRYPTO_RE.exec(description)
-      : null;
-    const quantity = qtyMatch ? Number(qtyMatch[1]) : null;
-
-    activities.push({
-      activityType,
-      tradeDate,
-      settlementDate: null,
-      description,
-      security,
-      quantity,
-      price: null,
-      amount,
-      fees: null,
-      currency,
-      sourceReference: null,
-    });
+    const ctx = rowContext(row, currency);
+    const routed = routeRow(ctx, isDepositAccount);
+    if (routed.kind === 'count') return bump(counts[routed.bucket], ctx.code);
+    if (routed.kind === 'cash') return void transactions.push(cashTxnFrom(ctx, routed.txnType));
+    activities.push(activityFrom(ctx, routed.activityType));
   };
 
   for (const l of lines) {
@@ -512,6 +568,8 @@ function parseActivities(
   finalize();
 
   const warnings: string[] = [];
+  const skipCounts = counts.skip;
+  const unmappedCounts = counts.unmapped;
   const skipTotal = Object.values(skipCounts).reduce((a, b) => a + b, 0);
   const unmappedTotal = Object.values(unmappedCounts).reduce((a, b) => a + b, 0);
   if (skipTotal > 0 || unmappedTotal > 0) {
