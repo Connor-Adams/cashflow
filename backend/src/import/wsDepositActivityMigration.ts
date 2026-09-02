@@ -121,6 +121,96 @@ async function loadDepositAccounts(accountIds: number[]): Promise<Account[]> {
   return accounts;
 }
 
+type TxnIndexEntry = { id: number; merchantRaw: string };
+
+/**
+ * Transactions bucketed by pair key, in id order, so activities claim them
+ * deterministically and each transaction is claimed at most once.
+ */
+function buildTransactionIndex(transactions: Transaction[]): Map<string, TxnIndexEntry[]> {
+  const index = new Map<string, TxnIndexEntry[]>();
+  for (const t of transactions) {
+    const key = pairKey(t.accountId, dateOnly(t.date), money(t.amount), String(t.currency));
+    const entry = { id: t.id as number, merchantRaw: String(t.merchantRaw ?? '') };
+    const bucket = index.get(key);
+    if (bucket) bucket.push(entry);
+    else index.set(key, [entry]);
+  }
+  return index;
+}
+
+/** The shape shared by both classifications, read off one activity row. */
+function activityFields(a: InvestmentActivity): {
+  activityId: number;
+  accountId: number;
+  date: string;
+  amount: number;
+  currency: string;
+  activityType: string;
+  description: string;
+} {
+  return {
+    activityId: a.id as number,
+    accountId: a.accountId as number,
+    date: dateOnly(a.tradeDate),
+    amount: money(a.amount),
+    currency: String(a.currency ?? 'CAD'),
+    activityType: String(a.activityType),
+    description: String(a.description ?? ''),
+  };
+}
+
+/**
+ * Take the next unclaimed transaction for this key, or null when every
+ * transaction at that (account, date, amount, currency) has already been
+ * claimed by an earlier activity. Claiming is what makes the pairing 1:1.
+ */
+function claimTransaction(
+  index: Map<string, TxnIndexEntry[]>,
+  consumed: Map<string, number>,
+  key: string,
+): TxnIndexEntry | null {
+  const bucket = index.get(key);
+  if (!bucket) return null;
+  const next = consumed.get(key) ?? 0;
+  if (next >= bucket.length) return null;
+  consumed.set(key, next + 1);
+  return bucket[next];
+}
+
+function partitionActivities(
+  cashRows: InvestmentActivity[],
+  index: Map<string, TxnIndexEntry[]>,
+  householdByAccount: Map<number, number | null>,
+): { shadows: ShadowRow[]; orphans: OrphanRow[] } {
+  const shadows: ShadowRow[] = [];
+  const orphans: OrphanRow[] = [];
+  const consumed = new Map<string, number>();
+
+  for (const a of cashRows) {
+    const f = activityFields(a);
+    const claimed = claimTransaction(
+      index,
+      consumed,
+      pairKey(f.accountId, f.date, f.amount, f.currency),
+    );
+    if (claimed) {
+      shadows.push({
+        ...f,
+        transactionId: claimed.id,
+        transactionMerchantRaw: claimed.merchantRaw,
+      });
+    } else {
+      orphans.push({
+        ...f,
+        householdId: householdByAccount.get(f.accountId) ?? null,
+        txnType: ACTIVITY_TXN_TYPE[f.activityType],
+      });
+    }
+  }
+  return { shadows, orphans };
+}
+
 /**
  * Split every activity row on the given deposit accounts into shadows (a
  * transaction already records it), orphans (nothing does), and skipped (rows
@@ -137,75 +227,25 @@ export async function classifyWsDepositActivities(
     where: { accountId: { [Op.in]: accountIds } },
     order: [['id', 'ASC']],
   });
-  const transactions = await Transaction.findAll({
-    where: { accountId: { [Op.in]: accountIds } },
-    order: [['id', 'ASC']],
-  });
+  const index = buildTransactionIndex(
+    await Transaction.findAll({
+      where: { accountId: { [Op.in]: accountIds } },
+      order: [['id', 'ASC']],
+    }),
+  );
 
-  // Transactions bucketed by pair key, in id order, so activities claim them
-  // deterministically and each transaction is claimed at most once.
-  const available = new Map<string, Array<{ id: number; merchantRaw: string }>>();
-  for (const t of transactions) {
-    const key = pairKey(t.accountId, dateOnly(t.date), money(t.amount), String(t.currency));
-    const bucket = available.get(key);
-    const entry = { id: t.id as number, merchantRaw: String(t.merchantRaw ?? '') };
-    if (bucket) bucket.push(entry);
-    else available.set(key, [entry]);
-  }
-  const consumed = new Map<string, number>();
-
-  const shadows: ShadowRow[] = [];
-  const orphans: OrphanRow[] = [];
-  const skipped: SkippedRow[] = [];
-
-  for (const a of activities) {
-    const accountId = a.accountId as number;
-    if (a.securityId != null) {
-      skipped.push({
-        activityId: a.id as number,
-        accountId,
-        reason: 'carries a security — not a cash event',
-      });
-      continue;
-    }
-    const date = dateOnly(a.tradeDate);
-    const amount = money(a.amount);
-    const currency = String(a.currency ?? 'CAD');
-    const activityType = String(a.activityType);
-    const description = String(a.description ?? '');
-    const key = pairKey(accountId, date, amount, currency);
-
-    const bucket = available.get(key) ?? [];
-    const next = consumed.get(key) ?? 0;
-    if (next < bucket.length) {
-      consumed.set(key, next + 1);
-      shadows.push({
-        activityId: a.id as number,
-        accountId,
-        date,
-        amount,
-        currency,
-        activityType,
-        description,
-        transactionId: bucket[next].id,
-        transactionMerchantRaw: bucket[next].merchantRaw,
-      });
-      continue;
-    }
-    orphans.push({
+  // A security-bearing row is not a cash event: neither delete it nor flatten
+  // it to a transaction, which would lose the security.
+  const skipped: SkippedRow[] = activities
+    .filter((a) => a.securityId != null)
+    .map((a) => ({
       activityId: a.id as number,
-      accountId,
-      householdId: householdByAccount.get(accountId) ?? null,
-      date,
-      amount,
-      currency,
-      activityType,
-      description,
-      txnType: ACTIVITY_TXN_TYPE[activityType],
-    });
-  }
+      accountId: a.accountId as number,
+      reason: 'carries a security — not a cash event',
+    }));
+  const cashRows = activities.filter((a) => a.securityId == null);
 
-  return { shadows, orphans, skipped };
+  return { ...partitionActivities(cashRows, index, householdByAccount), skipped };
 }
 
 export type MigrationReport = Classification & {
@@ -238,6 +278,63 @@ function orphanToRow(o: OrphanRow): NormalizedCashTransaction {
 }
 
 /**
+ * One account's orphans as a statement preview. `contentHash` is derived from
+ * the exact set of rows being converted, so re-running with the same set is
+ * recognized as an already-applied import while a run covering a different set
+ * is not.
+ */
+function cleanupPreview(
+  accountId: number,
+  householdId: number | null,
+  orphans: OrphanRow[],
+): StatementPreview {
+  const ids = orphans.map((o) => o.activityId).sort((a, b) => a - b);
+  return {
+    previewToken: `ws-deposit-cleanup-${accountId}`,
+    fileName: 'ws-deposit-activity-cleanup',
+    contentHash: `ws-deposit-cleanup:${accountId}:${ids.join(',')}`,
+    accountId,
+    householdId,
+    importBatch: 'WS deposit ledger cleanup',
+    usedParser: 'pdf',
+    transactions: orphans.map(orphanToRow),
+    investmentActivities: [],
+    holdings: [],
+    warnings: [],
+    rowErrors: 0,
+    parseErrors: [],
+    duplicateCounts: { transactions: 0, investmentActivities: 0, holdings: 0 },
+  };
+}
+
+/**
+ * Insert one commit per account — `commitStatementImport` is account-scoped.
+ * Runs BEFORE the delete, so an interrupted run leaves converted orphans still
+ * present as activities and the next run reclassifies them as shadows.
+ */
+async function insertOrphans(
+  accountIds: number[],
+  orphans: OrphanRow[],
+  userId: number | null,
+): Promise<{ inserted: number; deduped: number }> {
+  let inserted = 0;
+  let deduped = 0;
+  for (const accountId of accountIds) {
+    const mine = orphans.filter((o) => o.accountId === accountId);
+    if (mine.length === 0) continue;
+    const householdId = mine[0].householdId;
+    const result = await commitStatementImport(
+      cleanupPreview(accountId, householdId, mine),
+      userId,
+      householdId,
+    );
+    inserted += result.insertedTransactions;
+    deduped += result.skippedDuplicates;
+  }
+  return { inserted, deduped };
+}
+
+/**
  * Delete the shadow rows and convert the orphans into transactions.
  *
  * `dryRun` reports exactly what would happen and writes nothing.
@@ -261,40 +358,7 @@ export async function migrateWsDepositActivities(opts: {
     };
   }
 
-  let insertedTransactions = 0;
-  let skippedDuplicates = 0;
-
-  // Insert BEFORE deleting, one commit per account (commitStatementImport is
-  // account-scoped). If this dies partway the orphans remain as activities and
-  // the next run reclassifies them as shadows of the rows just created.
-  for (const accountId of opts.accountIds) {
-    const mine = orphans.filter((o) => o.accountId === accountId);
-    if (mine.length === 0) continue;
-    const householdId = mine[0].householdId;
-    const ids = mine.map((o) => o.activityId).sort((a, b) => a - b);
-    const preview: StatementPreview = {
-      previewToken: `ws-deposit-cleanup-${accountId}`,
-      fileName: 'ws-deposit-activity-cleanup',
-      // Derived from the exact set of rows being converted, so re-running with
-      // the same set is recognized as an already-applied import, and a run
-      // covering a different set is not.
-      contentHash: `ws-deposit-cleanup:${accountId}:${ids.join(',')}`,
-      accountId,
-      householdId,
-      importBatch: 'WS deposit ledger cleanup',
-      usedParser: 'pdf',
-      transactions: mine.map(orphanToRow),
-      investmentActivities: [],
-      holdings: [],
-      warnings: [],
-      rowErrors: 0,
-      parseErrors: [],
-      duplicateCounts: { transactions: 0, investmentActivities: 0, holdings: 0 },
-    };
-    const result = await commitStatementImport(preview, opts.userId, householdId);
-    insertedTransactions += result.insertedTransactions;
-    skippedDuplicates += result.skippedDuplicates;
-  }
+  const { inserted, deduped } = await insertOrphans(opts.accountIds, orphans, opts.userId);
 
   const toDelete = [...shadows.map((s) => s.activityId), ...orphans.map((o) => o.activityId)];
   let deletedShadows = 0;
@@ -306,8 +370,8 @@ export async function migrateWsDepositActivities(opts: {
   return {
     ...classification,
     deletedShadows,
-    insertedTransactions,
-    skippedDuplicates,
+    insertedTransactions: inserted,
+    skippedDuplicates: deduped,
     dryRun: false,
   };
 }
