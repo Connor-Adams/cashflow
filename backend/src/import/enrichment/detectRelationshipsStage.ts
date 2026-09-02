@@ -213,7 +213,17 @@ export function runDetectRelationshipsStage(input: DetectRelationshipsInput): Si
     }
   }
 
-  if (input.txnType === 'transfer') {
+  // A credit-card bill payment has the same two-leg shape as a transfer -- a
+  // chequing outflow and a matching card inflow -- so it is paired the same
+  // way. It is matched here as well as `transfer` because the narrative
+  // detector now types the chequing leg `payment` ("Pre-authorized Debit to
+  // AMEX BILL PYMT"); keying the sibling hunt on `transfer` alone would leave
+  // both legs sitting in the Transfers unmatched queue forever.
+  //
+  // The `payment` case deliberately sets no autoCategory: "Transfer" is wrong
+  // for a card payment, and the category is already carried by the user's own
+  // rules on those narratives.
+  if (input.txnType === 'transfer' || input.txnType === 'payment') {
     const sibling = findTransferSibling(input);
     if (sibling) {
       out.push({
@@ -221,9 +231,9 @@ export function runDetectRelationshipsStage(input: DetectRelationshipsInput): Si
         confidence: 'high',
         fields: {
           linkedTransactionId: sibling.id,
-          autoCategory: 'Transfer',
+          ...(input.txnType === 'transfer' ? { autoCategory: 'Transfer' } : {}),
         },
-        rationale: `linked to sibling transfer #${sibling.id} on account ${sibling.accountId}`,
+        rationale: `linked to sibling ${input.txnType} #${sibling.id} on account ${sibling.accountId}`,
       });
     }
   }
