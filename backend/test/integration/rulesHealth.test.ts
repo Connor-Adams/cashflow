@@ -128,9 +128,25 @@ async function createRule(opts: {
   return row.id;
 }
 
-const today = '2026-05-26';
-const ninetyDaysAgo = '2026-02-25';
-const longAgo = '2025-10-01';
+/**
+ * `/api/rules/health` counts transactions inside a lookback window that ends at
+ * the real `Date.now()` and defaults to 90 days (routes/rules.ts). Fixed
+ * calendar dates therefore rot out of range as the wall clock advances: seeded
+ * at a hardcoded 2026-05-26, every row fell outside the window on 2026-08-24
+ * and `totalTransactions` collapsed to 0, failing the hitRate and
+ * top-merchants cases on any branch. Seed relative to today instead — same
+ * approach as the subscription price-increase test (4e9193f9).
+ *
+ * (`ninetyDaysAgo` sat here too, unused, and is gone with the rot.)
+ */
+function daysAgo(n: number): string {
+  return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/** Comfortably inside the 90-day window. */
+const today = daysAgo(1);
+/** Comfortably outside it — the stale-rule case needs a match that has aged out. */
+const longAgo = daysAgo(300);
 
 before(async () => {
   testDb = await setupPgTestDb('rules-health');
