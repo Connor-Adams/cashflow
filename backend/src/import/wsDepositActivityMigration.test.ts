@@ -19,6 +19,7 @@ import assert from 'node:assert/strict';
 let models: typeof import('../models/index.js');
 let classifyWsDepositActivities: typeof import('./wsDepositActivityMigration.js').classifyWsDepositActivities;
 let migrateWsDepositActivities: typeof import('./wsDepositActivityMigration.js').migrateWsDepositActivities;
+let cleanupContentHash: typeof import('./wsDepositActivityMigration.js').cleanupContentHash;
 let rowFingerprint: typeof import('./fingerprint.js').rowFingerprint;
 let stableIdentityFingerprint: typeof import('./fingerprint.js').stableIdentityFingerprint;
 
@@ -28,6 +29,7 @@ before(async () => {
   const mod = await import('./wsDepositActivityMigration.js');
   classifyWsDepositActivities = mod.classifyWsDepositActivities;
   migrateWsDepositActivities = mod.migrateWsDepositActivities;
+  cleanupContentHash = mod.cleanupContentHash;
   const fp = await import('./fingerprint.js');
   rowFingerprint = fp.rowFingerprint;
   stableIdentityFingerprint = fp.stableIdentityFingerprint;
@@ -339,4 +341,27 @@ test('migrate types an orphaned card payment as a payment, not a transfer', asyn
   const txns = await models.Transaction.findAll({ where: { accountId } });
   assert.equal(txns.length, 1);
   assert.equal(txns[0].txnType, 'payment');
+});
+
+// ---------------------------------------------------------------------------
+// `import_histories.content_hash` is varchar(64). The first prod run of this
+// migration failed there — "value too long for type character varying(64)" —
+// because the hash was built by joining the converted activity ids, which for
+// account 14 is 56 of them. sqlite does not enforce varchar length, so the
+// suite above passed against a bug that only Postgres could catch.
+// ---------------------------------------------------------------------------
+
+test('the cleanup content hash fits the column no matter how many rows it covers', () => {
+  const many = Array.from({ length: 500 }, (_, i) => 100000 + i);
+  const hash = cleanupContentHash(14, many);
+  assert.equal(hash.length, 64);
+  assert.match(hash, /^[0-9a-f]{64}$/);
+});
+
+test('the cleanup content hash identifies the exact row set', () => {
+  // Same set (any order) → same hash, so a re-run is recognized as already
+  // applied. A different set → different hash, so it is not.
+  assert.equal(cleanupContentHash(14, [3, 1, 2]), cleanupContentHash(14, [1, 2, 3]));
+  assert.notEqual(cleanupContentHash(14, [1, 2, 3]), cleanupContentHash(14, [1, 2]));
+  assert.notEqual(cleanupContentHash(14, [1, 2, 3]), cleanupContentHash(24, [1, 2, 3]));
 });

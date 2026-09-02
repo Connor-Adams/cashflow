@@ -31,7 +31,7 @@
 import { Op } from 'sequelize';
 import { Account, InvestmentActivity, Transaction } from '../models';
 import { commitStatementImport } from './commitStatementImport';
-import { rowFingerprint } from './fingerprint';
+import { rowFingerprint, stableFingerprint } from './fingerprint';
 import { normalizeMerchant } from './normalizeMerchant';
 import type { NormalizedCashTransaction, StatementPreview } from './statementTypes';
 import type { TxnType } from './enrichment/types';
@@ -278,21 +278,34 @@ function orphanToRow(o: OrphanRow): NormalizedCashTransaction {
 }
 
 /**
- * One account's orphans as a statement preview. `contentHash` is derived from
- * the exact set of rows being converted, so re-running with the same set is
- * recognized as an already-applied import while a run covering a different set
- * is not.
+ * Identifies the exact set of rows a cleanup run converts, so re-running with
+ * the same set is recognized as an already-applied import while a run covering
+ * a different set is not.
+ *
+ * Must be a HASH, not the id list itself: `import_histories.content_hash` is
+ * varchar(64), and account 14 alone converts 56 rows. Joining the ids overflows
+ * the column and Postgres rejects the whole commit.
+ */
+export function cleanupContentHash(accountId: number, activityIds: number[]): string {
+  return stableFingerprint({
+    kind: 'ws-deposit-cleanup',
+    accountId,
+    activityIds: [...activityIds].sort((a, b) => a - b),
+  });
+}
+
+/**
+ * One account's orphans as a statement preview.
  */
 function cleanupPreview(
   accountId: number,
   householdId: number | null,
   orphans: OrphanRow[],
 ): StatementPreview {
-  const ids = orphans.map((o) => o.activityId).sort((a, b) => a - b);
   return {
     previewToken: `ws-deposit-cleanup-${accountId}`,
     fileName: 'ws-deposit-activity-cleanup',
-    contentHash: `ws-deposit-cleanup:${accountId}:${ids.join(',')}`,
+    contentHash: cleanupContentHash(accountId, orphans.map((o) => o.activityId)),
     accountId,
     householdId,
     importBatch: 'WS deposit ledger cleanup',
