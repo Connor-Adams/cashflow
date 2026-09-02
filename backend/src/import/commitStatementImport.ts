@@ -64,6 +64,13 @@ function narrativeTxnType(signals: Signal[]): TxnType | null {
     : null;
 }
 
+/**
+ * Types the classifier falls back to when the narrative told it nothing: a
+ * negative amount defaults to `purchase`, a positive one to `unknown`. Only
+ * these may be overwritten when a link reveals the row was internal movement.
+ */
+const GUESSED_TXN_TYPES = ['purchase', 'unknown'];
+
 function isUniqueLike(e: unknown): boolean {
   return (
     e !== null &&
@@ -470,7 +477,6 @@ export async function commitStatementImport(
               {
                 linkedTransactionId: txn.id,
                 transferLinkedAt: new Date(),
-                txnType: 'transfer',
               },
               {
                 where: {
@@ -479,6 +485,25 @@ export async function commitStatementImport(
                   // linked to a different txn (prevents clobbering a prior
                   // manual or auto-link on a second re-import).
                   linkedTransactionId: null,
+                },
+                transaction: sp,
+              },
+            );
+            // Re-typing the sibling is a SEPARATE, narrower write. Linking is
+            // real evidence that a row the classifier could only guess at
+            // (a bare outflow defaults to `purchase`) was internal movement,
+            // and without this those rows inflate dashboard spend. But it is
+            // NOT evidence against a type the narrative established: the card
+            // leg of a bill payment reads "PAYMENT RECEIVED - THANK YOU" and
+            // is a `payment`. Stamping 'transfer' on it demoted four Amex rows
+            // in prod, two of them when the deposit-activity cleanup imported
+            // their counterparts.
+            await Transaction.update(
+              { txnType: 'transfer' },
+              {
+                where: {
+                  id: f.linkedTransactionId,
+                  txnType: { [Op.in]: GUESSED_TXN_TYPES },
                 },
                 transaction: sp,
               },
