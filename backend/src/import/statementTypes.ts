@@ -23,6 +23,19 @@ export type NormalizedCashTransaction = {
    * enrichment-pipeline output.
    */
   overrideTxnType?: TxnType;
+  /**
+   * A txnType the source guessed rather than knew. Used where a source code
+   * covers several kinds of movement: Wealthsimple's WD / AFT_OUT mean "money
+   * left the account" and cover a plain withdrawal and a credit-card bill
+   * payment alike.
+   *
+   * Unlike `overrideTxnType` this LOSES to a high-confidence narrative match,
+   * so "Pre-authorized Debit to AMEX BILL PYMT" is typed `payment` by
+   * detectTypeStage. It still beats the detector's sign-based fallback, which
+   * would otherwise call every one of these outflows a purchase and inflate
+   * spend. Set at most one of the two.
+   */
+  txnTypeHint?: TxnType;
 };
 
 export type NormalizedSecurity = {

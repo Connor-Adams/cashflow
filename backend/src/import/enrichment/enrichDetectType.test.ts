@@ -82,13 +82,17 @@ test('unknown: positive amount with no narrative cue', () => {
 // regression to the pre-PR-#59 behavior where every negative-amount WS row
 // defaulted to 'purchase' and bloated the dashboard totalSpend metric.
 
-test('transfer: pre-authorized debit (AFT_OUT narrative)', () => {
+test('payment: pre-authorized debit to a card (AFT_OUT narrative)', () => {
+  // Was asserted as `transfer` until the card-network rule was added above the
+  // broad transfer pattern. Paying down a credit-card balance is a payment,
+  // not internal money movement — and the identical event on the card side of
+  // the ledger has always been typed `payment`, so the two legs disagreed.
   const out = runDetectTypeStage({
     merchantRaw: 'Pre-authorized Debit to AMEX BILL PYMT',
     merchantClean: 'Pre-authorized Debit to AMEX BILL PYMT',
     amount: -2959.34,
   });
-  assert.equal(out[0].fields.txnType, 'transfer');
+  assert.equal(out[0].fields.txnType, 'payment');
 });
 
 test('transfer: pre-authorized credit', () => {
@@ -768,4 +772,73 @@ test('GUARD: "INTERAC PURCHASE STARBUCKS" stays purchase (not a payment)', () =>
     amount: -6.45,
   });
   assert.equal(out[0].fields.txnType, 'purchase');
+});
+
+// ---------------------------------------------------------------------------
+// Pre-authorized debits that name a card network are card payments.
+//
+// The broad transfer rule matches `pre-?authorized (?:debit|credit)`, so it
+// claimed "Pre-authorized Debit to AMEX BILL PYMT" before the `amex bill pymt`
+// payment rule 37 lines below it could ever run. Prod shows the split that
+// caused: 38 rows on that one Wealthsimple narrative typed `transfer`, against
+// 65 RBC/CIBC card payments — whose narratives happen to miss the transfer
+// rule — correctly typed `payment`.
+//
+// The card-network token stays the precision signal. An unqualified
+// pre-authorized debit is a utility or subscription, and a debit-card purchase
+// is not a card payment at all.
+// ---------------------------------------------------------------------------
+
+test('payment: pre-authorized debit naming a card network is a card payment', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Pre-authorized Debit to AMEX BILL PYMT',
+    merchantClean: 'Pre-authorized Debit to AMEX BILL PYMT',
+    amount: -11922.9,
+  });
+  assert.equal(out[0].fields.txnType, 'payment');
+  assert.equal(out[0].confidence, 'high');
+});
+
+test('payment: the same rule covers other card networks', () => {
+  for (const raw of [
+    'Pre-authorized Debit to VISA BILL PYMT',
+    'Pre-authorized Debit to MASTERCARD',
+    'Preauthorized debit - CREDIT CARD',
+  ]) {
+    const out = runDetectTypeStage({ merchantRaw: raw, merchantClean: raw, amount: -500 });
+    assert.equal(out[0].fields.txnType, 'payment', raw);
+  }
+});
+
+test('transfer: a pre-authorized debit with no card network stays a transfer', () => {
+  // Utilities and subscriptions are genuine spend, never a card payment. The
+  // existing broad transfer rule keeps them; only the network token promotes.
+  const out = runDetectTypeStage({
+    merchantRaw: 'Pre-authorized Debit to ROGERS',
+    merchantClean: 'Pre-authorized Debit to ROGERS',
+    amount: -95.4,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('purchase: a debit-card purchase naming a network is not a card payment', () => {
+  // Real prod row. "VISA DEBIT PURCHASE" carries both a network token and the
+  // word "debit", but no "pre-authorized" — it is spend and must stay spend.
+  const out = runDetectTypeStage({
+    merchantRaw: 'VISA DEBIT PURCHASE - 1253 FTX BLOCKFOLIO',
+    merchantClean: 'VISA DEBIT PURCHASE - 1253 FTX BLOCKFOLIO',
+    amount: -250,
+  });
+  assert.equal(out[0].fields.txnType, 'purchase');
+});
+
+test('refund: a reversed card bill payment is still a refund', () => {
+  // Real prod row. The refund rule sits above every payment rule and must
+  // keep winning.
+  const out = runDetectTypeStage({
+    merchantRaw: 'BILL PAYMENT REVERSAL - 7009 CAPITAL ONE M/C',
+    merchantClean: 'BILL PAYMENT REVERSAL - 7009 CAPITAL ONE M/C',
+    amount: 300,
+  });
+  assert.equal(out[0].fields.txnType, 'refund');
 });

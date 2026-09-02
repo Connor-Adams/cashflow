@@ -452,8 +452,10 @@ test('brokerage emits E_TRFIN incoming e-transfer as a positive cash transaction
   assert.equal(result.transactions.length, 1);
   assert.equal(result.transactions[0].amount, 1000); // Credit → inflow
   assert.match(result.transactions[0].merchantRaw, /Interac e-Transfer/);
-  // E_TRFIN is an inter-account transfer, not spend.
-  assert.equal(result.transactions[0].overrideTxnType, 'transfer');
+  // E_TRFIN says money came IN; it cannot tell an account funding transfer
+  // from a payroll direct deposit, so it is a hint the narrative may beat.
+  assert.equal(result.transactions[0].txnTypeHint, 'transfer');
+  assert.equal(result.transactions[0].overrideTxnType, undefined);
   assert.equal(result.investmentActivities!.length, 0);
 });
 
@@ -468,8 +470,12 @@ test('brokerage emits AFT_OUT bill payment as a negative cash transaction', () =
   assert.equal(result.transactions.length, 1);
   assert.equal(result.transactions[0].amount, -1001.72); // Charged → outflow
   assert.match(result.transactions[0].merchantRaw, /AMEX/);
-  // AFT_OUT is a pre-authorized debit transfer, not spend.
-  assert.equal(result.transactions[0].overrideTxnType, 'transfer');
+  // AFT_OUT means "money left the account" and covers both a plain transfer
+  // and a card bill payment, so it is a HINT, not an override — otherwise it
+  // suppresses detectTypeStage's card-payment rule and this row lands as a
+  // transfer. It was asserted as `overrideTxnType` until that was fixed.
+  assert.equal(result.transactions[0].txnTypeHint, 'transfer');
+  assert.equal(result.transactions[0].overrideTxnType, undefined);
   assert.equal(result.investmentActivities!.length, 0);
 });
 
@@ -628,4 +634,221 @@ test('brokerage extracts crypto BUY symbol + quantity (cryptocurrency assetType)
   assert.equal(buy.quantity, 0.0544286100);
   assert.equal(buy.tradeDate, '2024-10-23'); // executed-at, not the 10-22 row date
   assert.equal(buy.amount, -200); // credit 0 − debit 200
+});
+
+// ---------------------------------------------------------------------------
+// Deposit accounts (WS Cash / Chequing / Save)
+//
+// These run through this same parser, but they are bank accounts: every row on
+// them is a cash-ledger event and belongs in `transactions`, not
+// `investmentActivities`. Wealthsimple relabelled their codes in the 2026-07
+// statement cycle — the recurring AMEX pre-authorized debit that carried
+// AFT_OUT in June arrived as WD in July, and an incoming Interac e-Transfer
+// moved from E_TRFIN to CONT. Because `wsPdfCodeToActivity` is consulted before
+// CASH_TXN_CODES, WD/DEP/WDQ/CONT were intercepted as investment activities and
+// the July cash flow never reached the ledger. Routing keys off the account
+// type the caller supplies, not off a code list WS can rename again.
+// ---------------------------------------------------------------------------
+
+const DEPOSIT_HEADER: PdfLine[] = [
+  mk('ORDER EXECUTION ONLY ACCOUNT', 1, 798.8),
+  mk('Wealthsimple Investments Inc.', 1, 780.0),
+  mk(' Account No.   Owner   Statement Period', 1, 762.2),
+  mk(' WK3DD9X35CAD   Connor Adams   2026-07-01 - 2026-07-31', 1, 749.6),
+  mk('Phone: (416) 595-7200 Fax: (647) 245-1002', 1, 713.2),
+  mk(' Chequing Account', 1, 699.9),
+  mk(' Activity - Current period', 2, 786.3),
+  mk(' Date   Transaction   Description   Debit ($)   Credit ($)   Balance ($)', 2, 769.6),
+];
+
+test('deposit account: WD pre-authorized debit becomes a cash transaction, not a cash_movement activity', () => {
+  const lines: PdfLine[] = [
+    ...DEPOSIT_HEADER,
+    mk('2026-07-15   WD   Pre-authorized Debit to AMEX BILL PYMT   $11,922.90   $0.00   $2,410.55', 2, 758.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, {
+    defaultCurrency: 'CAD',
+    accountType: 'checking',
+  });
+  assert.equal(result.investmentActivities!.length, 0);
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].amount, -11922.9);
+  assert.equal(result.transactions[0].merchantRaw, 'Pre-authorized Debit to AMEX BILL PYMT');
+  // A hint, so detectTypeStage can promote this to `payment` at commit time.
+  assert.equal(result.transactions[0].txnTypeHint, 'transfer');
+});
+
+test('deposit account: CONT incoming e-transfer becomes a cash transaction', () => {
+  const lines: PdfLine[] = [
+    ...DEPOSIT_HEADER,
+    mk('2026-07-19   CONT   Interac e-Transfer® Received from ZHENYUN GAO   $0.00   $150.00   $2,560.55', 2, 758.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, {
+    defaultCurrency: 'CAD',
+    accountType: 'checking',
+  });
+  assert.equal(result.investmentActivities!.length, 0);
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].amount, 150);
+  assert.equal(result.transactions[0].txnTypeHint, 'transfer');
+});
+
+test('deposit account: INT interest received becomes a cash transaction typed interest', () => {
+  const lines: PdfLine[] = [
+    ...DEPOSIT_HEADER,
+    mk('2026-07-01   INT   Interest received (executed at 2026-07-01)   $0.00   $8.58   $2,419.13', 2, 758.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, {
+    defaultCurrency: 'CAD',
+    accountType: 'checking',
+  });
+  assert.equal(result.investmentActivities!.length, 0);
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].amount, 8.58);
+  assert.equal(result.transactions[0].overrideTxnType, 'interest');
+});
+
+test('deposit account: TRFIN / TRFOUT money transfers become cash transactions', () => {
+  const lines: PdfLine[] = [
+    ...DEPOSIT_HEADER,
+    mk('2026-07-14   TRFIN   Money transfer into the account (executed at 2026-07-14)   $0.00   $6,000.00   $8,419.13', 2, 758.4),
+    mk('2026-07-06   TRFOUT   Money transfer out of the account (executed at 2026-07-06)   $1,001.34   $0.00   $7,417.79', 2, 747.0),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, {
+    defaultCurrency: 'CAD',
+    accountType: 'checking',
+  });
+  assert.equal(result.investmentActivities!.length, 0);
+  assert.equal(result.transactions.length, 2);
+  assert.deepEqual(
+    result.transactions.map((t) => t.amount).sort((a, b) => a - b),
+    [-1001.34, 6000],
+  );
+  assert.ok(result.transactions.every((t) => t.txnTypeHint === 'transfer'));
+});
+
+test('deposit account: the trade-date parenthetical still wins over the posting date', () => {
+  // "executed at" is the real event date; the row's first cell is the posting
+  // date. The cash branch already honoured this for SPEND — deposit routing
+  // must not regress it.
+  const lines: PdfLine[] = [
+    ...DEPOSIT_HEADER,
+    mk('2026-07-31   TRFOUT   Money transfer out of the account (executed at 2026-07-28)   $250.00   $0.00   $2,160.55', 2, 758.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, {
+    defaultCurrency: 'CAD',
+    accountType: 'checking',
+  });
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].date, '2026-07-28');
+});
+
+test('deposit account: SPEND still routes to the cash ledger with its purchase type', () => {
+  const lines: PdfLine[] = [
+    ...DEPOSIT_HEADER,
+    mk('2026-07-11   SPEND   Bar Burrito   $14.11   $0.00   $2,396.44', 2, 758.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, {
+    defaultCurrency: 'CAD',
+    accountType: 'checking',
+  });
+  assert.equal(result.investmentActivities!.length, 0);
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].amount, -14.11);
+  assert.equal(result.transactions[0].overrideTxnType, 'purchase');
+});
+
+test('deposit account: zero-cash skip codes stay skipped, never become transactions', () => {
+  const lines: PdfLine[] = [
+    ...DEPOSIT_HEADER,
+    mk('2026-07-20   JRL   Journal entry   $0.00   $0.00   $2,410.55', 2, 758.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, {
+    defaultCurrency: 'CAD',
+    accountType: 'checking',
+  });
+  assert.deepEqual(result.transactions, []);
+  assert.equal(result.investmentActivities!.length, 0);
+  assert.ok(result.warnings.some((w) => /JRL/.test(w)));
+});
+
+test('deposit account: a security-bearing row stays an investment activity', () => {
+  // A deposit statement should never carry one, but if it does, fabricating a
+  // cash transaction would lose the security. Keep it as investment activity.
+  const lines: PdfLine[] = [
+    ...DEPOSIT_HEADER,
+    mk('2026-07-22   BUY   VFV - Vanguard S&P 500 Index ETF: Bought 1.0 shares (executed at 2026-07-22)   $150.00   $0.00   $2,260.55', 2, 758.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, {
+    defaultCurrency: 'CAD',
+    accountType: 'checking',
+  });
+  assert.deepEqual(result.transactions, []);
+  assert.equal(result.investmentActivities!.length, 1);
+  assert.equal(result.investmentActivities![0].security!.symbol, 'VFV');
+});
+
+test('brokerage account: CONT and INT are unaffected by deposit routing', () => {
+  const lines: PdfLine[] = [
+    ...CAD_HEADER,
+    mk(' Activity - Current period', 2, 403.1),
+    mk(' Date   Transaction   Description   Debit ($)   Credit ($)   Balance ($)', 2, 386.4),
+    mk(' 2026-07-01   CONT   Contribution (executed at 2026-07-01)   $0.00   $50.00   $50.00', 2, 375.2),
+    mk(' 2026-07-01   INT   Interest received   $0.00   $1.20   $51.20', 2, 364.0),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, {
+    defaultCurrency: 'CAD',
+    accountType: 'investment',
+  });
+  assert.deepEqual(result.transactions, []);
+  assert.equal(result.investmentActivities!.length, 2);
+});
+
+// ---------------------------------------------------------------------------
+// Authoritative code vs guessed code.
+//
+// SPEND / OBP / INT / FEE name what the row IS. The movement codes
+// (WD / DEP / CONT / TRFIN / TRFOUT / AFT_* / E_TRF*) only say which direction
+// the money went, and Wealthsimple uses the same code for a plain withdrawal
+// and for a credit-card bill payment. Those emit a hint the narrative detector
+// is allowed to beat.
+// ---------------------------------------------------------------------------
+
+test('deposit account: an ambiguous movement code emits a hint, never an override', () => {
+  const lines: PdfLine[] = [
+    ...DEPOSIT_HEADER,
+    mk('2026-07-15   WD   Pre-authorized Debit to AMEX BILL PYMT   $11,922.90   $0.00   $2,410.55', 2, 758.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, {
+    defaultCurrency: 'CAD',
+    accountType: 'checking',
+  });
+  assert.equal(result.transactions[0].txnTypeHint, 'transfer');
+  assert.equal(result.transactions[0].overrideTxnType, undefined);
+});
+
+test('deposit account: SPEND stays authoritative', () => {
+  const lines: PdfLine[] = [
+    ...DEPOSIT_HEADER,
+    mk('2026-07-11   SPEND   Bar Burrito   $14.11   $0.00   $2,396.44', 2, 758.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, {
+    defaultCurrency: 'CAD',
+    accountType: 'checking',
+  });
+  assert.equal(result.transactions[0].overrideTxnType, 'purchase');
+  assert.equal(result.transactions[0].txnTypeHint, undefined);
+});
+
+test('deposit account: INT stays authoritative', () => {
+  const lines: PdfLine[] = [
+    ...DEPOSIT_HEADER,
+    mk('2026-07-01   INT   Interest received (executed at 2026-07-01)   $0.00   $8.58   $2,419.13', 2, 758.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, {
+    defaultCurrency: 'CAD',
+    accountType: 'checking',
+  });
+  assert.equal(result.transactions[0].overrideTxnType, 'interest');
+  assert.equal(result.transactions[0].txnTypeHint, undefined);
 });

@@ -35,6 +35,24 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
   // Reward: crypto staking rewards earned. Sign-agnostic — WS bundle imports
   // these with negative amount on the position leg.
   { type: 'reward', re: /\bof\s+\w+\s+rewards?\s+earned\b/i },
+  // A pre-authorized debit that NAMES A CARD NETWORK is a bill payment against
+  // that card, not internal money movement. This must sit ABOVE the broad
+  // transfer rule that follows: its `pre-?authorized (?:debit|credit)`
+  // alternative would otherwise claim the row first, leaving the `amex bill
+  // pymt` payment rule further down unreachable. That is exactly what prod
+  // records — 38 rows on the one Wealthsimple narrative "Pre-authorized Debit
+  // to AMEX BILL PYMT" typed `transfer`, while the 65 RBC/CIBC card payments,
+  // whose narratives miss the transfer rule, are typed `payment`.
+  //
+  // The network token is the precision signal, same as for the bill-payment
+  // rule further down: an UNQUALIFIED pre-authorized debit is a utility or
+  // subscription (genuine spend) and deliberately does not match. The
+  // "pre-authorized" qualifier is equally load-bearing — "VISA DEBIT PURCHASE
+  // - FTX BLOCKFOLIO" names a network and says "debit", but it is card spend.
+  {
+    type: 'payment',
+    re: /\bpre-?authorized debit\b[^.]{0,40}\b(amex|american express|visa|mastercard|master ?card|discover|credit ?card)\b/i,
+  },
   {
     type: 'transfer',
     re: /\b(transfer (?:to|from|in|out)|wire transfer|interac e?-?transfer|pre-?authorized (?:debit|credit)|cash (?:sent|received)|direct deposit|from chequing account|eft (?:in|out)|aft)\b/i,
