@@ -400,14 +400,24 @@ export const rbcCreditLineParser: PdfParser = {
 
     const { rows, parseErrors } = parseRbcCreditLineActivity(lines, period, openingPrincipal);
 
-    const transactions: PdfParseResult['transactions'] = rows.map((row) => ({
-      date: row.date,
-      merchantRaw: row.description,
-      merchantClean: normalizeMerchant(row.description),
-      amount: row.amount,
-      currency: ctx.defaultCurrency,
-      sourceReference: null,
-    }));
+    // Only principal movements become transactions. Interest on a Royal Credit
+    // Line is billed to the linked chequing account, not capitalised into the
+    // principal — the statement shows it by leaving the balance-owing column
+    // unchanged across an interest row — and the chequing statement already
+    // records that cash leaving as "Loan interest". Emitting it here as well
+    // booked the cost twice and overstated the amount owing by the cumulative
+    // interest. The rows themselves are kept above: the reconciliation gate
+    // needs to see them.
+    const transactions: PdfParseResult['transactions'] = rows
+      .filter((row) => row.isPrincipalChange)
+      .map((row) => ({
+        date: row.date,
+        merchantRaw: row.description,
+        merchantClean: normalizeMerchant(row.description),
+        amount: row.amount,
+        currency: ctx.defaultCurrency,
+        sourceReference: null,
+      }));
 
     // ── Reconciliation gate ─────────────────────────────────────────────────
     // Reconcile principal balance: opening + Σ(principal-change amounts) ≈ closing.

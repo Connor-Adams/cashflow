@@ -333,3 +333,53 @@ test('rbcCreditLineParser.parse: correct header + transactions for glued-row fix
   assert.equal(result.header?.periodStart, '2025-07-08');
   assert.equal(result.header?.periodEnd, '2025-08-04');
 });
+
+// ─── Interest rows are not transactions on the credit line ───────────────────
+//
+// Interest on a Royal Credit Line is billed to the linked RBC chequing account,
+// not capitalised into the principal — the statement proves it by leaving the
+// balance-owing column unchanged across the interest row. The chequing
+// statement records the same event as "Loan interest", so emitting it here too
+// books the cost twice (once as a fee on chequing, once as a purchase on the
+// line) and overstates the amount owing by the cumulative interest.
+//
+// In prod all 7 credit-line interest rows matched a chequing "LOAN INTEREST"
+// row exactly on date and amount, and the line reported 516.63 more owing than
+// the statement.
+//
+// The parser already distinguishes them (`isPrincipalChange: false`) and
+// already excludes them from its reconciliation sum; it just emitted them
+// anyway.
+
+test('interest rows are excluded from the emitted transactions', () => {
+  const result = rbcCreditLineParser.parse(MULTI_TXN_LINES, { defaultCurrency: 'CAD' });
+
+  assert.equal(result.transactions.length, 3);
+  assert.deepEqual(
+    result.transactions.map((t) => t.amount),
+    [-400, -1150, -2000],
+  );
+  assert.ok(
+    !result.transactions.some((t) => /interest/i.test(t.merchantRaw)),
+    `interest row leaked into transactions: ${JSON.stringify(result.transactions.map((t) => t.merchantRaw))}`,
+  );
+});
+
+test('excluding interest keeps the principal reconciliation intact', () => {
+  // Opening 4,000 + (-400 -1,150 -2,000) = -7,550 owing, matching the
+  // statement's closing principal. Interest never entered that sum.
+  const result = rbcCreditLineParser.parse(MULTI_TXN_LINES, { defaultCurrency: 'CAD' });
+  const recon = result.parseErrors.filter((e) => e.message.includes('does not reconcile'));
+  assert.deepEqual(recon, []);
+  const sum = result.transactions.reduce((acc, t) => acc + t.amount, 0);
+  assert.equal(-4000 + sum, -7550);
+});
+
+test('the row-level parser still reports interest rows, flagged as non-principal', () => {
+  // The information is not lost — only its promotion to a transaction is. The
+  // reconciliation gate depends on still seeing these rows.
+  const { rows } = parseRbcCreditLineActivity(MULTI_TXN_LINES, { start: '2025-08-05', end: '2025-09-03' }, 4000);
+  const interest = rows.filter((r) => !r.isPrincipalChange);
+  assert.equal(interest.length, 1);
+  assert.match(interest[0].description, /Interest Payment/i);
+});
