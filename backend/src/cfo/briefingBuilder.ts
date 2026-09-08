@@ -27,6 +27,7 @@ import {
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 import { insightToActionItem, type InsightLike } from '../insights/toActionItems';
 import { findRuleProposals } from '../ai/ruleProposals';
+import { synthesizeBriefing } from './synthesizeBriefing';
 import { num } from '../util/numbers';
 import {
   computeSafeToSpend,
@@ -42,7 +43,7 @@ import type {
 /** Persisted version of the briefing prompt/composition. Bump when the
  *  shape of action items materially changes so eval comparisons stay
  *  honest. */
-export const CFO_BRIEFING_PROMPT_VERSION = 'cfo-briefing-v1';
+export const CFO_BRIEFING_PROMPT_VERSION = 'cfo-briefing-v2';
 
 /** Default window length when the caller omits explicit dates. */
 const DEFAULT_BRIEFING_WINDOW_DAYS = 7;
@@ -154,6 +155,8 @@ export interface BuildBriefingParams {
   periodStart: string;
   periodEnd: string;
   currency: string;
+  /** Test seam — defaults to the real synthesis pass. */
+  synthesizeImpl?: typeof synthesizeBriefing;
 }
 
 export interface BuildBriefingResult {
@@ -470,9 +473,17 @@ export async function buildCfoBriefing(
     }
   }
 
+  const fallbackSummary = briefingShortSummary(counts);
+  const synthesize = params.synthesizeImpl ?? synthesizeBriefing;
+  const synthesis = await synthesize({
+    items,
+    safeToSpend: safeToSpendSnapshot,
+    currency,
+  });
+
   return {
-    actionItems: items,
-    summary: briefingShortSummary(counts),
+    actionItems: synthesis.ordered,
+    summary: synthesis.summary ?? fallbackSummary,
     safeToSpendSnapshot,
   };
 }

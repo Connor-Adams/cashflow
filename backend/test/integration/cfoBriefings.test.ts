@@ -348,7 +348,7 @@ test('POST /api/cfo/briefings with no body defaults to last 7 days and returns 2
   assert.equal(r.body.userId, primaryUserId);
   assert.equal(r.body.currency, 'CAD');
   assert.equal(r.body.model, 'deterministic');
-  assert.equal(r.body.promptVersion, 'cfo-briefing-v1');
+  assert.equal(r.body.promptVersion, 'cfo-briefing-v2');
   assert.equal(r.body.errorMessage, null);
   assert.ok(Array.isArray(r.body.actionItems));
   assert.ok(r.body.actionItems.length > 0, 'expected at least one action item');

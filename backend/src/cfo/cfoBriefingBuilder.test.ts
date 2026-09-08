@@ -1,5 +1,7 @@
 import { before, beforeEach, after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import type { Request } from 'express';
+import type { CfoBriefingActionItem } from '../models/CfoBriefing';
 
 process.env.DATABASE_PATH = ':memory:';
 
@@ -10,6 +12,7 @@ let classifyImportIssue: typeof import('./briefingBuilder').classifyImportIssue;
 let CFO_BRIEFING_PROMPT_VERSION: typeof import('./briefingBuilder').CFO_BRIEFING_PROMPT_VERSION;
 let resolveDefaultBriefingPeriod: typeof import('./briefingBuilder').resolveDefaultBriefingPeriod;
 let loadOpenInsightItems: typeof import('./briefingBuilder').loadOpenInsightItems;
+let buildCfoBriefing: typeof import('./briefingBuilder').buildCfoBriefing;
 
 /**
  * Unit tests for the pure helpers inside briefingBuilder, plus
@@ -28,6 +31,7 @@ before(async () => {
     CFO_BRIEFING_PROMPT_VERSION,
     resolveDefaultBriefingPeriod,
     loadOpenInsightItems,
+    buildCfoBriefing,
   } = await import('./briefingBuilder'));
   await sequelize.sync({ force: true });
 });
@@ -39,6 +43,25 @@ after(async () => {
 beforeEach(async () => {
   await Insight.destroy({ where: {}, truncate: true });
 });
+
+/**
+ * `currentAuth(req)` (backend/src/auth/scope.ts) just returns `req.auth`, so
+ * a plain object carrying the fields `householdWhere`/`visibleTransactionWhere`
+ * read — `user.id`, `user.globalRole`, `household.id`, `role` — is a
+ * sufficient fake. Mirrors the pattern already used in
+ * `backend/src/auth/scope.test.ts` and `backend/src/audit/auditLog.test.ts`.
+ * This file has no other request helper (confirmed by reading the file before
+ * adding tests), so it's built fresh here rather than reused from elsewhere.
+ */
+function fakeReq(userId: number, householdId: number): Request {
+  return {
+    auth: {
+      user: { id: userId, globalRole: 'user' },
+      household: { id: householdId },
+      role: 'owner',
+    },
+  } as unknown as Request;
+}
 
 test('briefingShortSummary returns a friendly empty message when no items', () => {
   assert.equal(
@@ -140,4 +163,72 @@ test('loadOpenInsightItems returns open insights as anomaly action items', async
   assert.equal(items[0].type, 'anomaly');
   assert.equal(items[0].severity, 'watch');
   assert.deepEqual(items[0].supportingTransactionIds, [11, 12]);
+});
+
+test('briefing uses the synthesized summary and ordering when available', async () => {
+  const householdId = 555;
+  await Insight.create({
+    householdId,
+    userId: null,
+    type: 'merchant_spend_spike',
+    severity: 'warning',
+    title: 'Insight A',
+    description: null,
+    entityType: null,
+    entityId: null,
+    status: 'open',
+    fingerprint: 'a',
+    metadata: null,
+    detectedAt: new Date('2026-09-01T00:00:00Z'),
+  });
+  await Insight.create({
+    householdId,
+    userId: null,
+    type: 'merchant_spend_spike',
+    severity: 'warning',
+    title: 'Insight B',
+    description: null,
+    entityType: null,
+    entityId: null,
+    status: 'open',
+    fingerprint: 'b',
+    metadata: null,
+    detectedAt: new Date('2026-09-02T00:00:00Z'),
+  });
+
+  let capturedItems: CfoBriefingActionItem[] = [];
+  const result = await buildCfoBriefing({
+    req: fakeReq(1, householdId),
+    householdId,
+    userId: 1,
+    periodStart: '2026-09-01',
+    periodEnd: '2026-09-07',
+    currency: 'CAD',
+    synthesizeImpl: async ({ items }) => {
+      capturedItems = items;
+      return {
+        summary: 'One thing matters this week.',
+        ordered: [...items].reverse(),
+      };
+    },
+  });
+
+  assert.ok(capturedItems.length >= 2, 'expected at least the two seeded insights as items');
+  assert.equal(result.summary, 'One thing matters this week.');
+  assert.deepEqual(result.actionItems, [...capturedItems].reverse());
+});
+
+test('briefing falls back to the count summary when synthesis returns null', async () => {
+  const householdId = 556;
+  const result = await buildCfoBriefing({
+    req: fakeReq(1, householdId),
+    householdId,
+    userId: 1,
+    periodStart: '2026-09-01',
+    periodEnd: '2026-09-07',
+    currency: 'CAD',
+    synthesizeImpl: async ({ items }) => ({ summary: null, ordered: items }),
+  });
+
+  assert.match(result.summary, /action item|All clear/);
 });
