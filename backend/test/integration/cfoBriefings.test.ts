@@ -10,8 +10,14 @@
  *  - POST /api/cfo/briefings/:id/items/:itemId/resolve|dismiss flips status
  *  - Validation: bad dates, swapped order, bad currency, window too long
  *  - Briefing degrades gracefully without OpenAI (no key configured)
- *  - Action items include the new types: missing_receipt, rule_suggestion,
- *    forecast_warning, review_backlog, new_subscription, import_issue.
+ *  - Action items include the new types: rule_suggestion, forecast_warning,
+ *    review_backlog, new_subscription, import_issue, anomaly.
+ *  - Anomalies come from real `Insight` rows (the detector-driven table),
+ *    not the old inline missing-receipt scan — an open Insight surfaces as
+ *    an `anomaly` item, and a big-ticket transaction with no receipt does
+ *    NOT surface one on its own (that's now `detectMissingReceipt`'s job,
+ *    which runs separately and persists an Insight; this builder only
+ *    reads what's already `status: 'open'`).
  *  - Briefing items include `link` paths for navigation (AC: links).
  */
 import { after, before, test } from 'node:test';
@@ -139,8 +145,8 @@ before(async () => {
     reviewedAt?: Date | null;
     reviewFlag?: boolean;
   };
-  async function makeTxn(seed: TxnSeed): Promise<void> {
-    await models.Transaction.create({
+  async function makeTxn(seed: TxnSeed): Promise<number> {
+    const txn = await models.Transaction.create({
       householdId: primaryHouseholdId,
       accountId: primaryAccountId,
       visibility: 'shared',
@@ -163,10 +169,17 @@ before(async () => {
       reviewFlag: seed.reviewFlag ?? false,
       reviewedAt: seed.reviewedAt ?? null,
     } as never);
+    return (txn as unknown as { id: number }).id;
   }
 
-  // Big-ticket charge without a receipt → missing_receipt item.
-  await makeTxn({
+  // Big-ticket charge without a receipt. This used to surface its own
+  // missing_receipt item via an inline scan in the briefing builder; that
+  // scan is gone (detectMissingReceipt now owns this, persisting an
+  // Insight row — which the builder only picks up once it's `status:
+  // 'open'`, not by re-deriving it here). Kept as a fixture so the
+  // "no missing_receipt items appear on their own" assertion below has
+  // something to *not* trigger on.
+  const bestBuyTxnId = await makeTxn({
     date: fiveDaysAgo,
     merchantClean: 'BestBuy',
     merchantRaw: 'BEST BUY',
@@ -250,6 +263,41 @@ before(async () => {
     startedAt: new Date(),
     finishedAt: new Date(),
   } as never);
+
+  // Open Insight row (as a real detector would persist) → anomaly item.
+  // Points at the BestBuy transaction so this also exercises refType/refId.
+  await models.Insight.create({
+    householdId: primaryHouseholdId,
+    userId: null,
+    type: 'missing_receipt',
+    severity: 'warning',
+    title: 'Missing receipt for BestBuy',
+    description: 'BestBuy on this date for 749.99 CAD has no attached receipt.',
+    entityType: 'transaction',
+    entityId: bestBuyTxnId,
+    status: 'open',
+    fingerprint: `missing-receipt:${bestBuyTxnId}`,
+    metadata: { transactionIds: [bestBuyTxnId] },
+    detectedAt: new Date(),
+  } as never);
+
+  // A dismissed Insight must NOT surface — this is the whole point of
+  // reading real detector output instead of re-deriving inline: dismissals
+  // are respected.
+  await models.Insight.create({
+    householdId: primaryHouseholdId,
+    userId: null,
+    type: 'merchant_spend_spike',
+    severity: 'critical',
+    title: 'Dismissed spend spike',
+    description: null,
+    entityType: null,
+    entityId: null,
+    status: 'dismissed',
+    fingerprint: 'dismissed-spike',
+    metadata: null,
+    detectedAt: new Date(),
+  } as never);
 });
 
 after(async () => {
@@ -309,12 +357,35 @@ test('POST /api/cfo/briefings with no body defaults to last 7 days and returns 2
   const types = new Set(
     (r.body.actionItems as Array<{ type: string }>).map((i) => i.type),
   );
-  assert.ok(types.has('missing_receipt'), `expected missing_receipt; got ${[...types].join(',')}`);
   assert.ok(types.has('rule_suggestion'), `expected rule_suggestion; got ${[...types].join(',')}`);
   assert.ok(types.has('forecast_warning'), `expected forecast_warning; got ${[...types].join(',')}`);
   assert.ok(types.has('review_backlog'), `expected review_backlog; got ${[...types].join(',')}`);
   assert.ok(types.has('new_subscription'), `expected new_subscription; got ${[...types].join(',')}`);
   assert.ok(types.has('import_issue'), `expected import_issue; got ${[...types].join(',')}`);
+  assert.ok(types.has('anomaly'), `expected anomaly; got ${[...types].join(',')}`);
+  // The old inline missing-receipt scan is gone: the builder only reads
+  // open Insight rows, so a big-ticket transaction with no receipt does not
+  // spontaneously produce its own item unless a detector has persisted one.
+  assert.ok(
+    !types.has('missing_receipt'),
+    'missing_receipt items should no longer be derived inline by the briefing builder',
+  );
+
+  const anomalyItems = (
+    r.body.actionItems as Array<{
+      type: string;
+      title: string;
+      refType: string | null;
+      refId: number | null;
+      severity: string;
+      link: string;
+    }>
+  ).filter((i) => i.type === 'anomaly');
+  assert.equal(anomalyItems.length, 1, 'only the open Insight should surface, not the dismissed one');
+  assert.equal(anomalyItems[0].title, 'Missing receipt for BestBuy');
+  assert.equal(anomalyItems[0].refType, 'transaction');
+  assert.equal(anomalyItems[0].severity, 'watch');
+  assert.equal(anomalyItems[0].link, '/insights');
 
   // Every item gets a stable id and starts in 'open' status.
   for (const item of r.body.actionItems as Array<{ id: string; status: string; link?: string }>) {
