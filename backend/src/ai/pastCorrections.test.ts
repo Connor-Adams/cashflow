@@ -74,3 +74,32 @@ test('caps the number of corrections returned', async () => {
   const out = await findPastCorrections(1, 'Starbucks 123');
   assert.equal(out.length, 5);
 });
+
+test('a split-percentage-only edit surfaces the pctMe change', async () => {
+  // The user kept category/business/splitType as suggested and only changed
+  // the split percentage. Before the fix, CorrectionFields dropped pctMe
+  // entirely, so `suggested` and `corrected` were identical here even though
+  // `mismatchedFields` (built from METRIC_TO_FIELD) already named 'pctMe' —
+  // an incoherent record that would teach the prompt nothing.
+  await seed({
+    output: { category: 'Dining', business: false, splitType: 'shared', pctMe: 50 },
+    finalSnapshot: {
+      category: 'Dining',
+      business: false,
+      splitType: 'shared',
+      pctMe: '70', // stored as a numeric string, as this codebase does elsewhere
+      metrics: {
+        categoryMatch: true,
+        businessMatch: true,
+        splitTypeMatch: true,
+        pctMeMatch: false,
+      },
+    },
+  });
+  const out = await findPastCorrections(1, 'Starbucks 123');
+  assert.equal(out.length, 1);
+  assert.equal(out[0].suggested.pctMe, 50);
+  assert.equal(out[0].corrected.pctMe, 70);
+  assert.notEqual(out[0].suggested.pctMe, out[0].corrected.pctMe);
+  assert.ok(out[0].mismatchedFields.includes('pctMe'));
+});

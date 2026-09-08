@@ -8,11 +8,14 @@
  */
 import { AiSuggestion } from '../models';
 import { normalizeMerchantKey } from './merchantMemory';
+import { num } from '../util/numbers';
 
 export interface CorrectionFields {
   category: string | null;
   business: boolean | null;
   splitType: string | null;
+  pctMe: number | null;
+  pctPartner: number | null;
 }
 
 export interface PastCorrection {
@@ -36,6 +39,8 @@ function fields(source: unknown): CorrectionFields {
     category: typeof o.category === 'string' ? o.category : null,
     business: typeof o.business === 'boolean' ? o.business : null,
     splitType: typeof o.splitType === 'string' ? o.splitType : null,
+    pctMe: num(o.pctMe),
+    pctPartner: num(o.pctPartner),
   };
 }
 
@@ -64,6 +69,11 @@ export async function findPastCorrections(
   // recent window rather than in SQL. Do NOT use `raw: true` here: on SQLite
   // it returns JSON columns as unparsed strings, silently breaking the
   // merchant match below.
+  //
+  // The 200-row window is a recency cap, not a merchant-scoped limit: a
+  // merchant whose matching corrections all fall outside the 200 most recent
+  // edited suggestions (across all merchants) silently yields fewer than
+  // `limit` results, or none, even if older corrections exist for it.
   const rows = await AiSuggestion.findAll({
     where: {
       kind: 'transaction_fields',
