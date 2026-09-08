@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSuggestion } from './suggestTransaction';
+import { parseSuggestion, buildCorrectionsPromptSection } from './suggestTransaction';
 import { scoreTransactionSuggestion } from './evaluateSuggestion';
 import { ruleProposalFromRow } from './ruleProposals';
 import { parseTransactionAuditIssues } from './auditTransactions';
@@ -83,6 +83,36 @@ test('ruleProposalFromRow handles Postgres lowercased aliases', () => {
       exampleTransactionIds: [7, 8, 9, 10],
     },
   );
+});
+
+test('renders past corrections as explicit negatives', () => {
+  const section = buildCorrectionsPromptSection([
+    {
+      suggestionId: 1,
+      suggested: {
+        category: 'Dining',
+        business: false,
+        splitType: 'me',
+        pctMe: 1,
+        pctPartner: 0,
+      },
+      corrected: {
+        category: 'Groceries',
+        business: false,
+        splitType: 'me',
+        pctMe: 1,
+        pctPartner: 0,
+      },
+      mismatchedFields: ['category'],
+    },
+  ]);
+  assert.match(section, /previously suggested/i);
+  assert.match(section, /Dining/);
+  assert.match(section, /Groceries/);
+});
+
+test('renders nothing when there are no corrections', () => {
+  assert.equal(buildCorrectionsPromptSection([]), '');
 });
 
 test('parseTransactionAuditIssues validates audit output safely', () => {

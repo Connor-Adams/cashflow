@@ -18,7 +18,6 @@ import { enrichmentItemClearConfidence } from '../config/env';
 import { computeReceiptWarnings } from '../util/receiptWarnings';
 import {
   loadCategoryHints,
-  suggestTransactionFields,
   suggestTransactionFieldsTracked,
 } from '../ai/suggestTransaction';
 import { createTrackedSuggestion, markTransactionSuggestionOutcome } from '../ai/suggestionStore';
@@ -650,7 +649,7 @@ router.post('/bulk-ai-suggest', aiSuggestLimiter, async (req, res, next) => {
     const results: {
       id: number;
       suggestionId: number;
-      suggestion: Awaited<ReturnType<typeof suggestTransactionFields>>;
+      suggestion: Awaited<ReturnType<typeof suggestTransactionFieldsTracked>>['suggestion'];
     }[] = [];
     for (const id of ids) {
         const txn = await Transaction.findOne({ where: { id, ...visibleTransactionWhere(req) } });
