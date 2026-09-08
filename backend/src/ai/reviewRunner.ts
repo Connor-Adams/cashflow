@@ -4,7 +4,9 @@
  * Builds a list of action items for a date window by combining
  * deterministic signals from existing engines:
  *
- * - Anomalies / category deltas / uncategorized backlog → `buildFinancialInsights`
+ * - Anomalies / category deltas / uncategorized backlog → `loadOpenInsightItems`
+ *   (open `Insight` rows from the real detectors, same source the CFO
+ *   briefing reads — see `../cfo/briefingBuilder`)
  * - Rule suggestions                                    → `findRuleProposals`
  * - Missing receipts on big-ticket spend                → direct query
  * - Subscription candidates                             → direct query
@@ -23,14 +25,15 @@ import { Op } from 'sequelize';
 import type { Request } from 'express';
 import { Transaction, Receipt, PlannedEvent } from '../models';
 import { visibleTransactionWhere } from '../auth/scope';
-import { buildFinancialInsights, type AiFinancialInsight } from './insights';
+import { loadOpenInsightItems } from '../cfo/briefingBuilder';
 import { findRuleProposals } from './ruleProposals';
 import { num } from '../util/numbers';
 import type {
   AiReviewActionItem,
-  AiReviewActionItemSeverity,
+  AiReviewActionItemRefType,
   AiReviewActionItemType,
 } from '../models/AiReviewRun';
+import type { CfoBriefingActionItem } from '../models/CfoBriefing';
 
 export const AI_REVIEW_PROMPT_VERSION = 'ai-review-v1';
 
@@ -63,18 +66,59 @@ function idFor(type: AiReviewActionItemType, suffix: string | number): string {
   return `${type}-${suffix}`;
 }
 
-function severityFromInsight(s: AiFinancialInsight['severity']): AiReviewActionItemSeverity {
-  return s === 'action' ? 'action' : s === 'watch' ? 'watch' : 'info';
+const CFO_STATUS_TO_REVIEW_STATUS: Record<
+  CfoBriefingActionItem['status'],
+  AiReviewActionItem['status']
+> = {
+  open: 'suggested',
+  resolved: 'accepted',
+  dismissed: 'dismissed',
+};
+
+const REVIEW_REF_TYPES = new Set<string>(['transaction', 'event', 'rule']);
+
+function reviewRefTypeFrom(refType: CfoBriefingActionItem['refType']): AiReviewActionItemRefType {
+  return refType != null && REVIEW_REF_TYPES.has(refType) ? (refType as AiReviewActionItemRefType) : null;
 }
 
-function classifyInsightType(insight: AiFinancialInsight): AiReviewActionItemType {
-  if (insight.metric === 'category_month_over_month_delta') return 'anomaly';
-  if (insight.metric === 'uncategorized_spend') return 'anomaly';
-  if (insight.metric === 'no_category_count') return 'anomaly';
-  if (insight.metric === 'merchant_spend') return 'anomaly';
-  if (insight.metric === 'category_spend') return 'other';
-  if (insight.metric === 'split_business_spend') return 'other';
-  return 'other';
+const REVIEW_ITEM_TYPES = new Set<string>([
+  'anomaly',
+  'rule_suggestion',
+  'missing_receipt',
+  'subscription',
+  'forecast_warning',
+  'other',
+]);
+
+function reviewTypeFrom(type: CfoBriefingActionItem['type']): AiReviewActionItemType {
+  return REVIEW_ITEM_TYPES.has(type) ? (type as AiReviewActionItemType) : 'other';
+}
+
+/**
+ * `loadOpenInsightItems` (Task 5) returns `CfoBriefingActionItem`s — the CFO
+ * briefing's shape, produced by `insightToActionItem`. That shape overlaps
+ * with `AiReviewActionItem` field-for-field but is NOT interchangeable:
+ * status vocabularies differ ('open'|'resolved'|'dismissed' vs
+ * 'suggested'|'accepted'|'dismissed'), and `type`/`refType` are each closed
+ * unions that don't fully align (e.g. `CfoBriefingActionItemRefType` allows
+ * 'subscription'/'import', which `AiReviewActionItemRefType` doesn't; CFO
+ * `type` allows values like 'safe_to_spend_low' that the review vocabulary
+ * doesn't have). Remap explicitly field-by-field rather than casting.
+ */
+function insightItemToReviewItem(item: CfoBriefingActionItem): AiReviewActionItem {
+  const refType = reviewRefTypeFrom(item.refType);
+  return {
+    id: item.id,
+    type: reviewTypeFrom(item.type),
+    refType,
+    refId: refType == null ? null : item.refId,
+    severity: item.severity,
+    title: item.title,
+    summary: item.summary,
+    status: CFO_STATUS_TO_REVIEW_STATUS[item.status],
+    supportingTransactionIds: item.supportingTransactionIds,
+    rationale: item.rationale,
+  };
 }
 
 function safeNumber(value: unknown): number {
@@ -98,16 +142,11 @@ export async function buildReviewActionItems(
   params: BuildReviewActionItemsParams,
 ): Promise<BuildReviewActionItemsResult> {
   const { req, householdId, periodStart, periodEnd, currency } = params;
-  const periodLabel = periodStart.slice(0, 7);
 
   // Run independent sub-queries in parallel.
-  const [insightsOut, ruleProposals, txnsInWindow, plannedEventsOverdue] =
+  const [insightItems, ruleProposals, txnsInWindow, plannedEventsOverdue] =
     await Promise.all([
-      buildFinancialInsights(req, periodLabel, currency, {
-        from: periodStart,
-        to: periodEnd,
-        label: `${periodStart} to ${periodEnd}`,
-      }),
+      loadOpenInsightItems(householdId),
       findRuleProposals(householdId),
       Transaction.findAll({
         where: {
@@ -141,20 +180,11 @@ export async function buildReviewActionItems(
 
   const items: AiReviewActionItem[] = [];
 
-  // Anomalies / categorical insights → action items.
-  for (const insight of insightsOut.insights) {
-    items.push({
-      id: idFor(classifyInsightType(insight), `${insight.metric}-${insight.amount}`),
-      type: classifyInsightType(insight),
-      refType: null,
-      refId: null,
-      severity: severityFromInsight(insight.severity),
-      title: insight.title,
-      summary: insight.summary,
-      status: 'suggested',
-      supportingTransactionIds: insight.supportingTransactionIds,
-      rationale: insight.rationale,
-    });
+  // Anomalies / categorical insights → action items, sourced from the real
+  // Insight detectors (same source the CFO briefing reads) rather than the
+  // old prompt-free `ai/insights.ts` template engine.
+  for (const insightItem of insightItems) {
+    items.push(insightItemToReviewItem(insightItem));
   }
 
   // Rule suggestions.
