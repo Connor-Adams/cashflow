@@ -105,7 +105,7 @@ function reviewTypeFrom(type: CfoBriefingActionItem['type']): AiReviewActionItem
  * `type` allows values like 'safe_to_spend_low' that the review vocabulary
  * doesn't have). Remap explicitly field-by-field rather than casting.
  */
-function insightItemToReviewItem(item: CfoBriefingActionItem): AiReviewActionItem {
+export function insightItemToReviewItem(item: CfoBriefingActionItem): AiReviewActionItem {
   const refType = reviewRefTypeFrom(item.refType);
   return {
     id: item.id,
