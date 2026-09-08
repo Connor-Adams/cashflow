@@ -18,8 +18,6 @@ import { getOpenAiConfig } from '../config/openai';
 import { openaiJson } from '../ai/openaiJson';
 import { logger } from '../observability/logger';
 
-export const CFO_BRIEFING_SYNTHESIS_PROMPT_VERSION = 'cfo-briefing-v2';
-
 export interface SynthesisResult {
   summary: string | null;
   ordered: CfoBriefingActionItem[];

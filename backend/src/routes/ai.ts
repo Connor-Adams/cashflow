@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { QueryTypes } from 'sequelize';
-import { AiSuggestion, Insight, Rule, Transaction } from '../models';
-import type { InsightSeverity } from '../models/Insight';
+import { AiSuggestion, Rule, Transaction } from '../models';
 import { sequelize } from '../models';
 import { getOpenAiConfig } from '../config/openai';
 import { isDemoUserRequest } from '../demo/aiAccess';
@@ -21,7 +20,6 @@ import {
   type CounterpartyPromotion,
 } from '../ai/counterpartyPromotions';
 import { auditTransactionsForMislabels } from '../ai/auditTransactions';
-import { mapInsightSeverity } from '../insights/toActionItems';
 import { aiSuggestLimiter } from './aiRateLimit';
 
 const router = Router();
@@ -285,9 +283,10 @@ router.post('/rule-proposals/:merchantPattern/dismiss', async (req, res, next) =
  *
  * GET /api/ai/insights used to run the standalone six-template financial
  * insight engine and write its output as `financial_insight` AiSuggestion
- * rows. That engine is deleted: the Unified Inbox now reads `Insight` rows
- * (the same detector-backed table the insights page reads and dismisses) via
- * GET /api/ai/inbox below. We return **410 Gone** rather than letting the
+ * rows. That engine is deleted, and its findings now live in the `Insight`
+ * table written by the real detectors — read via GET /api/insights, which is
+ * what the insights page and its badge use. The AI inbox deliberately does
+ * NOT restate them. We return **410 Gone** rather than letting the
  * route silently 404 so any stale caller (the web app, a bookmarklet, a
  * cron job) fails loudly instead of getting a routing 404 indistinguishable
  * from a typo'd path.
@@ -295,7 +294,7 @@ router.post('/rule-proposals/:merchantPattern/dismiss', async (req, res, next) =
 router.get('/insights', (_req, res) => {
   res.status(410).json({
     error: 'gone',
-    message: 'This endpoint was retired; insights now come from GET /api/ai/inbox.',
+    message: 'This endpoint was retired; insights now come from GET /api/insights.',
   });
 });
 
@@ -386,14 +385,18 @@ router.get('/import-cleanup', async (req, res, next) => {
 /**
  * An inbox item's identity is the PAIR `(kind, id)`, not `id` alone. `id` is
  * drawn from whichever table backs that `kind` — `AiSuggestion.id` for
- * transaction_audit/counterparty_email_match, `Insight.id` for
- * financial_insight, and synthesized negative ids for the unpersisted
- * rule_proposal/counterparty_promotion kinds — so the same numeric id can
- * legitimately appear under two different kinds and refer to unrelated rows.
- * `POST /api/ai/suggestions/:id/apply|reject` only resolve ids against
- * AiSuggestion, so a future consumer MUST key off `(kind, id)` (e.g. the
- * frontend's `${kind}:${id}` composite key below) rather than acting on a
- * bare `id` from this list.
+ * transaction_audit/counterparty_email_match, and synthesized negative ids
+ * for the unpersisted rule_proposal/counterparty_promotion kinds — so the
+ * same numeric id can legitimately appear under two different kinds and refer
+ * to unrelated rows. `POST /api/ai/suggestions/:id/apply|reject` only resolve
+ * ids against AiSuggestion, so a future consumer MUST key off `(kind, id)`
+ * (e.g. the frontend's `${kind}:${id}` composite key below) rather than
+ * acting on a bare `id` from this list.
+ *
+ * `financial_insight` stays in the union (and as a `byKind` key, always 0)
+ * for response-shape compatibility, but this endpoint no longer emits it:
+ * open `Insight` rows have their own page, endpoint and sidebar badge, and
+ * counting them here double-badged the very same rows.
  */
 type InboxItem = {
   id: number;
@@ -433,24 +436,12 @@ router.get('/inbox', async (req, res, next) => {
     const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
     const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
     const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
-    const [rows, insightRows, emailMatchRows, ruleProposals, counterpartyPromotions] =
+    const [rows, emailMatchRows, ruleProposals, counterpartyPromotions] =
       await Promise.all([
         AiSuggestion.findAll({
           where: { ...where, kind: 'transaction_audit' },
           order: [['id', 'DESC']],
           limit,
-        }),
-        // `financial_insight` inbox items are the real detector output (the
-        // `Insight` table the insights page reads and dismisses), not the
-        // retired six-template engine that wrote AiSuggestion rows. `raw: true`
-        // is safe here only because `metadata` (a JSON column) is not selected —
-        // SQLite hands back unparsed JSON strings for raw JSON selects.
-        Insight.findAll({
-          where: { ...(householdId == null ? {} : { householdId }), status: 'open' },
-          attributes: ['id', 'type', 'severity', 'title', 'description', 'detectedAt'],
-          order: [['detectedAt', 'DESC']],
-          limit,
-          raw: true,
         }),
         AiSuggestion.findAll({
           where: { ...where, kind: 'counterparty_email_match' },
@@ -474,23 +465,6 @@ router.get('/inbox', async (req, res, next) => {
         output: row.output,
       });
     }
-    const insightItems: InboxItem[] = (insightRows as unknown as Array<{
-      id: number;
-      type: string;
-      severity: InsightSeverity;
-      title: string;
-      description: string | null;
-      detectedAt: Date;
-    }>).map((row) => ({
-      id: row.id,
-      kind: 'financial_insight',
-      createdAt: new Date(row.detectedAt).toISOString(),
-      transactionId: null,
-      summary: row.description ?? row.title,
-      severity: mapInsightSeverity(row.severity),
-      confidence: null,
-      output: { type: row.type, title: row.title, description: row.description },
-    }));
     const proposalItems: InboxItem[] = ruleProposals.map((p, idx) => ({
       id: -1 - idx,
       kind: 'rule_proposal',
@@ -534,7 +508,6 @@ router.get('/inbox', async (req, res, next) => {
     res.json({
       items: [
         ...persistedItems,
-        ...insightItems,
         ...emailMatchItems,
         ...proposalItems,
         ...counterpartyItems,
@@ -549,13 +522,10 @@ router.get('/inbox/count', async (req, res, next) => {
   try {
     const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
     const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
-    const [auditRows, insightCount, ruleProposals, counterpartyPromotions] = await Promise.all([
+    const [auditRows, ruleProposals, counterpartyPromotions] = await Promise.all([
       AiSuggestion.findAll({
         where: { ...where, kind: 'transaction_audit' },
         attributes: ['id', 'output'],
-      }),
-      Insight.count({
-        where: { ...(householdId == null ? {} : { householdId }), status: 'open' },
       }),
       findRuleProposals(householdId),
       findCounterpartyPromotions(householdId),
@@ -564,14 +534,15 @@ router.get('/inbox/count', async (req, res, next) => {
     const ruleProposalCount = ruleProposals.length;
     const counterpartyPromotionCount = counterpartyPromotions.length;
     res.json({
-      total:
-        auditCount +
-        insightCount +
-        ruleProposalCount +
-        counterpartyPromotionCount,
+      total: auditCount + ruleProposalCount + counterpartyPromotionCount,
       byKind: {
         transaction_audit: auditCount,
-        financial_insight: insightCount,
+        // Always 0: open Insight rows are counted by the insights surface
+        // itself (GET /api/insights?status=open, via useInsightsCount) and
+        // badged there. Counting them here too badged the same rows twice
+        // (sidebar AI inbox + sidebar Insights, and again on the dashboard
+        // inbox tile). Key kept so the frontend response contract holds.
+        financial_insight: 0,
         rule_proposal: ruleProposalCount,
         counterparty_promotion: counterpartyPromotionCount,
       },

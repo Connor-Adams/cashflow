@@ -17,6 +17,6 @@ defineJob({
   enabledDefault: env.insightDetectorsEnabled,
   handler: async () => {
     const summary = await runAllHouseholdDetectors();
-    return { summary: summary as unknown as Record<string, unknown> };
+    return { summary: { ...summary } };
   },
 });

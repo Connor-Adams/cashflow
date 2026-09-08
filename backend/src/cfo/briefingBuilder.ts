@@ -16,7 +16,7 @@
  * label/plural correctness without touching the DB.
  */
 
-import { Op } from 'sequelize';
+import { Op, literal } from 'sequelize';
 import type { Request } from 'express';
 import {
   Transaction,
@@ -28,6 +28,7 @@ import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 import { insightToActionItem, type InsightLike } from '../insights/toActionItems';
 import { findRuleProposals } from '../ai/ruleProposals';
 import { synthesizeBriefing } from './synthesizeBriefing';
+import { getOpenAiConfig } from '../config/openai';
 import { num } from '../util/numbers';
 import {
   computeSafeToSpend,
@@ -163,7 +164,17 @@ export interface BuildBriefingResult {
   actionItems: CfoBriefingActionItem[];
   summary: string;
   safeToSpendSnapshot: CfoBriefingSafeToSpendSnapshot | null;
+  /**
+   * Provenance for the persisted row: the OpenAI model id when the synthesis
+   * pass actually wrote the summary, `'deterministic'` when we fell back to
+   * `briefingShortSummary`. Derived from the same condition as the summary
+   * itself so the two can never drift.
+   */
+  model: string;
 }
+
+/** Provenance label for a briefing whose summary came from the counters. */
+export const DETERMINISTIC_BRIEFING_MODEL = 'deterministic';
 
 function idFor(type: CfoBriefingActionItemType, suffix: string | number): string {
   return `${type}-${suffix}`;
@@ -194,7 +205,30 @@ function snapshotFromSafeToSpend(
 }
 
 /**
- * Open insights for the household, as briefing action items. Exported so the
+ * Most open insights a single briefing will carry. Open insights accumulate
+ * without bound (production sits at ~140 open `missing_receipt` rows alone),
+ * and every one of them is persisted into `CfoBriefing.actionItems` AND
+ * serialized into the synthesis prompt — so an uncapped read makes token
+ * cost, latency and JSON-truncation risk scale with the table.
+ *
+ * Deliberately NOT filtered by the briefing window: insights are standing
+ * observations, not period events, so a stale-but-open critical insight must
+ * still surface. The cap is severity-first instead, so what gets dropped is
+ * always the least severe / oldest tail.
+ */
+export const MAX_OPEN_INSIGHT_ITEMS = 20;
+
+/** Severity rank for ordering: critical first, then warning, then everything
+ *  else. A CASE expression rather than an ORDER BY on the raw column because
+ *  the stored values sort alphabetically ('critical' < 'info' < 'warning'),
+ *  which is not the severity order. Standard SQL — runs on SQLite and
+ *  Postgres alike. */
+const INSIGHT_SEVERITY_RANK_SQL =
+  "CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END";
+
+/**
+ * Open insights for the household, as briefing action items — the most severe
+ * `MAX_OPEN_INSIGHT_ITEMS`, newest first within a severity. Exported so the
  * unit test can exercise the query without building a whole briefing.
  */
 export async function loadOpenInsightItems(
@@ -212,7 +246,11 @@ export async function loadOpenInsightItems(
       'entityId',
       'metadata',
     ],
-    order: [['detectedAt', 'DESC']],
+    order: [
+      [literal(INSIGHT_SEVERITY_RANK_SQL), 'ASC'],
+      ['detectedAt', 'DESC'],
+    ],
+    limit: MAX_OPEN_INSIGHT_ITEMS,
   });
   // Not `raw: true`: SQLite stores the `metadata` JSON column as TEXT, and a
   // raw query returns that column un-parsed (a string), which breaks
@@ -485,6 +523,10 @@ export async function buildCfoBriefing(
     actionItems: synthesis.ordered,
     summary: synthesis.summary ?? fallbackSummary,
     safeToSpendSnapshot,
+    model:
+      synthesis.summary == null
+        ? DETERMINISTIC_BRIEFING_MODEL
+        : (getOpenAiConfig()?.model ?? 'llm'),
   };
 }
 

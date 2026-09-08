@@ -6,9 +6,11 @@
  *
  * - Anomalies / category deltas / uncategorized backlog → `loadOpenInsightItems`
  *   (open `Insight` rows from the real detectors, same source the CFO
- *   briefing reads — see `../cfo/briefingBuilder`)
+ *   briefing reads — see `../cfo/briefingBuilder`). Missing receipts arrive
+ *   this way too: `detectMissingReceipt` persists them as Insight rows, so
+ *   there is deliberately no inline missing-receipt scan here — one existed
+ *   and double-surfaced every receipt-less charge alongside its Insight.
  * - Rule suggestions                                    → `findRuleProposals`
- * - Missing receipts on big-ticket spend                → direct query
  * - Subscription candidates                             → direct query
  * - Forecast warnings (overdue planned events)          → direct query
  *
@@ -23,7 +25,7 @@
 
 import { Op } from 'sequelize';
 import type { Request } from 'express';
-import { Transaction, Receipt, PlannedEvent } from '../models';
+import { Transaction, PlannedEvent } from '../models';
 import { visibleTransactionWhere } from '../auth/scope';
 import { loadOpenInsightItems } from '../cfo/briefingBuilder';
 import { findRuleProposals } from './ruleProposals';
@@ -36,12 +38,6 @@ import type {
 import type { CfoBriefingActionItem } from '../models/CfoBriefing';
 
 export const AI_REVIEW_PROMPT_VERSION = 'ai-review-v1';
-
-/** Default $ threshold (period currency) above which a missing receipt is
- *  surfaced. Chosen low enough to be useful on a typical month and high
- *  enough not to spam coffee runs.
- */
-const MISSING_RECEIPT_AMOUNT_THRESHOLD = 50;
 
 /** Minimum count of similar charges to consider a merchant a subscription. */
 const SUBSCRIPTION_MIN_HITS = 3;
@@ -126,15 +122,17 @@ function safeNumber(value: unknown): number {
   return n == null ? 0 : Math.abs(n);
 }
 
+/** Slots: [anomalies, rule suggestions, subscriptions, forecast warnings].
+ *  There is no missing-receipt slot: those now arrive as Insight rows and are
+ *  counted under `anomaly`. */
 function shortSummary(parts: number[]): string {
   const total = parts.reduce((a, b) => a + b, 0);
   if (total === 0) return 'No action items — nothing flagged for this period.';
   const labels: string[] = [];
   if (parts[0] > 0) labels.push(`${parts[0]} anomaly${parts[0] === 1 ? '' : 'ies'}`);
   if (parts[1] > 0) labels.push(`${parts[1]} rule suggestion${parts[1] === 1 ? '' : 's'}`);
-  if (parts[2] > 0) labels.push(`${parts[2]} missing receipt${parts[2] === 1 ? '' : 's'}`);
-  if (parts[3] > 0) labels.push(`${parts[3]} subscription${parts[3] === 1 ? '' : 's'}`);
-  if (parts[4] > 0) labels.push(`${parts[4]} forecast warning${parts[4] === 1 ? '' : 's'}`);
+  if (parts[2] > 0) labels.push(`${parts[2]} subscription${parts[2] === 1 ? '' : 's'}`);
+  if (parts[3] > 0) labels.push(`${parts[3]} forecast warning${parts[3] === 1 ? '' : 's'}`);
   return `${total} action item${total === 1 ? '' : 's'}: ${labels.join(', ')}.`;
 }
 
@@ -155,14 +153,6 @@ export async function buildReviewActionItems(
           date: { [Op.between]: [periodStart, periodEnd] },
         },
         attributes: ['id', 'date', 'merchantClean', 'amount'],
-        include: [
-          {
-            model: Receipt,
-            as: 'receipts',
-            attributes: ['id'],
-            required: false,
-          },
-        ],
       }),
       PlannedEvent.findAll({
         where: {
@@ -203,39 +193,17 @@ export async function buildReviewActionItems(
     });
   }
 
-  // Missing receipts: txns above threshold with no Receipt rows.
-  type TxnWithReceipts = {
+  // Subscription detection: merchants with N+ near-identical negative
+  // amounts in the window. Cheap heuristic; OpenAI not needed.
+  type TxnRow = {
     id: number;
     date: string;
     merchantClean: string | null;
     amount: unknown;
-    receipts?: Array<{ id: number }>;
   };
-  for (const raw of txnsInWindow) {
-    const txn = raw.toJSON() as TxnWithReceipts;
-    const amount = safeNumber(txn.amount);
-    if (amount < MISSING_RECEIPT_AMOUNT_THRESHOLD) continue;
-    if ((txn.receipts ?? []).length > 0) continue;
-    const merchant = txn.merchantClean || 'Unknown merchant';
-    items.push({
-      id: idFor('missing_receipt', txn.id),
-      type: 'missing_receipt',
-      refType: 'transaction',
-      refId: txn.id,
-      severity: 'watch',
-      title: `Missing receipt for ${merchant}`,
-      summary: `${merchant} on ${txn.date} for ${amount.toFixed(2)} ${currency} has no attached receipt.`,
-      status: 'suggested',
-      supportingTransactionIds: [txn.id],
-      rationale: `Charge of ${amount.toFixed(2)} ${currency} exceeds the ${MISSING_RECEIPT_AMOUNT_THRESHOLD} ${currency} threshold and has no receipt.`,
-    });
-  }
-
-  // Subscription detection: merchants with N+ near-identical negative
-  // amounts in the window. Cheap heuristic; OpenAI not needed.
   const merchantBuckets = new Map<string, Array<{ id: number; amount: number }>>();
   for (const raw of txnsInWindow) {
-    const txn = raw.toJSON() as TxnWithReceipts;
+    const txn = raw.toJSON() as TxnRow;
     const amount = num(txn.amount);
     if (amount == null || amount >= 0) continue;
     const merchant = txn.merchantClean?.trim();
@@ -291,13 +259,12 @@ export async function buildReviewActionItems(
     });
   }
 
-  const counts = [0, 0, 0, 0, 0];
+  const counts = [0, 0, 0, 0];
   for (const item of items) {
     if (item.type === 'anomaly') counts[0] += 1;
     else if (item.type === 'rule_suggestion') counts[1] += 1;
-    else if (item.type === 'missing_receipt') counts[2] += 1;
-    else if (item.type === 'subscription') counts[3] += 1;
-    else if (item.type === 'forecast_warning') counts[4] += 1;
+    else if (item.type === 'subscription') counts[2] += 1;
+    else if (item.type === 'forecast_warning') counts[3] += 1;
   }
 
   return {

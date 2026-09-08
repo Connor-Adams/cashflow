@@ -13,6 +13,7 @@ let CFO_BRIEFING_PROMPT_VERSION: typeof import('./briefingBuilder').CFO_BRIEFING
 let resolveDefaultBriefingPeriod: typeof import('./briefingBuilder').resolveDefaultBriefingPeriod;
 let loadOpenInsightItems: typeof import('./briefingBuilder').loadOpenInsightItems;
 let buildCfoBriefing: typeof import('./briefingBuilder').buildCfoBriefing;
+let MAX_OPEN_INSIGHT_ITEMS: typeof import('./briefingBuilder').MAX_OPEN_INSIGHT_ITEMS;
 
 /**
  * Unit tests for the pure helpers inside briefingBuilder, plus
@@ -32,6 +33,7 @@ before(async () => {
     resolveDefaultBriefingPeriod,
     loadOpenInsightItems,
     buildCfoBriefing,
+    MAX_OPEN_INSIGHT_ITEMS,
   } = await import('./briefingBuilder'));
   await sequelize.sync({ force: true });
 });
@@ -165,6 +167,57 @@ test('loadOpenInsightItems returns open insights as anomaly action items', async
   assert.deepEqual(items[0].supportingTransactionIds, [11, 12]);
 });
 
+test('loadOpenInsightItems caps at MAX_OPEN_INSIGHT_ITEMS, severest and newest first', async () => {
+  const householdId = 7;
+  // 3 critical + 20 warning + 5 info = 28 open rows, well past the cap.
+  // detectedAt descends with the index inside each severity band, so the
+  // expected order is "critical newest→oldest, then warning newest→oldest",
+  // and every info row must fall off the end.
+  const rows: Array<Record<string, unknown>> = [];
+  const seed = (severity: string, count: number, dayBase: number) => {
+    for (let i = 0; i < count; i += 1) {
+      rows.push({
+        householdId,
+        userId: null,
+        type: 'missing_receipt',
+        severity,
+        title: `${severity}-${i}`,
+        description: null,
+        entityType: null,
+        entityId: null,
+        status: 'open',
+        fingerprint: `${severity}:${i}`,
+        metadata: null,
+        // i=0 is the newest within the band.
+        detectedAt: new Date(Date.UTC(2026, 0, dayBase - i)),
+      });
+    }
+  };
+  seed('critical', 3, 28);
+  seed('warning', 20, 28);
+  seed('info', 5, 28);
+  await Insight.bulkCreate(rows as never);
+
+  const items = await loadOpenInsightItems(householdId);
+
+  assert.equal(MAX_OPEN_INSIGHT_ITEMS, 20);
+  assert.equal(items.length, MAX_OPEN_INSIGHT_ITEMS);
+  assert.deepEqual(
+    items.slice(0, 3).map((i) => i.title),
+    ['critical-0', 'critical-1', 'critical-2'],
+    'criticals come first, newest first',
+  );
+  assert.deepEqual(
+    items.slice(3, 6).map((i) => i.title),
+    ['warning-0', 'warning-1', 'warning-2'],
+    'warnings follow, newest first',
+  );
+  assert.ok(
+    items.every((i) => !i.title.startsWith('info-')),
+    'the least severe rows are the ones dropped by the cap',
+  );
+});
+
 test('briefing uses the synthesized summary and ordering when available', async () => {
   const householdId = 555;
   await Insight.create({
@@ -220,6 +273,26 @@ test('briefing uses the synthesized summary and ordering when available', async 
 
 test('briefing falls back to the count summary when synthesis returns null', async () => {
   const householdId = 556;
+  // Seeded so the builder has real items to hand the synthesis pass — with an
+  // empty list, "did synthesis run?" and "was synthesis wired in at all?" look
+  // identical, which is what made the original version of this test vacuous.
+  await Insight.bulkCreate([
+    {
+      householdId, userId: null, type: 'merchant_spend_spike', severity: 'warning',
+      title: 'Fallback A', description: null, entityType: null, entityId: null,
+      status: 'open', fingerprint: 'fallback-a', metadata: null,
+      detectedAt: new Date('2026-09-01T00:00:00Z'),
+    },
+    {
+      householdId, userId: null, type: 'merchant_spend_spike', severity: 'warning',
+      title: 'Fallback B', description: null, entityType: null, entityId: null,
+      status: 'open', fingerprint: 'fallback-b', metadata: null,
+      detectedAt: new Date('2026-09-02T00:00:00Z'),
+    },
+  ] as never);
+
+  let calls = 0;
+  let capturedItems: CfoBriefingActionItem[] = [];
   const result = await buildCfoBriefing({
     req: fakeReq(1, householdId),
     householdId,
@@ -227,8 +300,49 @@ test('briefing falls back to the count summary when synthesis returns null', asy
     periodStart: '2026-09-01',
     periodEnd: '2026-09-07',
     currency: 'CAD',
-    synthesizeImpl: async ({ items }) => ({ summary: null, ordered: items }),
+    synthesizeImpl: async ({ items }) => {
+      calls += 1;
+      capturedItems = items;
+      // A null summary must NOT also discard the model's ordering.
+      return { summary: null, ordered: [...items].reverse() };
+    },
   });
 
+  // Fails loudly if the synthesis pass is ever unwired from buildCfoBriefing.
+  assert.equal(calls, 1, 'synthesizeImpl must be invoked exactly once');
+  assert.ok(capturedItems.length >= 2, 'synthesis must receive the built items');
+  assert.deepEqual(
+    result.actionItems.map((i) => i.id),
+    [...capturedItems].reverse().map((i) => i.id),
+    'the synthesis ordering must survive a null summary',
+  );
   assert.match(result.summary, /action item|All clear/);
+  assert.equal(result.model, 'deterministic', 'no LLM summary → deterministic provenance');
+});
+
+test('briefing records the model as provenance when synthesis writes the summary', async () => {
+  const householdId = 557;
+  await Insight.create({
+    householdId, userId: null, type: 'merchant_spend_spike', severity: 'warning',
+    title: 'Provenance', description: null, entityType: null, entityId: null,
+    status: 'open', fingerprint: 'provenance', metadata: null,
+    detectedAt: new Date('2026-09-02T00:00:00Z'),
+  } as never);
+
+  const result = await buildCfoBriefing({
+    req: fakeReq(1, householdId),
+    householdId,
+    userId: 1,
+    periodStart: '2026-09-01',
+    periodEnd: '2026-09-07',
+    currency: 'CAD',
+    synthesizeImpl: async ({ items }) => ({ summary: 'Synthesized.', ordered: items }),
+  });
+
+  assert.equal(result.summary, 'Synthesized.');
+  assert.notEqual(
+    result.model,
+    'deterministic',
+    'a synthesized briefing must not be stored as deterministic',
+  );
 });

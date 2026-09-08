@@ -76,7 +76,7 @@ test('GET /api/ai/inbox/count returns zeros when nothing pending', async () => {
   });
 });
 
-test('GET /api/ai/inbox/count counts open insights and suggested audit rows', async () => {
+test('GET /api/ai/inbox/count counts audit rows but never open insights', async () => {
   const { AiSuggestion, Insight } = await import('../../src/models/index.js');
   await Insight.create({
     householdId, userId: null, type: 'merchant_spend_spike', severity: 'critical',
@@ -103,8 +103,11 @@ test('GET /api/ai/inbox/count counts open insights and suggested audit rows', as
 
   const r = await authed.get('/api/ai/inbox/count');
   assert.equal(r.status, 200);
-  assert.equal(r.body.total, 2);
-  assert.equal(r.body.byKind.financial_insight, 1);
+  // The open Insight is NOT counted here: it is already counted and badged by
+  // the insights surface itself (GET /api/insights?status=open). Counting it
+  // in both places double-badged the same rows.
+  assert.equal(r.body.total, 1);
+  assert.equal(r.body.byKind.financial_insight, 0, 'insights never inflate the AI inbox count');
   assert.equal(r.body.byKind.transaction_audit, 1);
   assert.equal(r.body.byKind.rule_proposal, 0);
 });
@@ -121,21 +124,22 @@ test('GET /api/ai/inbox/count scopes by household', async () => {
   });
   const r = await regularAgent.get('/api/ai/inbox/count');
   assert.equal(r.status, 200);
-  assert.equal(r.body.byKind.financial_insight, 1);
+  assert.equal(r.body.byKind.financial_insight, 0, 'insights are counted by their own endpoint');
   assert.equal(r.body.byKind.transaction_audit, 0);
   assert.equal(r.body.byKind.rule_proposal, 0);
+  assert.equal(r.body.total, 0);
 });
 
-test('GET /api/ai/inbox returns audit rows plus open insights, insights newest first', async () => {
+test('GET /api/ai/inbox returns audit rows and leaves open insights to the insights page', async () => {
   const { AiSuggestion, Insight } = await import('../../src/models/index.js');
-  const olderInsight = await Insight.create({
+  await Insight.create({
     householdId, userId: null, type: 'category_trend', severity: 'info',
     title: 'Older insight', description: 'An older finding.',
     entityType: null, entityId: null, status: 'open',
     fingerprint: 'inbox:older', metadata: null,
     detectedAt: new Date('2026-04-01T00:00:00Z'),
   });
-  const newerInsight = await Insight.create({
+  await Insight.create({
     householdId, userId: null, type: 'category_trend', severity: 'info',
     title: 'Newer insight', description: 'A newer finding.',
     entityType: null, entityId: null, status: 'open',
@@ -151,23 +155,20 @@ test('GET /api/ai/inbox returns audit rows plus open insights, insights newest f
   const r = await authed.get('/api/ai/inbox');
   assert.equal(r.status, 200);
   const items = r.body.items as Array<{ id: number; kind: string; summary: string }>;
-  // Insight ids and AiSuggestion ids come from different sequences, so compare
-  // ordering within the financial_insight slice only.
-  const insightIds = items.filter((i) => i.kind === 'financial_insight').map((i) => i.id);
-  assert.ok(
-    insightIds.indexOf(newerInsight.id) >= 0 && insightIds.indexOf(olderInsight.id) >= 0,
-    'both open insights appear',
-  );
-  assert.ok(
-    insightIds.indexOf(newerInsight.id) < insightIds.indexOf(olderInsight.id),
-    'newer insight first',
+  // Open Insight rows are served by GET /api/insights and badged there; the AI
+  // inbox is AiSuggestion-backed kinds only, so the same rows are not listed
+  // (and counted) twice.
+  assert.equal(
+    items.filter((i) => i.kind === 'financial_insight').length,
+    0,
+    'open insights must not appear in the AI inbox',
   );
   const audit = items.find((i) => i.kind === 'transaction_audit' && i.id === newerAudit.id);
   assert.ok(audit);
   assert.match(audit.summary, /2 issue/);
 });
 
-test('GET /api/ai/inbox excludes dismissed insights and other suggestion kinds', async () => {
+test('GET /api/ai/inbox excludes insight rows and other suggestion kinds', async () => {
   const { AiSuggestion, Insight } = await import('../../src/models/index.js');
   // Ids are per-model sequences now, so identity is (kind, id), not id alone.
   const keysOf = (body: unknown) =>
@@ -176,11 +177,11 @@ test('GET /api/ai/inbox excludes dismissed insights and other suggestion kinds',
   assert.equal(beforeR.status, 200);
   const beforeKeys = new Set(keysOf(beforeR.body));
 
-  const dismissed = await Insight.create({
+  const openInsight = await Insight.create({
     householdId, userId: null, type: 'recurring_fee', severity: 'warning',
-    title: 'Dismissed finding', description: null,
-    entityType: null, entityId: null, status: 'dismissed',
-    fingerprint: 'inbox:dismissed', metadata: null, detectedAt: new Date(),
+    title: 'Open but not an inbox item', description: null,
+    entityType: null, entityId: null, status: 'open',
+    fingerprint: 'inbox:open-not-listed', metadata: null, detectedAt: new Date(),
   });
   const wrongKind = await AiSuggestion.create({
     householdId, userId: null, kind: 'transaction_fields', status: 'suggested',
@@ -193,7 +194,10 @@ test('GET /api/ai/inbox excludes dismissed insights and other suggestion kinds',
   const kinds = (r.body.items as Array<{ kind: string }>).map((i) => i.kind);
 
   // These two noise rows must not appear in the response
-  assert.ok(!keys.includes(`financial_insight:${dismissed.id}`), 'dismissed insight must be excluded');
+  assert.ok(
+    !keys.includes(`financial_insight:${openInsight.id}`),
+    'no Insight row — open or otherwise — belongs in the AI inbox',
+  );
   assert.ok(!keys.includes(`transaction_fields:${wrongKind.id}`), 'wrong-kind row must be excluded');
 
   // No new transaction_fields entries should have appeared
@@ -213,22 +217,28 @@ test('GET /api/ai/inbox scopes by household', async () => {
     entityType: null, entityId: null, status: 'open',
     fingerprint: 'inbox:other-household', metadata: null, detectedAt: new Date(),
   });
+  const ownAudit = await AiSuggestion.create({
+    householdId: otherHouseholdId, userId: null, kind: 'transaction_audit',
+    status: 'suggested', inputSnapshot: {}, output: { issues: [{ id: 1 }] },
+  } as never);
   // regularAgent belongs to otherHouseholdId and is not superadmin, so it should only see
-  // its own household's rows — across BOTH backing tables.
+  // its own household's rows.
   const r = await regularAgent.get('/api/ai/inbox');
   assert.equal(r.status, 200);
   const items = r.body.items as Array<{ id: number; kind: string }>;
   assert.ok(
-    items.some((i) => i.kind === 'financial_insight'),
-    'the other household\'s own insight is visible to it',
+    items.some((i) => i.kind === 'transaction_audit' && i.id === ownAudit.id),
+    'the other household\'s own audit row is visible to it',
+  );
+  assert.equal(
+    items.filter((i) => i.kind === 'financial_insight').length,
+    0,
+    'insights are not part of the AI inbox for any household',
   );
   for (const item of items) {
     // rule_proposal / counterparty_promotion items carry synthesized negative ids.
     if (item.id < 0) continue;
-    const row =
-      item.kind === 'financial_insight'
-        ? await Insight.findByPk(item.id)
-        : await AiSuggestion.findByPk(item.id);
+    const row = await AiSuggestion.findByPk(item.id);
     assert.ok(row, `row ${item.kind}:${item.id} should exist`);
     assert.equal(
       row.householdId,
@@ -367,9 +377,9 @@ test('GET /api/ai/inbox/count excludes transaction_audit rows with zero issues',
   assert.equal(after.body.byKind.transaction_audit, beforeAudit, 'empty audit must not bump count');
 });
 
-test('GET /api/ai/inbox maps open Insight rows onto financial_insight items', async () => {
+test('GET /api/ai/inbox never lists open Insight rows (they have their own surface)', async () => {
   const { Insight } = await import('../../src/models/index.js');
-  const withDescription = await Insight.create({
+  const critical = await Insight.create({
     householdId, userId: null, type: 'duplicate_transactions', severity: 'critical',
     title: 'Possible duplicate charge',
     description: 'Two identical $42 charges at Loblaws on the same day.',
@@ -377,7 +387,7 @@ test('GET /api/ai/inbox maps open Insight rows onto financial_insight items', as
     fingerprint: 'inbox:mapping-described', metadata: null,
     detectedAt: new Date('2026-10-02T00:00:00Z'),
   });
-  const withoutDescription = await Insight.create({
+  const warning = await Insight.create({
     householdId, userId: null, type: 'small_subscription', severity: 'warning',
     title: 'Small subscription still billing',
     description: null,
@@ -388,24 +398,17 @@ test('GET /api/ai/inbox maps open Insight rows onto financial_insight items', as
 
   const r = await authed.get('/api/ai/inbox');
   assert.equal(r.status, 200);
-  const items = r.body.items as Array<{
-    id: number; kind: string; summary: string; severity: string | null; output: unknown;
-  }>;
+  const keys = (r.body.items as Array<{ id: number; kind: string }>)
+    .map((i) => `${i.kind}:${i.id}`);
+  // The AI inbox is AiSuggestion-backed only. Insights are listed, counted and
+  // badged by the insights surface (GET /api/insights); mirroring them here
+  // made the sidebar badge the same rows twice.
+  assert.ok(!keys.includes(`financial_insight:${critical.id}`));
+  assert.ok(!keys.includes(`financial_insight:${warning.id}`));
 
-  const described = items.find((i) => i.kind === 'financial_insight' && i.id === withDescription.id);
-  assert.ok(described, 'inserted insight must appear in the inbox');
-  assert.equal(described.summary, 'Two identical $42 charges at Loblaws on the same day.');
-  assert.equal(described.severity, 'action', 'critical maps to action');
-  assert.deepEqual(described.output, {
-    type: 'duplicate_transactions',
-    title: 'Possible duplicate charge',
-    description: 'Two identical $42 charges at Loblaws on the same day.',
-  });
-
-  const bare = items.find((i) => i.kind === 'financial_insight' && i.id === withoutDescription.id);
-  assert.ok(bare, 'description-less insight must appear too');
-  assert.equal(bare.summary, 'Small subscription still billing', 'falls back to the title');
-  assert.equal(bare.severity, 'watch', 'warning maps to watch');
+  // ...and the count endpoint agrees.
+  const c = await authed.get('/api/ai/inbox/count');
+  assert.equal(c.body.byKind.financial_insight, 0);
 });
 
 test('GET /api/transactions?ids=1,2 filters to listed ids', async () => {

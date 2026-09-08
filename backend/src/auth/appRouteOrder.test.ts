@@ -143,7 +143,7 @@ test('410 fold: legacy GET /api/ai/insights returns 410 with documented body', a
   assert.equal(res.status, 410);
   assert.deepEqual(res.body, {
     error: 'gone',
-    message: 'This endpoint was retired; insights now come from GET /api/ai/inbox.',
+    message: 'This endpoint was retired; insights now come from GET /api/insights.',
   });
 });
 
