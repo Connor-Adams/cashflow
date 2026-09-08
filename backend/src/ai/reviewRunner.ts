@@ -182,7 +182,7 @@ export async function buildReviewActionItems(
 
   // Anomalies / categorical insights → action items, sourced from the real
   // Insight detectors (same source the CFO briefing reads) rather than the
-  // old prompt-free `ai/insights.ts` template engine.
+  // old prompt-free, now-deleted six-template insight engine.
   for (const insightItem of insightItems) {
     items.push(insightItemToReviewItem(insightItem));
   }

@@ -2,8 +2,8 @@
  * Maps persisted `Insight` rows onto `CfoBriefingActionItem`s.
  *
  * The CFO briefing and the AI review both used to build their "anomaly" items
- * from `ai/insights.ts`, a second insight engine that emitted six fixed
- * templates and never saw the real detectors. Both now read `Insight` rows,
+ * from a second, now-deleted insight engine that emitted six fixed templates
+ * and never saw the real detectors. Both now read `Insight` rows,
  * and this module owns the single mapping between the two shapes.
  *
  * Note the two severity vocabularies: `Insight.severity` is

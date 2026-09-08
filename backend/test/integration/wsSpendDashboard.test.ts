@@ -201,47 +201,6 @@ test('WS bundle import + /api/summary/dashboard: totalSpend excludes transfers a
   );
 });
 
-test('/api/ai/insights: investment buys + transfers excluded from Uncategorized spend totals', async () => {
-  const insights = await authed
-    .get('/api/ai/insights')
-    .query({ currency: 'CAD', dateFrom: '2025-06-01', dateTo: '2025-06-30' });
-  assert.equal(insights.status, 200, `insights body=${JSON.stringify(insights.body)}`);
-
-  type Insight = {
-    title: string;
-    metric: string;
-    amount: number;
-    comparison: string;
-  };
-  const list = insights.body.insights as Insight[];
-
-  // Pre-fix: the TFSA BUY (-2500) and any other negative non-spend rows
-  // landed in byCategory.get('Uncategorized') because the insights loop
-  // never consulted accountType or txnType. Post-fix: applying isNonSpend
-  // means BUY is excluded from spend → Uncategorized spend bucket holds
-  // ONLY genuine spend rows whose finalCategory is null (none, in this
-  // fixture, since the enricher categorizes the hydro bill).
-  const uncatSpend = list.find((i) => i.metric === 'uncategorized_spend');
-  if (uncatSpend) {
-    assert.ok(
-      uncatSpend.amount < 2500,
-      `Uncategorized spend (${uncatSpend.amount}) should not include the $2500 TFSA BUY (txnType=investment, investment account)`,
-    );
-  }
-
-  // The "Top category" insight, when present, must not name a category
-  // whose total is inflated by non-spend rows. With this fixture the only
-  // surviving spend is the chequing hydro bill ($150), so any topCategory
-  // amount must be ≤ 150.
-  const top = list.find((i) => i.metric === 'category_spend');
-  if (top) {
-    assert.ok(
-      top.amount <= 150,
-      `Top category spend (${top.amount}) exceeds the only legitimate spend row ($150) — non-spend rows leaked`,
-    );
-  }
-});
-
 test('/api/summary/monthly: investment buys + transfers excluded from monthly curve', async () => {
   const monthly = await authed.get('/api/summary/monthly').query({ currency: 'CAD' });
   assert.equal(monthly.status, 200);

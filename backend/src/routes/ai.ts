@@ -1,6 +1,7 @@
-import { Router, type Request } from 'express';
-import { Op, QueryTypes, Transaction as SqlTransaction } from 'sequelize';
-import { AiSuggestion, Rule, Transaction } from '../models';
+import { Router } from 'express';
+import { QueryTypes } from 'sequelize';
+import { AiSuggestion, Insight, Rule, Transaction } from '../models';
+import type { InsightSeverity } from '../models/Insight';
 import { sequelize } from '../models';
 import { getOpenAiConfig } from '../config/openai';
 import { isDemoUserRequest } from '../demo/aiAccess';
@@ -19,10 +20,9 @@ import {
   normalizeCounterpartyName,
   type CounterpartyPromotion,
 } from '../ai/counterpartyPromotions';
-import { buildFinancialInsights } from '../ai/insights';
 import { auditTransactionsForMislabels } from '../ai/auditTransactions';
+import { mapInsightSeverity } from '../insights/toActionItems';
 import { aiSuggestLimiter } from './aiRateLimit';
-import { jsonExtractText } from '../util/dialectSql';
 
 const router = Router();
 
@@ -280,62 +280,6 @@ router.post('/rule-proposals/:merchantPattern/dismiss', async (req, res, next) =
   }
 });
 
-router.get('/insights', async (req, res, next) => {
-  try {
-    const period = String(req.query.period || new Date().toISOString().slice(0, 7));
-    const currency = String(req.query.currency || 'CAD').toUpperCase().slice(0, 3);
-    const dateFrom =
-      typeof req.query.dateFrom === 'string' && req.query.dateFrom.trim()
-        ? req.query.dateFrom.trim()
-        : null;
-    const dateTo =
-      typeof req.query.dateTo === 'string' && req.query.dateTo.trim()
-        ? req.query.dateTo.trim()
-        : null;
-    const hasExplicitRange =
-      Object.prototype.hasOwnProperty.call(req.query, 'dateFrom') ||
-      Object.prototype.hasOwnProperty.call(req.query, 'dateTo');
-    const out = await buildFinancialInsights(
-      req,
-      period,
-      currency,
-      hasExplicitRange ? { from: dateFrom, to: dateTo } : undefined,
-    );
-
-    await sequelize.transaction(async (transaction) => {
-      await AiSuggestion.update(
-        { status: 'superseded' },
-        {
-          where: {
-            ...aiSuggestionWhere(req),
-            kind: 'financial_insight',
-            status: 'suggested',
-            [Op.and]: [
-              sequelize.literal(`${jsonExtractText('input_snapshot', 'period')} = ${sequelize.escape(out.period)}`),
-              sequelize.literal(`${jsonExtractText('input_snapshot', 'currency')} = ${sequelize.escape(currency)}`),
-            ],
-          },
-          transaction,
-        },
-      );
-
-      await createTrackedSuggestion({
-        req,
-        kind: 'financial_insight',
-        inputSnapshot: { period: out.period, currency },
-        output: out.insights,
-        model: 'deterministic',
-        promptVersion: 'financial-insights-v1',
-        temperature: null,
-        transaction,
-      });
-    });
-    res.json(out);
-  } catch (e) {
-    next(e);
-  }
-});
-
 router.get('/import-cleanup', async (req, res, next) => {
   try {
     const batch = String(req.query.batch || '').trim();
@@ -446,57 +390,6 @@ function summarizeAudit(output: unknown): string {
   return count === 1 ? '1 issue found' : `${count} issues found`;
 }
 
-type InsightSeverity = 'action' | 'watch' | 'info';
-
-function summarizeInsight(output: unknown): { summary: string; severity: InsightSeverity | null } {
-  const arr = Array.isArray(output) ? (output as Array<{ title?: unknown; severity?: unknown }>) : [];
-  if (arr.length === 0) return { summary: 'No insights', severity: null };
-  const first = arr[0];
-  const title = typeof first?.title === 'string' ? first.title : 'Insight';
-  const counts: Record<InsightSeverity, number> = { action: 0, watch: 0, info: 0 };
-  let topSeverity: InsightSeverity | null = null;
-  for (const item of arr) {
-    const s = item?.severity;
-    if (s === 'action' || s === 'watch' || s === 'info') {
-      counts[s] += 1;
-      if (topSeverity === null) topSeverity = s;
-      else if (s === 'action' && topSeverity !== 'action') topSeverity = 'action';
-      else if (s === 'watch' && topSeverity === 'info') topSeverity = 'watch';
-    }
-  }
-  const parts: string[] = [];
-  if (counts.action > 0) parts.push(`${counts.action} action`);
-  if (counts.watch > 0) parts.push(`${counts.watch} watch`);
-  if (counts.info > 0) parts.push(`${counts.info} info`);
-  const breakdown = arr.length > 1 && parts.length > 0 ? ` · ${parts.join(', ')}` : '';
-  return { summary: `${title}${breakdown}`, severity: topSeverity };
-}
-
-async function supersedeFinancialInsightDupes(
-  req: Request,
-  transaction?: SqlTransaction,
-): Promise<void> {
-  const periodExpr = jsonExtractText('input_snapshot', 'period');
-  const currencyExpr = jsonExtractText('input_snapshot', 'currency');
-  const householdClause = isSuperadmin(req)
-    ? ''
-    : `AND household_id = ${sequelize.escape(currentAuth(req).household.id)}`;
-  await sequelize.query(
-    `UPDATE ai_suggestions
-     SET status = 'superseded'
-     WHERE kind = 'financial_insight'
-       AND status = 'suggested'
-       ${householdClause}
-       AND id NOT IN (
-         SELECT MAX(id) FROM ai_suggestions
-         WHERE kind = 'financial_insight' AND status = 'suggested'
-         ${householdClause}
-         GROUP BY household_id, ${periodExpr}, ${currencyExpr}
-       )`,
-    { transaction },
-  );
-}
-
 function summarizeCounterpartyPromotion(p: CounterpartyPromotion): string {
   // "You've had 5 transactions from JANE DOE in the last 90 days. Create a Contact?"
   // Kept concise so the inbox card stays one-line; details live in the output payload.
@@ -506,52 +399,67 @@ function summarizeCounterpartyPromotion(p: CounterpartyPromotion): string {
 
 router.get('/inbox', async (req, res, next) => {
   try {
-    await supersedeFinancialInsightDupes(req);
     const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
     const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
     const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
-    const [rows, emailMatchRows, ruleProposals, counterpartyPromotions] = await Promise.all([
-      AiSuggestion.findAll({
-        where: { ...where, kind: ['transaction_audit', 'financial_insight'] },
-        order: [['id', 'DESC']],
-        limit,
-      }),
-      AiSuggestion.findAll({
-        where: { ...where, kind: 'counterparty_email_match' },
-        order: [['id', 'DESC']],
-        limit,
-      }),
-      findRuleProposals(householdId),
-      findCounterpartyPromotions(householdId),
-    ]);
+    const [rows, insightRows, emailMatchRows, ruleProposals, counterpartyPromotions] =
+      await Promise.all([
+        AiSuggestion.findAll({
+          where: { ...where, kind: 'transaction_audit' },
+          order: [['id', 'DESC']],
+          limit,
+        }),
+        // `financial_insight` inbox items are the real detector output (the
+        // `Insight` table the insights page reads and dismisses), not the
+        // retired six-template engine that wrote AiSuggestion rows. `raw: true`
+        // is safe here only because `metadata` (a JSON column) is not selected —
+        // SQLite hands back unparsed JSON strings for raw JSON selects.
+        Insight.findAll({
+          where: { ...(householdId == null ? {} : { householdId }), status: 'open' },
+          attributes: ['id', 'type', 'severity', 'title', 'description', 'detectedAt'],
+          order: [['detectedAt', 'DESC']],
+          limit,
+          raw: true,
+        }),
+        AiSuggestion.findAll({
+          where: { ...where, kind: 'counterparty_email_match' },
+          order: [['id', 'DESC']],
+          limit,
+        }),
+        findRuleProposals(householdId),
+        findCounterpartyPromotions(householdId),
+      ]);
     const persistedItems: InboxItem[] = [];
     for (const row of rows) {
-      if (row.kind === 'transaction_audit') {
-        if (auditIssueCount(row.output) === 0) continue;
-        persistedItems.push({
-          id: row.id,
-          kind: 'transaction_audit',
-          createdAt: row.createdAt.toISOString(),
-          transactionId: row.transactionId,
-          summary: summarizeAudit(row.output),
-          severity: null,
-          confidence: null,
-          output: row.output,
-        });
-        continue;
-      }
-      const { summary, severity } = summarizeInsight(row.output);
+      if (auditIssueCount(row.output) === 0) continue;
       persistedItems.push({
         id: row.id,
-        kind: 'financial_insight',
+        kind: 'transaction_audit',
         createdAt: row.createdAt.toISOString(),
         transactionId: row.transactionId,
-        summary,
-        severity,
+        summary: summarizeAudit(row.output),
+        severity: null,
         confidence: null,
         output: row.output,
       });
     }
+    const insightItems: InboxItem[] = (insightRows as unknown as Array<{
+      id: number;
+      type: string;
+      severity: InsightSeverity;
+      title: string;
+      description: string | null;
+      detectedAt: Date;
+    }>).map((row) => ({
+      id: row.id,
+      kind: 'financial_insight',
+      createdAt: new Date(row.detectedAt).toISOString(),
+      transactionId: null,
+      summary: row.description ?? row.title,
+      severity: mapInsightSeverity(row.severity),
+      confidence: null,
+      output: { type: row.type, title: row.title, description: row.description },
+    }));
     const proposalItems: InboxItem[] = ruleProposals.map((p, idx) => ({
       id: -1 - idx,
       kind: 'rule_proposal',
@@ -592,7 +500,15 @@ router.get('/inbox', async (req, res, next) => {
       confidence: null,
       output: p,
     }));
-    res.json({ items: [...persistedItems, ...emailMatchItems, ...proposalItems, ...counterpartyItems] });
+    res.json({
+      items: [
+        ...persistedItems,
+        ...insightItems,
+        ...emailMatchItems,
+        ...proposalItems,
+        ...counterpartyItems,
+      ],
+    });
   } catch (e) {
     next(e);
   }
@@ -600,7 +516,6 @@ router.get('/inbox', async (req, res, next) => {
 
 router.get('/inbox/count', async (req, res, next) => {
   try {
-    await supersedeFinancialInsightDupes(req);
     const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
     const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
     const [auditRows, insightCount, ruleProposals, counterpartyPromotions] = await Promise.all([
@@ -608,7 +523,9 @@ router.get('/inbox/count', async (req, res, next) => {
         where: { ...where, kind: 'transaction_audit' },
         attributes: ['id', 'output'],
       }),
-      AiSuggestion.count({ where: { ...where, kind: 'financial_insight' } }),
+      Insight.count({
+        where: { ...(householdId == null ? {} : { householdId }), status: 'open' },
+      }),
       findRuleProposals(householdId),
       findCounterpartyPromotions(householdId),
     ]);
