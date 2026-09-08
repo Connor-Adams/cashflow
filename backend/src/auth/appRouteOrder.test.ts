@@ -132,6 +132,21 @@ test('410 fold: legacy /api/notification-preferences returns 410 with documented
   assert.equal(patch.status, 410);
 });
 
+test('410 fold: legacy GET /api/ai/insights returns 410 with documented body', async () => {
+  // The six-template financial insight engine was deleted (backend/src/ai/insights.ts);
+  // the Unified Inbox now reads Insight rows via GET /api/ai/inbox. The retired
+  // GET /api/ai/insights must keep 410ing (see backend/src/routes/ai.ts) so any
+  // stale caller fails loudly instead of getting an indistinguishable 404.
+  const res = await request(app)
+    .get('/api/ai/insights')
+    .set('Cookie', authCookie());
+  assert.equal(res.status, 410);
+  assert.deepEqual(res.body, {
+    error: 'gone',
+    message: 'This endpoint was retired; insights now come from GET /api/ai/inbox.',
+  });
+});
+
 test('410 fold: legacy /api/statements returns 410 with documented body (issue #403)', async () => {
   // Statement reconciliation folded under the Account namespace
   // (/api/accounts/statements). The old top-level /api/statements must 410 so

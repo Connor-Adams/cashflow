@@ -280,6 +280,25 @@ router.post('/rule-proposals/:merchantPattern/dismiss', async (req, res, next) =
   }
 });
 
+/**
+ * DEPRECATED insights route — 410 Gone.
+ *
+ * GET /api/ai/insights used to run the standalone six-template financial
+ * insight engine and write its output as `financial_insight` AiSuggestion
+ * rows. That engine is deleted: the Unified Inbox now reads `Insight` rows
+ * (the same detector-backed table the insights page reads and dismisses) via
+ * GET /api/ai/inbox below. We return **410 Gone** rather than letting the
+ * route silently 404 so any stale caller (the web app, a bookmarklet, a
+ * cron job) fails loudly instead of getting a routing 404 indistinguishable
+ * from a typo'd path.
+ */
+router.get('/insights', (_req, res) => {
+  res.status(410).json({
+    error: 'gone',
+    message: 'This endpoint was retired; insights now come from GET /api/ai/inbox.',
+  });
+});
+
 router.get('/import-cleanup', async (req, res, next) => {
   try {
     const batch = String(req.query.batch || '').trim();
@@ -364,6 +383,18 @@ router.get('/import-cleanup', async (req, res, next) => {
   }
 });
 
+/**
+ * An inbox item's identity is the PAIR `(kind, id)`, not `id` alone. `id` is
+ * drawn from whichever table backs that `kind` — `AiSuggestion.id` for
+ * transaction_audit/counterparty_email_match, `Insight.id` for
+ * financial_insight, and synthesized negative ids for the unpersisted
+ * rule_proposal/counterparty_promotion kinds — so the same numeric id can
+ * legitimately appear under two different kinds and refer to unrelated rows.
+ * `POST /api/ai/suggestions/:id/apply|reject` only resolve ids against
+ * AiSuggestion, so a future consumer MUST key off `(kind, id)` (e.g. the
+ * frontend's `${kind}:${id}` composite key below) rather than acting on a
+ * bare `id` from this list.
+ */
 type InboxItem = {
   id: number;
   kind:
