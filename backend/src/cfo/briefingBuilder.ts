@@ -26,6 +26,7 @@ import {
 } from '../models';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 import { insightToActionItem, type InsightLike } from '../insights/toActionItems';
+import { filterInsightsVisibleTo } from '../insights/visibility';
 import { findRuleProposals } from '../ai/ruleProposals';
 import { synthesizeBriefing } from './synthesizeBriefing';
 import { getOpenAiConfig } from '../config/openai';
@@ -228,10 +229,16 @@ const INSIGHT_SEVERITY_RANK_SQL =
 
 /**
  * Open insights for the household, as briefing action items — the most severe
- * `MAX_OPEN_INSIGHT_ITEMS`, newest first within a severity. Exported so the
- * unit test can exercise the query without building a whole briefing.
+ * `MAX_OPEN_INSIGHT_ITEMS` *that the requesting user may see*, newest first
+ * within a severity. Exported so the unit test can exercise the query without
+ * building a whole briefing.
+ *
+ * `req` is what scopes the read: `Insight` rows are household-wide (detectors
+ * run with no viewer), so an insight derived from the other partner's private
+ * transaction must be dropped here — see `filterInsightsVisibleTo`.
  */
 export async function loadOpenInsightItems(
+  req: Request,
   householdId: number,
 ): Promise<CfoBriefingActionItem[]> {
   const rows = await Insight.findAll({
@@ -250,14 +257,21 @@ export async function loadOpenInsightItems(
       [literal(INSIGHT_SEVERITY_RANK_SQL), 'ASC'],
       ['detectedAt', 'DESC'],
     ],
-    limit: MAX_OPEN_INSIGHT_ITEMS,
+    // No SQL `limit`: the cap has to be applied AFTER the visibility filter.
+    // Capping first would let a row the viewer cannot see occupy one of the
+    // `MAX_OPEN_INSIGHT_ITEMS` slots and silently push out an insight they
+    // could have acted on. Ordering still happens in SQL, so the post-filter
+    // slice keeps the same severest-then-newest semantics.
   });
   // Not `raw: true`: SQLite stores the `metadata` JSON column as TEXT, and a
   // raw query returns that column un-parsed (a string), which breaks
   // `supportingIdsFromMetadata`'s object check. Going through model
   // instances runs Sequelize's JSON getter so `metadata` comes back as a
   // real object on both dialects.
-  return rows.map((row) => insightToActionItem(row.toJSON() as unknown as InsightLike));
+  const visible = await filterInsightsVisibleTo(req, rows);
+  return visible
+    .slice(0, MAX_OPEN_INSIGHT_ITEMS)
+    .map((row) => insightToActionItem(row.toJSON() as unknown as InsightLike));
 }
 
 /**
@@ -290,7 +304,7 @@ export async function buildCfoBriefing(
         asOfDate: periodEnd,
       }),
     ),
-    safeBriefingFetch(() => loadOpenInsightItems(householdId)),
+    safeBriefingFetch(() => loadOpenInsightItems(req, householdId)),
     safeBriefingFetch(() => findRuleProposals(householdId)),
     PlannedEvent.findAll({
       where: {

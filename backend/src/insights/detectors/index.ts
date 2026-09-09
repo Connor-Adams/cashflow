@@ -339,7 +339,11 @@ export function detectRecurringIncrease(
 // ---- detectMissingReceipt ----------------------------------------------
 
 const MISSING_RECEIPT_DAYS = 7;
-const MISSING_RECEIPT_MIN = 100;
+/** $50, not $100: the briefing's old inline missing-receipt scan used a $50
+ *  floor, and folding that scan onto this detector silently halved its
+ *  coverage. Restored deliberately — it produces more `missing_receipt`
+ *  insights, which is the intent. */
+const MISSING_RECEIPT_MIN = 50;
 
 export function detectMissingReceipt(
   rows: DetectorTransaction[],

@@ -19,6 +19,7 @@ import {
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
 import { runDetectorsForHousehold } from '../insights/runDetectors';
+import { filterInsightsVisibleTo } from '../insights/visibility';
 
 const router = Router();
 
@@ -80,7 +81,10 @@ router.get('/', async (req, res, next) => {
       where.type = typeParam;
     }
 
-    const rows = await Insight.findAll({ where });
+    // Insights are generated household-wide by detectors that run with no
+    // viewer, so an insight derived from the other partner's private
+    // transaction would otherwise surface here. Scope the read to the caller.
+    const rows = await filterInsightsVisibleTo(req, await Insight.findAll({ where }));
     rows.sort((a, b) => {
       const diff =
         SEVERITY_RANK[a.severity as InsightSeverity] -

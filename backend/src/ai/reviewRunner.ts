@@ -144,7 +144,7 @@ export async function buildReviewActionItems(
   // Run independent sub-queries in parallel.
   const [insightItems, ruleProposals, txnsInWindow, plannedEventsOverdue] =
     await Promise.all([
-      loadOpenInsightItems(householdId),
+      loadOpenInsightItems(req, householdId),
       findRuleProposals(householdId),
       Transaction.findAll({
         where: {

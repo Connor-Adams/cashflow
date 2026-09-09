@@ -1,5 +1,6 @@
 import { before, beforeEach, after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'crypto';
 import type { Request } from 'express';
 import type { CfoBriefingActionItem } from '../models/CfoBriefing';
 
@@ -7,6 +8,13 @@ process.env.DATABASE_PATH = ':memory:';
 
 let sequelize: import('sequelize').Sequelize;
 let Insight: typeof import('../models').Insight;
+let Transaction: typeof import('../models').Transaction;
+let models: typeof import('../models');
+/** Real FK targets for seeded transactions (accountId / createdByUserId
+ *  are live FKs). */
+let accountId = 0;
+let userA = 0;
+let userB = 0;
 let briefingShortSummary: typeof import('./briefingBuilder').briefingShortSummary;
 let classifyImportIssue: typeof import('./briefingBuilder').classifyImportIssue;
 let CFO_BRIEFING_PROMPT_VERSION: typeof import('./briefingBuilder').CFO_BRIEFING_PROMPT_VERSION;
@@ -23,9 +31,10 @@ let MAX_OPEN_INSIGHT_ITEMS: typeof import('./briefingBuilder').MAX_OPEN_INSIGHT_
  */
 
 before(async () => {
-  const models = await import('../models');
+  models = await import('../models');
   sequelize = models.sequelize;
   Insight = models.Insight;
+  Transaction = models.Transaction;
   ({
     briefingShortSummary,
     classifyImportIssue,
@@ -36,6 +45,30 @@ before(async () => {
     MAX_OPEN_INSIGHT_ITEMS,
   } = await import('./briefingBuilder'));
   await sequelize.sync({ force: true });
+  const hh = await models.Household.create({ name: 'Briefing' });
+  const account = await models.Account.create({
+    householdId: hh.id,
+    ownerUserId: null,
+    owner: 'me',
+    visibility: 'shared',
+    name: 'Briefing card',
+    accountType: 'credit',
+    defaultCurrency: 'CAD',
+    shortCode: 'BRF',
+  });
+  accountId = account.id;
+  const mkUser = async (name: string) => {
+    const u = await models.User.create({
+      email: `${name}-${crypto.randomBytes(4).toString('hex')}@test.local`,
+      displayName: name,
+      passwordHash: 'x',
+      passwordSalt: 'x',
+      passwordParams: 'x',
+    });
+    return u.id;
+  };
+  userA = await mkUser('a');
+  userB = await mkUser('b');
 });
 
 after(async () => {
@@ -44,6 +77,7 @@ after(async () => {
 
 beforeEach(async () => {
   await Insight.destroy({ where: {}, truncate: true });
+  await Transaction.destroy({ where: {}, truncate: true });
 });
 
 /**
@@ -63,6 +97,54 @@ function fakeReq(userId: number, householdId: number): Request {
       role: 'owner',
     },
   } as unknown as Request;
+}
+
+/**
+ * `loadOpenInsightItems` now drops insights whose backing transactions the
+ * viewer cannot see, so tests that assert on `supportingTransactionIds` have
+ * to seed real rows rather than invent ids.
+ */
+async function createTxn(
+  householdId: number,
+  createdByUserId: number,
+  visibility: 'shared' | 'private',
+): Promise<number> {
+  const t = await Transaction.create({
+    accountId,
+    householdId,
+    visibility,
+    ownershipType: 'me',
+    ownershipContactId: null,
+    importBatch: 'briefing-test',
+    date: '2026-09-01',
+    merchantRaw: 'Loblaws',
+    merchantClean: 'Loblaws',
+    amount: '-120.0000',
+    currency: 'CAD',
+    txnType: 'purchase',
+    notes: null,
+    sourceReference: null,
+    sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
+    appliedRuleId: null,
+    autoCategory: null,
+    categoryOverride: null,
+    finalCategory: null,
+    autoBusiness: null,
+    businessOverride: null,
+    autoSplitType: null,
+    splitOverride: null,
+    autoPctMe: null,
+    pctMeOverride: null,
+    finalPctMe: null,
+    autoPctPartner: null,
+    pctPartnerOverride: null,
+    finalPctPartner: null,
+    reviewFlag: false,
+    reviewedAt: null,
+    createdByUserId,
+  } as never);
+  return t.id;
 }
 
 test('briefingShortSummary returns a friendly empty message when no items', () => {
@@ -129,6 +211,8 @@ test('CFO_BRIEFING_PROMPT_VERSION is a stable string identifier', () => {
 
 test('loadOpenInsightItems returns open insights as anomaly action items', async () => {
   const householdId = 1;
+  const a = await createTxn(householdId, userA, 'shared');
+  const b = await createTxn(householdId, userA, 'shared');
   await Insight.create({
     householdId,
     userId: null,
@@ -140,7 +224,7 @@ test('loadOpenInsightItems returns open insights as anomaly action items', async
     entityId: null,
     status: 'open',
     fingerprint: 'spike:loblaws:2026-09',
-    metadata: { transactionIds: [11, 12] },
+    metadata: { transactionIds: [a, b] },
     detectedAt: new Date(),
   });
   await Insight.create({
@@ -158,13 +242,13 @@ test('loadOpenInsightItems returns open insights as anomaly action items', async
     detectedAt: new Date(),
   });
 
-  const items = await loadOpenInsightItems(householdId);
+  const items = await loadOpenInsightItems(fakeReq(1, householdId), householdId);
 
   assert.equal(items.length, 1);
   assert.equal(items[0].title, 'Spending at Loblaws is up');
   assert.equal(items[0].type, 'anomaly');
   assert.equal(items[0].severity, 'watch');
-  assert.deepEqual(items[0].supportingTransactionIds, [11, 12]);
+  assert.deepEqual(items[0].supportingTransactionIds, [a, b]);
 });
 
 test('loadOpenInsightItems caps at MAX_OPEN_INSIGHT_ITEMS, severest and newest first', async () => {
@@ -198,7 +282,7 @@ test('loadOpenInsightItems caps at MAX_OPEN_INSIGHT_ITEMS, severest and newest f
   seed('info', 5, 28);
   await Insight.bulkCreate(rows as never);
 
-  const items = await loadOpenInsightItems(householdId);
+  const items = await loadOpenInsightItems(fakeReq(1, householdId), householdId);
 
   assert.equal(MAX_OPEN_INSIGHT_ITEMS, 20);
   assert.equal(items.length, MAX_OPEN_INSIGHT_ITEMS);
@@ -215,6 +299,84 @@ test('loadOpenInsightItems caps at MAX_OPEN_INSIGHT_ITEMS, severest and newest f
   assert.ok(
     items.every((i) => !i.title.startsWith('info-')),
     'the least severe rows are the ones dropped by the cap',
+  );
+});
+
+test('loadOpenInsightItems hides insights backed by the other partner\'s private txns', async () => {
+  const householdId = 8;
+  const shared = await createTxn(householdId, userA, 'shared');
+  const partnerPrivate = await createTxn(householdId, userB, 'private');
+  await Insight.bulkCreate([
+    {
+      householdId, userId: null, type: 'missing_receipt', severity: 'warning',
+      title: 'Shared charge', description: null,
+      entityType: 'transaction', entityId: shared,
+      status: 'open', fingerprint: 'vis:shared', metadata: null,
+      detectedAt: new Date('2026-09-02T00:00:00Z'),
+    },
+    {
+      householdId, userId: null, type: 'missing_receipt', severity: 'warning',
+      title: 'Private charge at $840', description: null,
+      entityType: 'transaction', entityId: partnerPrivate,
+      status: 'open', fingerprint: 'vis:private', metadata: null,
+      detectedAt: new Date('2026-09-01T00:00:00Z'),
+    },
+    {
+      householdId, userId: null, type: 'cash_runway_low', severity: 'critical',
+      title: 'Runway is short', description: null,
+      entityType: null, entityId: null,
+      status: 'open', fingerprint: 'vis:runway', metadata: null,
+      detectedAt: new Date('2026-09-03T00:00:00Z'),
+    },
+  ] as never);
+
+  const mine = await loadOpenInsightItems(fakeReq(userA, householdId), householdId);
+  const theirs = await loadOpenInsightItems(fakeReq(userB, householdId), householdId);
+
+  assert.deepEqual(
+    mine.map((i) => i.title),
+    ['Runway is short', 'Shared charge'],
+    'the household-level insight and the shared-txn one, but not the partner private one',
+  );
+  assert.deepEqual(
+    theirs.map((i) => i.title).sort(),
+    ['Private charge at $840', 'Runway is short', 'Shared charge'],
+    'the creator still sees their own private-txn insight',
+  );
+});
+
+test('loadOpenInsightItems filters for visibility BEFORE applying the cap', async () => {
+  const householdId = 9;
+  const partnerPrivate = await createTxn(householdId, userB, 'private');
+  // MAX_OPEN_INSIGHT_ITEMS invisible rows sorted ahead of one visible row.
+  // If the cap ran first it would consume every slot with rows user 1 cannot
+  // see and return nothing; filtering first must still surface the visible one.
+  const rows: Array<Record<string, unknown>> = [];
+  for (let i = 0; i < 20; i += 1) {
+    rows.push({
+      householdId, userId: null, type: 'missing_receipt', severity: 'critical',
+      title: `hidden-${i}`, description: null,
+      entityType: 'transaction', entityId: partnerPrivate,
+      status: 'open', fingerprint: `cap:hidden:${i}`, metadata: null,
+      detectedAt: new Date(Date.UTC(2026, 0, 28 - i)),
+    });
+  }
+  rows.push({
+    householdId, userId: null, type: 'cash_runway_low', severity: 'info',
+    title: 'visible-tail', description: null,
+    entityType: null, entityId: null,
+    status: 'open', fingerprint: 'cap:visible', metadata: null,
+    detectedAt: new Date(Date.UTC(2026, 0, 1)),
+  });
+  await Insight.bulkCreate(rows as never);
+
+  const items = await loadOpenInsightItems(fakeReq(userA, householdId), householdId);
+
+  assert.equal(MAX_OPEN_INSIGHT_ITEMS, 20);
+  assert.deepEqual(
+    items.map((i) => i.title),
+    ['visible-tail'],
+    'a private insight must not consume a capped slot and hide a visible one',
   );
 });
 
