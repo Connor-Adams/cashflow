@@ -404,4 +404,143 @@ describe('UnifiedInboxPage', () => {
     await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1))
     expect(String(postSpy.mock.calls[0][0])).toContain('/api/chat/proposals/3/apply')
   })
+
+  describe('CFO briefing narrative header', () => {
+    it('renders the run narrative once above its items, not repeated on every card', async () => {
+      const runNarrative = 'Two things need your attention this week.'
+      const items: ReviewItem[] = [
+        {
+          id: 'cfo-briefing:200:b1',
+          source: 'cfo-briefing',
+          subject_type: 'subscription',
+          subject_id: '12',
+          payload: {
+            id: 'b1',
+            title: 'Safe-to-spend low',
+            summary: 'Careful this week',
+            severity: 'action',
+            runId: 200,
+            runSummary: runNarrative,
+          },
+          status_common: 'pending',
+          native_status: 'open',
+          created_at: '2026-05-03T00:00:00Z',
+          resolved_at: null,
+        },
+        {
+          id: 'cfo-briefing:200:b2',
+          source: 'cfo-briefing',
+          subject_type: 'import',
+          subject_id: '9',
+          payload: {
+            id: 'b2',
+            title: 'Import stuck',
+            summary: 'Fix it',
+            severity: 'watch',
+            runId: 200,
+            runSummary: runNarrative,
+          },
+          status_common: 'pending',
+          native_status: 'open',
+          created_at: '2026-05-03T00:00:00Z',
+          resolved_at: null,
+        },
+      ]
+      mockReviewItems(items)
+      render(
+        <MemoryRouter>
+          <UnifiedInboxPage />
+        </MemoryRouter>,
+      )
+      await waitFor(() => screen.getByText('Safe-to-spend low'))
+      expect(screen.getByText('Import stuck')).toBeTruthy()
+      // Narrative text appears exactly once, even though two items share the run.
+      expect(screen.getAllByText(runNarrative)).toHaveLength(1)
+    })
+
+    it('a run without a narrative (summary null) renders cleanly with no empty header', async () => {
+      const items: ReviewItem[] = [
+        {
+          id: 'cfo-briefing:201:c1',
+          source: 'cfo-briefing',
+          subject_type: 'subscription',
+          subject_id: '5',
+          payload: {
+            id: 'c1',
+            title: 'Low safe-to-spend',
+            summary: 'careful',
+            severity: 'action',
+            runId: 201,
+            runSummary: null,
+          },
+          status_common: 'pending',
+          native_status: 'open',
+          created_at: '2026-05-04T00:00:00Z',
+          resolved_at: null,
+        },
+      ]
+      mockReviewItems(items)
+      render(
+        <MemoryRouter>
+          <UnifiedInboxPage />
+        </MemoryRouter>,
+      )
+      await waitFor(() => screen.getByText('Low safe-to-spend'))
+      // No Alert/header element rendered — only the item's own card content.
+      expect(screen.queryByText('CFO briefing')).toBeNull()
+    })
+
+    it('renders each run under its own narrative when two briefing runs appear in one list', async () => {
+      const firstNarrative = 'First run needs attention.'
+      const secondNarrative = 'Second run needs attention.'
+      const items: ReviewItem[] = [
+        {
+          id: 'cfo-briefing:300:x1',
+          source: 'cfo-briefing',
+          subject_type: null,
+          subject_id: null,
+          payload: {
+            id: 'x1',
+            title: 'Newer run item',
+            summary: 's',
+            severity: 'info',
+            runId: 300,
+            runSummary: secondNarrative,
+          },
+          status_common: 'pending',
+          native_status: 'open',
+          created_at: '2026-05-05T00:00:00Z',
+          resolved_at: null,
+        },
+        {
+          id: 'cfo-briefing:200:y1',
+          source: 'cfo-briefing',
+          subject_type: null,
+          subject_id: null,
+          payload: {
+            id: 'y1',
+            title: 'Older run item',
+            summary: 's',
+            severity: 'info',
+            runId: 200,
+            runSummary: firstNarrative,
+          },
+          status_common: 'pending',
+          native_status: 'open',
+          created_at: '2026-05-03T00:00:00Z',
+          resolved_at: null,
+        },
+      ]
+      mockReviewItems(items)
+      render(
+        <MemoryRouter>
+          <UnifiedInboxPage />
+        </MemoryRouter>,
+      )
+      await waitFor(() => screen.getByText('Newer run item'))
+      expect(screen.getByText('Older run item')).toBeTruthy()
+      expect(screen.getByText(firstNarrative)).toBeTruthy()
+      expect(screen.getByText(secondNarrative)).toBeTruthy()
+    })
+  })
 })

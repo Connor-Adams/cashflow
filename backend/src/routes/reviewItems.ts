@@ -127,6 +127,7 @@ async function readReviewRuns(
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       actionItems: row.actionItems,
+      summary: row.summary,
     }),
   );
 }
@@ -146,6 +147,7 @@ async function readCfoBriefings(
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       actionItems: row.actionItems,
+      summary: row.summary,
     }),
   );
 }

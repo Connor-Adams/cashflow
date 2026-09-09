@@ -16,6 +16,7 @@ import { Badge } from '@connor-adams/designsystem'
 import { Alert } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
 import { getJson, patchJson, postJson } from '@/lib/api'
+import { InsightEvidence } from './InsightEvidence'
 
 export type InsightSeverity = 'info' | 'warning' | 'critical'
 export type InsightStatus = 'open' | 'dismissed' | 'resolved'
@@ -232,6 +233,7 @@ export function InsightsPage() {
                   {row.description ? (
                     <p className="text-sm text-muted-foreground">{row.description}</p>
                   ) : null}
+                  <InsightEvidence type={row.type} metadata={row.metadata} />
                 </div>
                 <div className="flex flex-col gap-2 items-end shrink-0">
                   {link ? (

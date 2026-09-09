@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Button } from '@connor-adams/designsystem'
 import { Input } from '@connor-adams/designsystem'
@@ -6,6 +6,7 @@ import { NativeSelect } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { EmptyState } from '@connor-adams/designsystem'
+import { Alert } from '@connor-adams/designsystem'
 import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
 import { getJson, postJson } from '@/lib/api'
 
@@ -174,6 +175,49 @@ function matchesSearch(item: ReviewItem, q: string): boolean {
   if (!q.trim()) return true
   const haystack = JSON.stringify(item.payload).toLowerCase()
   return haystack.includes(q.trim().toLowerCase())
+}
+
+// ---------------------------------------------------------------------------
+// CFO briefing narrative header
+//
+// backend/src/reviewItems/normalize.ts stamps `payload.runSummary` (the
+// briefing run's LLM narrative) and `payload.runId` onto every item nested
+// in a cfo-briefing run. The list itself stays a flat, sorted array of
+// items — so to show the narrative once above a run's items (not repeated
+// per card), the render pass below groups by (source, runId) and surfaces
+// the narrative only the first time a given run is encountered.
+// ---------------------------------------------------------------------------
+
+function cfoBriefingRunKey(item: ReviewItem): string | null {
+  if (item.source !== 'cfo-briefing') return null
+  const runId = item.payload.runId
+  if (runId == null) return null
+  return String(runId)
+}
+
+function cfoBriefingNarrative(item: ReviewItem): string | null {
+  const v = item.payload.runSummary
+  return typeof v === 'string' && v.trim() ? v : null
+}
+
+/**
+ * Pairs each item with the narrative to render above it, if any. A run
+ * without a summary (null/blank) contributes no narrative — no empty
+ * header renders — even though its items still get a run key.
+ */
+function withRunNarratives(
+  items: ReviewItem[],
+): Array<{ item: ReviewItem; narrative: string | null }> {
+  const seenRunKeys = new Set<string>()
+  return items.map((item) => {
+    const runKey = cfoBriefingRunKey(item)
+    let narrative: string | null = null
+    if (runKey && !seenRunKeys.has(runKey)) {
+      seenRunKeys.add(runKey)
+      narrative = cfoBriefingNarrative(item)
+    }
+    return { item, narrative }
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -486,6 +530,8 @@ export function UnifiedInboxPage() {
     [visible],
   )
 
+  const withNarratives = useMemo(() => withRunNarratives(visible), [visible])
+
   return (
     <div>
       <PageHeader
@@ -557,13 +603,21 @@ export function UnifiedInboxPage() {
         />
       ) : (
         <ul className="grid list-none gap-2 p-0">
-          {visible.map((item) => (
-            <ReviewItemCard
-              key={item.id}
-              item={item}
-              busy={bulkBusy || busyId === item.id}
-              onAction={(it, kind) => void onAction(it, kind)}
-            />
+          {withNarratives.map(({ item, narrative }) => (
+            <Fragment key={item.id}>
+              {narrative ? (
+                <li className="list-none">
+                  <Alert variant="info" title="CFO briefing">
+                    {narrative}
+                  </Alert>
+                </li>
+              ) : null}
+              <ReviewItemCard
+                item={item}
+                busy={bulkBusy || busyId === item.id}
+                onAction={(it, kind) => void onAction(it, kind)}
+              />
+            </Fragment>
           ))}
         </ul>
       )}
