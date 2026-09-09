@@ -160,6 +160,31 @@ describe('UnifiedInboxPage', () => {
     expect(screen.getByText(/bulk_patch/i)).toBeTruthy()
   })
 
+  it('ai-suggestion card body: an array output renders the first item\'s title, not the humanised kind', async () => {
+    const arrayOutputItem: ReviewItem = {
+      id: 'ai-suggestion:9',
+      source: 'ai-suggestion',
+      subject_type: null,
+      subject_id: null,
+      payload: {
+        kind: 'financial_insight',
+        output: [{ title: 'Spending up 20% this month' }, { title: 'Second insight' }],
+      },
+      status_common: 'pending',
+      native_status: 'suggested',
+      created_at: '2026-06-01T00:00:00Z',
+      resolved_at: null,
+    }
+    mockReviewItems([arrayOutputItem])
+    render(
+      <MemoryRouter>
+        <UnifiedInboxPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => screen.getByText('Spending up 20% this month'))
+    expect(screen.queryByText('financial insight')).toBeNull()
+  })
+
   it('selecting a source in the dropdown refetches scoped to that source', async () => {
     const { urls } = mockReviewItems(SAMPLE)
     render(

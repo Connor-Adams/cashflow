@@ -244,7 +244,16 @@ function AiSuggestionCardBody({ item }: { item: ReviewItem }) {
   }
   const output = p.output
   let headline = ''
-  if (output && typeof output === 'object' && !Array.isArray(output)) {
+  if (Array.isArray(output)) {
+    const first = output[0]
+    if (first && typeof first === 'object') {
+      const rec = first as Record<string, unknown>
+      const t = rec.title
+      const h = rec.headline
+      if (typeof t === 'string') headline = t
+      else if (typeof h === 'string') headline = h
+    }
+  } else if (output && typeof output === 'object') {
     const h = (output as Record<string, unknown>).headline
     if (typeof h === 'string') headline = h
   }

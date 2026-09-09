@@ -68,12 +68,17 @@ async function seed(emailPrefix: string): Promise<Seeded> {
 async function seedAllSources(householdId: number, userId: number): Promise<void> {
   const models = await import('../../src/models');
 
+  // Uses 'transaction_audit', not 'financial_insight' — the latter is a
+  // retired AiSuggestion kind (see RETIRED_AI_SUGGESTION_KINDS in
+  // backend/src/routes/reviewItems.ts) excluded from GET /api/review-items,
+  // so seeding it here would make this fixture's "one item per source"
+  // invariant false.
   await models.AiSuggestion.create({
     householdId,
     userId,
     transactionId: null,
     receiptId: null,
-    kind: 'financial_insight',
+    kind: 'transaction_audit',
     status: 'suggested',
     output: { headline: 'Spending up 20%' },
     createdAt: new Date('2026-05-01T00:00:00Z'),
