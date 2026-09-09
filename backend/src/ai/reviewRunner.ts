@@ -25,9 +25,14 @@
 
 import { Op } from 'sequelize';
 import type { Request } from 'express';
-import { Transaction, PlannedEvent } from '../models';
+import { Transaction } from '../models';
 import { visibleTransactionWhere } from '../auth/scope';
 import { loadOpenInsightItems } from '../cfo/briefingBuilder';
+import {
+  loadOverduePlannedEvents,
+  buildOverdueEventItemContent,
+  buildRuleSuggestionItemContent,
+} from '../cfo/reviewActionItemShared';
 import { findRuleProposals } from './ruleProposals';
 import { num } from '../util/numbers';
 import type {
@@ -117,11 +122,6 @@ export function insightItemToReviewItem(item: CfoBriefingActionItem): AiReviewAc
   };
 }
 
-function safeNumber(value: unknown): number {
-  const n = num(value);
-  return n == null ? 0 : Math.abs(n);
-}
-
 /** Slots: [anomalies, rule suggestions, subscriptions, forecast warnings].
  *  There is no missing-receipt slot: those now arrive as Insight rows and are
  *  counted under `anomaly`. */
@@ -154,18 +154,7 @@ export async function buildReviewActionItems(
         },
         attributes: ['id', 'date', 'merchantClean', 'amount'],
       }),
-      PlannedEvent.findAll({
-        where: {
-          householdId,
-          kind: 'planned',
-          status: 'planned',
-          expectedDate: {
-            [Op.lt]: periodEnd,
-          },
-        },
-        attributes: ['id', 'name', 'expectedDate', 'amount', 'type'],
-        raw: true,
-      }),
+      loadOverduePlannedEvents(householdId, periodEnd),
     ]);
 
   const items: AiReviewActionItem[] = [];
@@ -179,18 +168,11 @@ export async function buildReviewActionItems(
 
   // Rule suggestions.
   for (const proposal of ruleProposals) {
-    items.push({
-      id: idFor('rule_suggestion', proposal.merchantPattern),
-      type: 'rule_suggestion',
-      refType: 'rule',
-      refId: null,
-      severity: 'info',
-      title: `Create rule for "${proposal.merchantPattern}"`,
-      summary: `${proposal.supportCount} reviewed transactions match "${proposal.merchantPattern}" → ${proposal.category ?? '(no category)'}.`,
-      status: 'suggested',
-      supportingTransactionIds: proposal.exampleTransactionIds,
-      rationale: 'Detected by repeated manual categorizations sharing a merchant pattern.',
-    });
+    const content = buildRuleSuggestionItemContent(
+      proposal,
+      `Create rule for "${proposal.merchantPattern}"`,
+    );
+    items.push({ ...content, type: 'rule_suggestion', status: 'suggested' });
   }
 
   // Subscription detection: merchants with N+ near-identical negative
@@ -237,26 +219,9 @@ export async function buildReviewActionItems(
   }
 
   // Forecast warnings: planned events that should have posted but haven't.
-  type OverdueEvent = {
-    id: number;
-    name: string;
-    expectedDate: string;
-    amount: unknown;
-    type: string;
-  };
-  for (const raw of plannedEventsOverdue as unknown as OverdueEvent[]) {
-    items.push({
-      id: idFor('forecast_warning', raw.id),
-      type: 'forecast_warning',
-      refType: 'event',
-      refId: raw.id,
-      severity: 'watch',
-      title: `Planned ${raw.type} overdue: ${raw.name}`,
-      summary: `${raw.name} (${safeNumber(raw.amount).toFixed(2)} ${currency}) expected on ${raw.expectedDate} but not posted.`,
-      status: 'suggested',
-      supportingTransactionIds: [],
-      rationale: 'Planned event still in "planned" status past its expected date.',
-    });
+  for (const raw of plannedEventsOverdue) {
+    const content = buildOverdueEventItemContent(raw, currency);
+    items.push({ ...content, type: 'forecast_warning', status: 'suggested' });
   }
 
   const counts = [0, 0, 0, 0];
