@@ -88,6 +88,7 @@ test('normalizeAiSuggestion maps a transaction-scoped suggestion', () => {
   assert.equal(item.created_at, created.toISOString());
   assert.equal(item.resolved_at, null);
   assert.equal((item.payload as { kind?: string }).kind, 'financial_insight');
+  assert.equal(item.ordinal, 0);
 });
 
 test('normalizeAiSuggestion resolves subject to receipt + sets resolved_at when not pending', () => {
@@ -152,6 +153,7 @@ test('normalizeChatProposal maps to chat-message subject + applied resolved_at',
   assert.equal(item.created_at, created.toISOString());
   assert.equal(item.resolved_at, applied.toISOString());
   assert.deepEqual((item.payload as { preview?: unknown }).preview, { count: 4 });
+  assert.equal(item.ordinal, 0);
 });
 
 test('normalizeChatProposal pending has null resolved_at', () => {
@@ -214,12 +216,14 @@ test('normalizeReviewRunItems flattens action items into per-item review items',
   assert.equal(items[0].native_status, 'suggested');
   assert.equal(items[0].created_at, created.toISOString());
   assert.equal(items[0].resolved_at, null);
+  assert.equal(items[0].ordinal, 0);
 
   assert.equal(items[1].id, 'ai-review:100:a2');
   assert.equal(items[1].subject_type, 'rule');
   assert.equal(items[1].subject_id, null);
   assert.equal(items[1].status_common, 'resolved');
   assert.equal(items[1].resolved_at, updated.toISOString());
+  assert.equal(items[1].ordinal, 1);
 });
 
 test('normalizeReviewRunItems on empty array returns empty', () => {
@@ -281,14 +285,92 @@ test('normalizeCfoBriefingItems flattens action items with open->pending mapping
   assert.equal(items[1].resolved_at, updated.toISOString());
 });
 
+test('normalizeCfoBriefingItems carries the run-level narrative onto every item payload', () => {
+  const created = new Date('2026-05-03T00:00:00Z');
+  const items = normalizeCfoBriefingItems({
+    id: 300,
+    createdAt: created,
+    updatedAt: created,
+    summary: 'Two things need attention this week.',
+    actionItems: [
+      {
+        id: 'c1',
+        type: 'safe_to_spend_low',
+        refType: null,
+        refId: null,
+        severity: 'action',
+        title: 'Low safe-to-spend',
+        summary: 'careful',
+        status: 'open',
+      },
+      {
+        id: 'c2',
+        type: 'import_issue',
+        refType: null,
+        refId: null,
+        severity: 'watch',
+        title: 'Import stuck',
+        summary: 'fix it',
+        status: 'open',
+      },
+    ],
+  });
+  assert.equal(items.length, 2);
+  assert.equal(
+    (items[0].payload as { runSummary?: unknown }).runSummary,
+    'Two things need attention this week.',
+  );
+  assert.equal(
+    (items[1].payload as { runSummary?: unknown }).runSummary,
+    'Two things need attention this week.',
+  );
+});
+
+test('normalizeCfoBriefingItems with no summary puts null runSummary on the payload (no crash)', () => {
+  const created = new Date('2026-05-03T00:00:00Z');
+  const items = normalizeCfoBriefingItems({
+    id: 301,
+    createdAt: created,
+    updatedAt: created,
+    actionItems: [
+      {
+        id: 'd1',
+        type: 'other',
+        refType: null,
+        refId: null,
+        severity: 'info',
+        title: 'Something',
+        summary: 'x',
+        status: 'open',
+      },
+    ],
+  });
+  assert.equal((items[0].payload as { runSummary?: unknown }).runSummary, null);
+});
+
+test('normalizeCfoBriefingItems assigns ordinal = index within run.actionItems', () => {
+  const created = new Date('2026-05-03T00:00:00Z');
+  const items = normalizeCfoBriefingItems({
+    id: 302,
+    createdAt: created,
+    updatedAt: created,
+    actionItems: [
+      { id: 'e1', type: 'other', refType: null, refId: null, severity: 'info', title: 't1', summary: 's1', status: 'open' },
+      { id: 'e2', type: 'other', refType: null, refId: null, severity: 'info', title: 't2', summary: 's2', status: 'open' },
+      { id: 'e3', type: 'other', refType: null, refId: null, severity: 'info', title: 't3', summary: 's3', status: 'open' },
+    ],
+  });
+  assert.deepEqual(items.map((i) => i.ordinal), [0, 1, 2]);
+});
+
 // ---------------------------------------------------------------------------
 // Merge + sort + cursor
 // ---------------------------------------------------------------------------
 
-function ri(id: string, createdAt: string): ReviewItem {
+function ri(id: string, createdAt: string, ordinal = 0, source: ReviewItem['source'] = 'ai-suggestion'): ReviewItem {
   return {
     id,
-    source: 'ai-suggestion',
+    source,
     subject_type: null,
     subject_id: null,
     payload: {},
@@ -296,6 +378,7 @@ function ri(id: string, createdAt: string): ReviewItem {
     native_status: 'suggested',
     created_at: createdAt,
     resolved_at: null,
+    ordinal,
   };
 }
 
@@ -309,6 +392,51 @@ test('mergeAndSort orders by created_at desc, tie-broken by id desc for stabilit
   assert.deepEqual(
     merged.map((m) => m.id),
     ['z', 'c', 'b', 'a'],
+  );
+});
+
+test('mergeAndSort preserves a briefing run priority ranking via ordinal, ahead of id desc', () => {
+  // Simulate synthesizeBriefing having reordered the run's action items so the
+  // *most* important item ('zzz-least-important-id') comes first — id-desc
+  // alone would put it last. All three items share one run's created_at.
+  const runCreatedAt = '2026-05-03T00:00:00Z';
+  const merged = mergeAndSort([
+    ri('cfo-briefing:200:aaa', runCreatedAt, 2, 'cfo-briefing'), // ranked last
+    ri('cfo-briefing:200:zzz-least-important-id', runCreatedAt, 0, 'cfo-briefing'), // ranked first
+    ri('cfo-briefing:200:mmm', runCreatedAt, 1, 'cfo-briefing'), // ranked second
+  ]);
+  assert.deepEqual(
+    merged.map((m) => m.id),
+    [
+      'cfo-briefing:200:zzz-least-important-id',
+      'cfo-briefing:200:mmm',
+      'cfo-briefing:200:aaa',
+    ],
+  );
+});
+
+test('mergeAndSort does not regress single-row sources (ai-suggestion, chat-proposal): ordinal 0 for all, still id-desc tiebreak', () => {
+  const ts = '2026-05-03T00:00:00Z';
+  const merged = mergeAndSort([
+    ri('ai-suggestion:1', ts, 0, 'ai-suggestion'),
+    ri('chat-proposal:9', ts, 0, 'chat-proposal'),
+    ri('ai-suggestion:5', ts, 0, 'ai-suggestion'),
+  ]);
+  assert.deepEqual(
+    merged.map((m) => m.id),
+    ['chat-proposal:9', 'ai-suggestion:5', 'ai-suggestion:1'],
+  );
+});
+
+test('mergeAndSort keeps ai-review run order via ordinal too (same mechanism, no separate regression)', () => {
+  const ts = '2026-05-03T00:00:00Z';
+  const merged = mergeAndSort([
+    ri('ai-review:100:b', ts, 1, 'ai-review'),
+    ri('ai-review:100:a', ts, 0, 'ai-review'),
+  ]);
+  assert.deepEqual(
+    merged.map((m) => m.id),
+    ['ai-review:100:a', 'ai-review:100:b'],
   );
 });
 
