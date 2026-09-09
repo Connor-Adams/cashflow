@@ -24,6 +24,24 @@ import type {
   DetectorSettlement,
   DetectorRunwayPoint,
 } from './detectors';
+import {
+  SPIKE_MULT,
+  SPIKE_MIN_CURRENT,
+  CATEGORY_MULT,
+  CATEGORY_MIN_CURRENT,
+  RECURRING_INCREASE_RATIO,
+  DUPLICATE_WINDOW_DAYS,
+  CATEGORY_TREND_RATIO,
+  CATEGORY_TREND_WARNING_RATIO,
+  CATEGORY_TREND_MIN,
+  RUNWAY_HORIZON_DAYS,
+  RUNWAY_LOW_BUFFER,
+  RUNWAY_CRITICAL_DAYS,
+  SETTLEMENT_MIN_NET,
+  SETTLEMENT_CRITICAL_NET,
+  MISSING_RECEIPT_MIN,
+  MISSING_RECEIPT_DAYS,
+} from './detectors';
 
 function txn(partial: Partial<DetectorTransaction>): DetectorTransaction {
   return {
@@ -126,6 +144,30 @@ test('detectDuplicateTransactions: fingerprint stable across runs with same ids'
   assert.equal(run1[0].fingerprint, run2[0].fingerprint);
 });
 
+test('detectDuplicateTransactions: metadata carries per-row detail alongside transactionIds', () => {
+  const today = new Date('2026-05-10T12:00:00Z');
+  const insights = detectDuplicateTransactions(
+    [
+      txn({ id: 9, date: '2026-05-09', merchantClean: 'Costco', amount: -123.45 }),
+      txn({ id: 7, date: '2026-05-08', merchantClean: 'Costco', amount: -123.45 }),
+    ],
+    { now: today },
+  );
+  assert.equal(insights.length, 1);
+  const md = insights[0].metadata as {
+    transactionIds: number[];
+    transactions: Array<{ id: number; date: string; amount: number }>;
+    threshold: { windowDays: number };
+  };
+  // Existing field is untouched — still present, still the raw id list.
+  assert.deepEqual(md.transactionIds.sort(), [7, 9]);
+  assert.deepEqual(md.transactions, [
+    { id: 7, date: '2026-05-08', amount: 123.45 },
+    { id: 9, date: '2026-05-09', amount: 123.45 },
+  ]);
+  assert.deepEqual(md.threshold, { windowDays: DUPLICATE_WINDOW_DAYS });
+});
+
 // ---- detectMerchantSpendSpike ------------------------------------------
 
 test('detectMerchantSpendSpike: flags current month spend > 200% of prior 3-mo avg', () => {
@@ -167,6 +209,57 @@ test('detectMerchantSpendSpike: ignores merchants with no prior history (avoids 
     { now },
   );
   assert.equal(insights.length, 0);
+});
+
+test('detectMerchantSpendSpike: metadata exposes the prior-month baseline, contributing ids, and threshold', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const insights = detectMerchantSpendSpike(
+    [
+      // Single prior month — this is the case the fix targets: "prior 1
+      // month(s)" needs to be visible as an actual bucketed baseline.
+      txn({ id: 1, date: '2026-04-10', merchantClean: 'LCBO/RAO', amount: -31.8 }),
+      txn({ id: 2, date: '2026-05-05', merchantClean: 'LCBO/RAO', amount: -60 }),
+      txn({ id: 3, date: '2026-05-08', merchantClean: 'LCBO/RAO', amount: -40 }),
+    ],
+    { now },
+  );
+  assert.equal(insights.length, 1);
+  const md = insights[0].metadata as {
+    priorMonths: Array<{ month: string; amount: number }>;
+    currentIds: number[];
+    currentIdsTotal: number;
+    threshold: { multiplier: number; minCurrent: number };
+  };
+  assert.deepEqual(md.priorMonths, [{ month: '2026-04', amount: 31.8 }]);
+  assert.deepEqual(md.currentIds.sort((a, b) => a - b), [2, 3]);
+  assert.equal(md.currentIdsTotal, 2);
+  assert.deepEqual(md.threshold, { multiplier: SPIKE_MULT, minCurrent: SPIKE_MIN_CURRENT });
+});
+
+test('detectMerchantSpendSpike: priorMonths is sorted ascending and caps currentIds at 20 with a total count', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const rows: DetectorTransaction[] = [
+    txn({ id: 100, date: '2026-02-10', merchantClean: 'BulkCo', amount: -60 }),
+    txn({ id: 101, date: '2026-04-10', merchantClean: 'BulkCo', amount: -60 }),
+    txn({ id: 102, date: '2026-03-10', merchantClean: 'BulkCo', amount: -60 }),
+  ];
+  // 25 small current-month rows, comfortably over the $100/2x thresholds.
+  for (let i = 0; i < 25; i++) {
+    rows.push(txn({ id: 1000 + i, date: '2026-05-02', merchantClean: 'BulkCo', amount: -10 }));
+  }
+  const insights = detectMerchantSpendSpike(rows, { now });
+  assert.equal(insights.length, 1);
+  const md = insights[0].metadata as {
+    priorMonths: Array<{ month: string; amount: number }>;
+    currentIds: number[];
+    currentIdsTotal: number;
+  };
+  assert.deepEqual(
+    md.priorMonths.map((m) => m.month),
+    ['2026-02', '2026-03', '2026-04'],
+  );
+  assert.equal(md.currentIds.length, 20);
+  assert.equal(md.currentIdsTotal, 25);
 });
 
 // ---- detectRecurringIncrease -------------------------------------------
@@ -227,6 +320,39 @@ test('detectRecurringIncrease: skips merchants that are tracked subscriptions', 
   assert.equal(withGuard.length, 0);
   const without = detectRecurringIncrease(rows, { now, subscriptionMerchants: new Set() });
   assert.equal(without.length, 1);
+});
+
+test('detectRecurringIncrease: metadata exposes priorMonths, the contributing current-month ids, and threshold', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const insights = detectRecurringIncrease(
+    [
+      txn({ id: 1, date: '2026-02-01', merchantClean: 'Netflix', amount: -15 }),
+      txn({ id: 2, date: '2026-03-01', merchantClean: 'Netflix', amount: -15 }),
+      txn({ id: 3, date: '2026-04-01', merchantClean: 'Netflix', amount: -15 }),
+      txn({ id: 4, date: '2026-05-01', merchantClean: 'Netflix', amount: -22 }),
+    ],
+    { now },
+  );
+  assert.equal(insights.length, 1);
+  const md = insights[0].metadata as {
+    priorAmount: number;
+    currentAmount: number;
+    priorMonths: Array<{ month: string; amount: number }>;
+    supportingTransactionIds: number[];
+    supportingTransactionIdsTotal: number;
+    threshold: { ratio: number };
+  };
+  // Existing fields, unchanged.
+  assert.equal(md.priorAmount, 15);
+  assert.equal(md.currentAmount, 22);
+  assert.deepEqual(md.priorMonths, [
+    { month: '2026-02', amount: 15 },
+    { month: '2026-03', amount: 15 },
+    { month: '2026-04', amount: 15 },
+  ]);
+  assert.deepEqual(md.supportingTransactionIds, [4]);
+  assert.equal(md.supportingTransactionIdsTotal, 1);
+  assert.deepEqual(md.threshold, { ratio: RECURRING_INCREASE_RATIO });
 });
 
 // ---- detectMissingReceipt ----------------------------------------------
@@ -290,6 +416,17 @@ test('detectMissingReceipt: ignores positive amounts (refunds, payments)', () =>
   assert.equal(insights.length, 0);
 });
 
+test('detectMissingReceipt: metadata echoes the governing threshold', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const insights = detectMissingReceipt(
+    [txn({ id: 1, date: '2026-05-01', amount: -250, receiptCount: 0 })],
+    { now },
+  );
+  assert.equal(insights.length, 1);
+  const md = insights[0].metadata as { threshold: { minAmount: number; minAgeDays: number } };
+  assert.deepEqual(md.threshold, { minAmount: MISSING_RECEIPT_MIN, minAgeDays: MISSING_RECEIPT_DAYS });
+});
+
 // ---- detectUnusualCategorySpend ----------------------------------------
 
 test('detectUnusualCategorySpend: flags category spend > 200% of 3-mo avg', () => {
@@ -336,6 +473,35 @@ test('detectUnusualCategorySpend: requires $100 absolute floor on current month 
   assert.equal(insights.length, 0);
 });
 
+test('detectUnusualCategorySpend: metadata exposes the prior-month baseline, contributing ids, and threshold', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const insights = detectUnusualCategorySpend(
+    [
+      txn({ id: 1, date: '2026-02-10', finalCategory: 'Groceries', amount: -200 }),
+      txn({ id: 2, date: '2026-03-10', finalCategory: 'Groceries', amount: -200 }),
+      txn({ id: 3, date: '2026-04-10', finalCategory: 'Groceries', amount: -200 }),
+      txn({ id: 4, date: '2026-05-05', finalCategory: 'Groceries', amount: -300 }),
+      txn({ id: 5, date: '2026-05-06', finalCategory: 'Groceries', amount: -200 }),
+    ],
+    { now },
+  );
+  assert.equal(insights.length, 1);
+  const md = insights[0].metadata as {
+    priorMonths: Array<{ month: string; amount: number }>;
+    currentIds: number[];
+    currentIdsTotal: number;
+    threshold: { multiplier: number; minCurrent: number };
+  };
+  assert.deepEqual(md.priorMonths, [
+    { month: '2026-02', amount: 200 },
+    { month: '2026-03', amount: 200 },
+    { month: '2026-04', amount: 200 },
+  ]);
+  assert.deepEqual(md.currentIds.sort((a, b) => a - b), [4, 5]);
+  assert.equal(md.currentIdsTotal, 2);
+  assert.deepEqual(md.threshold, { multiplier: CATEGORY_MULT, minCurrent: CATEGORY_MIN_CURRENT });
+});
+
 // ---- detectSettlementImbalance -----------------------------------------
 
 test('detectSettlementImbalance: flags large net imbalance with a single contact', () => {
@@ -347,9 +513,14 @@ test('detectSettlementImbalance: flags large net imbalance with a single contact
   assert.equal(insights.length, 1);
   assert.equal(insights[0].type, 'settlement_imbalance');
   // 500 + 200 - 50 = 650 owed in the i_paid_partner direction
-  const md = insights[0].metadata as { netAmount: number; currency: string };
+  const md = insights[0].metadata as {
+    netAmount: number;
+    currency: string;
+    threshold: { minNet: number; criticalNet: number };
+  };
   assert.equal(md.netAmount, 650);
   assert.equal(md.currency, 'CAD');
+  assert.deepEqual(md.threshold, { minNet: SETTLEMENT_MIN_NET, criticalNet: SETTLEMENT_CRITICAL_NET });
 });
 
 test('detectSettlementImbalance: ignores small imbalances (<$100)', () => {
@@ -473,6 +644,26 @@ test('detectCashRunwayLow: fingerprint stable across re-runs when crossing date 
   const run1 = detectCashRunwayLow(runwaySeries(now, balances), { now });
   const run2 = detectCashRunwayLow(runwaySeries(now, balances), { now });
   assert.equal(run1[0].fingerprint, run2[0].fingerprint);
+});
+
+test('detectCashRunwayLow: metadata echoes the governing threshold alongside the existing flat fields', () => {
+  const now = new Date('2026-05-01T12:00:00Z');
+  const balances = Array.from({ length: 31 }, (_, i) => (i < 3 ? 100 : -20));
+  const insights = detectCashRunwayLow(runwaySeries(now, balances), { now });
+  assert.equal(insights.length, 1);
+  const md = insights[0].metadata as {
+    buffer: number;
+    horizonDays: number;
+    threshold: { horizonDays: number; buffer: number; criticalDays: number };
+  };
+  // Existing flat fields, unchanged.
+  assert.equal(md.buffer, RUNWAY_LOW_BUFFER);
+  assert.equal(md.horizonDays, RUNWAY_HORIZON_DAYS);
+  assert.deepEqual(md.threshold, {
+    horizonDays: RUNWAY_HORIZON_DAYS,
+    buffer: RUNWAY_LOW_BUFFER,
+    criticalDays: RUNWAY_CRITICAL_DAYS,
+  });
 });
 
 // ---- detectCategoryTrend -----------------------------------------------
@@ -609,4 +800,28 @@ test('detectCategoryTrend: fingerprint stable across re-runs for the same rollin
   const run1 = detectCategoryTrend(rows, { now });
   const run2 = detectCategoryTrend(rows, { now });
   assert.equal(run1[0].fingerprint, run2[0].fingerprint);
+});
+
+test('detectCategoryTrend: metadata echoes the governing thresholds alongside the existing monthlyTotals', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const insights = detectCategoryTrend(
+    [
+      txn({ id: 1, date: '2026-02-10', finalCategory: 'Groceries', amount: -200 }),
+      txn({ id: 2, date: '2026-03-10', finalCategory: 'Groceries', amount: -250 }),
+      txn({ id: 3, date: '2026-04-10', finalCategory: 'Groceries', amount: -300 }),
+    ],
+    { now },
+  );
+  assert.equal(insights.length, 1);
+  const md = insights[0].metadata as {
+    monthlyTotals: number[];
+    threshold: { ratio: number; warningRatio: number; minAmount: number };
+  };
+  // Existing field, unchanged.
+  assert.deepEqual(md.monthlyTotals, [200, 250, 300]);
+  assert.deepEqual(md.threshold, {
+    ratio: CATEGORY_TREND_RATIO,
+    warningRatio: CATEGORY_TREND_WARNING_RATIO,
+    minAmount: CATEGORY_TREND_MIN,
+  });
 });

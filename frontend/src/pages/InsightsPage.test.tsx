@@ -475,6 +475,337 @@ describe('InsightsPage', () => {
       },
     )
 
+    describe('enriched evidence (priorMonths / contributing transactions / threshold)', () => {
+      it('renders a legible single-month baseline when priorMonths has exactly one entry', async () => {
+        mockApi([
+          makeRow({
+            id: 1,
+            type: 'merchant_spend_spike',
+            metadata: {
+              merchant: 'LCBO/RAO',
+              currency: 'CAD',
+              currentMonth: '2026-05',
+              currentAmount: 97.8,
+              priorAvg: 31.8,
+              multiplier: 3.08,
+              priorMonths: [{ month: '2026-04', amount: 31.8 }],
+              currentIds: [501],
+              currentIdsTotal: 1,
+              threshold: { multiplier: 2, minCurrent: 100 },
+            },
+          }),
+        ])
+        render(
+          <MemoryRouter>
+            <InsightsPage />
+          </MemoryRouter>,
+        )
+        await waitFor(() => expect(screen.getByText(/Apr \$31\.80 → May \$97\.80/)).toBeTruthy())
+        expect(screen.getByText(/based on 1 prior month/)).toBeTruthy()
+      })
+
+      it('renders the full trail for a 3-entry priorMonths (no single-month caveat)', async () => {
+        mockApi([
+          makeRow({
+            id: 1,
+            type: 'recurring_increase',
+            metadata: {
+              merchant: 'Netflix',
+              currency: 'CAD',
+              priorAmount: 15,
+              currentAmount: 20,
+              currentMonth: '2026-05',
+              priorMonths: [
+                { month: '2026-02', amount: 15 },
+                { month: '2026-03', amount: 15 },
+                { month: '2026-04', amount: 15 },
+              ],
+              supportingTransactionIds: [900],
+              supportingTransactionIdsTotal: 1,
+              threshold: { ratio: 1.2 },
+            },
+          }),
+        ])
+        render(
+          <MemoryRouter>
+            <InsightsPage />
+          </MemoryRouter>,
+        )
+        await waitFor(() =>
+          expect(
+            screen.getByText('Feb $15.00 → Mar $15.00 → Apr $15.00 → May $20.00'),
+          ).toBeTruthy(),
+        )
+        expect(screen.queryByText(/based on 1 prior month/)).toBeNull()
+      })
+
+      it('falls back to the old before/after rendering for an OLD-shape merchant_spend_spike row with no priorMonths (regression guard)', async () => {
+        mockApi([
+          makeRow({
+            id: 1,
+            type: 'merchant_spend_spike',
+            metadata: {
+              // Exactly the pre-enrichment shape: no priorMonths / currentIds /
+              // threshold, only what ~153 production rows already have.
+              merchant: 'Amazon',
+              currency: 'CAD',
+              currentMonth: '2026-05',
+              currentAmount: 300,
+              priorAvg: 100,
+              multiplier: 3,
+            },
+          }),
+        ])
+        render(
+          <MemoryRouter>
+            <InsightsPage />
+          </MemoryRouter>,
+        )
+        await waitFor(() =>
+          expect(
+            screen.getByText(/\$100\.00\/mo avg → \$300\.00 this month \(\+\$200\.00, 3\.0×\)/),
+          ).toBeTruthy(),
+        )
+        expect(screen.queryByText(/based on 1 prior month/)).toBeNull()
+      })
+
+      it('does not throw and falls back to the old rendering when priorMonths/currentIds/threshold are malformed', async () => {
+        mockApi([
+          makeRow({
+            id: 1,
+            type: 'merchant_spend_spike',
+            metadata: {
+              merchant: 'Amazon',
+              currency: 'CAD',
+              currentAmount: 300,
+              priorAvg: 100,
+              multiplier: 3,
+              priorMonths: 'not-an-array',
+              currentIds: 'nope',
+              currentIdsTotal: 'nope',
+              threshold: 'nope',
+            },
+          }),
+        ])
+        expect(() =>
+          render(
+            <MemoryRouter>
+              <InsightsPage />
+            </MemoryRouter>,
+          ),
+        ).not.toThrow()
+        await waitFor(() =>
+          expect(
+            screen.getByText(/\$100\.00\/mo avg → \$300\.00 this month \(\+\$200\.00, 3\.0×\)/),
+          ).toBeTruthy(),
+        )
+      })
+
+      it('renders "and N more" for a capped contributing-transaction list using the *Total count', async () => {
+        mockApi([
+          makeRow({
+            id: 1,
+            type: 'merchant_spend_spike',
+            metadata: {
+              merchant: 'Amazon',
+              currency: 'CAD',
+              currentMonth: '2026-05',
+              currentAmount: 300,
+              priorAvg: 100,
+              multiplier: 3,
+              priorMonths: [{ month: '2026-04', amount: 100 }],
+              currentIds: [1, 2],
+              currentIdsTotal: 5,
+            },
+          }),
+        ])
+        render(
+          <MemoryRouter>
+            <InsightsPage />
+          </MemoryRouter>,
+        )
+        await waitFor(() => expect(screen.getByText('5 contributing transactions')).toBeTruthy())
+        expect(screen.getByText('Transaction #1')).toBeTruthy()
+        expect(screen.getByText('Transaction #2')).toBeTruthy()
+        expect(screen.getByText('and 3 more')).toBeTruthy()
+      })
+
+      it('renders the threshold rule for merchant_spend_spike', async () => {
+        mockApi([
+          makeRow({
+            id: 1,
+            type: 'merchant_spend_spike',
+            metadata: {
+              merchant: 'Amazon',
+              currency: 'CAD',
+              currentMonth: '2026-05',
+              currentAmount: 300,
+              priorAvg: 100,
+              multiplier: 3,
+              priorMonths: [{ month: '2026-04', amount: 100 }],
+              threshold: { multiplier: 2, minCurrent: 100 },
+            },
+          }),
+        ])
+        render(
+          <MemoryRouter>
+            <InsightsPage />
+          </MemoryRouter>,
+        )
+        await waitFor(() =>
+          expect(
+            screen.getByText(/Flagged because this month is over 2× the prior average and above \$100\.00\./),
+          ).toBeTruthy(),
+        )
+      })
+
+      it('renders the threshold rule for recurring_increase', async () => {
+        mockApi([
+          makeRow({
+            id: 1,
+            type: 'recurring_increase',
+            metadata: {
+              merchant: 'Netflix',
+              currency: 'CAD',
+              priorAmount: 15,
+              currentAmount: 20,
+              currentMonth: '2026-05',
+              priorMonths: [
+                { month: '2026-02', amount: 15 },
+                { month: '2026-03', amount: 15 },
+                { month: '2026-04', amount: 15 },
+              ],
+              threshold: { ratio: 1.2 },
+            },
+          }),
+        ])
+        render(
+          <MemoryRouter>
+            <InsightsPage />
+          </MemoryRouter>,
+        )
+        await waitFor(() =>
+          expect(
+            screen.getByText(/Flagged because this month is at least 20% above the prior average\./),
+          ).toBeTruthy(),
+        )
+      })
+
+      it('renders the matched rows and threshold rule for duplicate_transactions with the enriched shape', async () => {
+        mockApi([
+          makeRow({
+            id: 1,
+            type: 'duplicate_transactions',
+            metadata: {
+              transactionIds: [10, 11],
+              merchant: 'Costco',
+              amount: 50,
+              currency: 'CAD',
+              transactions: [
+                { id: 10, date: '2026-05-01', amount: 50 },
+                { id: 11, date: '2026-05-02', amount: 50 },
+              ],
+              threshold: { windowDays: 3 },
+            },
+          }),
+        ])
+        render(
+          <MemoryRouter>
+            <InsightsPage />
+          </MemoryRouter>,
+        )
+        await waitFor(() => expect(screen.getByText('2026-05-01 · $50.00')).toBeTruthy())
+        expect(screen.getByText('2026-05-02 · $50.00')).toBeTruthy()
+        expect(screen.getByText(/Flagged because the charges matched within 3 days\./)).toBeTruthy()
+      })
+
+      it('renders the threshold rule for category_trend', async () => {
+        mockApi([
+          makeRow({
+            id: 1,
+            type: 'category_trend',
+            metadata: {
+              category: 'Groceries',
+              currency: 'CAD',
+              windowEndMonth: '2026-05',
+              monthlyTotals: [100, 130, 180],
+              risePct: 80,
+              threshold: { ratio: 0.25, warningRatio: 0.4, minAmount: 100 },
+            },
+          }),
+        ])
+        render(
+          <MemoryRouter>
+            <InsightsPage />
+          </MemoryRouter>,
+        )
+        await waitFor(() =>
+          expect(
+            screen.getByText(
+              /Flagged because spend rose at least 25% over the window and the latest month is above \$100\.00\./,
+            ),
+          ).toBeTruthy(),
+        )
+      })
+
+      it('renders the threshold rule for cash_runway_low', async () => {
+        mockApi([
+          makeRow({
+            id: 1,
+            type: 'cash_runway_low',
+            metadata: {
+              currency: 'CAD',
+              crossingDate: '2026-06-01',
+              projectedBalance: -50,
+              buffer: 0,
+              daysOut: 10,
+              horizonDays: 30,
+              threshold: { horizonDays: 30, buffer: 0, criticalDays: 7 },
+            },
+          }),
+        ])
+        render(
+          <MemoryRouter>
+            <InsightsPage />
+          </MemoryRouter>,
+        )
+        await waitFor(() =>
+          expect(
+            screen.getByText(
+              /Flagged because the projected balance drops below \$0\.00 within 30 days \(critical inside 7 days\)\./,
+            ),
+          ).toBeTruthy(),
+        )
+      })
+
+      it('renders the threshold rule for settlement_imbalance', async () => {
+        mockApi([
+          makeRow({
+            id: 1,
+            type: 'settlement_imbalance',
+            metadata: {
+              contactId: 5,
+              contactName: 'Sam',
+              currency: 'CAD',
+              netAmount: 250,
+              direction: 'partner_owes_you',
+              threshold: { minNet: 100, criticalNet: 1000 },
+            },
+          }),
+        ])
+        render(
+          <MemoryRouter>
+            <InsightsPage />
+          </MemoryRouter>,
+        )
+        await waitFor(() =>
+          expect(
+            screen.getByText(/Flagged because the net imbalance is above \$100\.00 \(critical above \$1,000\.00\)\./),
+          ).toBeTruthy(),
+        )
+      })
+    })
+
     it('renders no evidence block for an unrecognized insight type', async () => {
       mockApi([
         makeRow({

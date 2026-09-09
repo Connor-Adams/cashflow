@@ -102,10 +102,28 @@ function formatCurrency(amount: number, currency: string): string {
   return `${amount.toFixed(2)} ${currency}`;
 }
 
+/** Cap on contributing-transaction-id lists embedded in metadata, so a
+ *  merchant/category with a huge number of matching rows doesn't bloat the
+ *  stored payload. Callers also emit a `*Total` count alongside the capped
+ *  list so the UI can render "and N more" instead of silently truncating. */
+const MAX_METADATA_IDS = 20;
+
+function capIds(ids: number[]): { ids: number[]; total: number } {
+  return { ids: ids.slice(0, MAX_METADATA_IDS), total: ids.length };
+}
+
+/** A month->amount bucket as an ordered array (ascending by month), for
+ *  metadata — exposes how thin or thick the prior-average baseline is. */
+function priorMonthsArray(byMonth: Map<string, number>): Array<{ month: string; amount: number }> {
+  return Array.from(byMonth.entries())
+    .map(([month, amount]) => ({ month, amount }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+}
+
 // ---- detectDuplicateTransactions ---------------------------------------
 
 const DUPLICATE_LOOKBACK_DAYS = 30;
-const DUPLICATE_WINDOW_DAYS = 3;
+export const DUPLICATE_WINDOW_DAYS = 3;
 
 export function detectDuplicateTransactions(
   rows: DetectorTransaction[],
@@ -158,6 +176,11 @@ export function detectDuplicateTransactions(
           merchant: cluster[0].merchantClean,
           amount: Math.abs(cluster[0].amount),
           currency: cluster[0].currency,
+          transactions: cluster
+            .slice()
+            .sort((a, b) => a.id - b.id)
+            .map((r) => ({ id: r.id, date: r.date, amount: Math.abs(r.amount) })),
+          threshold: { windowDays: DUPLICATE_WINDOW_DAYS },
         },
       });
       // Skip past the cluster to avoid re-emitting subsets
@@ -170,8 +193,8 @@ export function detectDuplicateTransactions(
 // ---- detectMerchantSpendSpike ------------------------------------------
 
 const SPIKE_HISTORY_MONTHS = 3;
-const SPIKE_MULT = 2; // current > 2× prior avg
-const SPIKE_MIN_CURRENT = 100;
+export const SPIKE_MULT = 2; // current > 2× prior avg
+export const SPIKE_MIN_CURRENT = 100;
 
 export function detectMerchantSpendSpike(
   rows: DetectorTransaction[],
@@ -180,7 +203,13 @@ export function detectMerchantSpendSpike(
   const currentKey = currentMonthKey(opts.now);
   const priorKeys = new Set(priorMonthKeys(opts.now, SPIKE_HISTORY_MONTHS));
 
-  type Bucket = { merchant: string; currency: string; current: number; priorByMonth: Map<string, number> };
+  type Bucket = {
+    merchant: string;
+    currency: string;
+    current: number;
+    currentIds: number[];
+    priorByMonth: Map<string, number>;
+  };
   const buckets = new Map<string, Bucket>();
 
   for (const row of rows) {
@@ -194,12 +223,13 @@ export function detectMerchantSpendSpike(
     const key = `${row.currency}|${merch.toLowerCase()}`;
     let bucket = buckets.get(key);
     if (!bucket) {
-      bucket = { merchant: merch, currency: row.currency, current: 0, priorByMonth: new Map() };
+      bucket = { merchant: merch, currency: row.currency, current: 0, currentIds: [], priorByMonth: new Map() };
       buckets.set(key, bucket);
     }
     const absAmt = Math.abs(row.amount);
     if (isCurrent) {
       bucket.current += absAmt;
+      bucket.currentIds.push(row.id);
     } else {
       bucket.priorByMonth.set(month, (bucket.priorByMonth.get(month) ?? 0) + absAmt);
     }
@@ -216,6 +246,7 @@ export function detectMerchantSpendSpike(
     if (bucket.current <= SPIKE_MULT * priorAvg) continue;
     const multiplier = bucket.current / priorAvg;
     const severity: InsightSeverity = multiplier >= 4 ? 'critical' : 'warning';
+    const cappedCurrentIds = capIds(bucket.currentIds);
     out.push({
       type: 'merchant_spend_spike',
       severity,
@@ -231,6 +262,10 @@ export function detectMerchantSpendSpike(
         currentAmount: bucket.current,
         priorAvg,
         multiplier,
+        priorMonths: priorMonthsArray(bucket.priorByMonth),
+        currentIds: cappedCurrentIds.ids,
+        currentIdsTotal: cappedCurrentIds.total,
+        threshold: { multiplier: SPIKE_MULT, minCurrent: SPIKE_MIN_CURRENT },
       },
     });
   }
@@ -245,7 +280,7 @@ export function detectMerchantSpendSpike(
 // deliberately simpler month-bucket comparison so it covers the common
 // subscription-price-hike case without overlapping that route's contract.
 const RECURRING_HISTORY_MONTHS = 3;
-const RECURRING_INCREASE_RATIO = 1.2; // >20%
+export const RECURRING_INCREASE_RATIO = 1.2; // >20%
 // TODO(threshold): 1.2 captures subscription bumps without churning on micro-
 // inflation. Revisit if Connor sees false positives.
 
@@ -315,6 +350,10 @@ export function detectRecurringIncrease(
     if (currentBucket.sum < priorAvg * RECURRING_INCREASE_RATIO) continue;
 
     const pct = ((currentBucket.sum - priorAvg) / priorAvg) * 100;
+    const priorMonths = priorKeys
+      .map((month) => ({ month, amount: bucket.byMonth.get(month)!.sum }))
+      .sort((a, b) => a.month.localeCompare(b.month));
+    const cappedCurrentIds = capIds(currentBucket.ids);
     out.push({
       type: 'recurring_increase',
       severity: 'warning',
@@ -329,7 +368,10 @@ export function detectRecurringIncrease(
         priorAmount: priorAvg,
         currentAmount: currentBucket.sum,
         currentMonth: currentKey,
-        supportingTransactionIds: currentBucket.ids,
+        supportingTransactionIds: cappedCurrentIds.ids,
+        supportingTransactionIdsTotal: cappedCurrentIds.total,
+        priorMonths,
+        threshold: { ratio: RECURRING_INCREASE_RATIO },
       },
     });
   }
@@ -338,12 +380,12 @@ export function detectRecurringIncrease(
 
 // ---- detectMissingReceipt ----------------------------------------------
 
-const MISSING_RECEIPT_DAYS = 7;
+export const MISSING_RECEIPT_DAYS = 7;
 /** $50, not $100: the briefing's old inline missing-receipt scan used a $50
  *  floor, and folding that scan onto this detector silently halved its
  *  coverage. Restored deliberately — it produces more `missing_receipt`
  *  insights, which is the intent. */
-const MISSING_RECEIPT_MIN = 50;
+export const MISSING_RECEIPT_MIN = 50;
 
 export function detectMissingReceipt(
   rows: DetectorTransaction[],
@@ -370,6 +412,7 @@ export function detectMissingReceipt(
         currency: row.currency,
         merchant: row.merchantClean,
         date: row.date,
+        threshold: { minAmount: MISSING_RECEIPT_MIN, minAgeDays: MISSING_RECEIPT_DAYS },
       },
     });
   }
@@ -379,8 +422,8 @@ export function detectMissingReceipt(
 // ---- detectUnusualCategorySpend ----------------------------------------
 
 const CATEGORY_HISTORY_MONTHS = 3;
-const CATEGORY_MULT = 2;
-const CATEGORY_MIN_CURRENT = 100;
+export const CATEGORY_MULT = 2;
+export const CATEGORY_MIN_CURRENT = 100;
 
 export function detectUnusualCategorySpend(
   rows: DetectorTransaction[],
@@ -389,7 +432,13 @@ export function detectUnusualCategorySpend(
   const currentKey = currentMonthKey(opts.now);
   const priorKeys = new Set(priorMonthKeys(opts.now, CATEGORY_HISTORY_MONTHS));
 
-  type Bucket = { category: string; currency: string; current: number; priorByMonth: Map<string, number> };
+  type Bucket = {
+    category: string;
+    currency: string;
+    current: number;
+    currentIds: number[];
+    priorByMonth: Map<string, number>;
+  };
   const buckets = new Map<string, Bucket>();
 
   for (const row of rows) {
@@ -406,6 +455,7 @@ export function detectUnusualCategorySpend(
         category: row.finalCategory,
         currency: row.currency,
         current: 0,
+        currentIds: [],
         priorByMonth: new Map(),
       };
       buckets.set(key, bucket);
@@ -413,6 +463,7 @@ export function detectUnusualCategorySpend(
     const absAmt = Math.abs(row.amount);
     if (isCurrent) {
       bucket.current += absAmt;
+      bucket.currentIds.push(row.id);
     } else {
       bucket.priorByMonth.set(month, (bucket.priorByMonth.get(month) ?? 0) + absAmt);
     }
@@ -428,6 +479,7 @@ export function detectUnusualCategorySpend(
     if (priorAvg <= 0) continue;
     if (bucket.current <= CATEGORY_MULT * priorAvg) continue;
     const multiplier = bucket.current / priorAvg;
+    const cappedCurrentIds = capIds(bucket.currentIds);
     out.push({
       type: 'unusual_category_spend',
       severity: multiplier >= 4 ? 'critical' : 'warning',
@@ -443,6 +495,10 @@ export function detectUnusualCategorySpend(
         currentAmount: bucket.current,
         priorAvg,
         multiplier,
+        priorMonths: priorMonthsArray(bucket.priorByMonth),
+        currentIds: cappedCurrentIds.ids,
+        currentIdsTotal: cappedCurrentIds.total,
+        threshold: { multiplier: CATEGORY_MULT, minCurrent: CATEGORY_MIN_CURRENT },
       },
     });
   }
@@ -466,11 +522,11 @@ export type DetectorRunwayPoint = {
 };
 
 // How far ahead we look for a low-balance crossing.
-const RUNWAY_HORIZON_DAYS = 30;
+export const RUNWAY_HORIZON_DAYS = 30;
 // Buffer the projected balance must stay above. 0 = crossing into negative.
-const RUNWAY_LOW_BUFFER = 0;
+export const RUNWAY_LOW_BUFFER = 0;
 // A crossing this many days out (or a negative balance) is critical, not advisory.
-const RUNWAY_CRITICAL_DAYS = 7;
+export const RUNWAY_CRITICAL_DAYS = 7;
 // TODO(threshold): horizon=30, buffer=0 are sane defaults; make per-household
 // configurable in a follow-up (see issue out-of-scope note).
 
@@ -536,6 +592,11 @@ export function detectCashRunwayLow(
         buffer: RUNWAY_LOW_BUFFER,
         daysOut,
         horizonDays: RUNWAY_HORIZON_DAYS,
+        threshold: {
+          horizonDays: RUNWAY_HORIZON_DAYS,
+          buffer: RUNWAY_LOW_BUFFER,
+          criticalDays: RUNWAY_CRITICAL_DAYS,
+        },
       },
     });
   }
@@ -546,11 +607,11 @@ export function detectCashRunwayLow(
 
 const CATEGORY_TREND_MONTHS = 3;
 // Required total rise from first to last month of the window.
-const CATEGORY_TREND_RATIO = 0.25; // +25%
+export const CATEGORY_TREND_RATIO = 0.25; // +25%
 // Latest-month spend floor — avoids noise on tiny categories.
-const CATEGORY_TREND_MIN = 100;
+export const CATEGORY_TREND_MIN = 100;
 // A rise at/above this escalates info → warning.
-const CATEGORY_TREND_WARNING_RATIO = 0.4; // +40%
+export const CATEGORY_TREND_WARNING_RATIO = 0.4; // +40%
 // TODO(threshold): 25%/40%/$100 are conservative starting points; make
 // per-household configurable in a follow-up (see issue out-of-scope note).
 
@@ -649,6 +710,11 @@ export function detectCategoryTrend(
         monthlyTotals: series,
         risePct: pct,
         slope,
+        threshold: {
+          ratio: CATEGORY_TREND_RATIO,
+          warningRatio: CATEGORY_TREND_WARNING_RATIO,
+          minAmount: CATEGORY_TREND_MIN,
+        },
       },
     });
   }
@@ -657,8 +723,8 @@ export function detectCategoryTrend(
 
 // ---- detectSettlementImbalance -----------------------------------------
 
-const SETTLEMENT_MIN_NET = 100;
-const SETTLEMENT_CRITICAL_NET = 1000;
+export const SETTLEMENT_MIN_NET = 100;
+export const SETTLEMENT_CRITICAL_NET = 1000;
 
 export function detectSettlementImbalance(
   rows: DetectorSettlement[],
@@ -703,6 +769,7 @@ export function detectSettlementImbalance(
         currency: bucket.currency,
         netAmount: absNet,
         direction,
+        threshold: { minNet: SETTLEMENT_MIN_NET, criticalNet: SETTLEMENT_CRITICAL_NET },
       },
     });
   }
