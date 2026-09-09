@@ -70,7 +70,7 @@ test('ensureDailyPrices returns never when no rows and enqueues a backfill', asy
   });
   const first = await backfill.ensureDailyPrices(sec.id);
   assert.equal(first.status, 'never');
-  await new Promise((r) => setTimeout(r, 60));
+  await backfill.__drainForTests();
   const rows = await models.SecurityDailyPrice.findAll({ where: { securityId: sec.id } });
   assert.equal(rows.length, 2);
   const second = await backfill.ensureDailyPrices(sec.id);
@@ -98,7 +98,7 @@ test('ensureDailyPrices appends .TO for CAD-listed securities', async () => {
   });
 
   await backfill.ensureDailyPrices(sec.id);
-  await new Promise((r) => setTimeout(r, 60));
+  await backfill.__drainForTests();
 
   assert.equal(observedSymbol, 'XEQT.TO', 'Yahoo client should be called with the .TO-suffixed symbol');
   const okLog = await models.ProviderJobLog.findOne({
@@ -124,7 +124,7 @@ test('ensureDailyPrices falls back to .V when .TO returns no data (TSXV)', async
   });
 
   await backfill.ensureDailyPrices(sec.id);
-  await new Promise((r) => setTimeout(r, 60));
+  await backfill.__drainForTests();
 
   assert.deepEqual(observedSymbols, ['PLUR.TO', 'PLUR.V']);
   const notFound = await models.ProviderJobLog.findOne({
@@ -153,7 +153,7 @@ test('ensureDailyPrices uses BTC-CAD for cryptocurrency assetType', async () => 
   });
 
   await backfill.ensureDailyPrices(sec.id);
-  await new Promise((r) => setTimeout(r, 60));
+  await backfill.__drainForTests();
 
   assert.equal(observedSymbol, 'BTC-CAD');
 });
@@ -178,7 +178,7 @@ test('concurrent ensureDailyPrices for same security dedupes', async () => {
     backfill.ensureDailyPrices(sec.id),
     backfill.ensureDailyPrices(sec.id),
   ]);
-  await new Promise((r) => setTimeout(r, 80));
+  await backfill.__drainForTests();
   assert.equal(calls, 1, 'Yahoo called exactly once for concurrent requests');
   assert.ok(['never', 'in_progress'].includes(a.status));
 });
@@ -298,7 +298,7 @@ test('ensureOverview persists metadata + logs ok', async () => {
 
   const first = await backfill.ensureOverview(sec.id);
   assert.equal(first.status, 'never');
-  await new Promise((r) => setTimeout(r, 60));
+  await backfill.__drainForTests();
 
   const refreshed = await models.Security.findByPk(sec.id);
   assert.ok(refreshed);
@@ -333,7 +333,7 @@ test('ensureOverview skips Yahoo for cash-placeholder symbols', async () => {
   });
 
   const status = await backfill.ensureOverview(sec.id);
-  await new Promise((r) => setTimeout(r, 60));
+  await backfill.__drainForTests();
 
   assert.equal(status.status, 'fresh', 'cash positions should short-circuit, not poll Yahoo');
   assert.equal(called, false, 'Yahoo fetcher must not be invoked for cash placeholders');
@@ -360,7 +360,7 @@ test('ensureDividends rate-limit response is recorded as rate_limited', async ()
 
   const first = await backfill.ensureDividends(sec.id);
   assert.equal(first.status, 'never');
-  await new Promise((r) => setTimeout(r, 60));
+  await backfill.__drainForTests();
 
   const log = await models.ProviderJobLog.findOne({
     where: { function: 'DIVIDENDS', symbol: 'DVT' },

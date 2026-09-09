@@ -63,6 +63,14 @@ export function __resetForTests(): void {
   inFlight.clear();
   yahoo = defaultYahoo;
 }
+/** Test seam — awaits every queued backfill, including work enqueued by that work. */
+// Consumed by backfill.test.ts via dynamic import; fallow's static resolver can't follow it.
+// fallow-ignore-next-line unused-export
+export async function __drainForTests(): Promise<void> {
+  while (inFlight.size > 0) {
+    await Promise.all([...inFlight.values()]);
+  }
+}
 
 function yesterdayISODate(): string {
   const d = new Date();
