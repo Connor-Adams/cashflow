@@ -4,12 +4,11 @@
  * Composes a deterministic action-item list from existing engines:
  *   - safeToSpend headline                       → computeSafeToSpend
  *   - forecast warnings (overdue planned events) → PlannedEvent query
- *   - missing receipts on big-ticket spend       → Transaction join
  *   - new subscriptions in window                → Subscription query
- *   - rule suggestions                           → findRuleProposals
+ *   - rule suggestions                            → findRuleProposals
  *   - review backlog (unflagged review queue)    → Transaction count
  *   - import issues in window                    → ImportHistory query
- *   - anomalies / category deltas                → buildFinancialInsights
+ *   - anomalies (incl. missing receipts)         → Insight rows (real detectors)
  *
  * Everything is deterministic — no OpenAI required. That's the AC's
  * "AI summary is optional and gracefully disabled when unavailable"
@@ -17,17 +16,20 @@
  * label/plural correctness without touching the DB.
  */
 
-import { Op } from 'sequelize';
+import { Op, literal } from 'sequelize';
 import type { Request } from 'express';
 import {
   Transaction,
-  Receipt,
   PlannedEvent,
   ImportHistory,
+  Insight,
 } from '../models';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
-import { buildFinancialInsights, type AiFinancialInsight } from '../ai/insights';
+import { insightToActionItem, type InsightLike } from '../insights/toActionItems';
+import { filterInsightsVisibleTo } from '../insights/visibility';
 import { findRuleProposals } from '../ai/ruleProposals';
+import { synthesizeBriefing } from './synthesizeBriefing';
+import { getOpenAiConfig } from '../config/openai';
 import { num } from '../util/numbers';
 import {
   computeSafeToSpend,
@@ -43,11 +45,7 @@ import type {
 /** Persisted version of the briefing prompt/composition. Bump when the
  *  shape of action items materially changes so eval comparisons stay
  *  honest. */
-export const CFO_BRIEFING_PROMPT_VERSION = 'cfo-briefing-v1';
-
-/** $ threshold (period currency) above which a missing receipt is
- *  surfaced. Mirrors the AI review value so the two features agree. */
-const MISSING_RECEIPT_AMOUNT_THRESHOLD = 50;
+export const CFO_BRIEFING_PROMPT_VERSION = 'cfo-briefing-v2';
 
 /** Default window length when the caller omits explicit dates. */
 const DEFAULT_BRIEFING_WINDOW_DAYS = 7;
@@ -96,7 +94,6 @@ function isoDate(d: Date): string {
 export interface BriefingCounts {
   forecastWarnings: number;
   safeToSpendLow: number;
-  missingReceipts: number;
   newSubscriptions: number;
   ruleSuggestions: number;
   reviewBacklog: number;
@@ -112,7 +109,6 @@ export function briefingShortSummary(counts: BriefingCounts): string {
   const total =
     counts.forecastWarnings +
     counts.safeToSpendLow +
-    counts.missingReceipts +
     counts.newSubscriptions +
     counts.ruleSuggestions +
     counts.reviewBacklog +
@@ -122,7 +118,6 @@ export function briefingShortSummary(counts: BriefingCounts): string {
   const labels: string[] = [];
   push(labels, counts.forecastWarnings, 'forecast warning', 'forecast warnings');
   push(labels, counts.safeToSpendLow, 'safe-to-spend alert', 'safe-to-spend alerts');
-  push(labels, counts.missingReceipts, 'missing receipt', 'missing receipts');
   push(labels, counts.newSubscriptions, 'new subscription', 'new subscriptions');
   push(labels, counts.ruleSuggestions, 'rule suggestion', 'rule suggestions');
   push(labels, counts.reviewBacklog, 'review backlog item', 'review backlog items');
@@ -162,20 +157,28 @@ export interface BuildBriefingParams {
   periodStart: string;
   periodEnd: string;
   currency: string;
+  /** Test seam — defaults to the real synthesis pass. */
+  synthesizeImpl?: typeof synthesizeBriefing;
 }
 
 export interface BuildBriefingResult {
   actionItems: CfoBriefingActionItem[];
   summary: string;
   safeToSpendSnapshot: CfoBriefingSafeToSpendSnapshot | null;
+  /**
+   * Provenance for the persisted row: the OpenAI model id when the synthesis
+   * pass actually wrote the summary, `'deterministic'` when we fell back to
+   * `briefingShortSummary`. Derived from the same condition as the summary
+   * itself so the two can never drift.
+   */
+  model: string;
 }
+
+/** Provenance label for a briefing whose summary came from the counters. */
+export const DETERMINISTIC_BRIEFING_MODEL = 'deterministic';
 
 function idFor(type: CfoBriefingActionItemType, suffix: string | number): string {
   return `${type}-${suffix}`;
-}
-
-function severityFromInsight(s: AiFinancialInsight['severity']): CfoBriefingActionItemSeverity {
-  return s === 'action' ? 'action' : s === 'watch' ? 'watch' : 'info';
 }
 
 function safeAbsNumber(value: unknown): number {
@@ -203,6 +206,75 @@ function snapshotFromSafeToSpend(
 }
 
 /**
+ * Most open insights a single briefing will carry. Open insights accumulate
+ * without bound (production sits at ~140 open `missing_receipt` rows alone),
+ * and every one of them is persisted into `CfoBriefing.actionItems` AND
+ * serialized into the synthesis prompt — so an uncapped read makes token
+ * cost, latency and JSON-truncation risk scale with the table.
+ *
+ * Deliberately NOT filtered by the briefing window: insights are standing
+ * observations, not period events, so a stale-but-open critical insight must
+ * still surface. The cap is severity-first instead, so what gets dropped is
+ * always the least severe / oldest tail.
+ */
+export const MAX_OPEN_INSIGHT_ITEMS = 20;
+
+/** Severity rank for ordering: critical first, then warning, then everything
+ *  else. A CASE expression rather than an ORDER BY on the raw column because
+ *  the stored values sort alphabetically ('critical' < 'info' < 'warning'),
+ *  which is not the severity order. Standard SQL — runs on SQLite and
+ *  Postgres alike. */
+const INSIGHT_SEVERITY_RANK_SQL =
+  "CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END";
+
+/**
+ * Open insights for the household, as briefing action items — the most severe
+ * `MAX_OPEN_INSIGHT_ITEMS` *that the requesting user may see*, newest first
+ * within a severity. Exported so the unit test can exercise the query without
+ * building a whole briefing.
+ *
+ * `req` is what scopes the read: `Insight` rows are household-wide (detectors
+ * run with no viewer), so an insight derived from the other partner's private
+ * transaction must be dropped here — see `filterInsightsVisibleTo`.
+ */
+export async function loadOpenInsightItems(
+  req: Request,
+  householdId: number,
+): Promise<CfoBriefingActionItem[]> {
+  const rows = await Insight.findAll({
+    where: { householdId, status: 'open' },
+    attributes: [
+      'id',
+      'type',
+      'severity',
+      'title',
+      'description',
+      'entityType',
+      'entityId',
+      'metadata',
+    ],
+    order: [
+      [literal(INSIGHT_SEVERITY_RANK_SQL), 'ASC'],
+      ['detectedAt', 'DESC'],
+    ],
+    // No SQL `limit`: the cap has to be applied AFTER the visibility filter.
+    // Capping first would let a row the viewer cannot see occupy one of the
+    // `MAX_OPEN_INSIGHT_ITEMS` slots and silently push out an insight they
+    // could have acted on. Ordering still happens in SQL, so the post-filter
+    // slice keeps the same severest-then-newest semantics.
+  });
+  // Not `raw: true`: SQLite stores the `metadata` JSON column as TEXT, and a
+  // raw query returns that column un-parsed (a string), which breaks
+  // `supportingIdsFromMetadata`'s object check. Going through model
+  // instances runs Sequelize's JSON getter so `metadata` comes back as a
+  // real object on both dialects.
+  const visible = await filterInsightsVisibleTo(req, rows);
+  return visible
+    .slice(0, MAX_OPEN_INSIGHT_ITEMS)
+    .map((row) => insightToActionItem(row.toJSON() as unknown as InsightLike));
+}
+
+/**
  * Main entry point — returns the full action-item list + summary + safe-to-spend
  * snapshot for a household + window. Deterministic; OpenAI not invoked.
  *
@@ -219,7 +291,6 @@ export async function buildCfoBriefing(
     safeToSpend,
     insightsOut,
     ruleProposals,
-    txnsInWindow,
     plannedEventsOverdue,
     newSubscriptions,
     reviewBacklogCount,
@@ -233,30 +304,8 @@ export async function buildCfoBriefing(
         asOfDate: periodEnd,
       }),
     ),
-    safeBriefingFetch(() =>
-      buildFinancialInsights(req, periodEnd.slice(0, 7), currency, {
-        from: periodStart,
-        to: periodEnd,
-        label: `${periodStart} to ${periodEnd}`,
-      }),
-    ),
+    safeBriefingFetch(() => loadOpenInsightItems(req, householdId)),
     safeBriefingFetch(() => findRuleProposals(householdId)),
-    Transaction.findAll({
-      where: {
-        ...visibleTransactionWhere(req),
-        currency,
-        date: { [Op.between]: [periodStart, periodEnd] },
-      },
-      attributes: ['id', 'date', 'merchantClean', 'amount', 'reviewFlag'],
-      include: [
-        {
-          model: Receipt,
-          as: 'receipts',
-          attributes: ['id'],
-          required: false,
-        },
-      ],
-    }),
     PlannedEvent.findAll({
       where: {
         householdId,
@@ -319,23 +368,9 @@ export async function buildCfoBriefing(
     }
   }
 
-  // 2. Anomalies from insights.
+  // 2. Anomalies from the insight detectors.
   if (insightsOut) {
-    for (const insight of insightsOut.insights) {
-      items.push({
-        id: idFor('anomaly', `${insight.metric}-${Math.round(insight.amount)}`),
-        type: 'anomaly',
-        refType: null,
-        refId: null,
-        severity: severityFromInsight(insight.severity),
-        title: insight.title,
-        summary: insight.summary,
-        status: 'open',
-        supportingTransactionIds: insight.supportingTransactionIds,
-        rationale: insight.rationale,
-        link: '/insights',
-      });
-    }
+    items.push(...insightsOut);
   }
 
   // 3. Rule suggestions.
@@ -357,36 +392,7 @@ export async function buildCfoBriefing(
     }
   }
 
-  // 4. Missing receipts on big-ticket spend in window.
-  type TxnRow = {
-    id: number;
-    date: string;
-    merchantClean: string | null;
-    amount: unknown;
-    receipts?: Array<{ id: number }>;
-  };
-  for (const raw of txnsInWindow) {
-    const txn = raw.toJSON() as TxnRow;
-    const amount = safeAbsNumber(txn.amount);
-    if (amount < MISSING_RECEIPT_AMOUNT_THRESHOLD) continue;
-    if ((txn.receipts ?? []).length > 0) continue;
-    const merchant = txn.merchantClean || 'Unknown merchant';
-    items.push({
-      id: idFor('missing_receipt', txn.id),
-      type: 'missing_receipt',
-      refType: 'transaction',
-      refId: txn.id,
-      severity: 'watch',
-      title: `Missing receipt for ${merchant}`,
-      summary: `${merchant} on ${txn.date} for ${amount.toFixed(2)} ${currency} has no attached receipt.`,
-      status: 'open',
-      supportingTransactionIds: [txn.id],
-      rationale: `Charge of ${amount.toFixed(2)} ${currency} exceeds the ${MISSING_RECEIPT_AMOUNT_THRESHOLD} ${currency} threshold and has no receipt.`,
-      link: `/transactions?id=${txn.id}`,
-    });
-  }
-
-  // 5. New subscriptions detected in the window. The merged PlannedEvent stores
+  // 4. New subscriptions detected in the window. The merged PlannedEvent stores
   // the merchant in `name` (kind='subscription'); the legacy column was
   // `merchantName`.
   type SubRow = {
@@ -412,7 +418,7 @@ export async function buildCfoBriefing(
     });
   }
 
-  // 6. Forecast warnings: planned events overdue.
+  // 5. Forecast warnings: planned events overdue.
   type OverdueEvent = {
     id: number;
     name: string;
@@ -436,7 +442,7 @@ export async function buildCfoBriefing(
     });
   }
 
-  // 7. Review backlog — if there are flagged transactions, surface one
+  // 6. Review backlog — if there are flagged transactions, surface one
   // aggregated item with the count (frontend links into the queue).
   if (reviewBacklogCount > 0) {
     items.push({
@@ -453,7 +459,7 @@ export async function buildCfoBriefing(
     });
   }
 
-  // 8. Import issues during the window.
+  // 7. Import issues during the window.
   type ImportRow = {
     id: number;
     fileName: string;
@@ -481,7 +487,6 @@ export async function buildCfoBriefing(
   const counts: BriefingCounts = {
     forecastWarnings: 0,
     safeToSpendLow: 0,
-    missingReceipts: 0,
     newSubscriptions: 0,
     ruleSuggestions: 0,
     reviewBacklog: 0,
@@ -497,7 +502,10 @@ export async function buildCfoBriefing(
         counts.safeToSpendLow += 1;
         break;
       case 'missing_receipt':
-        counts.missingReceipts += 1;
+        // No longer produced here — detectMissingReceipt now emits this as
+        // an Insight, mapped to type 'anomaly' below. Kept as a case so a
+        // historical briefing loaded from storage (pre-migration) still
+        // switches exhaustively instead of falling through silently.
         break;
       case 'new_subscription':
         counts.newSubscriptions += 1;
@@ -517,10 +525,22 @@ export async function buildCfoBriefing(
     }
   }
 
+  const fallbackSummary = briefingShortSummary(counts);
+  const synthesize = params.synthesizeImpl ?? synthesizeBriefing;
+  const synthesis = await synthesize({
+    items,
+    safeToSpend: safeToSpendSnapshot,
+    currency,
+  });
+
   return {
-    actionItems: items,
-    summary: briefingShortSummary(counts),
+    actionItems: synthesis.ordered,
+    summary: synthesis.summary ?? fallbackSummary,
     safeToSpendSnapshot,
+    model:
+      synthesis.summary == null
+        ? DETERMINISTIC_BRIEFING_MODEL
+        : (getOpenAiConfig()?.model ?? 'llm'),
   };
 }
 

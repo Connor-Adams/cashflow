@@ -76,13 +76,14 @@ test('GET /api/ai/inbox/count returns zeros when nothing pending', async () => {
   });
 });
 
-test('GET /api/ai/inbox/count counts only suggested rows in the three kinds', async () => {
-  const { AiSuggestion } = await import('../../src/models/index.js');
-  await AiSuggestion.create({
-    householdId, userId: null, kind: 'financial_insight', status: 'suggested',
-    inputSnapshot: { period: '2026-05', currency: 'CAD' },
-    output: [{ title: 'Dining up 18%', severity: 'action' }],
-  } as never);
+test('GET /api/ai/inbox/count counts audit rows but never open insights', async () => {
+  const { AiSuggestion, Insight } = await import('../../src/models/index.js');
+  await Insight.create({
+    householdId, userId: null, type: 'merchant_spend_spike', severity: 'critical',
+    title: 'Dining up 18%', description: 'Dining is up 18% versus the prior month.',
+    entityType: null, entityId: null, status: 'open',
+    fingerprint: 'count:dining-up-18', metadata: null, detectedAt: new Date(),
+  });
   await AiSuggestion.create({
     householdId, userId: null, kind: 'transaction_audit', status: 'suggested',
     inputSnapshot: {}, output: { issues: [{ id: 1 }] },
@@ -91,15 +92,22 @@ test('GET /api/ai/inbox/count counts only suggested rows in the three kinds', as
     householdId, userId: null, kind: 'transaction_fields', status: 'suggested',
     inputSnapshot: {}, output: {},
   } as never);
-  await AiSuggestion.create({
-    householdId, userId: null, kind: 'financial_insight', status: 'superseded',
-    inputSnapshot: {}, output: [],
-  } as never);
+  // A dismissed Insight is the lifecycle equivalent of the retired
+  // AiSuggestion status='superseded' row: it must not reach the badge.
+  await Insight.create({
+    householdId, userId: null, type: 'merchant_spend_spike', severity: 'info',
+    title: 'Already dismissed', description: null,
+    entityType: null, entityId: null, status: 'dismissed',
+    fingerprint: 'count:dismissed', metadata: null, detectedAt: new Date(),
+  });
 
   const r = await authed.get('/api/ai/inbox/count');
   assert.equal(r.status, 200);
-  assert.equal(r.body.total, 2);
-  assert.equal(r.body.byKind.financial_insight, 1);
+  // The open Insight is NOT counted here: it is already counted and badged by
+  // the insights surface itself (GET /api/insights?status=open). Counting it
+  // in both places double-badged the same rows.
+  assert.equal(r.body.total, 1);
+  assert.equal(r.body.byKind.financial_insight, 0, 'insights never inflate the AI inbox count');
   assert.equal(r.body.byKind.transaction_audit, 1);
   assert.equal(r.body.byKind.rule_proposal, 0);
 });
@@ -107,25 +115,37 @@ test('GET /api/ai/inbox/count counts only suggested rows in the three kinds', as
 test('GET /api/ai/inbox/count scopes by household', async () => {
   // regularAgent is a non-superadmin with otherHouseholdId.
   // Suggestions from test 2 belong to householdId (superadmin's household) and must not appear.
-  const { AiSuggestion } = await import('../../src/models/index.js');
-  await AiSuggestion.create({
-    householdId: otherHouseholdId, userId: null, kind: 'financial_insight', status: 'suggested',
-    inputSnapshot: {}, output: [],
-  } as never);
+  const { Insight } = await import('../../src/models/index.js');
+  await Insight.create({
+    householdId: otherHouseholdId, userId: null, type: 'category_trend', severity: 'info',
+    title: 'Other household finding', description: null,
+    entityType: null, entityId: null, status: 'open',
+    fingerprint: 'count:other-household', metadata: null, detectedAt: new Date(),
+  });
   const r = await regularAgent.get('/api/ai/inbox/count');
   assert.equal(r.status, 200);
-  assert.equal(r.body.byKind.financial_insight, 1);
+  assert.equal(r.body.byKind.financial_insight, 0, 'insights are counted by their own endpoint');
   assert.equal(r.body.byKind.transaction_audit, 0);
   assert.equal(r.body.byKind.rule_proposal, 0);
+  assert.equal(r.body.total, 0);
 });
 
-test('GET /api/ai/inbox returns audit + insight suggested rows newest first', async () => {
-  const { AiSuggestion } = await import('../../src/models/index.js');
-  const olderInsight = await AiSuggestion.create({
-    householdId, userId: null, kind: 'financial_insight', status: 'suggested',
-    inputSnapshot: { period: '2026-04', currency: 'CAD' },
-    output: [{ title: 'Older insight', severity: 'info', supportingTransactionIds: [] }],
-  } as never);
+test('GET /api/ai/inbox returns audit rows and leaves open insights to the insights page', async () => {
+  const { AiSuggestion, Insight } = await import('../../src/models/index.js');
+  await Insight.create({
+    householdId, userId: null, type: 'category_trend', severity: 'info',
+    title: 'Older insight', description: 'An older finding.',
+    entityType: null, entityId: null, status: 'open',
+    fingerprint: 'inbox:older', metadata: null,
+    detectedAt: new Date('2026-04-01T00:00:00Z'),
+  });
+  await Insight.create({
+    householdId, userId: null, type: 'category_trend', severity: 'info',
+    title: 'Newer insight', description: 'A newer finding.',
+    entityType: null, entityId: null, status: 'open',
+    fingerprint: 'inbox:newer', metadata: null,
+    detectedAt: new Date('2026-05-01T00:00:00Z'),
+  });
   const newerAudit = await AiSuggestion.create({
     householdId, userId: null, kind: 'transaction_audit', status: 'suggested',
     inputSnapshot: {},
@@ -135,24 +155,34 @@ test('GET /api/ai/inbox returns audit + insight suggested rows newest first', as
   const r = await authed.get('/api/ai/inbox');
   assert.equal(r.status, 200);
   const items = r.body.items as Array<{ id: number; kind: string; summary: string }>;
-  const ids = items.map((i) => i.id);
-  assert.ok(ids.indexOf(newerAudit.id) < ids.indexOf(olderInsight.id), 'newer first');
-  const audit = items.find((i) => i.id === newerAudit.id);
+  // Open Insight rows are served by GET /api/insights and badged there; the AI
+  // inbox is AiSuggestion-backed kinds only, so the same rows are not listed
+  // (and counted) twice.
+  assert.equal(
+    items.filter((i) => i.kind === 'financial_insight').length,
+    0,
+    'open insights must not appear in the AI inbox',
+  );
+  const audit = items.find((i) => i.kind === 'transaction_audit' && i.id === newerAudit.id);
   assert.ok(audit);
-  assert.equal(audit.kind, 'transaction_audit');
   assert.match(audit.summary, /2 issue/);
 });
 
-test('GET /api/ai/inbox excludes non-suggested status and other kinds', async () => {
-  const { AiSuggestion } = await import('../../src/models/index.js');
+test('GET /api/ai/inbox excludes insight rows and other suggestion kinds', async () => {
+  const { AiSuggestion, Insight } = await import('../../src/models/index.js');
+  // Ids are per-model sequences now, so identity is (kind, id), not id alone.
+  const keysOf = (body: unknown) =>
+    (body as { items: Array<{ id: number; kind: string }> }).items.map((i) => `${i.kind}:${i.id}`);
   const beforeR = await authed.get('/api/ai/inbox');
   assert.equal(beforeR.status, 200);
-  const beforeIds = new Set((beforeR.body.items as Array<{ id: number }>).map((i) => i.id));
+  const beforeKeys = new Set(keysOf(beforeR.body));
 
-  const rejected = await AiSuggestion.create({
-    householdId, userId: null, kind: 'financial_insight', status: 'rejected',
-    inputSnapshot: {}, output: [],
-  } as never);
+  const openInsight = await Insight.create({
+    householdId, userId: null, type: 'recurring_fee', severity: 'warning',
+    title: 'Open but not an inbox item', description: null,
+    entityType: null, entityId: null, status: 'open',
+    fingerprint: 'inbox:open-not-listed', metadata: null, detectedAt: new Date(),
+  });
   const wrongKind = await AiSuggestion.create({
     householdId, userId: null, kind: 'transaction_fields', status: 'suggested',
     inputSnapshot: {}, output: {},
@@ -160,51 +190,62 @@ test('GET /api/ai/inbox excludes non-suggested status and other kinds', async ()
 
   const r = await authed.get('/api/ai/inbox');
   assert.equal(r.status, 200);
-  const ids = (r.body.items as Array<{ id: number }>).map((i) => i.id);
+  const keys = keysOf(r.body);
   const kinds = (r.body.items as Array<{ kind: string }>).map((i) => i.kind);
 
   // These two noise rows must not appear in the response
-  assert.ok(!ids.includes(rejected.id), 'rejected row must be excluded');
-  assert.ok(!ids.includes(wrongKind.id), 'wrong-kind row must be excluded');
+  assert.ok(
+    !keys.includes(`financial_insight:${openInsight.id}`),
+    'no Insight row — open or otherwise — belongs in the AI inbox',
+  );
+  assert.ok(!keys.includes(`transaction_fields:${wrongKind.id}`), 'wrong-kind row must be excluded');
 
   // No new transaction_fields entries should have appeared
   assert.ok(!kinds.includes('transaction_fields'));
 
   // The response must still contain all the previously-visible items
-  for (const id of beforeIds) {
-    assert.ok(ids.includes(id), `previously-visible item ${id} must still be present`);
+  for (const key of beforeKeys) {
+    assert.ok(keys.includes(key), `previously-visible item ${key} must still be present`);
   }
 });
 
 test('GET /api/ai/inbox scopes by household', async () => {
-  const { AiSuggestion } = await import('../../src/models/index.js');
-  await AiSuggestion.create({
-    householdId: otherHouseholdId, userId: null, kind: 'financial_insight', status: 'suggested',
-    inputSnapshot: { period: '2026-05', currency: 'CAD' },
-    output: [{ title: 'Other household' }],
+  const { AiSuggestion, Insight } = await import('../../src/models/index.js');
+  await Insight.create({
+    householdId: otherHouseholdId, userId: null, type: 'category_trend', severity: 'info',
+    title: 'Other household', description: 'Belongs to the other household.',
+    entityType: null, entityId: null, status: 'open',
+    fingerprint: 'inbox:other-household', metadata: null, detectedAt: new Date(),
+  });
+  const ownAudit = await AiSuggestion.create({
+    householdId: otherHouseholdId, userId: null, kind: 'transaction_audit',
+    status: 'suggested', inputSnapshot: {}, output: { issues: [{ id: 1 }] },
   } as never);
   // regularAgent belongs to otherHouseholdId and is not superadmin, so it should only see
-  // its own household's suggestions.
+  // its own household's rows.
   const r = await regularAgent.get('/api/ai/inbox');
   assert.equal(r.status, 200);
-  // authed (superadmin) may see everything; use regularAgent to check scoping
-  const titles = (r.body.items as Array<{ summary: string }>).map((i) => i.summary);
-  // The otherHouseholdId suggestion summary should be present for regularAgent (it's theirs)
-  // but suggestions belonging to householdId (superadmin's household) must not appear.
-  const r2 = await authed.get('/api/ai/inbox');
-  const authedIds = (r2.body.items as Array<{ id: number }>).map((i) => i.id);
-  const regularIds = (r.body.items as Array<{ id: number }>).map((i) => i.id);
-  // No overlap: regularAgent must not see householdId rows, authed (superadmin) sees all
-  // Just verify regularAgent's items don't include any rows from householdId.
-  // We do this by checking that every item regularAgent sees belongs to otherHouseholdId.
-  const { AiSuggestion: AS2 } = await import('../../src/models/index.js');
-  for (const id of regularIds) {
-    const row = await AS2.findByPk(id);
-    assert.ok(row, `row ${id} should exist`);
-    assert.equal(row!.householdId, otherHouseholdId, `row ${id} must belong to otherHouseholdId`);
+  const items = r.body.items as Array<{ id: number; kind: string }>;
+  assert.ok(
+    items.some((i) => i.kind === 'transaction_audit' && i.id === ownAudit.id),
+    'the other household\'s own audit row is visible to it',
+  );
+  assert.equal(
+    items.filter((i) => i.kind === 'financial_insight').length,
+    0,
+    'insights are not part of the AI inbox for any household',
+  );
+  for (const item of items) {
+    // rule_proposal / counterparty_promotion items carry synthesized negative ids.
+    if (item.id < 0) continue;
+    const row = await AiSuggestion.findByPk(item.id);
+    assert.ok(row, `row ${item.kind}:${item.id} should exist`);
+    assert.equal(
+      row.householdId,
+      otherHouseholdId,
+      `row ${item.kind}:${item.id} must belong to otherHouseholdId`,
+    );
   }
-  void titles; // used above for context
-  void authedIds; // not needed for the assertion
 });
 
 test('GET /api/ai/inbox includes rule_proposal items computed from transactions', async () => {
@@ -307,46 +348,6 @@ test('POST /api/ai/rule-proposals dismiss normalizes multi-space patterns', asyn
   assert.equal(afterProposals.length, 0, 'multi-space dismiss should exclude collapsed-space proposal');
 });
 
-test('POST /api/ai/insights supersedes prior suggested rows for same period+currency', async () => {
-  await authed.get('/api/ai/insights?period=2026-03&currency=CAD');
-  await authed.get('/api/ai/insights?period=2026-03&currency=CAD');
-  await authed.get('/api/ai/insights?period=2026-03&currency=CAD');
-
-  const { AiSuggestion } = await import('../../src/models/index.js');
-  const suggested = await AiSuggestion.findAll({
-    where: { householdId, kind: 'financial_insight', status: 'suggested' },
-  });
-  const for2026_03_CAD = suggested.filter((row) => {
-    const snap = row.inputSnapshot as { period?: string; currency?: string };
-    return snap?.period === '2026-03' && snap?.currency === 'CAD';
-  });
-  assert.equal(for2026_03_CAD.length, 1, 'exactly one suggested row per (period, currency)');
-
-  const superseded = await AiSuggestion.findAll({
-    where: { householdId, kind: 'financial_insight', status: 'superseded' },
-  });
-  const supersededFor2026_03 = superseded.filter((row) => {
-    const snap = row.inputSnapshot as { period?: string; currency?: string };
-    return snap?.period === '2026-03' && snap?.currency === 'CAD';
-  });
-  assert.equal(supersededFor2026_03.length, 2, 'two superseded rows from earlier loads');
-});
-
-test('POST /api/ai/insights does not supersede rows for a different period', async () => {
-  await authed.get('/api/ai/insights?period=2026-02&currency=CAD');
-  await authed.get('/api/ai/insights?period=2026-03&currency=CAD');
-
-  const { AiSuggestion } = await import('../../src/models/index.js');
-  const feb = await AiSuggestion.findAll({
-    where: { householdId, kind: 'financial_insight', status: 'suggested' },
-  });
-  const stillSuggestedFeb = feb.filter((row) => {
-    const snap = row.inputSnapshot as { period?: string };
-    return snap?.period === '2026-02';
-  });
-  assert.equal(stillSuggestedFeb.length, 1, 'Feb row was not superseded by Mar refresh');
-});
-
 test('GET /api/ai/inbox hides transaction_audit rows with zero issues', async () => {
   const { AiSuggestion } = await import('../../src/models/index.js');
   const empty = await AiSuggestion.create({
@@ -354,8 +355,14 @@ test('GET /api/ai/inbox hides transaction_audit rows with zero issues', async ()
     inputSnapshot: {}, output: { issues: [] },
   } as never);
   const r = await authed.get('/api/ai/inbox');
-  const ids = (r.body.items as Array<{ id: number }>).map((i) => i.id);
-  assert.ok(!ids.includes(empty.id), 'empty audit row must not appear in inbox');
+  // Compare on (kind, id): Insight and AiSuggestion ids come from different
+  // sequences, so a bare id can collide across kinds.
+  const keys = (r.body.items as Array<{ id: number; kind: string }>)
+    .map((i) => `${i.kind}:${i.id}`);
+  assert.ok(
+    !keys.includes(`transaction_audit:${empty.id}`),
+    'empty audit row must not appear in inbox',
+  );
 });
 
 test('GET /api/ai/inbox/count excludes transaction_audit rows with zero issues', async () => {
@@ -370,58 +377,38 @@ test('GET /api/ai/inbox/count excludes transaction_audit rows with zero issues',
   assert.equal(after.body.byKind.transaction_audit, beforeAudit, 'empty audit must not bump count');
 });
 
-test('GET /api/ai/inbox lazy-supersedes financial_insight duplicates per (period, currency)', async () => {
-  const { AiSuggestion } = await import('../../src/models/index.js');
-  const dupes = await Promise.all([
-    AiSuggestion.create({
-      householdId, userId: null, kind: 'financial_insight', status: 'suggested',
-      inputSnapshot: { period: '2026-09', currency: 'CAD' },
-      output: [{ title: 'Dup A' }],
-    } as never),
-    AiSuggestion.create({
-      householdId, userId: null, kind: 'financial_insight', status: 'suggested',
-      inputSnapshot: { period: '2026-09', currency: 'CAD' },
-      output: [{ title: 'Dup B' }],
-    } as never),
-    AiSuggestion.create({
-      householdId, userId: null, kind: 'financial_insight', status: 'suggested',
-      inputSnapshot: { period: '2026-09', currency: 'CAD' },
-      output: [{ title: 'Dup C' }],
-    } as never),
-  ]);
-
-  await authed.get('/api/ai/inbox');
-
-  const refreshed = await AiSuggestion.findAll({
-    where: { id: dupes.map((d) => d.id) },
-    order: [['id', 'ASC']],
+test('GET /api/ai/inbox never lists open Insight rows (they have their own surface)', async () => {
+  const { Insight } = await import('../../src/models/index.js');
+  const critical = await Insight.create({
+    householdId, userId: null, type: 'duplicate_transactions', severity: 'critical',
+    title: 'Possible duplicate charge',
+    description: 'Two identical $42 charges at Loblaws on the same day.',
+    entityType: null, entityId: null, status: 'open',
+    fingerprint: 'inbox:mapping-described', metadata: null,
+    detectedAt: new Date('2026-10-02T00:00:00Z'),
   });
-  assert.equal(refreshed[0].status, 'superseded', 'oldest dupe is superseded');
-  assert.equal(refreshed[1].status, 'superseded', 'middle dupe is superseded');
-  assert.equal(refreshed[2].status, 'suggested', 'newest dupe is kept');
-});
+  const warning = await Insight.create({
+    householdId, userId: null, type: 'small_subscription', severity: 'warning',
+    title: 'Small subscription still billing',
+    description: null,
+    entityType: null, entityId: null, status: 'open',
+    fingerprint: 'inbox:mapping-bare', metadata: null,
+    detectedAt: new Date('2026-10-01T00:00:00Z'),
+  });
 
-test('GET /api/ai/inbox summarizes financial_insight with severity breakdown', async () => {
-  const { AiSuggestion } = await import('../../src/models/index.js');
-  await AiSuggestion.create({
-    householdId, userId: null, kind: 'financial_insight', status: 'suggested',
-    inputSnapshot: { period: '2026-10', currency: 'CAD' },
-    output: [
-      { title: 'Top thing', severity: 'action' },
-      { title: 'Second', severity: 'action' },
-      { title: 'Third', severity: 'watch' },
-      { title: 'Fourth', severity: 'info' },
-    ],
-  } as never);
   const r = await authed.get('/api/ai/inbox');
-  const items = r.body.items as Array<{ summary: string; severity: string | null }>;
-  const it = items.find((i) => i.summary.startsWith('Top thing'));
-  assert.ok(it, 'inserted insight must appear in inbox');
-  assert.match(it.summary, /2 action/);
-  assert.match(it.summary, /1 watch/);
-  assert.match(it.summary, /1 info/);
-  assert.doesNotMatch(it.summary, /\+\d+ more/, 'should no longer use "+N more" suffix');
-  assert.equal(it.severity, 'action', 'top-row severity is the highest across the array');
+  assert.equal(r.status, 200);
+  const keys = (r.body.items as Array<{ id: number; kind: string }>)
+    .map((i) => `${i.kind}:${i.id}`);
+  // The AI inbox is AiSuggestion-backed only. Insights are listed, counted and
+  // badged by the insights surface (GET /api/insights); mirroring them here
+  // made the sidebar badge the same rows twice.
+  assert.ok(!keys.includes(`financial_insight:${critical.id}`));
+  assert.ok(!keys.includes(`financial_insight:${warning.id}`));
+
+  // ...and the count endpoint agrees.
+  const c = await authed.get('/api/ai/inbox/count');
+  assert.equal(c.body.byKind.financial_insight, 0);
 });
 
 test('GET /api/transactions?ids=1,2 filters to listed ids', async () => {

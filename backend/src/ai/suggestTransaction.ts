@@ -3,13 +3,14 @@ import type { Transaction as TxnModel } from '../models/Transaction';
 import { sequelize } from '../models';
 import { QueryTypes } from 'sequelize';
 import { num } from '../util/numbers';
-import { openaiJson, openaiJsonWithMeta, type OpenAiJsonResult } from './openaiJson';
+import { openaiJsonWithMeta, type OpenAiJsonResult } from './openaiJson';
 import { findBestRule, loadAllRules } from '../import/applyRules';
 import type { Receipt } from '../models/Receipt';
 import { findMerchantMemory, type MerchantMemoryMatch } from './merchantMemory';
 import { loadCategoryTree } from '../categories/rollup';
+import { findPastCorrections, type PastCorrection } from './pastCorrections';
 
-export const TRANSACTION_SUGGESTION_PROMPT_VERSION = 'transaction-fields-v2';
+export const TRANSACTION_SUGGESTION_PROMPT_VERSION = 'transaction-fields-v3';
 
 export async function loadCategoryHints(householdId?: number | null): Promise<string[]> {
   if (householdId != null) {
@@ -166,6 +167,7 @@ export type TransactionSuggestionContext = {
     date: string | null;
     summary: string | null;
   }>;
+  pastCorrections: PastCorrection[];
 };
 
 export async function buildTransactionSuggestionContext(
@@ -174,7 +176,7 @@ export async function buildTransactionSuggestionContext(
 ): Promise<TransactionSuggestionContext> {
   const householdId = txn.householdId;
   const targetMerchant = normalizeForSimilarity(txn.merchantClean || txn.merchantRaw);
-  const [rules, priorRows, receipts, merchantMemory] = await Promise.all([
+  const [rules, priorRows, receipts, merchantMemory, pastCorrections] = await Promise.all([
     loadAllRules(householdId),
     sequelize.query<{
       id: number;
@@ -210,6 +212,7 @@ export async function buildTransactionSuggestionContext(
       { replacements: [txn.id], type: QueryTypes.SELECT },
     ),
     findMerchantMemory(householdId, txn.merchantClean, num(txn.amount)),
+    findPastCorrections(householdId, txn.merchantClean || txn.merchantRaw),
   ]);
   const matching = findBestRule(rules, txn.merchantClean, txn.date);
   const similarTransactions = priorRows
@@ -283,42 +286,27 @@ export async function buildTransactionSuggestionContext(
     merchantMemory,
     similarTransactions,
     receiptExtracts,
+    pastCorrections,
   };
 }
 
-export async function suggestTransactionFields(
-  txn: TxnModel,
-  hints: string[],
-): Promise<AiSuggestion> {
-  const categories = hints.length ? hints.join(', ') : '(none yet — invent short labels)';
-
-  const user = [
-    `Categorize this card transaction for a household expense tracker.`,
-    ``,
-    `Date: ${txn.date}`,
-    `Merchant (clean): ${txn.merchantClean}`,
-    `Merchant (raw): ${txn.merchantRaw}`,
-    `Amount: ${num(txn.amount)} ${txn.currency}`,
-    `Current auto category: ${txn.autoCategory ?? 'null'}`,
-    `Current final category: ${txn.finalCategory ?? 'null'}`,
-    `Notes: ${txn.notes ?? ''}`,
-    ``,
-    `Known category labels already used in this database (prefer reusing when it fits): ${categories}`,
-    ``,
-    `Return ONLY a JSON object with keys: category (string or null), business (boolean), splitType ("me"|"partner"|"shared"), pctMe (number 0-1 or null), pctPartner (number 0-1 or null), notes (string or null), rationale (one short sentence).`,
-    `For typical personal spending, business is usually false. Use split "shared" with pctMe 0.5 only when it is clearly shared household spend.`,
+/**
+ * Renders past corrections as explicit negatives. Empty string when there are
+ * none, so the prompt has no dangling empty section.
+ */
+export function buildCorrectionsPromptSection(corrections: PastCorrection[]): string {
+  if (corrections.length === 0) return '';
+  const lines = corrections.map((c) => {
+    const fields = c.mismatchedFields.length
+      ? ` (wrong on: ${c.mismatchedFields.join(', ')})`
+      : '';
+    return `- You previously suggested ${JSON.stringify(c.suggested)} for this merchant; the user corrected it to ${JSON.stringify(c.corrected)}${fields}.`;
+  });
+  return [
+    '',
+    'Corrections the user has already made on this merchant — do not repeat these mistakes:',
+    ...lines,
   ].join('\n');
-
-  const j = await openaiJson([
-    {
-      role: 'system',
-      content:
-        'You output compact JSON only. Be practical with merchant names; map cafes to Groceries or Dining as appropriate.',
-    },
-    { role: 'user', content: user },
-  ]);
-
-  return parseSuggestion(j);
 }
 
 export async function suggestTransactionFieldsTracked(
@@ -332,6 +320,7 @@ export async function suggestTransactionFieldsTracked(
 }> {
   const context = await buildTransactionSuggestionContext(txn, hints);
   const categories = hints.length ? hints.join(', ') : '(none yet; invent short labels)';
+  const correctionsSection = buildCorrectionsPromptSection(context.pastCorrections);
   const user = [
     `Categorize this card transaction for a household expense tracker.`,
     ``,
@@ -341,9 +330,11 @@ export async function suggestTransactionFieldsTracked(
     `Merchant memory, if any: ${JSON.stringify(context.merchantMemory)}`,
     `Similar reviewed transactions: ${JSON.stringify(context.similarTransactions)}`,
     `Receipt extracts: ${JSON.stringify(context.receiptExtracts)}`,
+    ...(correctionsSection ? [correctionsSection] : []),
     ``,
     `Return ONLY a JSON object with keys: category (string or null), business (boolean), splitType ("me"|"partner"|"shared"), pctMe (number 0-1 or null), pctPartner (number 0-1 or null), notes (string or null), confidence ("high"|"medium"|"low"), evidence (string array), needsReview (boolean), rationale (one short sentence).`,
     `Use existing categories when they fit. Existing deterministic rules are strongest evidence. Mark confidence low if guessing from merchant name only.`,
+    `When a past correction covers this merchant, follow the correction over your own instinct.`,
   ].join('\n');
   const meta = await openaiJsonWithMeta([
     {

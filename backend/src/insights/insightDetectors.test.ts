@@ -253,13 +253,23 @@ test('detectMissingReceipt: ignores transactions that already have a receipt', (
   assert.equal(insights.length, 0);
 });
 
-test('detectMissingReceipt: ignores transactions under the $100 large-charge threshold', () => {
+test('detectMissingReceipt: ignores transactions under the $50 large-charge threshold', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const insights = detectMissingReceipt(
+    [txn({ id: 1, date: '2026-05-01', amount: -40, receiptCount: 0 })],
+    { now },
+  );
+  assert.equal(insights.length, 0);
+});
+
+test('detectMissingReceipt: fires between $50 and $100 (the restored coverage)', () => {
   const now = new Date('2026-05-15T12:00:00Z');
   const insights = detectMissingReceipt(
     [txn({ id: 1, date: '2026-05-01', amount: -75, receiptCount: 0 })],
     { now },
   );
-  assert.equal(insights.length, 0);
+  assert.equal(insights.length, 1);
+  assert.equal(insights[0].entityId, 1);
 });
 
 test('detectMissingReceipt: ignores transactions in the last 7 days (grace period)', () => {

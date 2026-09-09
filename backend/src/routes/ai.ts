@@ -1,5 +1,5 @@
-import { Router, type Request } from 'express';
-import { Op, QueryTypes, Transaction as SqlTransaction } from 'sequelize';
+import { Router } from 'express';
+import { QueryTypes } from 'sequelize';
 import { AiSuggestion, Rule, Transaction } from '../models';
 import { sequelize } from '../models';
 import { getOpenAiConfig } from '../config/openai';
@@ -19,10 +19,8 @@ import {
   normalizeCounterpartyName,
   type CounterpartyPromotion,
 } from '../ai/counterpartyPromotions';
-import { buildFinancialInsights } from '../ai/insights';
 import { auditTransactionsForMislabels } from '../ai/auditTransactions';
 import { aiSuggestLimiter } from './aiRateLimit';
-import { jsonExtractText } from '../util/dialectSql';
 
 const router = Router();
 
@@ -280,60 +278,24 @@ router.post('/rule-proposals/:merchantPattern/dismiss', async (req, res, next) =
   }
 });
 
-router.get('/insights', async (req, res, next) => {
-  try {
-    const period = String(req.query.period || new Date().toISOString().slice(0, 7));
-    const currency = String(req.query.currency || 'CAD').toUpperCase().slice(0, 3);
-    const dateFrom =
-      typeof req.query.dateFrom === 'string' && req.query.dateFrom.trim()
-        ? req.query.dateFrom.trim()
-        : null;
-    const dateTo =
-      typeof req.query.dateTo === 'string' && req.query.dateTo.trim()
-        ? req.query.dateTo.trim()
-        : null;
-    const hasExplicitRange =
-      Object.prototype.hasOwnProperty.call(req.query, 'dateFrom') ||
-      Object.prototype.hasOwnProperty.call(req.query, 'dateTo');
-    const out = await buildFinancialInsights(
-      req,
-      period,
-      currency,
-      hasExplicitRange ? { from: dateFrom, to: dateTo } : undefined,
-    );
-
-    await sequelize.transaction(async (transaction) => {
-      await AiSuggestion.update(
-        { status: 'superseded' },
-        {
-          where: {
-            ...aiSuggestionWhere(req),
-            kind: 'financial_insight',
-            status: 'suggested',
-            [Op.and]: [
-              sequelize.literal(`${jsonExtractText('input_snapshot', 'period')} = ${sequelize.escape(out.period)}`),
-              sequelize.literal(`${jsonExtractText('input_snapshot', 'currency')} = ${sequelize.escape(currency)}`),
-            ],
-          },
-          transaction,
-        },
-      );
-
-      await createTrackedSuggestion({
-        req,
-        kind: 'financial_insight',
-        inputSnapshot: { period: out.period, currency },
-        output: out.insights,
-        model: 'deterministic',
-        promptVersion: 'financial-insights-v1',
-        temperature: null,
-        transaction,
-      });
-    });
-    res.json(out);
-  } catch (e) {
-    next(e);
-  }
+/**
+ * DEPRECATED insights route — 410 Gone.
+ *
+ * GET /api/ai/insights used to run the standalone six-template financial
+ * insight engine and write its output as `financial_insight` AiSuggestion
+ * rows. That engine is deleted, and its findings now live in the `Insight`
+ * table written by the real detectors — read via GET /api/insights, which is
+ * what the insights page and its badge use. The AI inbox deliberately does
+ * NOT restate them. We return **410 Gone** rather than letting the
+ * route silently 404 so any stale caller (the web app, a bookmarklet, a
+ * cron job) fails loudly instead of getting a routing 404 indistinguishable
+ * from a typo'd path.
+ */
+router.get('/insights', (_req, res) => {
+  res.status(410).json({
+    error: 'gone',
+    message: 'This endpoint was retired; insights now come from GET /api/insights.',
+  });
 });
 
 router.get('/import-cleanup', async (req, res, next) => {
@@ -420,6 +382,22 @@ router.get('/import-cleanup', async (req, res, next) => {
   }
 });
 
+/**
+ * An inbox item's identity is the PAIR `(kind, id)`, not `id` alone. `id` is
+ * drawn from whichever table backs that `kind` — `AiSuggestion.id` for
+ * transaction_audit/counterparty_email_match, and synthesized negative ids
+ * for the unpersisted rule_proposal/counterparty_promotion kinds — so the
+ * same numeric id can legitimately appear under two different kinds and refer
+ * to unrelated rows. `POST /api/ai/suggestions/:id/apply|reject` only resolve
+ * ids against AiSuggestion, so a future consumer MUST key off `(kind, id)`
+ * (e.g. the frontend's `${kind}:${id}` composite key below) rather than
+ * acting on a bare `id` from this list.
+ *
+ * `financial_insight` stays in the union (and as a `byKind` key, always 0)
+ * for response-shape compatibility, but this endpoint no longer emits it:
+ * open `Insight` rows have their own page, endpoint and sidebar badge, and
+ * counting them here double-badged the very same rows.
+ */
 type InboxItem = {
   id: number;
   kind:
@@ -446,57 +424,6 @@ function summarizeAudit(output: unknown): string {
   return count === 1 ? '1 issue found' : `${count} issues found`;
 }
 
-type InsightSeverity = 'action' | 'watch' | 'info';
-
-function summarizeInsight(output: unknown): { summary: string; severity: InsightSeverity | null } {
-  const arr = Array.isArray(output) ? (output as Array<{ title?: unknown; severity?: unknown }>) : [];
-  if (arr.length === 0) return { summary: 'No insights', severity: null };
-  const first = arr[0];
-  const title = typeof first?.title === 'string' ? first.title : 'Insight';
-  const counts: Record<InsightSeverity, number> = { action: 0, watch: 0, info: 0 };
-  let topSeverity: InsightSeverity | null = null;
-  for (const item of arr) {
-    const s = item?.severity;
-    if (s === 'action' || s === 'watch' || s === 'info') {
-      counts[s] += 1;
-      if (topSeverity === null) topSeverity = s;
-      else if (s === 'action' && topSeverity !== 'action') topSeverity = 'action';
-      else if (s === 'watch' && topSeverity === 'info') topSeverity = 'watch';
-    }
-  }
-  const parts: string[] = [];
-  if (counts.action > 0) parts.push(`${counts.action} action`);
-  if (counts.watch > 0) parts.push(`${counts.watch} watch`);
-  if (counts.info > 0) parts.push(`${counts.info} info`);
-  const breakdown = arr.length > 1 && parts.length > 0 ? ` · ${parts.join(', ')}` : '';
-  return { summary: `${title}${breakdown}`, severity: topSeverity };
-}
-
-async function supersedeFinancialInsightDupes(
-  req: Request,
-  transaction?: SqlTransaction,
-): Promise<void> {
-  const periodExpr = jsonExtractText('input_snapshot', 'period');
-  const currencyExpr = jsonExtractText('input_snapshot', 'currency');
-  const householdClause = isSuperadmin(req)
-    ? ''
-    : `AND household_id = ${sequelize.escape(currentAuth(req).household.id)}`;
-  await sequelize.query(
-    `UPDATE ai_suggestions
-     SET status = 'superseded'
-     WHERE kind = 'financial_insight'
-       AND status = 'suggested'
-       ${householdClause}
-       AND id NOT IN (
-         SELECT MAX(id) FROM ai_suggestions
-         WHERE kind = 'financial_insight' AND status = 'suggested'
-         ${householdClause}
-         GROUP BY household_id, ${periodExpr}, ${currencyExpr}
-       )`,
-    { transaction },
-  );
-}
-
 function summarizeCounterpartyPromotion(p: CounterpartyPromotion): string {
   // "You've had 5 transactions from JANE DOE in the last 90 days. Create a Contact?"
   // Kept concise so the inbox card stays one-line; details live in the output payload.
@@ -506,48 +433,34 @@ function summarizeCounterpartyPromotion(p: CounterpartyPromotion): string {
 
 router.get('/inbox', async (req, res, next) => {
   try {
-    await supersedeFinancialInsightDupes(req);
     const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
     const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
     const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
-    const [rows, emailMatchRows, ruleProposals, counterpartyPromotions] = await Promise.all([
-      AiSuggestion.findAll({
-        where: { ...where, kind: ['transaction_audit', 'financial_insight'] },
-        order: [['id', 'DESC']],
-        limit,
-      }),
-      AiSuggestion.findAll({
-        where: { ...where, kind: 'counterparty_email_match' },
-        order: [['id', 'DESC']],
-        limit,
-      }),
-      findRuleProposals(householdId),
-      findCounterpartyPromotions(householdId),
-    ]);
+    const [rows, emailMatchRows, ruleProposals, counterpartyPromotions] =
+      await Promise.all([
+        AiSuggestion.findAll({
+          where: { ...where, kind: 'transaction_audit' },
+          order: [['id', 'DESC']],
+          limit,
+        }),
+        AiSuggestion.findAll({
+          where: { ...where, kind: 'counterparty_email_match' },
+          order: [['id', 'DESC']],
+          limit,
+        }),
+        findRuleProposals(householdId),
+        findCounterpartyPromotions(householdId),
+      ]);
     const persistedItems: InboxItem[] = [];
     for (const row of rows) {
-      if (row.kind === 'transaction_audit') {
-        if (auditIssueCount(row.output) === 0) continue;
-        persistedItems.push({
-          id: row.id,
-          kind: 'transaction_audit',
-          createdAt: row.createdAt.toISOString(),
-          transactionId: row.transactionId,
-          summary: summarizeAudit(row.output),
-          severity: null,
-          confidence: null,
-          output: row.output,
-        });
-        continue;
-      }
-      const { summary, severity } = summarizeInsight(row.output);
+      if (auditIssueCount(row.output) === 0) continue;
       persistedItems.push({
         id: row.id,
-        kind: 'financial_insight',
+        kind: 'transaction_audit',
         createdAt: row.createdAt.toISOString(),
         transactionId: row.transactionId,
-        summary,
-        severity,
+        summary: summarizeAudit(row.output),
+        severity: null,
         confidence: null,
         output: row.output,
       });
@@ -592,7 +505,14 @@ router.get('/inbox', async (req, res, next) => {
       confidence: null,
       output: p,
     }));
-    res.json({ items: [...persistedItems, ...emailMatchItems, ...proposalItems, ...counterpartyItems] });
+    res.json({
+      items: [
+        ...persistedItems,
+        ...emailMatchItems,
+        ...proposalItems,
+        ...counterpartyItems,
+      ],
+    });
   } catch (e) {
     next(e);
   }
@@ -600,15 +520,13 @@ router.get('/inbox', async (req, res, next) => {
 
 router.get('/inbox/count', async (req, res, next) => {
   try {
-    await supersedeFinancialInsightDupes(req);
     const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
     const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
-    const [auditRows, insightCount, ruleProposals, counterpartyPromotions] = await Promise.all([
+    const [auditRows, ruleProposals, counterpartyPromotions] = await Promise.all([
       AiSuggestion.findAll({
         where: { ...where, kind: 'transaction_audit' },
         attributes: ['id', 'output'],
       }),
-      AiSuggestion.count({ where: { ...where, kind: 'financial_insight' } }),
       findRuleProposals(householdId),
       findCounterpartyPromotions(householdId),
     ]);
@@ -616,14 +534,15 @@ router.get('/inbox/count', async (req, res, next) => {
     const ruleProposalCount = ruleProposals.length;
     const counterpartyPromotionCount = counterpartyPromotions.length;
     res.json({
-      total:
-        auditCount +
-        insightCount +
-        ruleProposalCount +
-        counterpartyPromotionCount,
+      total: auditCount + ruleProposalCount + counterpartyPromotionCount,
       byKind: {
         transaction_audit: auditCount,
-        financial_insight: insightCount,
+        // Always 0: open Insight rows are counted by the insights surface
+        // itself (GET /api/insights?status=open, via useInsightsCount) and
+        // badged there. Counting them here too badged the same rows twice
+        // (sidebar AI inbox + sidebar Insights, and again on the dashboard
+        // inbox tile). Key kept so the frontend response contract holds.
+        financial_insight: 0,
         rule_proposal: ruleProposalCount,
         counterparty_promotion: counterpartyPromotionCount,
       },

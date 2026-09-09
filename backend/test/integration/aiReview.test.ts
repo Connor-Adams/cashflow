@@ -12,7 +12,7 @@
  *  - POST /api/ai/reviews/:id/items/:itemId/accept|dismiss flips status
  *  - Validation: bad dates, swapped order, bad currency
  *  - Degrade gracefully when OpenAI is not configured (no key → still 201)
- *  - Action items include rule_suggestion, missing_receipt, subscription,
+ *  - Action items include rule_suggestion, subscription,
  *    forecast_warning given seeded fixtures
  */
 import { after, before, test } from 'node:test';
@@ -156,7 +156,11 @@ before(async () => {
     });
   }
 
-  // Big-ticket charge without a receipt → triggers missing_receipt action.
+  // Big-ticket charge without a receipt. It no longer produces its own item:
+  // the inline missing-receipt scan is gone (detectMissingReceipt persists an
+  // Insight instead, which the runner picks up as an `anomaly`). Kept as a
+  // fixture so the "no missing_receipt items" assertion has something to not
+  // trigger on.
   await makeTxn({
     date: '2026-05-04',
     merchantClean: 'BestBuy',
@@ -252,9 +256,15 @@ test('POST /api/ai/review creates a completed run with action items (no OpenAI)'
   primaryRunId = r.body.id as number;
 
   const types = new Set((r.body.actionItems as Array<{ type: string }>).map((i) => i.type));
-  // Seed fixtures should produce all four classes.
+  // Seed fixtures should produce all three deterministic classes.
   assert.ok(types.has('subscription'), `expected subscription in types: ${[...types].join(',')}`);
-  assert.ok(types.has('missing_receipt'), `expected missing_receipt in types: ${[...types].join(',')}`);
+  // The inline scan is gone: a receipt-less big-ticket charge only surfaces
+  // once a detector has persisted an Insight for it, and then as an anomaly.
+  // Running both produced two items with two ids for the same transaction.
+  assert.ok(
+    !types.has('missing_receipt'),
+    `missing_receipt must no longer be derived inline: ${[...types].join(',')}`,
+  );
   assert.ok(types.has('rule_suggestion'), `expected rule_suggestion in types: ${[...types].join(',')}`);
   assert.ok(types.has('forecast_warning'), `expected forecast_warning in types: ${[...types].join(',')}`);
 

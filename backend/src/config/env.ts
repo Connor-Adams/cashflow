@@ -35,6 +35,8 @@ export type EnvConfig = {
   dividendMatchCron: string;
   subscriptionPriceDetectEnabled: boolean;
   subscriptionPriceDetectCron: string;
+  insightDetectorsEnabled: boolean;
+  insightDetectorsCron: string;
 };
 
 export function parsePort(raw: string | undefined): number {
@@ -184,6 +186,14 @@ export function loadEnvConfig(
     nodeEnv,
   );
   const subscriptionPriceDetectCron = e.SUBSCRIPTION_PRICE_DETECT_CRON?.trim() || '0 2 * * *';
+  const insightDetectorsEnabled = parseInsightDetectorsEnabled(
+    e.INSIGHT_DETECTORS_ENABLED,
+    nodeEnv,
+  );
+  // 05:00 UTC — after detect_subscription_price_changes at 02:00, so
+  // subscription price hikes are already recorded when detectRecurringIncrease
+  // builds its skip-set.
+  const insightDetectorsCron = e.INSIGHT_DETECTORS_CRON?.trim() || '0 5 * * *';
 
   return {
     csvUploadDir,
@@ -215,6 +225,8 @@ export function loadEnvConfig(
     dividendMatchCron,
     subscriptionPriceDetectEnabled,
     subscriptionPriceDetectCron,
+    insightDetectorsEnabled,
+    insightDetectorsCron,
   };
 }
 
@@ -344,6 +356,21 @@ export function parseSubscriptionPriceDetectEnabled(
   return true;
 }
 
+/**
+ * Default-off in test so the insight-detectors cron doesn't auto-schedule
+ * during the integration-test suite. Production / dev defaults on.
+ */
+export function parseInsightDetectorsEnabled(
+  raw: string | undefined,
+  nodeEnv: string,
+): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
+  if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
+  if (nodeEnv === 'test') return false;
+  return true;
+}
+
 export function parseDividendDedupDays(raw: string | undefined): number {
   if (raw == null || raw.trim() === '') return 5;
   const n = Number(raw);
@@ -386,6 +413,8 @@ export const dividendMatchEnabled = resolved.dividendMatchEnabled;
 export const dividendMatchCron = resolved.dividendMatchCron;
 export const subscriptionPriceDetectEnabled = resolved.subscriptionPriceDetectEnabled;
 export const subscriptionPriceDetectCron = resolved.subscriptionPriceDetectCron;
+export const insightDetectorsEnabled = resolved.insightDetectorsEnabled;
+export const insightDetectorsCron = resolved.insightDetectorsCron;
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
