@@ -56,8 +56,10 @@ export function evaluatePriceChange(
  * most recent charge amount against the median of prior charges in the last 90
  * days. Emits a `subscription_price_increase` Insight (the Observation
  * primitive) via the shared `upsertInsight` helper when the increase is >= 5%.
- * The upsert is status-preserving (keyed by household + type + fingerprint), so
- * a dismissed/resolved Insight is never reopened on a re-run.
+ * The upsert is keyed by household + type + fingerprint and status-preserving
+ * for `open`/`dismissed` rows, so a dismissed Insight is never reopened on a
+ * re-run — but a `resolved` row (this fingerprint previously stopped firing)
+ * IS reopened when the same price increase fires again; see `upsertInsight`.
  *
  * Post-Expectation-fold: subscriptions are PlannedEvent rows with
  * kind='subscription'. Legacy status 'active' maps to {status:'planned',

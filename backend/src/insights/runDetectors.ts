@@ -4,10 +4,13 @@
  *
  * Idempotency: detectors return a stable `fingerprint` (e.g. sorted txn ids).
  * We upsert by `(household_id, type, fingerprint)`. A re-run of the same
- * detector will refresh `metadata`/`detected_at` but won't churn statuses —
- * if the user already dismissed/resolved a finding, we preserve that. That
- * means a "dismissed" duplicate stays dismissed even if the detector still
- * surfaces it. To re-surface, drop the row.
+ * detector refreshes `metadata`/`detected_at` and preserves an `open` or
+ * `dismissed` status — a "dismissed" duplicate stays dismissed even if the
+ * detector still surfaces it. To re-surface a dismissal, drop the row.
+ * `resolved` is the one exception: it means "this run's sweep retired the
+ * row because the finding stopped recurring," not a standing user decision,
+ * so a fingerprint match on a `resolved` row reopens it — the condition has
+ * demonstrably recurred. See `upsertInsight`.
  *
  * Retirement: upserting alone only ever grows the open set — an insight whose
  * cause stopped being true (receipt attached, duplicate deleted, month rolled
@@ -56,6 +59,8 @@ const FORECAST_EXCLUDED_TYPES = new Set(['investment']);
 export type RunDetectorsResult = {
   created: number;
   refreshed: number;
+  /** Resolved rows reopened because this run re-emitted their fingerprint. */
+  reopened: number;
   /** Open rows retired by the stale sweep because this run no longer emits them. */
   resolved: number;
   total: number;
@@ -183,21 +188,32 @@ async function loadRunwayPoints(
 
 /**
  * Upsert one detected insight, keyed by (householdId, type, fingerprint).
- * Refreshes content fields but NEVER writes `status`, so a user's
- * dismissed/resolved state is preserved across re-runs. Caller supplies the
- * transaction. Returns 'created' | 'refreshed'.
+ * Refreshes content fields and preserves a user's `open`/`dismissed` status
+ * across re-runs — a dismissal is a standing decision, not ours to rewrite.
+ *
+ * `resolved` is different: nothing but the stale sweep ever writes it, and
+ * the sweep only means "this fingerprint didn't recur last run." If the same
+ * fingerprint is emitted again, the condition has demonstrably come back, so
+ * a `resolved` row is reopened (status set back to `open`) rather than left
+ * silently retired forever. Without this, `resolved` + a re-emitted
+ * fingerprint would refresh the row's content but leave it invisible in every
+ * `open` view — permanent silent data loss for exactly the findings (e.g.
+ * `settlement_imbalance`, `missing_receipt`) whose condition can recur.
+ *
+ * Caller supplies the transaction. Returns 'created' | 'refreshed' | 'reopened'.
  */
 export async function upsertInsight(
   householdId: number,
   f: DetectedInsight,
   opts: { now: Date; userId: number | null },
   t: import('sequelize').Transaction,
-): Promise<'created' | 'refreshed'> {
+): Promise<'created' | 'refreshed' | 'reopened'> {
   const existing = await Insight.findOne({
     where: { householdId, type: f.type, fingerprint: f.fingerprint },
     transaction: t,
   });
   if (existing) {
+    const wasResolved = existing.status === 'resolved';
     existing.set('severity', f.severity);
     existing.set('title', f.title);
     existing.set('description', f.description);
@@ -205,8 +221,13 @@ export async function upsertInsight(
     existing.set('entityId', f.entityId);
     existing.set('metadata', f.metadata);
     existing.set('detectedAt', opts.now);
+    if (wasResolved) {
+      // Only 'resolved' is reopened here — 'dismissed' is a user decision
+      // and must never be overridden by a recurring detector run.
+      existing.set('status', 'open');
+    }
     await existing.save({ transaction: t });
-    return 'refreshed';
+    return wasResolved ? 'reopened' : 'refreshed';
   }
   await Insight.create(
     {
@@ -347,6 +368,7 @@ export async function runDetectorsForHousehold(
 
   let created = 0;
   let refreshed = 0;
+  let reopened = 0;
   let resolved = 0;
 
   // Persist inside a transaction so a partial run doesn't leave inconsistent
@@ -356,10 +378,12 @@ export async function runDetectorsForHousehold(
   await sequelize.transaction(async (t) => {
     for (const f of findings) {
       const r = await upsertInsight(householdId, f, { now, userId }, t);
-      if (r === 'created') created++; else refreshed++;
+      if (r === 'created') created++;
+      else if (r === 'reopened') reopened++;
+      else refreshed++;
     }
     resolved = await resolveStaleInsights(householdId, coveredTypes, findings, t);
   });
 
-  return { created, refreshed, resolved, total: findings.length, detectorCounts };
+  return { created, refreshed, reopened, resolved, total: findings.length, detectorCounts };
 }

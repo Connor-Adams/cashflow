@@ -37,7 +37,7 @@ export type InsightRow = {
 }
 
 type InsightsListResponse = { data: InsightRow[] }
-type RunResponse = { created: number; refreshed: number; resolved: number; total: number }
+type RunResponse = { created: number; refreshed: number; reopened: number; resolved: number; total: number }
 
 type Tab = 'open' | 'dismissed' | 'resolved'
 

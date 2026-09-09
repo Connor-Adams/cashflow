@@ -487,3 +487,55 @@ test('sweep reports an accurate resolved count', async () => {
   const second = await runDetectorsForHousehold(householdId, { now });
   assert.equal(second.resolved, 0);
 });
+
+// ---- reopen on recurrence -------------------------------------------------
+//
+// The sweep can mark a row `resolved`. If the same fingerprint fires again on
+// a later run, the finding has demonstrably recurred and must become visible
+// again — otherwise it is silently lost forever (issue: settle up, resolves;
+// fall back out of balance, refreshed but stuck `resolved`).
+
+test('a resolved row whose finding recurs round-trips: open -> resolved -> open again', async () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const { householdId } = await seedHousehold('A');
+  const contact = await models.Contact.create({ householdId, name: 'Jamie' });
+
+  const seedSettlement = (amount: number) =>
+    models.PartnerSettlement.create({
+      householdId,
+      recordedByUserId: null,
+      contactId: contact.id,
+      direction: 'i_paid_partner',
+      currency: 'CAD',
+      amount: amount.toFixed(4),
+      settledDate: '2026-05-01',
+      notes: null,
+    });
+
+  // 1. Finding present: an imbalance over the $100 threshold -> open.
+  const s1 = await seedSettlement(500);
+  const first = await runDetectorsForHousehold(householdId, { now });
+  assert.equal(first.created, 1);
+  let row = await models.Insight.findOne({ where: { householdId, type: 'settlement_imbalance' } });
+  assert.ok(row);
+  assert.equal(row!.status, 'open');
+  assert.equal(row!.fingerprint, `settlement:${contact.id}:CAD`);
+
+  // 2. Finding gone: settle up (no outstanding settlement rows left) -> the
+  //    sweep resolves it.
+  await s1.destroy();
+  const second = await runDetectorsForHousehold(householdId, { now });
+  assert.equal(second.resolved, 1);
+  await row!.reload();
+  assert.equal(row!.status, 'resolved', 'settling up must retire the imbalance insight');
+
+  // 3. Finding returns: fall back out of balance with the SAME contact/currency
+  //    fingerprint -> must reopen, not stay silently resolved.
+  await seedSettlement(750);
+  const third = await runDetectorsForHousehold(householdId, { now });
+  assert.equal(third.reopened, 1, 'the recurring imbalance must be counted as reopened');
+  assert.equal(third.created, 0, 'same fingerprint — must not create a duplicate row');
+  await row!.reload();
+  assert.equal(row!.status, 'open', 'a recurring finding must become visible again');
+  assert.equal(await models.Insight.count({ where: { householdId, type: 'settlement_imbalance' } }), 1);
+});
