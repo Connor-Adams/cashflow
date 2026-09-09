@@ -40,6 +40,19 @@ const router = Router();
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
+/**
+ * AiSuggestion kinds that are retired from the inbox read path.
+ *
+ * `financial_insight`: the engine that produced these (backend/src/ai/insights.ts,
+ * six hardcoded templates) was deleted, along with the supersede logic that used
+ * to retire stale rows (`supersedeFinancialInsightDupes`). No new rows of this
+ * kind are ever written. Existing rows are retained in the DB only as history —
+ * this is a read-path exclusion, not a data deletion — so they no longer show up
+ * as content-less "financial insight" cards in the unified inbox (their `output`
+ * is an array of `{ title, ... }` objects that the old renderer couldn't read).
+ */
+const RETIRED_AI_SUGGESTION_KINDS: readonly string[] = ['financial_insight'];
+
 const COMMON_STATUSES: readonly ReviewItemCommonStatus[] = [
   'pending',
   'resolved',
@@ -77,7 +90,10 @@ async function readAiSuggestions(
   cap: number,
 ): Promise<ReviewItem[]> {
   const rows = await AiSuggestion.findAll({
-    where: aiSuggestionWhere(req),
+    where: {
+      ...aiSuggestionWhere(req),
+      kind: { [Op.notIn]: RETIRED_AI_SUGGESTION_KINDS },
+    },
     order: [['createdAt', 'DESC']],
     limit: cap,
   });
