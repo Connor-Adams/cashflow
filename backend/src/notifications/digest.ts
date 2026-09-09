@@ -32,6 +32,7 @@ import {
 import { num } from '../util/numbers';
 import { NON_SPEND_TXN_TYPES } from '../summary/classifyTransactionFlow';
 import { gatherPlannedOccurrences } from '../forecast/gatherOccurrences';
+import { filterInsightsVisibleToUser } from '../insights/visibility';
 
 export interface DigestTxnRow {
   id: number;
@@ -487,6 +488,13 @@ const INSIGHT_SEVERITY_RANK: Record<string, number> = {
  * insights plus the top 3 ordered by severity (critical → info) then recency
  * (most-recently detected first), sourced the same way as
  * `GET /api/insights?status=open`. Read-only.
+ *
+ * The rows are scoped to the digest's recipient BEFORE anything is counted or
+ * sliced. Detectors run household-wide with no viewer, so an insight derived
+ * from the other partner's PRIVATE transaction carries that merchant and
+ * amount in its title — and this rollup ends up in an EMAIL, which leaves the
+ * app entirely. Filtering first also keeps `openInsightCount` honest for the
+ * recipient and stops a hidden insight from consuming one of the three slots.
  */
 async function loadOpenInsightRollup(
   ctx: DigestUserContext,
@@ -494,11 +502,16 @@ async function loadOpenInsightRollup(
   if (ctx.householdIds.length === 0) {
     return { openInsightCount: 0, topInsights: [] };
   }
-  const rows = await Insight.findAll({
+  const allRows = await Insight.findAll({
     where: {
       householdId: { [Op.in]: ctx.householdIds },
       status: 'open',
     },
+  });
+  // No request here — this is a background job — so scope by the recipient's
+  // user id directly. One batched query for every backing transaction id.
+  const rows = await filterInsightsVisibleToUser(ctx.userId, allRows, {
+    householdIds: ctx.householdIds,
   });
   const sorted = [...rows].sort((a, b) => {
     const diff =

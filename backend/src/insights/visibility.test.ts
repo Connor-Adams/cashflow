@@ -16,6 +16,7 @@ process.env.DATABASE_PATH = ':memory:';
 let sequelize: import('sequelize').Sequelize;
 let models: typeof import('../models');
 let filterInsightsVisibleTo: typeof import('./visibility').filterInsightsVisibleTo;
+let filterInsightsVisibleToUser: typeof import('./visibility').filterInsightsVisibleToUser;
 let backingTransactionIds: typeof import('./visibility').backingTransactionIds;
 
 // Real FK targets, filled in by `before`: transactions carry FKs to
@@ -39,7 +40,8 @@ async function makeUser(name: string): Promise<number> {
 before(async () => {
   models = await import('../models');
   sequelize = models.sequelize;
-  ({ filterInsightsVisibleTo, backingTransactionIds } = await import('./visibility'));
+  ({ filterInsightsVisibleTo, filterInsightsVisibleToUser, backingTransactionIds } =
+    await import('./visibility'));
   await sequelize.sync({ force: true });
 
   const hh = await models.Household.create({ name: 'Visibility' });
@@ -254,6 +256,74 @@ test('visibility is resolved in a single batched query, not one per insight', as
   };
   try {
     const out = await filterInsightsVisibleTo(fakeReq(ME), rows);
+    assert.equal(out.length, 12);
+  } finally {
+    sequelize.options.logging = original;
+  }
+
+  assert.equal(selects, 1, 'one SELECT for all 12 insights');
+});
+
+// ---- request-free variant (background jobs, e.g. the weekly digest) --------
+
+test('filterInsightsVisibleToUser applies the same rule with no request', async () => {
+  const shared = await createTxn(PARTNER, 'shared');
+  const secret = await createTxn(PARTNER, 'private');
+  const rows = [
+    insight('shared', { entityType: 'transaction', entityId: shared }),
+    insight('secret', { metadata: { transactionIds: [secret] } }),
+    insight('runway', {}),
+  ];
+
+  assert.deepEqual(
+    (await filterInsightsVisibleToUser(ME, rows)).map((r) => r.label),
+    ['shared', 'runway'],
+  );
+  assert.deepEqual(
+    (await filterInsightsVisibleToUser(PARTNER, rows)).map((r) => r.label),
+    ['shared', 'secret', 'runway'],
+  );
+});
+
+test('filterInsightsVisibleToUser has no superadmin bypass', async () => {
+  // A background job runs on behalf of one ordinary user; there is no role to
+  // elevate. Even ME's own globalRole is irrelevant — only the id is consulted.
+  const secret = await createTxn(PARTNER, 'private');
+  const rows = [insight('secret', { entityType: 'transaction', entityId: secret })];
+
+  assert.deepEqual(await filterInsightsVisibleToUser(ME, rows), []);
+});
+
+test('filterInsightsVisibleToUser honours the optional household scope', async () => {
+  const shared = await createTxn(PARTNER, 'shared');
+  const rows = [insight('shared', { entityType: 'transaction', entityId: shared })];
+
+  assert.deepEqual(
+    (await filterInsightsVisibleToUser(ME, rows, { householdIds: [HOUSEHOLD_ID] })).map(
+      (r) => r.label,
+    ),
+    ['shared'],
+  );
+  assert.deepEqual(
+    await filterInsightsVisibleToUser(ME, rows, { householdIds: [HOUSEHOLD_ID + 999] }),
+    [],
+    'a backing transaction outside the given households is not visible',
+  );
+});
+
+test('filterInsightsVisibleToUser batches into a single query too', async () => {
+  const shared = await createTxn(ME, 'shared');
+  const rows = Array.from({ length: 12 }, (_, i) =>
+    insight(`row-${i}`, { entityType: 'transaction', entityId: shared }),
+  );
+
+  let selects = 0;
+  const original = sequelize.options.logging;
+  sequelize.options.logging = (sql: string) => {
+    if (/^Executing \(default\): SELECT/.test(sql)) selects += 1;
+  };
+  try {
+    const out = await filterInsightsVisibleToUser(ME, rows);
     assert.equal(out.length, 12);
   } finally {
     sequelize.options.logging = original;
