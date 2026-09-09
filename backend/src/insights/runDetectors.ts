@@ -9,11 +9,20 @@
  * means a "dismissed" duplicate stays dismissed even if the detector still
  * surfaces it. To re-surface, drop the row.
  *
+ * Retirement: upserting alone only ever grows the open set — an insight whose
+ * cause stopped being true (receipt attached, duplicate deleted, month rolled
+ * over, or a detector that stopped emitting the finding at all) stayed `open`
+ * forever until a human dismissed it by hand. So after the upserts we sweep:
+ * any `open` row of a type THIS run produces whose fingerprint the run didn't
+ * emit becomes `resolved`. See `resolveStaleInsights` for why the sweep is
+ * scoped to `DETECTOR_RUNS`' types and never touches `dismissed`.
+ *
  * Scope: this is the deterministic layer. Issue #210 (future) layers an AI
  * review pass on top — it reads the same `insights` table.
  */
 import { Op } from 'sequelize';
 import { Insight, Transaction, PartnerSettlement, Contact, Receipt, PlannedEvent, Account, sequelize } from '../models';
+import type { InsightType } from '../models/Insight';
 import { isNonSpend } from '../summary/classifyTransactionFlow';
 import { assembleForecast } from '../forecast/assembleForecast';
 import { buildForecast } from '../forecast/buildForecast';
@@ -47,6 +56,8 @@ const FORECAST_EXCLUDED_TYPES = new Set(['investment']);
 export type RunDetectorsResult = {
   created: number;
   refreshed: number;
+  /** Open rows retired by the stale sweep because this run no longer emits them. */
+  resolved: number;
   total: number;
   detectorCounts: Record<string, number>;
 };
@@ -217,6 +228,61 @@ export async function upsertInsight(
   return 'created';
 }
 
+/** An insight's identity: rows are keyed by (household, type, fingerprint). */
+function identityKey(type: string, fingerprint: string): string {
+  return `${type} ${fingerprint}`;
+}
+
+/**
+ * Retire the open insights this run no longer produces.
+ *
+ * Two hard scoping rules, both load-bearing:
+ *
+ * 1. **Only types this run covers.** `coveredTypes` is derived from the
+ *    detector roster the run itself executes, so it can never widen to types
+ *    written by OTHER producers — `subscription_price_increase`
+ *    (`subscriptions/detectSubscriptionPriceChanges.ts`, its own scheduled
+ *    job) and `small_subscription` / `recurring_fee` / `duplicate_service` /
+ *    `delivery_fee_high` (`routes/moneyLeaks.ts`). This run knows nothing
+ *    about their findings; sweeping them would silently wipe another
+ *    feature's data.
+ * 2. **Only `status = 'open'`.** A dismissal is a user decision and a
+ *    `resolved` row is already retired — neither is ours to rewrite.
+ *
+ * Caller supplies the transaction so the sweep commits with the upserts: a
+ * partial run must never resolve rows whose replacements were never written.
+ */
+async function resolveStaleInsights(
+  householdId: number,
+  coveredTypes: Set<InsightType>,
+  findings: DetectedInsight[],
+  t: import('sequelize').Transaction,
+): Promise<number> {
+  if (coveredTypes.size === 0) return 0;
+  const emitted = new Set(findings.map((f) => identityKey(f.type, f.fingerprint)));
+  // Narrow `attributes` deliberately: it keeps the JSON `metadata` column out
+  // of the SELECT (Sequelize's `raw` JSON handling differs across sqlite and
+  // Postgres) and the sweep only needs identity.
+  const openRows = await Insight.findAll({
+    where: {
+      householdId,
+      status: 'open',
+      type: { [Op.in]: Array.from(coveredTypes) },
+    },
+    attributes: ['id', 'type', 'fingerprint'],
+    transaction: t,
+  });
+  const staleIds = openRows
+    .filter((r) => !emitted.has(identityKey(r.type, r.fingerprint)))
+    .map((r) => r.id);
+  if (staleIds.length === 0) return 0;
+  await Insight.update(
+    { status: 'resolved' },
+    { where: { id: { [Op.in]: staleIds } }, transaction: t },
+  );
+  return staleIds.length;
+}
+
 export async function runDetectorsForHousehold(
   householdId: number,
   options?: { now?: Date; userId?: number | null },
@@ -250,16 +316,29 @@ export async function runDetectorsForHousehold(
     if (display) subscriptionMerchants.add(display);
   }
 
-  const findings: DetectedInsight[] = [
-    ...detectDuplicateTransactions(transactions, { now }),
-    ...detectMerchantSpendSpike(transactions, { now }),
-    ...detectRecurringIncrease(transactions, { now, subscriptionMerchants }),
-    ...detectMissingReceipt(transactions, { now }),
-    ...detectUnusualCategorySpend(transactions, { now }),
-    ...detectCategoryTrend(transactions, { now }),
-    ...detectCashRunwayLow(runwayPoints, { now }),
-    ...detectSettlementImbalance(settlements),
+  // The detector roster. One entry per detector, pairing the insight type it
+  // emits with its invocation — this single list is BOTH what the run executes
+  // and what the stale sweep is scoped to, so adding or removing a detector
+  // moves both at once and there is no second list to drift out of sync.
+  const detectorRuns: Array<{ emits: InsightType; run: () => DetectedInsight[] }> = [
+    { emits: 'duplicate_transactions', run: () => detectDuplicateTransactions(transactions, { now }) },
+    { emits: 'merchant_spend_spike', run: () => detectMerchantSpendSpike(transactions, { now }) },
+    { emits: 'recurring_increase', run: () => detectRecurringIncrease(transactions, { now, subscriptionMerchants }) },
+    { emits: 'missing_receipt', run: () => detectMissingReceipt(transactions, { now }) },
+    { emits: 'unusual_category_spend', run: () => detectUnusualCategorySpend(transactions, { now }) },
+    { emits: 'category_trend', run: () => detectCategoryTrend(transactions, { now }) },
+    { emits: 'cash_runway_low', run: () => detectCashRunwayLow(runwayPoints, { now }) },
+    { emits: 'settlement_imbalance', run: () => detectSettlementImbalance(settlements) },
   ];
+
+  const findings: DetectedInsight[] = detectorRuns.flatMap((d) => d.run());
+
+  // Declared types cover the detectors that found nothing this run (that is
+  // precisely the case a sweep must retire). Union in the types actually
+  // emitted so a detector whose `emits` annotation drifts still sweeps only
+  // what this run itself produced — it can never reach another producer's rows.
+  const coveredTypes = new Set<InsightType>(detectorRuns.map((d) => d.emits));
+  for (const f of findings) coveredTypes.add(f.type);
 
   const detectorCounts: Record<string, number> = {};
   for (const f of findings) {
@@ -268,15 +347,19 @@ export async function runDetectorsForHousehold(
 
   let created = 0;
   let refreshed = 0;
+  let resolved = 0;
 
   // Persist inside a transaction so a partial run doesn't leave inconsistent
-  // state. Upsert by (household_id, type, fingerprint).
+  // state. Upsert by (household_id, type, fingerprint), then retire the open
+  // rows this run no longer emits — same transaction, so the sweep can never
+  // resolve rows whose replacements failed to write.
   await sequelize.transaction(async (t) => {
     for (const f of findings) {
       const r = await upsertInsight(householdId, f, { now, userId }, t);
       if (r === 'created') created++; else refreshed++;
     }
+    resolved = await resolveStaleInsights(householdId, coveredTypes, findings, t);
   });
 
-  return { created, refreshed, total: findings.length, detectorCounts };
+  return { created, refreshed, resolved, total: findings.length, detectorCounts };
 }

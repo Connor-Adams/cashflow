@@ -31,7 +31,7 @@ test('runs detectors for every household and aggregates counts', async () => {
   const result = await runAllHouseholdDetectors({
     runForHousehold: async (householdId) => {
       seen.push(householdId);
-      return { created: 2, refreshed: 1, total: 3, detectorCounts: {} };
+      return { created: 2, refreshed: 1, resolved: 3, total: 3, detectorCounts: {} };
     },
   });
 
@@ -41,6 +41,7 @@ test('runs detectors for every household and aggregates counts', async () => {
   assert.equal(result.failed, 0);
   assert.equal(result.created, 4);
   assert.equal(result.refreshed, 2);
+  assert.equal(result.resolved, 6);
   assert.deepEqual(result.errors, []);
 });
 
@@ -51,7 +52,7 @@ test('one household failing does not abort the others', async () => {
   const result = await runAllHouseholdDetectors({
     runForHousehold: async (householdId) => {
       if (householdId === a.id) throw new Error('boom');
-      return { created: 1, refreshed: 0, total: 1, detectorCounts: {} };
+      return { created: 1, refreshed: 0, resolved: 0, total: 1, detectorCounts: {} };
     },
   });
 

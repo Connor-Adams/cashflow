@@ -15,6 +15,8 @@ export interface AllHouseholdDetectorsResult {
   failed: number;
   created: number;
   refreshed: number;
+  /** Open insights retired because the run no longer produces them. */
+  resolved: number;
   errors: Array<{ householdId: number; message: string }>;
 }
 
@@ -34,6 +36,7 @@ export async function runAllHouseholdDetectors(options?: {
     failed: 0,
     created: 0,
     refreshed: 0,
+    resolved: 0,
     errors: [],
   };
 
@@ -43,6 +46,7 @@ export async function runAllHouseholdDetectors(options?: {
       result.succeeded += 1;
       result.created += one.created;
       result.refreshed += one.refreshed;
+      result.resolved += one.resolved;
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       result.failed += 1;

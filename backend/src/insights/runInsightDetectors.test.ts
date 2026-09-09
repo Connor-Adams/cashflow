@@ -315,3 +315,175 @@ test('runDetectorsForHousehold: new detectors are idempotent and preserve dismis
     assert.equal(row!.status, 'dismissed', `${type} should remain dismissed`);
   }
 });
+
+// ---- stale-insight sweep -------------------------------------------------
+//
+// A detector run retires the open rows it no longer produces. The sweep is
+// scoped to the types the run's own detector roster covers, so rows written by
+// OTHER producers (subscription_price_increase from the subscription-price job,
+// the money-leak types from routes/moneyLeaks.ts) must survive untouched.
+
+async function seedInsight(
+  householdId: number,
+  type: string,
+  fingerprint: string,
+  status: 'open' | 'dismissed' | 'resolved' = 'open',
+): Promise<number> {
+  const row = await models.Insight.create({
+    householdId,
+    userId: null,
+    type: type as never,
+    severity: 'info',
+    title: `${type} ${fingerprint}`,
+    description: null,
+    entityType: null,
+    entityId: null,
+    status,
+    fingerprint,
+    metadata: { seeded: true },
+    detectedAt: new Date('2026-01-01T00:00:00Z'),
+  });
+  return row.id;
+}
+
+test('sweep resolves an open insight the run no longer emits', async () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const { householdId, accountId } = await seedHousehold('A');
+  await createTxn(householdId, accountId, isoDaysAgo(now, 2), 'Costco', -123.45);
+  const dropId = await createTxn(householdId, accountId, isoDaysAgo(now, 1), 'Costco', -123.45);
+  // A second, independent duplicate pair that stays intact.
+  await createTxn(householdId, accountId, isoDaysAgo(now, 2), 'Shell', -80.10);
+  await createTxn(householdId, accountId, isoDaysAgo(now, 1), 'Shell', -80.10);
+
+  await runDetectorsForHousehold(householdId, { now });
+  const rows = await models.Insight.findAll({ where: { householdId, type: 'duplicate_transactions' } });
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((r) => r.status === 'open'));
+  const costco = rows.find((r) => r.fingerprint.includes('costco'));
+  const shell = rows.find((r) => r.fingerprint.includes('shell'));
+  assert.ok(costco && shell);
+
+  // Delete one leg of the Costco pair: that duplicate finding no longer exists.
+  await models.Transaction.destroy({ where: { id: dropId } });
+  const second = await runDetectorsForHousehold(householdId, { now });
+
+  await costco!.reload();
+  await shell!.reload();
+  assert.equal(costco!.status, 'resolved', 'the vanished duplicate must be retired');
+  assert.equal(shell!.status, 'open', 'a finding still emitted stays open');
+  assert.equal(second.resolved, 1);
+});
+
+test('sweep leaves still-emitted findings open and refreshed, resolving nothing', async () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const { householdId, accountId } = await seedHousehold('A');
+  await createTxn(householdId, accountId, isoDaysAgo(now, 2), 'Costco', -123.45);
+  await createTxn(householdId, accountId, isoDaysAgo(now, 1), 'Costco', -123.45);
+
+  const first = await runDetectorsForHousehold(householdId, { now });
+  assert.equal(first.resolved, 0);
+  const before = await models.Insight.findOne({
+    where: { householdId, type: 'duplicate_transactions' },
+  });
+  assert.ok(before);
+  const detectedBefore = before!.detectedAt.getTime();
+
+  // Same calendar day, later clock time: every date-bucketed detector window
+  // is unchanged, so nothing can go stale — only `detected_at` should move.
+  const later = new Date('2026-05-15T18:00:00Z');
+  const second = await runDetectorsForHousehold(householdId, { now: later });
+  assert.equal(second.resolved, 0, 'nothing went stale');
+  assert.equal(second.created, 0);
+  assert.equal(second.refreshed, first.total);
+
+  await before!.reload();
+  assert.equal(before!.status, 'open');
+  assert.ok(
+    before!.detectedAt.getTime() > detectedBefore,
+    'a still-emitted finding is refreshed, not resolved',
+  );
+});
+
+test('sweep never touches dismissed rows', async () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const { householdId, accountId } = await seedHousehold('A');
+  await createTxn(householdId, accountId, isoDaysAgo(now, 2), 'Costco', -123.45);
+  const dropId = await createTxn(householdId, accountId, isoDaysAgo(now, 1), 'Costco', -123.45);
+
+  await runDetectorsForHousehold(householdId, { now });
+  const dup = await models.Insight.findOne({
+    where: { householdId, type: 'duplicate_transactions' },
+  });
+  assert.ok(dup);
+  dup!.set('status', 'dismissed');
+  await dup!.save();
+
+  // Now make the finding go stale — the sweep would resolve it if it were open.
+  await models.Transaction.destroy({ where: { id: dropId } });
+  await runDetectorsForHousehold(householdId, { now });
+
+  await dup!.reload();
+  assert.equal(dup!.status, 'dismissed', 'a dismissal is a user decision, not ours to rewrite');
+});
+
+test('sweep leaves types this run does not produce alone', async () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const { householdId } = await seedHousehold('A');
+  // Written by other producers: the subscription-price job and money-leak
+  // detection. This run knows nothing about their findings.
+  const foreignIds = await Promise.all([
+    seedInsight(householdId, 'subscription_price_increase', 'sub:netflix:2026-05'),
+    seedInsight(householdId, 'small_subscription', 'small_subscription|spotify'),
+    seedInsight(householdId, 'recurring_fee', 'recurring_fee|bank'),
+    seedInsight(householdId, 'duplicate_service', 'duplicate_service|streaming'),
+    seedInsight(householdId, 'delivery_fee_high', 'delivery_fee_high|ubereats'),
+  ]);
+  // A covered-type row with no backing finding — this one SHOULD be swept.
+  const staleId = await seedInsight(householdId, 'duplicate_transactions', 'dupe:999');
+
+  const result = await runDetectorsForHousehold(householdId, { now });
+
+  for (const id of foreignIds) {
+    const row = await models.Insight.findByPk(id);
+    assert.equal(row!.status, 'open', `${row!.type} belongs to another producer`);
+  }
+  const stale = await models.Insight.findByPk(staleId);
+  assert.equal(stale!.status, 'resolved');
+  assert.equal(result.resolved, 1);
+});
+
+test('sweep is scoped to the household being run', async () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const a = await seedHousehold('A');
+  const b = await seedHousehold('B');
+  const aStale = await seedInsight(a.householdId, 'duplicate_transactions', 'dupe:a');
+  const bStale = await seedInsight(b.householdId, 'duplicate_transactions', 'dupe:b');
+
+  const result = await runDetectorsForHousehold(b.householdId, { now });
+
+  assert.equal((await models.Insight.findByPk(aStale))!.status, 'open', 'other households untouched');
+  assert.equal((await models.Insight.findByPk(bStale))!.status, 'resolved');
+  assert.equal(result.resolved, 1);
+});
+
+test('sweep reports an accurate resolved count', async () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const { householdId } = await seedHousehold('A');
+  const staleIds = await Promise.all([
+    seedInsight(householdId, 'duplicate_transactions', 'dupe:1'),
+    seedInsight(householdId, 'missing_receipt', 'receipt:1'),
+    seedInsight(householdId, 'merchant_spend_spike', 'spike:1'),
+    seedInsight(householdId, 'settlement_imbalance', 'settle:1'),
+  ]);
+  // Neither of these counts: one is dismissed, one is already resolved.
+  await seedInsight(householdId, 'category_trend', 'trend:1', 'dismissed');
+  await seedInsight(householdId, 'cash_runway_low', 'runway:1', 'resolved');
+
+  const result = await runDetectorsForHousehold(householdId, { now });
+  assert.equal(result.total, 0, 'no transactions seeded, so no findings');
+  assert.equal(result.resolved, staleIds.length);
+
+  // A second run has nothing left to retire.
+  const second = await runDetectorsForHousehold(householdId, { now });
+  assert.equal(second.resolved, 0);
+});
