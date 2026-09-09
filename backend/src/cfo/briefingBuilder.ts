@@ -30,11 +30,16 @@ import { filterInsightsVisibleTo } from '../insights/visibility';
 import { findRuleProposals } from '../ai/ruleProposals';
 import { synthesizeBriefing } from './synthesizeBriefing';
 import { getOpenAiConfig } from '../config/openai';
-import { num } from '../util/numbers';
 import {
   computeSafeToSpend,
   type SafeToSpendResult,
 } from '../cashflow/safeToSpend';
+import {
+  loadOverduePlannedEvents,
+  safeAbsNumber,
+  buildOverdueEventItemContent,
+  buildRuleSuggestionItemContent,
+} from './reviewActionItemShared';
 import type {
   CfoBriefingActionItem,
   CfoBriefingActionItemSeverity,
@@ -181,11 +186,6 @@ function idFor(type: CfoBriefingActionItemType, suffix: string | number): string
   return `${type}-${suffix}`;
 }
 
-function safeAbsNumber(value: unknown): number {
-  const n = num(value);
-  return n == null ? 0 : Math.abs(n);
-}
-
 function reviewBacklogSeverity(count: number): CfoBriefingActionItemSeverity {
   if (count >= REVIEW_BACKLOG_ACTION_THRESHOLD) return 'action';
   if (count >= REVIEW_BACKLOG_WATCH_THRESHOLD) return 'watch';
@@ -306,18 +306,7 @@ export async function buildCfoBriefing(
     ),
     safeBriefingFetch(() => loadOpenInsightItems(req, householdId)),
     safeBriefingFetch(() => findRuleProposals(householdId)),
-    PlannedEvent.findAll({
-      where: {
-        householdId,
-        kind: 'planned',
-        status: 'planned',
-        expectedDate: {
-          [Op.lt]: periodEnd,
-        },
-      },
-      attributes: ['id', 'name', 'expectedDate', 'amount', 'type'],
-      raw: true,
-    }),
+    loadOverduePlannedEvents(householdId, periodEnd),
     PlannedEvent.findAll({
       where: {
         ...householdWhere(req),
@@ -376,17 +365,14 @@ export async function buildCfoBriefing(
   // 3. Rule suggestions.
   if (ruleProposals) {
     for (const proposal of ruleProposals) {
+      const content = buildRuleSuggestionItemContent(
+        proposal,
+        `Suggested rule: "${proposal.merchantPattern}"`,
+      );
       items.push({
-        id: idFor('rule_suggestion', proposal.merchantPattern),
+        ...content,
         type: 'rule_suggestion',
-        refType: 'rule',
-        refId: null,
-        severity: 'info',
-        title: `Suggested rule: "${proposal.merchantPattern}"`,
-        summary: `${proposal.supportCount} reviewed transactions match "${proposal.merchantPattern}" → ${proposal.category ?? '(no category)'}.`,
         status: 'open',
-        supportingTransactionIds: proposal.exampleTransactionIds,
-        rationale: 'Detected by repeated manual categorizations sharing a merchant pattern.',
         link: '/rules',
       });
     }
@@ -419,25 +405,12 @@ export async function buildCfoBriefing(
   }
 
   // 5. Forecast warnings: planned events overdue.
-  type OverdueEvent = {
-    id: number;
-    name: string;
-    expectedDate: string;
-    amount: unknown;
-    type: string;
-  };
-  for (const raw of plannedEventsOverdue as unknown as OverdueEvent[]) {
+  for (const raw of plannedEventsOverdue) {
+    const content = buildOverdueEventItemContent(raw, currency);
     items.push({
-      id: idFor('forecast_warning', raw.id),
+      ...content,
       type: 'forecast_warning',
-      refType: 'event',
-      refId: raw.id,
-      severity: 'watch',
-      title: `Planned ${raw.type} overdue: ${raw.name}`,
-      summary: `${raw.name} (${safeAbsNumber(raw.amount).toFixed(2)} ${currency}) expected on ${raw.expectedDate} but not posted.`,
       status: 'open',
-      supportingTransactionIds: [],
-      rationale: 'Planned event still in "planned" status past its expected date.',
       link: '/planned',
     });
   }
