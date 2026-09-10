@@ -27,6 +27,7 @@ import {
 } from '../models';
 import { classifySubject } from './subjectFilter';
 import { tryDeterministicParse } from './parsers';
+import { dateFromInternalDate } from './internalDate';
 import type { ExtractedReceiptOrder } from '../ai/extractReceiptItems';
 import { decryptSecret, encryptSecret } from '../util/symmetricEncryption';
 import {
@@ -704,7 +705,7 @@ export async function scanInbox(
             vendor: extracted!.vendor,
             vendorOrderId: extracted!.orderId,
             dedupeKey,
-            orderDate: extracted!.orderDate,
+            orderDate: extracted!.orderDate ?? dateFromInternalDate(full.internalDate),
             shipmentDate: null,
             subtotal: extracted!.subtotal != null ? String(extracted!.subtotal) : null,
             tax: extracted!.tax != null ? String(extracted!.tax) : null,
