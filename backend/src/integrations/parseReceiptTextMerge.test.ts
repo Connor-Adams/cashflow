@@ -78,3 +78,22 @@ test('the AI budget cap still returns the deterministic result alone', async () 
   assert.equal(out.extracted?.paymentLast4, '1001', 'deterministic result is kept, not discarded');
   assert.equal(out.extracted?.total, null);
 });
+
+test('merges AI tenders into a deterministic result with empty tenders', async () => {
+  const aiResultWithTenders: ExtractedReceiptOrder = {
+    ...aiResult,
+    tenders: [{ type: 'credit_card', last4: '5432', amount: 44.97 }],
+  };
+
+  const out = await parseReceiptText({
+    fromAddress: 'auto-confirm@amazon.ca',
+    subject: 'Your Amazon.ca order',
+    text: bodyWithLast4NoTotal,
+    extractFromText: async () => aiResultWithTenders,
+  });
+
+  assert.equal(out.extracted?.tenders.length, 1, 'AI tenders are merged into result');
+  assert.equal(out.extracted?.tenders[0].last4, '5432');
+  assert.equal(out.parser, 'amazon+ai');
+  assert.equal(out.usedAi, true);
+});

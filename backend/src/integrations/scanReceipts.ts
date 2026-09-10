@@ -201,6 +201,7 @@ function mergeExtracts(
     total: det.total ?? ai.total,
     currency: det.currency ?? ai.currency,
     paymentLast4: det.paymentLast4 ?? ai.paymentLast4,
+    tenders: det.tenders.length > 0 ? det.tenders : ai.tenders,
     items: det.items.length >= ai.items.length ? det.items : ai.items,
     notes: det.notes ?? ai.notes,
     trip: det.trip ?? ai.trip,
