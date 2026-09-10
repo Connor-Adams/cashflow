@@ -50,9 +50,17 @@ const ORDER_ID_RE = /\bOrder\s*#?\s*([0-9]{3}-[0-9]{7}-[0-9]{7})\b/i;
 const TOTAL_RE = new RegExp(`\\bOrder\\s*Total\\b\\s*[:\\-]?\\s*${CURRENCY_PREFIX}${AMOUNT_SRC}`, 'i');
 const SUBTOTAL_RE = new RegExp(`\\bOrder\\s*Subtotal\\b\\s*[:\\-]?\\s*${CURRENCY_PREFIX}${AMOUNT_SRC}`, 'i');
 const TAX_RE = new RegExp(`\\bTax\\b\\s*[:\\-]?\\s*${CURRENCY_PREFIX}${AMOUNT_SRC}`, 'i');
-// DATE_RE: matches "Placed on", "Order placed", "Order Date:", standalone "Date:",
-// and ship-confirm phrasings "Arriving <date>" / "Shipped on <date>".
-const DATE_RE = /\b(?:Placed\s*on|Order\s*placed|Order\s*Date|Date|Arriving|Shipped\s*on)\b\s*[:\-]?\s*([A-Za-z]{3,9}\s+[0-9]{1,2},?\s+[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2})/i;
+// DATE_RE: matches "Placed on", "Order placed", "Ordered on", "Order Date:",
+// standalone "Date:", and ship-confirm phrasings "Arriving <date>" /
+// "Shipped on <date>". An optional day-of-week prefix is skipped — Amazon
+// routinely writes "Arriving Thursday, September 4, 2025", which the previous
+// pattern failed on (it matched "Thursday" as the month, then wanted digits and
+// found a comma).
+const DAY_OF_WEEK = '(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day,?\\s*';
+const DATE_RE = new RegExp(
+  `\\b(?:Placed\\s*on|Order\\s*placed|Ordered\\s*on|Order\\s*Date|Date|Arriving|Shipped\\s*on)\\b\\s*[:\\-]?\\s*(?:${DAY_OF_WEEK})?([A-Za-z]{3,9}\\s+[0-9]{1,2},?\\s+[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2})`,
+  'i',
+);
 const QUANTITY_RE = /\bQuantity\s*[:\-]?\s*([0-9]+)/i;
 const PRICE_RE = new RegExp(`${CURRENCY_PREFIX_REQUIRED}((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)\\.[0-9]{2})`);
 // LAST4_RE: matches "ending in 1234", "ending with 1234", and card-network-prefixed
