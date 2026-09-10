@@ -161,8 +161,60 @@ export function buildDiscoveryQuery(opts: {
 }
 
 /**
+ * A deterministic parse worth trusting on its own — no AI gap-fill needed.
+ *
+ * Gates on `total` alone — deliberately NOT `orderDate` or `items.length`:
+ * - Amazon "Arriving" / shipment emails state a delivery date rather than an
+ *   order date, so the parser legitimately returns `orderDate: null` there;
+ *   the caller backfills it from the Gmail message's `internalDate`
+ *   afterward (see scanReceiptsOrderDate.test.ts).
+ * - The Apple and Amazon line-scanners can legitimately land on
+ *   `items: []` (e.g. a summary line resets the pending title before the
+ *   item's price line is reached) while still having read the total
+ *   correctly off its own regex (see scanInboxAiCap.test.ts's "deterministic
+ *   parses are never capped").
+ * Requiring either would spend an AI call on emails the parser already got
+ * everything useful out of. This mirrors the "clean enough" checks already
+ * used downstream in this file (`bodyClean`, the `no_items` status), which
+ * likewise never required orderDate.
+ */
+function isCompleteExtract(o: ExtractedReceiptOrder): boolean {
+  return o.total != null;
+}
+
+/**
+ * Field-wise merge: the deterministic parser wins wherever it produced a value,
+ * the AI fills the holes. Items come from whichever side has more of them —
+ * never concatenated, which would double the order.
+ */
+function mergeExtracts(
+  det: ExtractedReceiptOrder,
+  ai: ExtractedReceiptOrder,
+): ExtractedReceiptOrder {
+  return {
+    ...det,
+    vendorName: det.vendorName ?? ai.vendorName,
+    orderDate: det.orderDate ?? ai.orderDate,
+    orderId: det.orderId ?? ai.orderId,
+    subtotal: det.subtotal ?? ai.subtotal,
+    tax: det.tax ?? ai.tax,
+    total: det.total ?? ai.total,
+    currency: det.currency ?? ai.currency,
+    paymentLast4: det.paymentLast4 ?? ai.paymentLast4,
+    items: det.items.length >= ai.items.length ? det.items : ai.items,
+    notes: det.notes ?? ai.notes,
+    trip: det.trip ?? ai.trip,
+  };
+}
+
+/**
  * Parse receipt text (an email body OR PDF-extracted text) into a structured
- * order: try the cheap deterministic vendor parsers first, then fall back to AI.
+ * order: try the cheap deterministic vendor parsers first. In production the
+ * two parsers fill DISJOINT fields — the deterministic Amazon parser gets
+ * payment_last4 on 100% of orders and a total on 0%; the AI extractor gets a
+ * total on 93% and last4 on 0%. So a complete deterministic parse is returned
+ * as-is (no AI spend), but an incomplete one is topped up by an AI call and
+ * merged field-wise rather than replaced outright.
  * `extractFromText` is injected so callers (and tests) can supply the real AI
  * extractor or a fake. `usedAi` lets callers track AI-call counts.
  */
@@ -185,12 +237,23 @@ export async function parseReceiptText(opts: {
   aiCapped: boolean;
 }> {
   const det = tryDeterministicParse({ fromAddress: opts.fromAddress, subject: opts.subject, body: opts.text });
-  if (det.ok) return { extracted: det.order, parser: det.parser, usedAi: false, aiCapped: false };
-  if (opts.budget && !opts.budget.tryConsume()) {
-    return { extracted: null, parser: 'ai', usedAi: false, aiCapped: true };
+  const detOrder = det.ok ? det.order : null;
+
+  if (detOrder && isCompleteExtract(detOrder)) {
+    return { extracted: detOrder, parser: det.ok ? det.parser : 'ai', usedAi: false, aiCapped: false };
   }
-  const extracted = await opts.extractFromText(opts.text);
-  return { extracted, parser: 'ai', usedAi: true, aiCapped: false };
+  if (opts.budget && !opts.budget.tryConsume()) {
+    // Capped: keep whatever the deterministic parser managed rather than dropping it.
+    return { extracted: detOrder, parser: det.ok ? det.parser : 'ai', usedAi: false, aiCapped: true };
+  }
+  const aiOrder = await opts.extractFromText(opts.text);
+  if (!detOrder) return { extracted: aiOrder, parser: 'ai', usedAi: true, aiCapped: false };
+  return {
+    extracted: mergeExtracts(detOrder, aiOrder),
+    parser: `${det.ok ? det.parser : 'ai'}+ai`,
+    usedAi: true,
+    aiCapped: false,
+  };
 }
 
 /** Senders the household explicitly dismissed during discovery — excluded from
