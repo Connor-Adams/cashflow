@@ -92,7 +92,19 @@ export function scoreAmazonOrderMatch(txn: Transaction, order: ExternalOrder): M
   const orderTotal = numberOrNull(order.total);
   if (orderTotal != null) {
     const diff = Math.abs(txnAmount - Math.abs(orderTotal));
-    if (diff <= 0.5) {
+    // Exact-cent is a distinct tier ABOVE ±$0.50, credited to secondaryScore
+    // rather than confidence. Against undated orders (which score 65 and land
+    // in selectMatchCandidates' fallback tier) an exact-cent match yields 30
+    // real links with a null-test of ~0 false positives, while ±$0.50 yields 45
+    // with a null-test of 21-29. Raising the primary score instead would push
+    // these into the `strong` tier, which returns EVERY candidate — the
+    // historical fan-out. Amounts are DECIMAL-as-string, so compare with an
+    // epsilon, never `=== 0`.
+    if (diff < 0.005) {
+      score += 50;
+      secondary += 20;
+      reasons.push('amount matches to the cent');
+    } else if (diff <= 0.5) {
       score += 50;
       reasons.push(`amount within $0.50 (${diff.toFixed(2)})`);
     } else if (diff <= 2) {

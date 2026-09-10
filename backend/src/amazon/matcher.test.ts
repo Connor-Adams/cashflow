@@ -131,14 +131,18 @@ test('scoreAmazonOrderMatch returns secondaryScore=0 for amount-only match (no d
   } as unknown as Transaction;
 
   const orderAmountOnly = {
-    total: '50.00', // exact match → +50 confidence, no secondary
+    total: '49.60', // within $0.50 but not exact-cent → +50 confidence, no secondary
     orderDate: '2026-05-01', // far away — date gap > 10 days, no secondary
     shipmentDate: null,
     paymentLast4: null,
   } as unknown as ExternalOrder;
 
   const result = scoreAmazonOrderMatch(txn, orderAmountOnly);
-  assert.equal(result.secondaryScore, 0, 'amount-only match should have zero secondary score');
+  assert.equal(
+    result.secondaryScore,
+    0,
+    'a near-miss (non-exact-cent) amount match should have zero secondary score',
+  );
 });
 
 test('selectMatchCandidates with scoreAmazonOrderMatch-derived secondaryScore: tie-break by date/last4', async () => {
@@ -193,4 +197,64 @@ test('selectMatchCandidates with scoreAmazonOrderMatch-derived secondaryScore: t
   const result = selectMatchCandidates(tiedCandidates);
   assert.equal(result.length, 1, 'tiebreak should return exactly one candidate');
   assert.equal(result[0].id, 1, 'should return the candidate with higher secondary (date match)');
+});
+
+// ─── exact-cent scoring band for undated orders ──────────────────────────────
+// 30 of 60 unmatched Amazon transactions have an order in the corpus with the
+// correct total to the cent, but the order has no order_date, so it scores 65
+// (50 amount + 15 merchant) — tying against near-miss orders that also score
+// 65 — and selectMatchCandidates abstains on the tie. An exact-cent match must
+// credit secondaryScore (not confidence) so the existing tie guard resolves it,
+// without pushing the candidate into the ungated `strong` tier.
+
+const exactCentTxn = {
+  amount: '-44.97',
+  date: '2025-08-28',
+  merchantRaw: 'AMZN MKTP CA*Z90R91K22',
+  merchantClean: 'Amazon',
+  notes: null,
+  sourceReference: null,
+  accountId: 1,
+} as unknown as Transaction;
+
+const undatedOrder = (total: string) =>
+  ({ total, orderDate: null, shipmentDate: null, paymentLast4: null, currency: 'CAD' } as unknown as ExternalOrder);
+
+test('an exact-cent amount match credits secondaryScore', () => {
+  const exact = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.97'));
+  assert.equal(exact.secondaryScore >= 20, true, 'exact cent match scores on secondary');
+  assert.match(exact.matchReason, /to the cent/);
+});
+
+test('a near-miss inside $0.50 does NOT credit secondaryScore', () => {
+  const near = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.70'));
+  assert.equal(near.secondaryScore, 0);
+});
+
+test('exact-cent and near-miss tie on confidence but the exact one wins', () => {
+  const exact = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.97'));
+  const near = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.70'));
+  assert.equal(exact.confidence, near.confidence, 'both score 65 — this is the tie that used to abstain');
+
+  const picked = selectMatchCandidates([
+    { id: 'near', confidence: near.confidence, secondary: near.secondaryScore },
+    { id: 'exact', confidence: exact.confidence, secondary: exact.secondaryScore },
+  ]);
+  assert.equal(picked.length, 1);
+  assert.equal((picked[0] as { id: string }).id, 'exact');
+});
+
+test('an undated exact-cent order stays below the strong threshold', () => {
+  const exact = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.97'));
+  assert.equal(exact.confidence < 70, true, 'must stay in the fallback tier — fan-out guard');
+});
+
+test('two exact-cent orders abstain rather than fan out', () => {
+  const a = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.97'));
+  const b = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.97'));
+  const picked = selectMatchCandidates([
+    { id: 'a', confidence: a.confidence, secondary: a.secondaryScore },
+    { id: 'b', confidence: b.confidence, secondary: b.secondaryScore },
+  ]);
+  assert.equal(picked.length, 0, 'ambiguous — abstain');
 });
