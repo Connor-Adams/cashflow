@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { Op, type WhereOptions } from 'sequelize';
 import type { Request } from 'express';
 import {
+  Account,
   ExternalOrder,
   ExternalOrderItem,
   Receipt,
@@ -11,13 +12,149 @@ import {
 } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { visibleTransactionWhere } from '../auth/scope';
-import type { ItemRow, ItemsListResponse } from '@cashflow/shared';
+import type { CardOwnershipView, ItemRow, ItemsListResponse } from '@cashflow/shared';
 import {
   transactionIdsForOrder,
   recomputeTransactionsReviewFromItems,
 } from '../import/enrichment/recomputeTransactionReviewFromItems';
+import {
+  buildLast4Map,
+  classifyCardOwnership,
+  classifyCardOwnershipForVendor,
+  resolveAccountLast4,
+} from '../amazon/cardOwnership';
 
 const router = Router();
+
+/**
+ * Order ids to hide from the Items page: Amazon orders paid with a card
+ * Cashflow does not recognize as belonging to this household.
+ *
+ * The Items page queries ExternalOrder/ExternalOrderItem directly and is NOT
+ * covered by loadItemAllocationContext's chokepoint
+ * (backend/src/summary/loadItemAllocations.ts), so it needs its own copy of
+ * that rule. Mirrors that file's semantics (commit 8b56596a) rather than a
+ * vendor-agnostic exclusion:
+ *
+ *   1. Only vendor 'amazon' may ever be classified foreign. Production has
+ *      zero accepted Amazon links but 7 accepted non-Amazon links (6 costco,
+ *      1 uber_eats); a vendor-agnostic rule would have dropped 5 of those 7
+ *      ($2,087.08) because Costco's short_code ('costco') is opaque and
+ *      derives no last4, even though the order's own last4 ('3114') is real.
+ *   2. `unknown` (order has no last4 at all) is shown, never hidden --
+ *      absence of a last4 is not evidence of a foreign card.
+ *   3. Even for a candidate Amazon order, if it has an accepted
+ *      transaction_order_link whose account has no derivable last4 (e.g. an
+ *      opaque short code), there is no basis for that comparison and the
+ *      order is kept. Orders with no accepted link at all have no linked
+ *      account to consult, so this guard only fires when a link exists.
+ *
+ * Resolved once per request (never per-row): at most two queries up front,
+ * plus two more only when there are foreign-candidate orders with accepted
+ * links to check.
+ *
+ * `accounts`/`last4Map` are loaded once per request by {@link loadLast4Context}
+ * and threaded in here (and into cardOwnership serialization below) rather
+ * than re-queried, so a single request never issues the Account query twice.
+ */
+async function foreignOrderIds(
+  householdId: number,
+  accounts: { id: number; shortCode: string | null }[],
+  last4Map: Map<string, number[]>,
+): Promise<number[]> {
+  // Household-level "no basis for comparison" guard: when NOT ONE account in
+  // the household can derive a last4 (every short_code is opaque, e.g. all
+  // Costco/Wealthsimple-style), there is nothing to compare any order's own
+  // last4 against -- not just for orders with an accepted link (guard 3
+  // below), but for every order, linked or not. Without this, a household
+  // whose accounts are all opaque would have every Amazon order with a
+  // payment_last4 classified foreign on its own last4 alone, since an
+  // unlinked order never reaches guard 3 at all.
+  if (last4Map.size === 0) return [];
+
+  const orders = await ExternalOrder.findAll({
+    where: { householdId, vendor: 'amazon' },
+    attributes: ['id', 'paymentLast4'],
+  });
+  if (orders.length === 0) return [];
+
+  const candidateIds = orders
+    .filter((o) => classifyCardOwnership(o.paymentLast4, last4Map) === 'foreign')
+    .map((o) => o.id);
+  if (candidateIds.length === 0) return [];
+
+  const links = await TransactionOrderLink.findAll({
+    where: { externalOrderId: { [Op.in]: candidateIds }, status: 'accepted' },
+    attributes: ['externalOrderId', 'transactionId'],
+  });
+  if (links.length === 0) return candidateIds;
+
+  const txnIds = Array.from(new Set(links.map((l) => l.transactionId)));
+  const transactions = await Transaction.findAll({
+    where: { id: { [Op.in]: txnIds } },
+    attributes: ['id', 'accountId'],
+  });
+  const accountIdByTxnId = new Map(transactions.map((t) => [t.id, t.accountId]));
+  const accountById = new Map(accounts.map((a) => [a.id, a]));
+
+  // Orders "saved" by at least one accepted link whose account has no
+  // derivable last4 -- there is no basis to compare, so they must not be
+  // excluded even though the order's own last4 matches no known account.
+  const savedByLink = new Set<number>();
+  for (const link of links) {
+    const accountId = accountIdByTxnId.get(link.transactionId);
+    const account = accountId != null ? accountById.get(accountId) : undefined;
+    if (account == null || resolveAccountLast4(account.shortCode) == null) {
+      savedByLink.add(link.externalOrderId);
+    }
+  }
+
+  return candidateIds.filter((id) => !savedByLink.has(id));
+}
+
+/** Loads the household's accounts once per request, deriving the last4 map from them. */
+async function loadLast4Context(
+  householdId: number,
+): Promise<{
+  accounts: { id: number; shortCode: string | null }[];
+  last4Map: Map<string, number[]>;
+}> {
+  const accounts = await Account.findAll({ where: { householdId }, attributes: ['id', 'shortCode'] });
+  const plain = accounts.map((a) => ({ id: a.id, shortCode: a.shortCode }));
+  return { accounts: plain, last4Map: buildLast4Map(plain) };
+}
+
+/**
+ * cardOwnership for an ItemRow, given a row that has already survived
+ * {@link foreignOrderIds}' exclusion filter. A residual 'foreign' result here
+ * can only mean this Amazon order was "saved" by guard 3 above (its accepted
+ * link's account has no derivable last4 -- no basis for the comparison);
+ * since the order was not excluded, it must not be badged foreign either.
+ *
+ * It also must not be badged 'known': the card was never verified -- the
+ * order's own last4 genuinely matches no account, and we are counting it
+ * only because the linked account's short code is opaque. 'unknown' is the
+ * honest state (task 15 finding 2) and renders the "unverified card" badge
+ * rather than silently claiming verification. This mirrors
+ * `classifyCardOwnershipForDisplay` in cardOwnership.ts, which
+ * backend/src/routes/receipts.ts uses for the same guard case.
+ *
+ * NOTE: Items and Receipts endpoints agree for orders with at most one
+ * accepted link. For a multi-link order, items.ts uses an OR across all
+ * links (saved if ANY link has an opaque account), while receipts.ts checks
+ * the specific account behind each receipt independently. They can therefore
+ * differ in label only (items='unknown', receipts='foreign') for the same
+ * order when receipts are attached to a derivable account. See
+ * cardOwnershipConsistency.test.ts for the regression test.
+ */
+function displayCardOwnership(
+  vendor: string,
+  paymentLast4: string | null,
+  last4Map: Map<string, number[]>,
+): CardOwnershipView {
+  const c = classifyCardOwnershipForVendor(vendor, paymentLast4, last4Map);
+  return c === 'foreign' ? 'unknown' : c;
+}
 
 function num(v: string | null): number | null {
   if (v == null || v === '') return null;
@@ -132,7 +269,11 @@ async function loadOrderAttribution(txnWhere: WhereOptions): Promise<Map<number,
   return map;
 }
 
-function mapItemToRow(it: ExternalOrderItem, attribution: Map<number, Attribution>): ItemRow {
+function mapItemToRow(
+  it: ExternalOrderItem,
+  attribution: Map<number, Attribution>,
+  last4Map: Map<string, number[]>,
+): ItemRow {
   const order = (it as ExternalOrderItem & { order?: ExternalOrder }).order!;
   const attr = attribution.get(order.id);
   return {
@@ -148,7 +289,11 @@ function mapItemToRow(it: ExternalOrderItem, attribution: Map<number, Attributio
     businessUseEffective: effectiveBusinessUse(it),
     businessUseOverride:
       it.businessUseOverride == null ? null : Number(it.businessUseOverride) > 0,
-    order: { id: order.id, vendor: order.vendor },
+    order: {
+      id: order.id,
+      vendor: order.vendor,
+      cardOwnership: displayCardOwnership(order.vendor, order.paymentLast4, last4Map),
+    },
     receipt: {
       // Grouping key: the receipt when present, else the transaction (one purchase).
       id: attr?.receiptId ?? attr?.txnId ?? 0,
@@ -272,6 +417,12 @@ router.get('/items/analyze', async (req, res, next) => {
     if (from) orderWhere.orderDate = { ...(orderWhere.orderDate as object ?? {}), [Op.gte]: from };
     if (to) orderWhere.orderDate = { ...(orderWhere.orderDate as object ?? {}), [Op.lte]: to };
 
+    const { accounts: last4Accounts, last4Map } = await loadLast4Context(household.id);
+    const excludedOrderIds = await foreignOrderIds(household.id, last4Accounts, last4Map);
+    if (excludedOrderIds.length > 0) {
+      orderWhere.id = { [Op.notIn]: excludedOrderIds };
+    }
+
     const items = await ExternalOrderItem.findAll({
       include: [
         {
@@ -366,6 +517,12 @@ router.get('/items/analyze/trend', async (req, res, next) => {
     if (to) orderWhere.orderDate = { ...(orderWhere.orderDate as object ?? {}), [Op.lte]: to };
     if (vendorFilter) orderWhere.vendor = vendorFilter;
 
+    const { accounts: last4Accounts, last4Map } = await loadLast4Context(household.id);
+    const excludedOrderIds = await foreignOrderIds(household.id, last4Accounts, last4Map);
+    if (excludedOrderIds.length > 0) {
+      orderWhere.id = { [Op.notIn]: excludedOrderIds };
+    }
+
     const items = await ExternalOrderItem.findAll({
       where: { title: { [Op.like]: `%${itemName}%` } },
       include: [
@@ -451,6 +608,12 @@ router.get('/items', async (req, res, next) => {
       };
     }
 
+    const { accounts: last4Accounts, last4Map } = await loadLast4Context(household.id);
+    const excludedOrderIds = await foreignOrderIds(household.id, last4Accounts, last4Map);
+    if (excludedOrderIds.length > 0) {
+      (orderWhere as Record<string, unknown>).id = { [Op.notIn]: excludedOrderIds };
+    }
+
     const txnWhereWithDate: WhereOptions = { ...(txnWhere as object) };
     if (f.from || f.to) {
       const dateCond: Record<symbol, string> = {};
@@ -495,7 +658,7 @@ router.get('/items', async (req, res, next) => {
         as: 'order',
         required: true,
         where: orderWhere,
-        attributes: ['id', 'vendor', 'currency'],
+        attributes: ['id', 'vendor', 'currency', 'paymentLast4'],
       },
     ];
 
@@ -514,7 +677,7 @@ router.get('/items', async (req, res, next) => {
           .json({ error: `Result set too large (>${maxRows} items). Narrow your filters.` });
         return;
       }
-      const csv = rowsToCsv(allItems.map((it) => mapItemToRow(it, attribution)));
+      const csv = rowsToCsv(allItems.map((it) => mapItemToRow(it, attribution, last4Map)));
       const filename = `items-${new Date().toISOString().slice(0, 10)}.csv`;
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -533,7 +696,7 @@ router.get('/items', async (req, res, next) => {
     const hasMore = items.length > limit;
     const sliced = hasMore ? items.slice(0, limit) : items;
 
-    const rows: ItemRow[] = sliced.map((it) => mapItemToRow(it, attribution));
+    const rows: ItemRow[] = sliced.map((it) => mapItemToRow(it, attribution, last4Map));
 
     const last = rows[rows.length - 1];
     const nextCursor = hasMore && last ? encodeCursor({ itemId: last.id }) : null;

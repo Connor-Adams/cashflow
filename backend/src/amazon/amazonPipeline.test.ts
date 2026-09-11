@@ -10,7 +10,7 @@ import {
   normalizeAmazonOrder,
   normalizeTitle,
 } from './normalizeAmazonOrder';
-import { isAmazonLikeMerchant, scoreAmazonOrderMatch } from './matcher';
+import { scoreAmazonOrderMatch } from './matcher';
 import { categorizeAmazonItem } from './categories';
 import { ExternalOrder } from '../models/ExternalOrder';
 import { Transaction } from '../models/Transaction';
@@ -282,8 +282,8 @@ test('matcher: same-day same-amount non-Amazon merchant scores lower than Amazon
     merchantRaw: 'AMZN Mktp CA',
     merchantClean: 'AMZN Mktp CA',
   });
-  const localScore = scoreAmazonOrderMatch(local, order).confidence;
-  const amznScore = scoreAmazonOrderMatch(amzn, order).confidence;
+  const localScore = scoreAmazonOrderMatch(local, order, null).confidence;
+  const amznScore = scoreAmazonOrderMatch(amzn, order, null).confidence;
   assert.ok(amznScore > localScore, `expected amzn ${amznScore} > local ${localScore}`);
   // amount=+50 + date=+25 + amazon merchant=+15 = 90
   assert.equal(amznScore, 90);
@@ -302,6 +302,7 @@ test('matcher: fuzzy date window — gap 3d → +25; gap 6d → 0; gap 11d → -
   const gap3 = scoreAmazonOrderMatch(
     txnFor({ ...merchantNoBonus, date: '2026-05-08' }),
     order,
+    null,
   ).confidence;
   assert.equal(gap3, 75);
 
@@ -309,6 +310,7 @@ test('matcher: fuzzy date window — gap 3d → +25; gap 6d → 0; gap 11d → -
   const gap6 = scoreAmazonOrderMatch(
     txnFor({ ...merchantNoBonus, date: '2026-05-11' }),
     order,
+    null,
   ).confidence;
   assert.equal(gap6, 50);
 
@@ -316,6 +318,7 @@ test('matcher: fuzzy date window — gap 3d → +25; gap 6d → 0; gap 11d → -
   const gap11 = scoreAmazonOrderMatch(
     txnFor({ ...merchantNoBonus, date: '2026-05-16' }),
     order,
+    null,
   ).confidence;
   assert.equal(gap11, 35);
 });
@@ -325,8 +328,8 @@ test('matcher: ambiguous orders — both score >=70 → both above-threshold', (
   const orderA = orderFor({ shipmentDate: '2026-05-03', total: '42.00' });
   const orderB = orderFor({ shipmentDate: '2026-05-04', total: '42.25' });
   const txn = txnFor({ date: '2026-05-05', merchantRaw: 'Local Cafe', merchantClean: 'Local Cafe' });
-  const scoreA = scoreAmazonOrderMatch(txn, orderA).confidence;
-  const scoreB = scoreAmazonOrderMatch(txn, orderB).confidence;
+  const scoreA = scoreAmazonOrderMatch(txn, orderA, null).confidence;
+  const scoreB = scoreAmazonOrderMatch(txn, orderB, null).confidence;
   assert.ok(scoreA >= 70, `A=${scoreA}`);
   assert.ok(scoreB >= 70, `B=${scoreB}`);
 });
@@ -340,15 +343,18 @@ test('matcher: ambiguous orders — both score equal but <70, both candidates (t
   const orderA = orderFor({ shipmentDate: null, orderDate: null, total: '42.00' });
   const orderB = orderFor({ shipmentDate: null, orderDate: null, total: '42.25' });
   const txn = txnFor({ date: '2026-05-05' }); // AMZN-like merchant
-  const scoreA = scoreAmazonOrderMatch(txn, orderA).confidence;
-  const scoreB = scoreAmazonOrderMatch(txn, orderB).confidence;
+  const scoreA = scoreAmazonOrderMatch(txn, orderA, null).confidence;
+  const scoreB = scoreAmazonOrderMatch(txn, orderB, null).confidence;
   assert.equal(scoreA, 65);
   assert.equal(scoreB, 65);
 });
 
-test('matcher: payment last4 bonus — sourceReference="REF-1234" + paymentLast4="1234" → +20', () => {
+test('matcher: payment last4 bonus — account-derived txnLast4 "1234" + paymentLast4="1234" → +20', () => {
   // Use a >$0.50 amount delta (+35) and a non-Amazon merchant so the base
   // score stays well below the 100 cap and the +20 bonus is observable.
+  // txnLast4 is now the account-derived third parameter, not text scraped
+  // from notes/sourceReference (that scrape matched 0 of 111 prod txns and
+  // has been deleted — see cardOwnership.resolveAccountLast4).
   const baseOrder = orderFor({ shipmentDate: '2026-05-03', total: '40.50' });
   const orderWithLast4 = orderFor({
     shipmentDate: '2026-05-03',
@@ -356,18 +362,17 @@ test('matcher: payment last4 bonus — sourceReference="REF-1234" + paymentLast4
     paymentLast4: '1234',
   });
   const txn = txnFor({
-    sourceReference: 'REF-1234',
     date: '2026-05-05',
     merchantRaw: 'Local Cafe',
     merchantClean: 'Local Cafe',
   });
 
-  const noBonus = scoreAmazonOrderMatch(txn, baseOrder).confidence;
-  const withBonus = scoreAmazonOrderMatch(txn, orderWithLast4).confidence;
+  const noBonus = scoreAmazonOrderMatch(txn, baseOrder, '1234').confidence;
+  const withBonus = scoreAmazonOrderMatch(txn, orderWithLast4, '1234').confidence;
   assert.equal(withBonus - noBonus, 20);
 });
 
-test('matcher: payment last4 bonus — notes="ending in 9999" matches paymentLast4=9999', () => {
+test('matcher: payment last4 bonus — account-derived txnLast4 "9999" matches paymentLast4=9999', () => {
   const baseOrder = orderFor({
     shipmentDate: '2026-05-03',
     total: '40.50',
@@ -377,25 +382,17 @@ test('matcher: payment last4 bonus — notes="ending in 9999" matches paymentLas
     total: '40.50',
     paymentLast4: '9999',
   });
-  const txnWithNotes = txnFor({
-    notes: 'ending in 9999',
+  const txn = txnFor({
     date: '2026-05-05',
     merchantRaw: 'Local Cafe',
     merchantClean: 'Local Cafe',
   });
-  const txnNoNotes = txnFor({
-    notes: null,
-    sourceReference: null,
-    date: '2026-05-05',
-    merchantRaw: 'Local Cafe',
-    merchantClean: 'Local Cafe',
-  });
-  const withMatchingNotes = scoreAmazonOrderMatch(txnWithNotes, order).confidence;
-  const withoutMatchingNotes = scoreAmazonOrderMatch(txnNoNotes, baseOrder).confidence;
-  assert.equal(withMatchingNotes - withoutMatchingNotes, 20);
+  const withMatchingLast4 = scoreAmazonOrderMatch(txn, order, '9999').confidence;
+  const withoutMatchingLast4 = scoreAmazonOrderMatch(txn, baseOrder, '9999').confidence;
+  assert.equal(withMatchingLast4 - withoutMatchingLast4, 20);
 });
 
-test('matcher: payment last4 bonus — both notes and sourceReference null → no bonus regardless of order.paymentLast4', () => {
+test('matcher: payment last4 bonus — null txnLast4 → no bonus regardless of order.paymentLast4', () => {
   const orderWithLast4 = orderFor({
     shipmentDate: '2026-05-03',
     total: '42.00',
@@ -406,25 +403,14 @@ test('matcher: payment last4 bonus — both notes and sourceReference null → n
     total: '42.00',
     paymentLast4: null,
   });
-  const txn = txnFor({ notes: null, sourceReference: null, date: '2026-05-05' });
-  const a = scoreAmazonOrderMatch(txn, orderWithLast4).confidence;
-  const b = scoreAmazonOrderMatch(txn, orderNoLast4).confidence;
-  assert.equal(a, b, 'no bonus when txn has no 4-digit text in notes/sourceReference');
+  const txn = txnFor({ date: '2026-05-05' });
+  const a = scoreAmazonOrderMatch(txn, orderWithLast4, null).confidence;
+  const b = scoreAmazonOrderMatch(txn, orderNoLast4, null).confidence;
+  assert.equal(a, b, 'no bonus when txnLast4 is null, regardless of order.paymentLast4');
 });
 
-test('isAmazonLikeMerchant: positive cases', () => {
-  assert.equal(isAmazonLikeMerchant('AMZN MKTP CA'), true);
-  assert.equal(isAmazonLikeMerchant('Amazon.ca'), true);
-  assert.equal(isAmazonLikeMerchant('AMAZON MARKETPLACE'), true);
-  assert.equal(isAmazonLikeMerchant('amzn mktp ca *abc'), true);
-  assert.equal(isAmazonLikeMerchant('Prime Video'), true);
-});
-
-test('isAmazonLikeMerchant: PRIMERICA does NOT match (word boundary on \\bprime\\b)', () => {
-  assert.equal(isAmazonLikeMerchant('PRIMERICA INSURANCE'), false);
-  assert.equal(isAmazonLikeMerchant('Cafe Primo'), false);
-  assert.equal(isAmazonLikeMerchant('Costco Wholesale'), false);
-});
+// isAmazonLikeMerchant coverage moved to ./merchant.test.ts alongside its
+// definition in ./merchant.ts.
 
 // ─── categories: rule precedence ───────────────────────────────────────────
 

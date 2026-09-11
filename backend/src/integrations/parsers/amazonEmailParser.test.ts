@@ -337,3 +337,23 @@ test('refund-policy boilerplate in footer does NOT drop a real order (regression
   assert.equal(order!.total, 50.36);
   assert.equal(order!.orderId, '114-2468013-5791234');
 });
+
+// ── Task 4: DATE_RE day-of-week and "Ordered on" support ──────────────────────
+
+const body = (dateLine: string) =>
+  `Your Amazon.ca order\nOrder # 701-1111111-2222222\n${dateLine}\nOrder Total: $44.97\nQuantity: 1\n$44.97\n`;
+
+test('parses a date behind a day-of-week prefix', () => {
+  const r = parseAmazonReceiptEmail(body('Arriving Thursday, September 4, 2025'));
+  assert.equal(r?.orderDate, '2025-09-04');
+});
+
+test('parses the "Ordered on" phrasing', () => {
+  const r = parseAmazonReceiptEmail(body('Ordered on August 28, 2025'));
+  assert.equal(r?.orderDate, '2025-08-28');
+});
+
+test('still parses the phrasings that already worked', () => {
+  assert.equal(parseAmazonReceiptEmail(body('Order Placed: July 2, 2025'))?.orderDate, '2025-07-02');
+  assert.equal(parseAmazonReceiptEmail(body('Order Date: 2025-07-02'))?.orderDate, '2025-07-02');
+});

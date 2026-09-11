@@ -1,14 +1,20 @@
 import { Op, type Transaction as DbTransaction } from 'sequelize';
-import { ExternalOrder, Transaction, TransactionOrderLink } from '../models';
+import { Account, ExternalOrder, Transaction, TransactionOrderLink } from '../models';
 import { decideAutoAccept } from './autoAccept';
+import { backfillAutoAcceptAmazonLinks } from './backfillAutoAcceptLinks';
+import { resolveAccountLast4 } from './cardOwnership';
+import { mergeDuplicateAmazonOrders } from './mergeDuplicateOrders';
+import { isAmazonLikeMerchant, isAmazonSubscriptionCharge } from './merchant';
 import {
   recomputeTransactionsReviewFromItems,
   transactionIdsForOrder,
 } from '../import/enrichment/recomputeTransactionReviewFromItems';
 
-export function isAmazonLikeMerchant(merchant: string): boolean {
-  return /\b(amazon(?:\.ca)?|amzn|amzn\s*mktp|amazon marketplace|prime)\b/i.test(merchant);
-}
+// Re-exported for existing external callers (e.g. routes/amazon.ts) that import
+// isAmazonLikeMerchant from this module; the canonical definition lives in
+// ./merchant to avoid a circular dependency with backfillAutoAcceptLinks.ts.
+// isAmazonSubscriptionCharge has no external callers, so it is not re-exported.
+export { isAmazonLikeMerchant };
 
 function daysBetween(a: string, b: string): number {
   const one = new Date(`${a}T00:00:00Z`).getTime();
@@ -20,10 +26,6 @@ function numberOrNull(value: unknown): number | null {
   if (value == null || value === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
-}
-
-function last4FromText(text: string | null | undefined): string | null {
-  return String(text || '').match(/\b(\d{4})\b/)?.[1] ?? null;
 }
 
 export type MatchScore = {
@@ -48,10 +50,28 @@ export const MATCH_CONFIDENCE_THRESHOLD = 70;
 export const FALLBACK_MIN_CONFIDENCE = 50;
 
 /**
+ * Resolve a set of candidates tied at the same confidence using the
+ * unambiguous-identity secondary score (exact-cent amount, date proximity,
+ * last4). Returns the sole leader, or [] when the tie is unresolvable —
+ * abstaining rather than guessing.
+ */
+function resolveTie<T extends { confidence: number; secondary?: number }>(tied: T[]): T[] {
+  if (tied.length <= 1) return tied;
+  const bestSecondary = Math.max(...tied.map((c) => c.secondary ?? 0));
+  if (bestSecondary > 0) {
+    const leaders = tied.filter((c) => (c.secondary ?? 0) === bestSecondary);
+    if (leaders.length === 1) return leaders;
+  }
+  return [];
+}
+
+/**
  * Pick which scored orders become suggested links for one transaction.
  *
  * - Every candidate at/above {@link MATCH_CONFIDENCE_THRESHOLD} is returned
- *   (a transaction can legitimately span multiple confident orders).
+ *   (a transaction can legitimately span multiple confident orders) — unless
+ *   the top strong score is itself a tie, in which case it is resolved via
+ *   {@link resolveTie} rather than fanning out.
  * - Otherwise fall back to AT MOST the single best candidate, and only when it
  *   is unambiguous (no tie at the top score) and clears
  *   {@link FALLBACK_MIN_CONFIDENCE}.
@@ -63,28 +83,66 @@ export const FALLBACK_MIN_CONFIDENCE = 50;
  */
 export function selectMatchCandidates<T extends { confidence: number; secondary?: number }>(scored: T[]): T[] {
   const strong = scored.filter((candidate) => candidate.confidence >= MATCH_CONFIDENCE_THRESHOLD);
-  if (strong.length > 0) return strong;
+  if (strong.length > 0) {
+    // The strong tier intentionally returns MULTIPLE candidates — one charge can
+    // legitimately span several orders. But once the account-derived last4 bonus
+    // exists, two exact-cent orders on the same card both reach 85 and tie, and
+    // returning both is the historical fan-out. Guard the top tie only: a tie is
+    // resolved on secondary, or abstained on. Strictly-lower strong candidates
+    // are untouched, preserving genuine multi-order behaviour.
+    const sortedStrong = [...strong].sort((a, b) => b.confidence - a.confidence);
+    const topScore = sortedStrong[0].confidence;
+    const tiedAtTop = sortedStrong.filter((c) => c.confidence === topScore);
+    if (tiedAtTop.length > 1) {
+      const resolved = resolveTie(tiedAtTop);
+      if (resolved.length === 0) return [];
+      return [...resolved, ...sortedStrong.filter((c) => c.confidence < topScore)];
+    }
+    return strong;
+  }
 
   const sorted = [...scored].sort((a, b) => b.confidence - a.confidence);
   const best = sorted[0];
   if (!best || best.confidence < FALLBACK_MIN_CONFIDENCE) return [];
   const tiedAtBest = sorted.filter((candidate) => candidate.confidence === best.confidence);
-  if (tiedAtBest.length > 1) {
-    // Attempt a secondary tiebreak on unambiguous-identity signals (date + last4).
-    // Only resolve the tie when exactly ONE candidate strictly leads on secondary.
-    const bestSecondary = Math.max(...tiedAtBest.map((c) => c.secondary ?? 0));
-    if (bestSecondary > 0) {
-      const leadersOnSecondary = tiedAtBest.filter((c) => (c.secondary ?? 0) === bestSecondary);
-      if (leadersOnSecondary.length === 1) {
-        return [leadersOnSecondary[0]];
-      }
-    }
-    return []; // still ambiguous — abstain rather than guess
-  }
+  if (tiedAtBest.length > 1) return resolveTie(tiedAtBest);
   return [best];
 }
 
-export function scoreAmazonOrderMatch(txn: Transaction, order: ExternalOrder): MatchScore {
+/**
+ * Whether the top confidence tier (strong if any candidate clears
+ * {@link MATCH_CONFIDENCE_THRESHOLD}, else the fallback tier) had more than
+ * one candidate tied at the top score — i.e. {@link selectMatchCandidates}
+ * had to consult {@link resolveTie} to pick a winner.
+ *
+ * This matters because a resolved tie collapses to a single candidate (the
+ * winner, plus only strictly-lower ones) exactly like a genuine lone match
+ * would. A caller deciding whether to auto-accept off `candidates.length`
+ * cannot tell the two apart from the selection alone — an ambiguous pair
+ * that happened to have a secondary-score tiebreaker looks identical to an
+ * order nothing else came close to. Callers MUST consult this (on the
+ * pre-selection scored list) before trusting a singleton selection as
+ * unambiguous.
+ */
+export function isTopTied<T extends { confidence: number }>(scored: T[]): boolean {
+  const strong = scored.filter((candidate) => candidate.confidence >= MATCH_CONFIDENCE_THRESHOLD);
+  const pool = strong.length > 0 ? strong : scored;
+  if (pool.length === 0) return false;
+  const top = Math.max(...pool.map((c) => c.confidence));
+  return pool.filter((c) => c.confidence === top).length > 1;
+}
+
+export function scoreAmazonOrderMatch(
+  txn: Transaction,
+  order: ExternalOrder,
+  /**
+   * The last-4 of the card the transaction was charged to, resolved from the
+   * account's short_code. Previously scraped from txn.notes/sourceReference,
+   * which matched 0 of 111 production Amazon transactions while 403 of 538
+   * orders carry a payment_last4 — the join could never fire.
+   */
+  txnLast4: string | null,
+): MatchScore {
   let score = 0;
   let secondary = 0;
   const reasons: string[] = [];
@@ -92,7 +150,19 @@ export function scoreAmazonOrderMatch(txn: Transaction, order: ExternalOrder): M
   const orderTotal = numberOrNull(order.total);
   if (orderTotal != null) {
     const diff = Math.abs(txnAmount - Math.abs(orderTotal));
-    if (diff <= 0.5) {
+    // Exact-cent is a distinct tier ABOVE ±$0.50, credited to secondaryScore
+    // rather than confidence. Against undated orders (which score 65 and land
+    // in selectMatchCandidates' fallback tier) an exact-cent match yields 30
+    // real links with a null-test of ~0 false positives, while ±$0.50 yields 45
+    // with a null-test of 21-29. Raising the primary score instead would push
+    // these into the `strong` tier, which returns EVERY candidate — the
+    // historical fan-out. Amounts are DECIMAL-as-string, so compare with an
+    // epsilon, never `=== 0`.
+    if (diff < 0.005) {
+      score += 50;
+      secondary += 20;
+      reasons.push('amount matches to the cent');
+    } else if (diff <= 0.5) {
       score += 50;
       reasons.push(`amount within $0.50 (${diff.toFixed(2)})`);
     } else if (diff <= 2) {
@@ -122,11 +192,19 @@ export function scoreAmazonOrderMatch(txn: Transaction, order: ExternalOrder): M
     reasons.push('merchant indicates Amazon');
   }
 
-  const txnLast4 = last4FromText(`${txn.notes || ''} ${txn.sourceReference || ''}`);
-  if (txnLast4 && order.paymentLast4 && txnLast4 === order.paymentLast4) {
-    score += 20;
-    secondary += 20;
-    reasons.push('payment last4 matches');
+  if (txnLast4 && order.paymentLast4) {
+    if (txnLast4 === order.paymentLast4) {
+      score += 20;
+      secondary += 20;
+      reasons.push('payment last4 matches');
+    } else {
+      // Two different cards is positive evidence against a match, at the same
+      // magnitude as an amount mismatch. This is NOT foreign-card exclusion: it
+      // is per-pair evidence, applied regardless of ownership, and it never
+      // removes an order from the candidate pool.
+      score -= 25;
+      reasons.push('charged to a different card than the order');
+    }
   }
 
   return {
@@ -197,6 +275,10 @@ export async function runAmazonMatching(args: {
   /** Latest txn date that received a newly-suggested link, or null if none. */
   matchedDateTo: string | null;
 }> {
+  // Fold CSV/email duplicates before scoring so a partial CSV total never
+  // competes with the full email total for the same order.
+  await mergeDuplicateAmazonOrders({ householdId: args.householdId });
+
   const txns = await Transaction.findAll({
     where: {
       householdId: args.householdId,
@@ -216,15 +298,36 @@ export async function runAmazonMatching(args: {
   const orders = await ExternalOrder.findAll({
     where: { householdId: args.householdId, vendor: 'amazon' },
   });
+  const accounts = await Account.findAll({
+    where: { householdId: args.householdId },
+    attributes: ['id', 'shortCode'],
+  });
+  const last4ByAccountId = new Map<number, string | null>(
+    accounts.map((a) => [a.id, resolveAccountLast4(a.shortCode)]),
+  );
   let suggested = 0;
   let autoAccepted = 0;
   const acceptedOrderIds = new Set<number>();
   let matchedDateFrom: string | null = null;
   let matchedDateTo: string | null = null;
+  // Transactions whose sole surviving candidate this run came from a
+  // resolved tie (see isTopTied below). Their suggested link is
+  // structurally indistinguishable from a genuine lone match — exactly one
+  // non-rejected link — so without this, backfillAutoAcceptAmazonLinks would
+  // immediately re-promote it later in this same call, undoing the guard.
+  const tieAmbiguousTxnIds = new Set<number>();
 
-  for (const txn of txns.filter((row) => isAmazonLikeMerchant(`${row.merchantRaw} ${row.merchantClean}`))) {
+  for (const txn of txns.filter(
+    (row) =>
+      isAmazonLikeMerchant(`${row.merchantRaw} ${row.merchantClean}`) &&
+      !isAmazonSubscriptionCharge(`${row.merchantRaw} ${row.merchantClean}`),
+  )) {
     const scores = orders.map((order) => {
-      const { confidence, matchReason, secondaryScore } = scoreAmazonOrderMatch(txn, order);
+      const { confidence, matchReason, secondaryScore } = scoreAmazonOrderMatch(
+        txn,
+        order,
+        last4ByAccountId.get(txn.accountId) ?? null,
+      );
       return { order, confidence, matchReason, secondary: secondaryScore };
     });
     const candidates = selectMatchCandidates(scores);
@@ -232,7 +335,15 @@ export async function runAmazonMatching(args: {
     // is unambiguous + ≥ threshold. A transaction spanning multiple confident
     // orders is never auto-accepted (genuinely ambiguous which order it is).
     const sortedConf = candidates.map((c) => c.confidence).sort((a, b) => b - a);
-    const auto = candidates.length === 1 && decideAutoAccept(sortedConf);
+    // A tie-resolved selection collapses to one candidate exactly like a
+    // genuine lone match would, so `candidates.length === 1` alone cannot
+    // tell them apart. isTopTied consults the pre-selection scored list
+    // (which still has the runner-up) to veto auto-accept for the resolved
+    // case — see isTopTied's doc comment. Fixes a tie such as [85, 85]
+    // silently auto-accepting once resolveTie picks a sole leader.
+    const tied = isTopTied(scores);
+    const auto = candidates.length === 1 && !tied && decideAutoAccept(sortedConf);
+    if (tied) tieAmbiguousTxnIds.add(txn.id);
     for (const candidate of candidates) {
       const { created, accepted } = await upsertSuggestedOrderLink({
         transactionId: txn.id,
@@ -258,6 +369,21 @@ export async function runAmazonMatching(args: {
   for (const orderId of acceptedOrderIds) {
     await recomputeTransactionsReviewFromItems(await transactionIdsForOrder(orderId));
   }
+
+  // Reconcile links created before auto-accept existed. upsertSuggestedOrderLink
+  // only promotes rows it touches during THIS scan, so a suggested row whose
+  // transaction no longer produces a candidate would stay pending forever.
+  // The backfill runs its own review recompute for the orders it accepts, which
+  // is why it goes after the loop rather than feeding into it. Transactions
+  // this run deliberately left ambiguous (tieAmbiguousTxnIds) are excluded —
+  // otherwise the backfill's own "exactly one non-rejected link" heuristic
+  // would immediately re-promote the very link the guard above just refused
+  // to auto-accept.
+  const backfilled = await backfillAutoAcceptAmazonLinks({
+    householdId: args.householdId,
+    excludeTransactionIds: tieAmbiguousTxnIds,
+  });
+  autoAccepted += backfilled.promoted;
 
   return { suggested, autoAccepted, scannedTransactions: txns.length, matchedDateFrom, matchedDateTo };
 }

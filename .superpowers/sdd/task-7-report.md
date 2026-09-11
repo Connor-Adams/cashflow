@@ -1,134 +1,118 @@
-# Task 7 Report: Populate structured tax/subtotal/currency from Amazon emails
+# Task 7 report: `forceReprocess` for the existing 141 orders
 
-## Step 1: Field shape verification
+## What was done
 
-`grep -n "subtotal\|tax\|shipping\|currency\|interface ExtractedReceiptOrder\|type ExtractedReceiptOrder" backend/src/ai/extractReceiptItems.ts`
+Followed TDD per `superpowers:test-driven-development`.
 
-Confirmed at line 43–61:
-```ts
-export type ExtractedReceiptOrder = {
-  subtotal: number | null;   // line 48
-  tax: number | null;        // line 49
-  currency: string | null;   // line 51
-  // NO shipping field
-};
-```
+### 1. Test file (written first, colocated)
 
-`shipping` does NOT exist on `ExtractedReceiptOrder` — dropped the shipping local as instructed.
+`backend/src/integrations/scanReceiptsReprocess.test.ts` — new file, following the
+seeding/auth conventions in `backend/src/integrations/scanReceiptsOrderDate.test.ts`
+(same `deps` DI seam: `listMessageIds`, `fetchMessage`, `extractFromText`; same
+`before`/`beforeEach` pattern with `Household`/`User`/`UserEmailIntegration` seeded,
+`sequelize.sync({ force: true })`).
 
-## Parser changes (`backend/src/integrations/parsers/amazon.ts`)
+Deviations from the brief's sketch (the brief says its scaffolding is a sketch and
+its assertions are the requirement):
 
-1. Added `detectCurrency(body: string): string | null` helper after `parseAmount`:
-   - CDN$/CA$/CAD → 'CAD', US$/USD → 'USD', £/GBP → 'GBP', €/EUR → 'EUR', else null.
+- **Added a `ProcessedEmailMessage` row in tests 2 and 3, not just test 1.** The
+  brief's sketch only seeded the "seen" row in test 1. Without it, tests 2/3 would
+  pass trivially even with a broken/missing `forceReprocessMessageIds` bypass,
+  because the message would never have been in the `seen` set to begin with. Seeding
+  it in all three tests means the backfill tests actually exercise "bypass the skip
+  guard because of forceReprocess," not just "findOrCreate backfills nulls."
+- **Fixed the seeded `dedupeKey` to match what `scanInbox` actually computes.** I
+  ran the real Amazon parser against the brief's `BODY` fixture and confirmed it
+  returns `orderDate: null` and `items: []` for that text (no "Placed on" line, no
+  item title line before `Quantity:`). `scanInbox` builds
+  `dedupeKey = [vendor, orderId, orderDate, total, itemCount, msgId].join(':')`, so
+  the correct key is `amazon:701-9999999-8888888::44.97:0:msg-repro` (empty
+  orderDate segment, itemCount `0`) — not the brief's
+  `amazon:701-9999999-8888888:44.97:1:msg-repro`. With the brief's literal key,
+  `findOrCreate` would never match the pre-seeded row (it would insert a second
+  row instead), and the backfill would silently never run against the row the test
+  asserts on. This was caught precisely because I ran the test and watched it fail
+  for the wrong reason first (order date stayed null because a *new* order was
+  created, not because the feature was unimplemented) — then fixed the fixture
+  before re-verifying against the real implementation.
+- **`total` assertion uses `Number(order.total)` instead of a string literal.**
+  SQLite/Sequelize round-trips `DECIMAL` columns as JS numbers on this codebase
+  (confirmed against existing precedent: `amazonPipeline.test.ts` asserts
+  `order!.total` as a bare number, and `vendorCapture.test.ts` wraps it in
+  `Number(...)`). `assert.equal` from `node:assert/strict` is strict equality, so
+  comparing to the string `'99.99'` fails on a type mismatch unrelated to the
+  feature under test.
 
-2. Removed unused `SHIPPING_RE` constant (was causing TS6133 unused-variable error after shipping local was dropped).
+### 2. Implementation — `backend/src/integrations/scanReceipts.ts`
 
-3. In `parseAmazonReceiptEmail`, replaced the notes-stuffing block with structured population:
-   - `subtotal`: parsed from `SUBTOTAL_RE` via `parseAmount`.
-   - `tax`: parsed from `TAX_RE` via `parseAmount`.
-   - `currency`: from `detectCurrency(body)`.
-   - `notes`: now only `Order ${orderId}` (or null) — no longer carries tax/shipping strings.
+- Added `forceReprocessMessageIds?: string[]` to `scanInbox`'s options type,
+  alongside `sinceDateOverride`, with the doc comment from the brief verbatim.
+- Immediately after the `seen` set is populated: `for (const id of
+  opts.forceReprocessMessageIds ?? []) seen.delete(id);`
+- In the `findOrCreate` transaction block, after `result.orderCreated =
+  createdOrder;`: when `!createdOrder` (row already existed), compute a
+  `backfill` object that only sets `orderDate`, `total`, `subtotal`, `tax`,
+  `paymentLast4`, `vendorOrderId` when the **existing** field is `null` AND the
+  freshly-extracted value is non-null (orderDate additionally falls back to
+  `dateFromInternalDate(full.internalDate)`, imported from
+  `backend/src/integrations/internalDate.ts` per Task 1 — not reimplemented).
+  Calls `order.update(backfill, { transaction: t })` only if there's something to
+  fill. No field with an existing value is ever touched.
 
-## Persistence trace (Step 5)
+## Test commands run and output
 
-**`scanReceipts.ts` (line 657-659):** The `ExternalOrder.findOrCreate` defaults block hardcoded `subtotal: null, tax: null, shipping: null` — it did NOT map from `extracted!.subtotal` / `extracted!.tax`. **MAPPING WAS MISSING.**
+1. Failing-test verification (pre-implementation):
+   `cd backend && yarn tsx --import ./test/setup.ts --test src/integrations/scanReceiptsReprocess.test.ts`
+   → 1 pass, 2 fail as expected (`skippedAlreadySeen` test passed trivially since
+   the skip guard already existed; the two backfill tests failed — first because
+   `forceReprocessMessageIds` didn't exist yet, then again after fixing the
+   dedupeKey fixture, this time genuinely because the backfill code didn't exist).
 
-**Fix applied** to `backend/src/integrations/scanReceipts.ts`:
-```ts
-// Before:
-subtotal: null,
-tax: null,
-shipping: null,
+2. Post-implementation, same file:
+   ```
+   ok 1 - a seen message is skipped without forceReprocess
+   ok 2 - forceReprocess backfills null fields on an existing order
+   ok 3 - forceReprocess never overwrites a non-null field
+   # tests 3
+   # pass 3
+   # fail 0
+   ```
 
-// After:
-subtotal: extracted!.subtotal != null ? String(extracted!.subtotal) : null,
-tax: extracted!.tax != null ? String(extracted!.tax) : null,
-shipping: null,   // no shipping field on ExtractedReceiptOrder
-```
+3. Backend typecheck: `yarn workspace cashflow-backend run typecheck` → clean,
+   no output (no errors).
 
-**`vendorCapture.ts` (line 104-106):** Also hardcodes `subtotal: null, tax: null` — but this path handles bookmarklet/Apple import orders (not email scan). The bookmarklet payload schema (`CaptureOrderArgs`) does not carry `subtotal`/`tax` fields from the frontend, so fixing this would require a broader schema change. Left as-is with no change; it is a separate concern from the email parser path.
-
-## Test command + output
-
-```
-yarn workspace cashflow-backend exec tsx --import ./test/setup.ts --test src/integrations/parsers/amazonEmailParser.test.ts
-```
-
-Result: **7 pass, 0 fail** (4 new tests added, 3 pre-existing).
-
-New tests:
-- `populates structured subtotal/tax, not just notes` — asserts `tax=5.39`, `subtotal=44.97`, notes has no Tax: or Shipping: strings
-- `detects CAD currency from CDN$ prefix`
-- `detects USD currency from US$ prefix`
-- `currency is null when no currency prefix present`
-
-Existing tests updated: None required — existing tests did not assert on `notes` content for tax/shipping.
-
-## Typecheck
-
-`yarn workspace cashflow-backend run typecheck` → clean (0 errors).
-
-Initial run surfaced TS6133: 'SHIPPING_RE' is declared but its value is never read. Fixed by removing the now-unused constant.
-
-## Commit
-
-```
-feat(parser): populate structured tax/subtotal/currency from Amazon emails
-```
-
-Files committed:
-- `backend/src/integrations/parsers/amazon.ts`
-- `backend/src/integrations/parsers/amazonEmailParser.test.ts`
-- `backend/src/integrations/scanReceipts.ts`
+4. Full integrations suite (required before commit, since `scanInbox` is exercised
+   by many other test files):
+   `cd backend && yarn tsx --import ./test/setup.ts --test src/integrations/*.test.ts`
+   ```
+   1..77
+   # tests 77
+   # suites 0
+   # pass 77
+   # fail 0
+   # cancelled 0
+   # skipped 0
+   # todo 0
+   ```
+   All 77 tests across every `backend/src/integrations/*.test.ts` file pass,
+   confirming the new option and seen-set/backfill changes didn't regress any
+   existing `scanInbox` consumer.
 
 ## Concerns
 
-- `vendorCapture.ts` persistence path still hardcodes `subtotal: null, tax: null` for bookmarklet/Apple import orders. That path's upstream `CaptureOrderArgs` schema doesn't carry those fields, so fixing it requires a frontend schema change. Not in scope for this task, but worth noting for completeness.
-- `SHIPPING_RE` was removed entirely. If a future task adds a `shipping` field to `ExtractedReceiptOrder`, it will need to be re-added.
-
----
-
-## Follow-up fixes (FIX 1 + FIX 2)
-
-### FIX 1 — ExternalOrder persistence mapping test
-
-Added to `backend/src/integrations/scanReceipts.test.ts`:
-
-```
-test('scanInbox: ExternalOrder.subtotal and .tax are persisted (not null) from Amazon email')
-```
-
-**Approach**: drives `scanInbox` with a stubbed `fetchMessage` returning an Amazon-format email body (from `auto-confirm@amazon.ca`), no `extractFromText` needed since the deterministic Amazon parser handles it. Asserts the created `ExternalOrder` row has non-null `subtotal` and `tax` values.
-
-**Notes**:
-- Email body uses bare `$` on the summary lines (TOTAL_RE/SUBTOTAL_RE/TAX_RE only handle optional bare `$`; `CDN$ X.XX` format does not match those regexes). The `CDN$` prefix on the per-item line is sufficient to trigger CAD currency detection.
-- SQLite returns DECIMAL as a JS number; Postgres returns a string. Assertions use `Number()` coercion to work on both.
-- `interacCounterparty.ts` logs an ILIKE-not-supported SQLite error during the scan (pre-existing, non-fatal — same as in `scanInboxPdf.test.ts`).
-
-**Test command**: `cd backend && yarn tsx --import ./test/setup.ts --test src/integrations/scanReceipts.test.ts`
-**Result**: 5 pass, 0 fail.
-
-### FIX 2 — detectCurrency anchored to adjacent digits
-
-Tightened `detectCurrency` in `backend/src/integrations/parsers/amazon.ts` to require a currency symbol/code to be adjacent to a digit before returning a match.
-
-**Pattern changes**:
-- Before: `/CDN\$|CA\$|\bCAD\b/` — would match bare CAD or £ anywhere in body
-- After: `/CDN\$\s*\d|CA\$\s*\d|\d[\s.]*CAD\b|\bCAD\s*\d/` and equivalent for USD/GBP/EUR
-
-**New tests** added to `backend/src/integrations/parsers/amazonEmailParser.test.ts`:
-1. `incidental £ in non-price prose does NOT override CDN$-priced order currency` — asserts CAD, not GBP, when body contains non-price "£ sterling" text alongside CDN$ item pricing
-2. `detectCurrency still works for standalone CAD/USD codes adjacent to amounts` — asserts CDN$/US$ prefix patterns and trailing CAD/USD codes still resolve
-
-**Test command**: `cd backend && yarn tsx --import ./test/setup.ts --test src/integrations/parsers/amazonEmailParser.test.ts`
-**Result**: 9 pass, 0 fail (7 existing + 2 new).
-
-### Typecheck
-
-`yarn workspace cashflow-backend run typecheck` → clean (0 errors).
-
-### Commit
-
-```
-test(parser): cover tax/subtotal persistence + anchor currency detection
-```
+- A `SQLITE_ERROR: near "ILIKE": syntax error` appears in the log output for every
+  test that exercises `scanInbox`'s post-commit `runInteracCounterpartySync` step
+  (Postgres-only `ILIKE` operator run against the SQLite test DB). This is
+  pre-existing, unrelated to this change, caught internally as a `logger.warn` (the
+  code treats it as best-effort and never lets it fail the scan), and present in
+  the baseline before my changes too — not introduced by this task. Flagging per
+  the project's "Cashflow is Postgres-only, never SQLite" note in case it's worth a
+  separate follow-up to make that sync SQLite-safe for local dev/tests, but it is
+  out of scope here and does not affect correctness of `forceReprocessMessageIds`.
+- This task only adds the mechanism (`forceReprocessMessageIds` option). It does
+  not itself include a script/route that enumerates the 141 production orders and
+  calls `scanInbox` with their Gmail message ids — that wiring (reading
+  `ExternalOrder.rawPayload.gmailMessageId` for orders with `order_date IS NULL`
+  and invoking the backfill) is presumably a separate task/step in the plan, not
+  mentioned in this brief beyond "so those orders can be re-parsed against Gmail."
+  No such caller was requested or written.

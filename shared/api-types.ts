@@ -1141,6 +1141,16 @@ export type TripDetailView = {
   surgeMultiplier: number | null;
 };
 
+/**
+ * Whether an order was paid with a card Cashflow recognizes as belonging to
+ * this household. Derived per request from accounts.short_code — never
+ * persisted. `foreign` is only ever produced for vendor 'amazon' orders
+ * (see backend/src/amazon/cardOwnership.ts); every other vendor serializes
+ * as `known` or `unknown`. `foreign` orders are excluded from every spend
+ * total and from the Items page.
+ */
+export type CardOwnershipView = 'known' | 'foreign' | 'unknown';
+
 export type ExternalOrderView = {
   id: number;
   vendor: string;
@@ -1149,6 +1159,7 @@ export type ExternalOrderView = {
   shipping: string | null;
   total: string | null;
   currency: string;
+  cardOwnership: CardOwnershipView;
   trip?: TripDetailView | null;
 };
 
@@ -1289,6 +1300,7 @@ export type ItemRow = {
   order: {
     id: number
     vendor: string
+    cardOwnership: CardOwnershipView
   }
   receipt: {
     id: number

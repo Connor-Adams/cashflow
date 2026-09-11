@@ -3,7 +3,8 @@ import path from 'path';
 import crypto from 'crypto';
 import multer from 'multer';
 import { Op } from 'sequelize';
-import { Transaction, Receipt, ExternalOrder, ExternalOrderItem, TransactionOrderLink, CostcoProduct } from '../models';
+import { Account, Transaction, Receipt, ExternalOrder, ExternalOrderItem, TransactionOrderLink, CostcoProduct } from '../models';
+import { buildLast4Map, classifyCardOwnershipForDisplay } from '../amazon/cardOwnership';
 import { extractReceiptFromImage } from '../ai/extractReceiptItems';
 import { persistExtractedOrder } from './externalOrders';
 import { anchorReceiptOrderToTransaction } from '../import/receiptOrderAnchor';
@@ -228,14 +229,24 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
       order: [['createdAt', 'DESC']],
     });
     const orderIds = receipts.map((r) => r.externalOrderId).filter((x): x is number => x != null);
-    const [orders, items] = await Promise.all([
+    const [orders, items, accounts] = await Promise.all([
       orderIds.length
         ? ExternalOrder.findAll({ where: { id: { [Op.in]: orderIds }, householdId: txn.householdId } })
         : Promise.resolve([] as InstanceType<typeof ExternalOrder>[]),
       orderIds.length
         ? ExternalOrderItem.findAll({ where: { externalOrderId: { [Op.in]: orderIds } } })
         : Promise.resolve([] as InstanceType<typeof ExternalOrderItem>[]),
+      // Built once per request (never per-order) for cardOwnership below --
+      // see backend/src/amazon/cardOwnership.ts and backend/src/routes/items.ts.
+      Account.findAll({ where: { householdId: txn.householdId }, attributes: ['id', 'shortCode'] }),
     ]);
+    const last4Map = buildLast4Map(accounts.map((a) => ({ id: a.id, shortCode: a.shortCode })));
+    // Every receipt in this response is attached to the SAME `txn` (this
+    // endpoint is scoped to one transaction id), so its account is the
+    // derivable-account-guard context for every order below -- see
+    // classifyCardOwnershipForDisplay in cardOwnership.ts and the
+    // task-15 comment on items.ts's `displayCardOwnership`.
+    const linkedAccountShortCode = accounts.find((a) => a.id === txn.accountId)?.shortCode;
     const ordersById = new Map(orders.map((o) => [o.id, o]));
     const itemsByOrder = new Map<number, typeof items>();
     for (const it of items) {
@@ -269,6 +280,12 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
                 shipping: order.shipping,
                 total: order.total,
                 currency: order.currency,
+                cardOwnership: classifyCardOwnershipForDisplay(
+                  order.vendor,
+                  order.paymentLast4,
+                  last4Map,
+                  linkedAccountShortCode,
+                ),
                 trip: orderTrip(order),
               }
             : null,

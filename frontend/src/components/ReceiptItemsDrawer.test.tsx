@@ -29,6 +29,7 @@ const RECEIPT_WITH_ORDER: ReceiptWithItems = {
     shipping: null,
     total: '20.34',
     currency: 'CAD',
+    cardOwnership: 'known',
   },
   items: [
     {
@@ -88,6 +89,7 @@ const RECEIPT_UBER_TRIP: ReceiptWithItems = {
     shipping: null,
     total: '23.45',
     currency: 'CAD',
+    cardOwnership: 'known',
     trip: {
       pickupAddress: '123 Main St',
       dropoffAddress: '456 King St W',

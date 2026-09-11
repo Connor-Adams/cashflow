@@ -26,6 +26,7 @@ import './jobs/definitions/dataExportCleanup';
 import './jobs/definitions/auditBufferTrim';
 import './jobs/definitions/pdfImportProcess';
 import './jobs/definitions/simplefinSync';
+import './jobs/definitions/gmailReceiptScan';
 import { startAllJobs } from './jobs';
 
 const uploadDir = env.csvUploadDir;

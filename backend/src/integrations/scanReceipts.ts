@@ -17,6 +17,7 @@
  * The link-items pipeline stage matches the new orders to card transactions
  * on the next backfill / import.
  */
+import { QueryTypes, type Transaction as DbTransaction } from 'sequelize';
 import {
   sequelize,
   ExternalOrder,
@@ -27,8 +28,10 @@ import {
 } from '../models';
 import { classifySubject } from './subjectFilter';
 import { tryDeterministicParse } from './parsers';
+import { dateFromInternalDate } from './internalDate';
 import type { ExtractedReceiptOrder } from '../ai/extractReceiptItems';
 import { decryptSecret, encryptSecret } from '../util/symmetricEncryption';
+import { jsonExtractText } from '../util/dialectSql';
 import {
   buildAuthUrl,
   exchangeCodeForTokens,
@@ -160,8 +163,61 @@ export function buildDiscoveryQuery(opts: {
 }
 
 /**
+ * A deterministic parse worth trusting on its own — no AI gap-fill needed.
+ *
+ * Gates on `total` alone — deliberately NOT `orderDate` or `items.length`:
+ * - Amazon "Arriving" / shipment emails state a delivery date rather than an
+ *   order date, so the parser legitimately returns `orderDate: null` there;
+ *   the caller backfills it from the Gmail message's `internalDate`
+ *   afterward (see scanReceiptsOrderDate.test.ts).
+ * - The Apple and Amazon line-scanners can legitimately land on
+ *   `items: []` (e.g. a summary line resets the pending title before the
+ *   item's price line is reached) while still having read the total
+ *   correctly off its own regex (see scanInboxAiCap.test.ts's "deterministic
+ *   parses are never capped").
+ * Requiring either would spend an AI call on emails the parser already got
+ * everything useful out of. This mirrors the "clean enough" checks already
+ * used downstream in this file (`bodyClean`, the `no_items` status), which
+ * likewise never required orderDate.
+ */
+function isCompleteExtract(o: ExtractedReceiptOrder): boolean {
+  return o.total != null;
+}
+
+/**
+ * Field-wise merge: the deterministic parser wins wherever it produced a value,
+ * the AI fills the holes. Items come from whichever side has more of them —
+ * never concatenated, which would double the order.
+ */
+function mergeExtracts(
+  det: ExtractedReceiptOrder,
+  ai: ExtractedReceiptOrder,
+): ExtractedReceiptOrder {
+  return {
+    ...det,
+    vendorName: det.vendorName ?? ai.vendorName,
+    orderDate: det.orderDate ?? ai.orderDate,
+    orderId: det.orderId ?? ai.orderId,
+    subtotal: det.subtotal ?? ai.subtotal,
+    tax: det.tax ?? ai.tax,
+    total: det.total ?? ai.total,
+    currency: det.currency ?? ai.currency,
+    paymentLast4: det.paymentLast4 ?? ai.paymentLast4,
+    tenders: det.tenders.length > 0 ? det.tenders : ai.tenders,
+    items: det.items.length >= ai.items.length ? det.items : ai.items,
+    notes: det.notes ?? ai.notes,
+    trip: det.trip ?? ai.trip,
+  };
+}
+
+/**
  * Parse receipt text (an email body OR PDF-extracted text) into a structured
- * order: try the cheap deterministic vendor parsers first, then fall back to AI.
+ * order: try the cheap deterministic vendor parsers first. In production the
+ * two parsers fill DISJOINT fields — the deterministic Amazon parser gets
+ * payment_last4 on 100% of orders and a total on 0%; the AI extractor gets a
+ * total on 93% and last4 on 0%. So a complete deterministic parse is returned
+ * as-is (no AI spend), but an incomplete one is topped up by an AI call and
+ * merged field-wise rather than replaced outright.
  * `extractFromText` is injected so callers (and tests) can supply the real AI
  * extractor or a fake. `usedAi` lets callers track AI-call counts.
  */
@@ -184,12 +240,23 @@ export async function parseReceiptText(opts: {
   aiCapped: boolean;
 }> {
   const det = tryDeterministicParse({ fromAddress: opts.fromAddress, subject: opts.subject, body: opts.text });
-  if (det.ok) return { extracted: det.order, parser: det.parser, usedAi: false, aiCapped: false };
-  if (opts.budget && !opts.budget.tryConsume()) {
-    return { extracted: null, parser: 'ai', usedAi: false, aiCapped: true };
+  const detOrder = det.ok ? det.order : null;
+
+  if (detOrder && isCompleteExtract(detOrder)) {
+    return { extracted: detOrder, parser: det.ok ? det.parser : 'ai', usedAi: false, aiCapped: false };
   }
-  const extracted = await opts.extractFromText(opts.text);
-  return { extracted, parser: 'ai', usedAi: true, aiCapped: false };
+  if (opts.budget && !opts.budget.tryConsume()) {
+    // Capped: keep whatever the deterministic parser managed rather than dropping it.
+    return { extracted: detOrder, parser: det.ok ? det.parser : 'ai', usedAi: false, aiCapped: true };
+  }
+  const aiOrder = await opts.extractFromText(opts.text);
+  if (!detOrder) return { extracted: aiOrder, parser: 'ai', usedAi: true, aiCapped: false };
+  return {
+    extracted: mergeExtracts(detOrder, aiOrder),
+    parser: `${det.ok ? det.parser : 'ai'}+ai`,
+    usedAi: true,
+    aiCapped: false,
+  };
 }
 
 /** Senders the household explicitly dismissed during discovery — excluded from
@@ -365,6 +432,57 @@ export function receiptCurrencyOrDefault(extractedCurrency: string | null | unde
   return extractedCurrency ?? defaultCurrency;
 }
 
+/**
+ * Locate the ExternalOrder a forced reprocess should backfill, by Gmail
+ * message id rather than by re-deriving a content-based dedupeKey.
+ *
+ * A reparse exists specifically to IMPROVE extraction (e.g. finding an order
+ * date the original parser missed), so its dedupeKey — built from
+ * vendor:orderId:orderDate:total:itemCount:messageId — almost always differs
+ * from the one stored on the original row. Looking the order up by
+ * dedupeKey therefore misses the existing row and creates a duplicate
+ * instead of backfilling it, which is exactly backwards for a feature whose
+ * whole point is fixing already-imported orders.
+ *
+ * Two lookups, in order of preference:
+ *   1. ProcessedEmailMessage.externalOrderId for this (household, provider,
+ *      messageId) — set by every scan's recordProcessed call.
+ *   2. ExternalOrder.rawPayload.gmailMessageId — every gmail-scan order
+ *      stamps this at creation (and mergeDuplicateAmazonOrders coalesces it
+ *      onto the merge survivor), so it survives even a row whose
+ *      ProcessedEmailMessage was never written or had its externalOrderId
+ *      nulled by ON DELETE SET NULL after an unrelated order was destroyed.
+ */
+async function findExistingOrderForMessage(
+  householdId: number | null,
+  messageId: string,
+  transaction?: DbTransaction,
+): Promise<ExternalOrder | null> {
+  if (householdId == null) return null;
+
+  const seenRow = await ProcessedEmailMessage.findOne({
+    where: { householdId, provider: 'google', messageId },
+    transaction,
+  });
+  if (seenRow?.externalOrderId != null) {
+    const order = await ExternalOrder.findOne({
+      where: { id: seenRow.externalOrderId, householdId },
+      transaction,
+    });
+    if (order) return order;
+  }
+
+  const rows = await sequelize.query<{ id: number }>(
+    `SELECT id FROM external_orders
+      WHERE household_id = :householdId
+        AND ${jsonExtractText('raw_payload', 'gmailMessageId')} = :messageId
+      LIMIT 1`,
+    { replacements: { householdId, messageId }, type: QueryTypes.SELECT, transaction },
+  );
+  if (rows.length === 0) return null;
+  return ExternalOrder.findOne({ where: { id: rows[0].id, householdId }, transaction });
+}
+
 export interface ScanResultMessage {
   messageId: string;
   from: string | null;
@@ -425,6 +543,14 @@ export async function scanInbox(
     maxMessages?: number;
     /** Override sinceDate manually (e.g. one-time backfill of more history). */
     sinceDateOverride?: Date | null;
+    /**
+     * Gmail message ids to re-parse even though ProcessedEmailMessage has
+     * already seen them. Used to backfill orders written before a parser fix —
+     * the raw body is not retained, so the message is re-fetched from Gmail.
+     * Existing ExternalOrder rows get NULL fields filled in; non-null fields are
+     * never overwritten, since the user may have corrected them.
+     */
+    forceReprocessMessageIds?: string[];
   },
   callbacks: ScanCallbacks = {},
   deps: Partial<ScanDeps> = {},
@@ -480,6 +606,7 @@ export async function scanInbox(
     });
     for (const r of seenRows) seen.add(r.messageId);
   }
+  for (const id of opts.forceReprocessMessageIds ?? []) seen.delete(id);
 
   const results: ScanResultMessage[] = [];
   let created = 0;
@@ -691,34 +818,71 @@ export async function scanInbox(
         // preserving cross-message dedup when the same receipt arrives twice.
         summary.id,
       ].join(':');
+      const isForceReprocess = (opts.forceReprocessMessageIds ?? []).includes(summary.id);
 
       await sequelize.transaction(async (t) => {
-        const [order, createdOrder] = await ExternalOrder.findOrCreate({
-          where:
-            opts.householdId != null
-              ? { householdId: opts.householdId, dedupeKey }
-              : { dedupeKey },
-          defaults: {
-            householdId: opts.householdId,
-            createdByUserId: opts.userId,
-            vendor: extracted!.vendor,
-            vendorOrderId: extracted!.orderId,
-            dedupeKey,
-            orderDate: extracted!.orderDate,
-            shipmentDate: null,
-            subtotal: extracted!.subtotal != null ? String(extracted!.subtotal) : null,
-            tax: extracted!.tax != null ? String(extracted!.tax) : null,
-            shipping: null,
-            total: extracted!.total != null ? String(extracted!.total) : null,
-            currency: receiptCurrencyOrDefault(extracted!.currency),
-            paymentLast4: extracted!.paymentLast4,
-            source: `gmail-scan:${parser}${fromPdf ? '-pdf' : ''}`,
-            rawPayload: { extracted, gmailMessageId: summary.id, parser, trip: extracted!.trip ?? null } as unknown,
-          } as never,
-          transaction: t,
-        });
+        // A forced reprocess must locate the order it is improving by Gmail
+        // message id, NOT by this content-derived dedupeKey — the reparse
+        // exists to fix fields the key is built from, so a genuine
+        // improvement almost always computes a different key and would
+        // otherwise miss the existing row and create a duplicate (see
+        // findExistingOrderForMessage's doc comment).
+        const existingForReprocess = isForceReprocess
+          ? await findExistingOrderForMessage(opts.householdId, summary.id, t)
+          : null;
+
+        const [order, createdOrder] = existingForReprocess
+          ? [existingForReprocess, false]
+          : await ExternalOrder.findOrCreate({
+              where:
+                opts.householdId != null
+                  ? { householdId: opts.householdId, dedupeKey }
+                  : { dedupeKey },
+              defaults: {
+                householdId: opts.householdId,
+                createdByUserId: opts.userId,
+                vendor: extracted!.vendor,
+                vendorOrderId: extracted!.orderId,
+                dedupeKey,
+                orderDate: extracted!.orderDate ?? dateFromInternalDate(full.internalDate),
+                shipmentDate: null,
+                subtotal: extracted!.subtotal != null ? String(extracted!.subtotal) : null,
+                tax: extracted!.tax != null ? String(extracted!.tax) : null,
+                shipping: null,
+                total: extracted!.total != null ? String(extracted!.total) : null,
+                currency: receiptCurrencyOrDefault(extracted!.currency),
+                paymentLast4: extracted!.paymentLast4,
+                source: `gmail-scan:${parser}${fromPdf ? '-pdf' : ''}`,
+                rawPayload: {
+                  extracted,
+                  gmailMessageId: summary.id,
+                  parser,
+                  trip: extracted!.trip ?? null,
+                } as unknown,
+              } as never,
+              transaction: t,
+            });
         result.orderId = order.id;
         result.orderCreated = createdOrder;
+        if (!createdOrder) {
+          // Reprocess: fill holes only. Never clobber a value already present —
+          // it may have been corrected by hand.
+          const backfill: Record<string, unknown> = {};
+          const fallbackDate = extracted!.orderDate ?? dateFromInternalDate(full.internalDate);
+          if (order.orderDate == null && fallbackDate != null) backfill.orderDate = fallbackDate;
+          if (order.total == null && extracted!.total != null) backfill.total = String(extracted!.total);
+          if (order.subtotal == null && extracted!.subtotal != null) backfill.subtotal = String(extracted!.subtotal);
+          if (order.tax == null && extracted!.tax != null) backfill.tax = String(extracted!.tax);
+          if (order.paymentLast4 == null && extracted!.paymentLast4 != null) {
+            backfill.paymentLast4 = extracted!.paymentLast4;
+          }
+          if (order.vendorOrderId == null && extracted!.orderId != null) {
+            backfill.vendorOrderId = extracted!.orderId;
+          }
+          if (Object.keys(backfill).length > 0) {
+            await order.update(backfill, { transaction: t });
+          }
+        }
         if (createdOrder && extracted!.items.length > 0) {
           await ExternalOrderItem.bulkCreate(
             extracted!.items.map((it) => ({

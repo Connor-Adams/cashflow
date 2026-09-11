@@ -42,6 +42,7 @@ import {
   getHeader,
 } from './gmail';
 import { classifySubject } from './subjectFilter';
+import { dateFromInternalDate } from './internalDate';
 import { extractReceiptFromText } from '../ai/extractReceiptItems';
 import type { ExtractedReceiptOrder } from '../ai/extractReceiptItems';
 import { isPurchasesLabel, classifyDiscoveryConfidence } from './discoveryConfidence';
@@ -196,8 +197,9 @@ export async function discoverReceiptSources(
     parser: string;
     gmailMessageId: string;
     fromPdf: boolean;
+    internalDate: string | null | undefined;
   }): Promise<number> {
-    const { extracted, parser, gmailMessageId, fromPdf } = args;
+    const { extracted, parser, gmailMessageId, fromPdf, internalDate } = args;
     const dedupeKey = [
       extracted.vendor,
       extracted.orderId || '',
@@ -216,10 +218,10 @@ export async function discoverReceiptSources(
           vendor: extracted.vendor,
           vendorOrderId: extracted.orderId,
           dedupeKey,
-          orderDate: extracted.orderDate,
+          orderDate: extracted.orderDate ?? dateFromInternalDate(internalDate),
           shipmentDate: null,
-          subtotal: null,
-          tax: null,
+          subtotal: extracted.subtotal != null ? String(extracted.subtotal) : null,
+          tax: extracted.tax != null ? String(extracted.tax) : null,
           shipping: null,
           total: extracted.total != null ? String(extracted.total) : null,
           currency: receiptCurrencyOrDefault(extracted.currency),
@@ -374,7 +376,9 @@ export async function discoverReceiptSources(
       r.confidence = autoIngestAllowed ? 'high' : 'low';
 
       if (autoIngestAllowed) {
-        const orderId = await persistHighConfidenceOrder({ extracted, parser, gmailMessageId: summary.id, fromPdf });
+        const orderId = await persistHighConfidenceOrder({
+          extracted, parser, gmailMessageId: summary.id, fromPdf, internalDate: full.internalDate,
+        });
         r.orderId = orderId;
         r.status = 'auto_learned';
         autoIngested++;

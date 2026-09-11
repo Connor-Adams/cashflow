@@ -4,8 +4,28 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ItemsPage } from './ItemsPage'
 import * as api from '@/lib/api'
+import type { ItemRow } from '@cashflow/shared'
 
 void React
+
+function itemRow(overrides: Partial<ItemRow> = {}): ItemRow {
+  return {
+    id: 1,
+    title: 'Widget',
+    qty: 1,
+    unitPrice: 5,
+    totalPrice: 5,
+    currency: 'CAD',
+    taxShare: 0,
+    categoryEffective: null,
+    categoryOverride: null,
+    businessUseEffective: false,
+    businessUseOverride: null,
+    order: { id: 10, vendor: 'amazon', cardOwnership: 'known' },
+    receipt: { id: 100, date: '2026-05-01', sourceTxnId: 1000 },
+    ...overrides,
+  }
+}
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
@@ -75,5 +95,27 @@ describe('ItemsPage', () => {
     renderAt('/items?vendor=Costco')
     expect(await screen.findByText('Nothing matches this filter')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /clear filters/i })).toBeInTheDocument()
+  })
+
+  describe('card ownership badges', () => {
+    it('badges an item whose order card is unverified', async () => {
+      vi.mocked(api.getJson).mockResolvedValue({
+        items: [itemRow({ order: { id: 10, vendor: 'amazon', cardOwnership: 'unknown' } })],
+        nextCursor: null,
+      })
+      renderAt('/items')
+      expect(await screen.findByText(/unverified card/i)).toBeInTheDocument()
+    })
+
+    it('renders no badge for a known card', async () => {
+      vi.mocked(api.getJson).mockResolvedValue({
+        items: [itemRow({ order: { id: 10, vendor: 'amazon', cardOwnership: 'known' } })],
+        nextCursor: null,
+      })
+      renderAt('/items')
+      await screen.findByText('Widget')
+      expect(screen.queryByText(/unverified card/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/not your card/i)).not.toBeInTheDocument()
+    })
   })
 })
