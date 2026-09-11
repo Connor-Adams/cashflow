@@ -137,10 +137,12 @@ export function scoreAmazonOrderMatch(
   txn: Transaction,
   order: ExternalOrder,
   /**
-   * The last-4 of the card the transaction was charged to, resolved from the
-   * account's short_code. Previously scraped from txn.notes/sourceReference,
-   * which matched 0 of 111 production Amazon transactions while 403 of 538
-   * orders carry a payment_last4 — the join could never fire.
+   * The last-4 of the card the transaction was charged to: the best match
+   * from the account's short_code UNION its harvested AccountCardIdentifier
+   * last4s (see the call site's selection below and `:334-344`). Previously
+   * scraped from txn.notes/sourceReference, which matched 0 of 111
+   * production Amazon transactions while 403 of 538 orders carry a
+   * payment_last4 — the join could never fire.
    */
   txnLast4: string | null,
 ): MatchScore {
