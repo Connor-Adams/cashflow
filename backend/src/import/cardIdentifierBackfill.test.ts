@@ -212,3 +212,103 @@ test('a non-allowlisted source produces no candidates even with a tender and a l
   const rows = await AccountCardIdentifier.findAll({ where: { last4: '4321' } });
   assert.equal(rows.length, 0);
 });
+
+// FIX 2 (review): a `suggested` or `rejected` link must never be harvested,
+// in EITHER path -- the tender-paired path (amount-matched to a tender) or
+// the no-tender fallback (order.paymentLast4). Before this fix a suggested
+// link with a NULL linked_amount was skipped only by accident (amountsMatch
+// returned false); the moment the suggested-branch update in
+// matchReceiptOrderToTransactions sets that amount, this backfill would
+// harvest it anyway. Production: order 522 is exactly this shape (suggested,
+// account 14, tender 7876).
+test('a suggested link with an amount-matched tender still writes NOTHING (tender-paired path)', async () => {
+  const txn = await mkTxn(costcoAccountId, { amount: '-947.04', date: '2025-12-15' });
+  const order = await mkOrder({
+    orderDate: '2025-12-13',
+    total: '947.04',
+    source: 'costco_till_receipt-pdf',
+  });
+  await ExternalOrderTender.create(
+    { externalOrderId: order.id, sequence: 0, paymentLast4: '3114', amount: '947.04' } as never,
+  );
+  await mkLink({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    linkedAmount: '947.04',
+    status: 'suggested',
+  });
+
+  const report = await backfillAccountCardIdentifiers();
+
+  const rows = await AccountCardIdentifier.findAll({ where: { accountId: costcoAccountId } });
+  assert.equal(rows.length, 0, 'an unconfirmed (suggested) link must never be harvested');
+  assert.equal(report.newRows.length, 0);
+});
+
+test('a rejected link with an amount-matched tender still writes NOTHING (tender-paired path)', async () => {
+  const txn = await mkTxn(costcoAccountId, { amount: '-947.04', date: '2025-12-15' });
+  const order = await mkOrder({
+    orderDate: '2025-12-13',
+    total: '947.04',
+    source: 'costco_till_receipt-pdf',
+  });
+  await ExternalOrderTender.create(
+    { externalOrderId: order.id, sequence: 0, paymentLast4: '3114', amount: '947.04' } as never,
+  );
+  await mkLink({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    linkedAmount: '947.04',
+    status: 'rejected',
+  });
+
+  const report = await backfillAccountCardIdentifiers();
+
+  const rows = await AccountCardIdentifier.findAll({ where: { accountId: costcoAccountId } });
+  assert.equal(rows.length, 0, 'a rejected link must never be harvested');
+  assert.equal(report.newRows.length, 0);
+});
+
+test('a suggested link on a no-tender order still writes NOTHING (no-tender fallback)', async () => {
+  const txn = await mkTxn(costcoAccountId, { amount: '-100.00', date: '2025-06-01' });
+  const order = await mkOrder({
+    orderDate: '2025-05-30',
+    total: '100.00',
+    last4: '3114',
+    source: 'costco_till_receipt-pdf',
+  });
+  await mkLink({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    linkedAmount: '100.00',
+    status: 'suggested',
+  });
+
+  const report = await backfillAccountCardIdentifiers();
+
+  const rows = await AccountCardIdentifier.findAll({ where: { accountId: costcoAccountId } });
+  assert.equal(rows.length, 0, 'the no-tender fallback must not harvest off a suggested link');
+  assert.equal(report.newRows.length, 0);
+});
+
+test('a rejected link on a no-tender order still writes NOTHING (no-tender fallback)', async () => {
+  const txn = await mkTxn(costcoAccountId, { amount: '-100.00', date: '2025-06-01' });
+  const order = await mkOrder({
+    orderDate: '2025-05-30',
+    total: '100.00',
+    last4: '3114',
+    source: 'costco_till_receipt-pdf',
+  });
+  await mkLink({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    linkedAmount: '100.00',
+    status: 'rejected',
+  });
+
+  const report = await backfillAccountCardIdentifiers();
+
+  const rows = await AccountCardIdentifier.findAll({ where: { accountId: costcoAccountId } });
+  assert.equal(rows.length, 0, 'the no-tender fallback must not harvest off a rejected link');
+  assert.equal(report.newRows.length, 0);
+});

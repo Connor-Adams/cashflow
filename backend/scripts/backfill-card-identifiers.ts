@@ -10,9 +10,12 @@
  * backend/src/amazon/cardOwnership.ts) and upserts an identifier for each
  * (account, last4) pair reachable through its `TransactionOrderLink` rows.
  *
- * Against production this is expected to write exactly ONE new row: account 5
- * (Costco MC) -> 3114. Every other account's last-4 is already recoverable
- * from `short_code`, so a run reporting more than a handful of new rows has
+ * Against production this is expected to write exactly TWO new rows, both
+ * legitimate: account 5 (Costco MC) -> 3114 (order 399's tender, accepted
+ * link), and account 14 (Wealthsimple Chequing) -> 3812 (order 398's tender
+ * 3812/$1863.72, paired by linked_amount to an accepted link on account 14 --
+ * a split-tender Costco purchase). Every other account's last-4 is already
+ * recoverable from `short_code`, so a run reporting more than these two has
  * over-harvested and should be investigated before applying -- see the
  * design doc's "source filter that makes this safe".
  *

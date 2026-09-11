@@ -20,6 +20,18 @@
  * than the handful of genuinely new rows has over-harvested, which is the
  * failure mode to watch for, not under-harvesting.
  *
+ * `linkedAccountsForOrder` only follows `TransactionOrderLink` rows whose
+ * `status` is `'accepted'` -- a `'suggested'` link is the system's own
+ * statement that the match is not confident, and a `'rejected'` one is a
+ * confirmed non-match; neither is a basis for recording a card identifier.
+ *
+ * Against production this is expected to write exactly TWO new rows, both
+ * legitimate: `(5, '3114')` (Costco MC, from order 399's tender on an
+ * accepted link) and `(14, '3812')` (Wealthsimple Chequing, from order 398's
+ * tender `3812`/$1863.72, paired by `linked_amount` to an accepted link on
+ * account 14 -- a split-tender Costco purchase). A run reporting more than
+ * these two has over-harvested and should be investigated before applying.
+ *
  * Idempotent: `upsertAccountCardIdentifier` is a find-or-create keyed on
  * (accountId, last4), so re-running writes nothing new and never duplicates.
  *
@@ -79,7 +91,18 @@ type LinkedAccount = { last4: string; accountId: number };
  * avoid.
  */
 async function linkedAccountsForOrder(order: ExternalOrder): Promise<LinkedAccount[]> {
-  const links = await TransactionOrderLink.findAll({ where: { externalOrderId: order.id } });
+  // status: 'accepted' -- a 'suggested' link is the system's own statement
+  // that the match is NOT confident, and a 'rejected' link is a confirmed
+  // non-match. Neither is a basis for recording a card identifier. Without
+  // this filter, a suggested link is skipped today only by accident (its
+  // linked_amount is often still NULL, which fails amountsMatch below) --
+  // the moment it gets an amount, or for the no-tender fallback further
+  // down (which has no amount check at all), this would harvest off an
+  // unconfirmed or rejected match. See FIX 2 in the 2026-09-11 card
+  // identifiers review.
+  const links = await TransactionOrderLink.findAll({
+    where: { externalOrderId: order.id, status: 'accepted' },
+  });
   if (links.length === 0) return [];
 
   const txns = await Transaction.findAll({
