@@ -21,12 +21,12 @@
 // fallow-ignore-file code-duplication
 import {
   sequelize,
-  ExternalOrder,
   ExternalOrderItem,
   ProcessedEmailMessage,
   ReceiptSenderAllowlist,
   UserEmailIntegration,
 } from '../models';
+import { findOrCreateExternalOrderForDedupe } from '../models/externalOrderDedupe';
 import {
   buildDiscoveryQuery,
   getDiscoveryExclusions,
@@ -210,7 +210,11 @@ export async function discoverReceiptSources(
     ].join(':');
     let orderId = 0;
     await sequelize.transaction(async (t) => {
-      const [order, createdOrder] = await ExternalOrder.findOrCreate({
+      // findOrCreateExternalOrderForDedupe (not ExternalOrder.findOrCreate)
+      // restores a row already soft-deleted by mergeDuplicateAmazonOrders
+      // instead of colliding with the unique (household_id, dedupe_key)
+      // index on create().
+      const [order, createdOrder] = await findOrCreateExternalOrderForDedupe({
         where: { householdId: opts.householdId, dedupeKey },
         defaults: {
           householdId: opts.householdId,

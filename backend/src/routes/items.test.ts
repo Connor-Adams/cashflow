@@ -253,3 +253,46 @@ test('a household where no account can derive a last4 does not hide items/analyz
   const names = res.body.topItems.map((r: { name: string }) => r.name.toLowerCase());
   assert.equal(names.includes('nobasisanalyzewidget'), true);
 });
+
+// ─── FIX 5: soft-deleted (merged-away) orders must not surface here ───────
+//
+// ExternalOrder is now paranoid (docs/superpowers/specs/2026-09-11-account-
+// card-identifiers-design.md, Part 5). loadItemAllocationContext already has
+// a regression test proving a soft-deleted order never reaches an
+// allocation total (backend/src/summary/loadItemAllocations.test.ts), but
+// the Items page queries ExternalOrder/ExternalOrderItem directly and is
+// not covered by that chokepoint, so it needs its own coverage of all three
+// endpoints.
+test('GET /api/items omits items from a soft-deleted order', async () => {
+  const order = await makeOrder('amazon', null, 'k-soft-deleted-items');
+  await makeItem(order.id, 'SoftDeletedItemsWidget');
+  await models.ExternalOrder.destroy({ where: { id: order.id } });
+
+  const res = await request(app).get('/api/items');
+  assert.equal(res.status, 200);
+  const titles = res.body.items.map((r: { title: string }) => r.title);
+  assert.equal(titles.includes('SoftDeletedItemsWidget'), false);
+});
+
+test('GET /api/items/analyze omits items from a soft-deleted order', async () => {
+  const order = await makeOrder('amazon', null, 'k-soft-deleted-analyze');
+  await makeItem(order.id, 'SoftDeletedAnalyzeWidget');
+  await models.ExternalOrder.destroy({ where: { id: order.id } });
+
+  const res = await request(app).get('/api/items/analyze');
+  assert.equal(res.status, 200);
+  const names = res.body.topItems.map((r: { name: string }) => r.name.toLowerCase());
+  assert.equal(names.includes('softdeletedanalyzewidget'), false);
+});
+
+test('GET /api/items/analyze/trend omits points from a soft-deleted order', async () => {
+  const order = await makeOrder('amazon', null, 'k-soft-deleted-trend');
+  await makeItem(order.id, 'SoftDeletedTrendWidget');
+  await models.ExternalOrder.destroy({ where: { id: order.id } });
+
+  const res = await request(app)
+    .get('/api/items/analyze/trend')
+    .query({ itemName: 'SoftDeletedTrendWidget' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.points.length, 0);
+});

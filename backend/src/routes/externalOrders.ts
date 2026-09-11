@@ -8,6 +8,7 @@ import {
   ExternalOrderTender,
   TransactionOrderLink,
 } from '../models';
+import { findOrCreateExternalOrderForDedupe } from '../models/externalOrderDedupe';
 import { currentAuth } from '../auth/middleware';
 import { defaultCurrency } from '../config/env';
 import { logger } from '../observability/logger';
@@ -151,7 +152,11 @@ export async function persistExtractedOrder(
   ].join(':');
 
   return sequelize.transaction(async (t) => {
-    const [order, created] = await ExternalOrder.findOrCreate({
+    // findOrCreateExternalOrderForDedupe (not ExternalOrder.findOrCreate)
+    // restores a row already soft-deleted by mergeDuplicateAmazonOrders
+    // instead of colliding with the unique (household_id, dedupe_key) index
+    // on create().
+    const [order, created] = await findOrCreateExternalOrderForDedupe({
       where:
         opts.householdId != null
           ? { householdId: opts.householdId, dedupeKey }

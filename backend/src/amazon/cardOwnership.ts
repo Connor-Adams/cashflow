@@ -25,17 +25,47 @@ export function resolveAccountLast4(shortCode: string | null): string | null {
   return trimmed.slice(-4);
 }
 
-/** last4 -> account ids. A last4 shared by two accounts maps to both. */
+/**
+ * ALL last-4s known for one account (docs/superpowers/specs/2026-09-11-account-card-identifiers-design.md,
+ * Part 4): the harvested `account_card_identifiers` rows UNION the
+ * short_code-derived value.
+ *
+ * The short_code fallback is load-bearing, not legacy cruft: Amex Reserve
+ * (`701001` -> `1001`) and Amex Cobalt (`741005` -> `1005`) have 71 PDF
+ * imports between them whose filenames are date-only, so they will NEVER
+ * gain an identifier row from harvesting. Their last-4s must keep coming
+ * from short_code parsing exactly as before -- dropping this fallback would
+ * silently break the only two accounts that currently work.
+ */
+export function resolveAccountLast4s(
+  shortCode: string | null,
+  identifierLast4s: readonly string[] = [],
+): string[] {
+  const set = new Set(identifierLast4s);
+  const fromShortCode = resolveAccountLast4(shortCode);
+  if (fromShortCode != null) set.add(fromShortCode);
+  return Array.from(set);
+}
+
+/**
+ * last4 -> account ids. A last4 shared by two accounts maps to both.
+ *
+ * `identifierLast4s` is optional and additive only: every existing caller
+ * that still passes bare `{ id, shortCode }` objects behaves exactly as
+ * before. Callers that also want harvested `account_card_identifiers` rows
+ * folded in should load them ONCE per request (never per account -- this is
+ * a hot dashboard/budget path) and attach them here.
+ */
 export function buildLast4Map(
-  accounts: { id: number; shortCode: string | null }[],
+  accounts: { id: number; shortCode: string | null; identifierLast4s?: string[] }[],
 ): Map<string, number[]> {
   const map = new Map<string, number[]>();
   for (const account of accounts) {
-    const last4 = resolveAccountLast4(account.shortCode);
-    if (last4 == null) continue;
-    const ids = map.get(last4) ?? [];
-    ids.push(account.id);
-    map.set(last4, ids);
+    for (const last4 of resolveAccountLast4s(account.shortCode, account.identifierLast4s ?? [])) {
+      const ids = map.get(last4) ?? [];
+      ids.push(account.id);
+      map.set(last4, ids);
+    }
   }
   return map;
 }
@@ -88,9 +118,12 @@ export function classifyCardOwnershipForVendor(
  * own last4 genuinely matches no account, so it is being counted on benefit
  * of the doubt, not because the card was verified (task 15 finding 2).
  *
- * `linkedAccountShortCode` is:
- *   - a `string | null` -- the short_code of the account the order is
- *     actually attributed through, so the guard can be evaluated; or
+ * `linkedAccountLast4s` is:
+ *   - a `string[]` (the account's FULL last4 set — `resolveAccountLast4s`,
+ *     short_code UNION harvested `account_card_identifiers` rows) for the
+ *     account the order is actually attributed through, so the guard can be
+ *     evaluated -- an empty array means that account has no derivable last4
+ *     at all; or
  *   - `undefined` -- there is no such account to consult (no attribution),
  *     so the guard cannot apply and the raw classification stands.
  *
@@ -114,10 +147,77 @@ export function classifyCardOwnershipForDisplay(
   vendor: string,
   paymentLast4: string | null,
   map: Map<string, number[]>,
-  linkedAccountShortCode: string | null | undefined,
+  linkedAccountLast4s: string[] | undefined,
 ): CardOwnership {
   const raw = classifyCardOwnershipForVendor(vendor, paymentLast4, map);
   if (raw !== 'foreign') return raw;
-  if (linkedAccountShortCode === undefined) return raw;
-  return resolveAccountLast4(linkedAccountShortCode) == null ? 'unknown' : raw;
+  if (linkedAccountLast4s === undefined) return raw;
+  return linkedAccountLast4s.length === 0 ? 'unknown' : raw;
+}
+
+/**
+ * `ExternalOrder.source` strings trusted to harvest an `account_card_identifiers`
+ * row from a receipt tender's `paymentLast4`
+ * (docs/superpowers/specs/2026-09-11-account-card-identifiers-design.md, Part 2 —
+ * used by backend/src/import/matchReceiptToTransactions.ts).
+ *
+ * An EXPLICIT allowlist of exact source strings, not a denylist and not a
+ * "doesn't look like AI" heuristic. Production has exactly one known bad
+ * datum: `gmail-scan:ai` wrote a `9907` last-4 onto Amex Reserve that was
+ * actually an AI misparse of a non-card number on an Uber Eats receipt,
+ * while `costco_till_receipt-pdf` wrote a correct `3114` (corroborated by 4
+ * accepted links + 29 more orders). A pattern like "reject anything
+ * containing 'ai'" is one future parser id away from silently trusting the
+ * next misparse; an explicit list only grows when someone deliberately adds
+ * to it.
+ *
+ * Every entry here names a parser that reads a card number out of already-
+ * structured text via a plain regex — never an LLM:
+ *   - `costco_till_receipt-pdf` — backend/src/import/pdf/receipts/costcoTillReceipt.ts,
+ *     registered under id `costco_till_receipt`
+ *     (backend/src/import/pdf/receipts/registry.ts), reached through the
+ *     direct receipt-PDF-upload route (`${parser.id}-pdf` in
+ *     backend/src/routes/externalOrders.ts).
+ *   - `gmail-scan:<parser>` / `gmail-scan:<parser>-pdf` and the
+ *     `gmail-discovery:` equivalents — backend/src/integrations/scanReceipts.ts
+ *     and discoverReceiptSources.ts stamp these when
+ *     `tryDeterministicParse` (backend/src/integrations/parsers/index.ts)
+ *     matched one of its regex-based vendor parsers (`apple`, `google`,
+ *     `amazon`, `uber`) with NO AI fallback involved.
+ *
+ * Deliberately excluded:
+ *   - `gmail-scan:ai` / `gmail-discovery:ai` (and any `-pdf` variant) — no
+ *     deterministic parser matched; the LLM extracted everything.
+ *   - `gmail-scan:<parser>+ai` / `gmail-discovery:<parser>+ai` — the
+ *     deterministic parser came back incomplete and AI filled the rest; the
+ *     last-4 field itself is not provably the deterministic parser's.
+ *   - `email-paste` and `image-upload` — both go through AI extraction
+ *     (backend/src/ai/extractReceiptItems.ts) on arbitrary pasted/uploaded
+ *     content, never a named vendor parser.
+ *   - `${vendor}-csv` — CSV-derived orders don't reach this harvest hook
+ *     today; add explicitly if that changes.
+ */
+export const DETERMINISTIC_RECEIPT_SOURCES: ReadonlySet<string> = new Set([
+  'costco_till_receipt-pdf',
+  'gmail-scan:apple',
+  'gmail-scan:apple-pdf',
+  'gmail-scan:google',
+  'gmail-scan:google-pdf',
+  'gmail-scan:amazon',
+  'gmail-scan:amazon-pdf',
+  'gmail-scan:uber',
+  'gmail-scan:uber-pdf',
+  'gmail-discovery:apple',
+  'gmail-discovery:apple-pdf',
+  'gmail-discovery:google',
+  'gmail-discovery:google-pdf',
+  'gmail-discovery:amazon',
+  'gmail-discovery:amazon-pdf',
+  'gmail-discovery:uber',
+  'gmail-discovery:uber-pdf',
+]);
+
+/** Whether an ExternalOrder.source is trusted to harvest a card identifier from. */
+export function isDeterministicReceiptSource(source: string | null | undefined): boolean {
+  return source != null && DETERMINISTIC_RECEIPT_SOURCES.has(source);
 }

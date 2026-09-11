@@ -26,6 +26,7 @@ import {
   ReceiptSenderAllowlist,
   UserEmailIntegration,
 } from '../models';
+import { findOrCreateExternalOrderForDedupe } from '../models/externalOrderDedupe';
 import { classifySubject } from './subjectFilter';
 import { tryDeterministicParse } from './parsers';
 import { dateFromInternalDate } from './internalDate';
@@ -472,9 +473,16 @@ async function findExistingOrderForMessage(
     if (order) return order;
   }
 
+  // deleted_at IS NULL: this raw query bypasses ExternalOrder's paranoid
+  // scope, so it must exclude soft-deleted rows itself -- otherwise it could
+  // hand back a merged-away loser's id (mergeDuplicateAmazonOrders coalesces
+  // gmailMessageId onto the survivor, which also carries this key and would
+  // be the row actually worth reprocessing) and the ExternalOrder.findOne
+  // below would then (correctly) fail to find it, masking a usable order.
   const rows = await sequelize.query<{ id: number }>(
     `SELECT id FROM external_orders
       WHERE household_id = :householdId
+        AND deleted_at IS NULL
         AND ${jsonExtractText('raw_payload', 'gmailMessageId')} = :messageId
       LIMIT 1`,
     { replacements: { householdId, messageId }, type: QueryTypes.SELECT, transaction },
@@ -831,9 +839,13 @@ export async function scanInbox(
           ? await findExistingOrderForMessage(opts.householdId, summary.id, t)
           : null;
 
+        // findOrCreateExternalOrderForDedupe (not ExternalOrder.findOrCreate)
+        // restores a row already soft-deleted by mergeDuplicateAmazonOrders
+        // instead of colliding with the unique (household_id, dedupe_key)
+        // index on create().
         const [order, createdOrder] = existingForReprocess
           ? [existingForReprocess, false]
-          : await ExternalOrder.findOrCreate({
+          : await findOrCreateExternalOrderForDedupe({
               where:
                 opts.householdId != null
                   ? { householdId: opts.householdId, dedupeKey }

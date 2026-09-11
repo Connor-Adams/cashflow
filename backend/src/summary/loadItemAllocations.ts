@@ -1,6 +1,7 @@
 import { Op } from 'sequelize';
 import {
   Account,
+  AccountCardIdentifier,
   ExternalOrder,
   ExternalOrderItem,
   Transaction,
@@ -14,7 +15,7 @@ import type {
 import {
   buildLast4Map,
   classifyCardOwnershipForVendor,
-  resolveAccountLast4,
+  resolveAccountLast4s,
 } from '../amazon/cardOwnership';
 
 export type ItemAllocationContext = {
@@ -78,16 +79,39 @@ export async function loadItemAllocationContext(
   );
 
   let last4Map: Map<string, number[]>;
-  const derivableLast4ByAccountId = new Map<number, string>();
+  // Per-account FULL last4 set (short_code UNION harvested identifiers) --
+  // only its emptiness matters here (guard 2 asks "is there any basis for
+  // comparison at all"), never a specific value.
+  const derivableLast4sByAccountId = new Map<number, string[]>();
   if (householdIds.length > 0) {
-    const accounts = await Account.findAll({
-      where: { householdId: { [Op.in]: householdIds } },
-      attributes: ['id', 'shortCode'],
-    });
-    last4Map = buildLast4Map(accounts.map((a) => ({ id: a.id, shortCode: a.shortCode })));
+    const [accounts, identifierRows] = await Promise.all([
+      Account.findAll({
+        where: { householdId: { [Op.in]: householdIds } },
+        attributes: ['id', 'shortCode'],
+      }),
+      // One extra query (never per-account) so an opaque short_code (Costco)
+      // still contributes a derivable last4 once harvested.
+      AccountCardIdentifier.findAll({
+        where: { householdId: { [Op.in]: householdIds } },
+        attributes: ['accountId', 'last4'],
+      }),
+    ]);
+    const identifierLast4sByAccountId = new Map<number, string[]>();
+    for (const row of identifierRows) {
+      const list = identifierLast4sByAccountId.get(row.accountId) ?? [];
+      list.push(row.last4);
+      identifierLast4sByAccountId.set(row.accountId, list);
+    }
+    last4Map = buildLast4Map(
+      accounts.map((a) => ({
+        id: a.id,
+        shortCode: a.shortCode,
+        identifierLast4s: identifierLast4sByAccountId.get(a.id) ?? [],
+      })),
+    );
     for (const a of accounts) {
-      const last4 = resolveAccountLast4(a.shortCode);
-      if (last4 != null) derivableLast4ByAccountId.set(a.id, last4);
+      const last4s = resolveAccountLast4s(a.shortCode, identifierLast4sByAccountId.get(a.id) ?? []);
+      if (last4s.length > 0) derivableLast4sByAccountId.set(a.id, last4s);
     }
   } else {
     // No household context: skip the query entirely and use an empty map.
@@ -118,9 +142,9 @@ export async function loadItemAllocationContext(
     // Guard 2: the linked transaction's account must have a derivable last4
     // to have any basis for comparison.
     const accountId = accountIdByTxnId.get(link.transactionId);
-    const linkedAccountLast4 =
-      accountId != null ? derivableLast4ByAccountId.get(accountId) : undefined;
-    if (linkedAccountLast4 == null) return false;
+    const linkedAccountLast4s =
+      accountId != null ? derivableLast4sByAccountId.get(accountId) : undefined;
+    if (linkedAccountLast4s == null || linkedAccountLast4s.length === 0) return false;
     // Guard 1 (only Amazon orders may ever be classified foreign) is folded
     // into classifyCardOwnershipForVendor -- reused here rather than
     // reimplemented, so the vendor rule cannot drift between this exclusion

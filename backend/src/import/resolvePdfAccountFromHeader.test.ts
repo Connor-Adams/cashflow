@@ -5,6 +5,7 @@ process.env.DATABASE_PATH = ':memory:';
 
 let sequelize: import('sequelize').Sequelize;
 let Account: typeof import('../models/Account').Account;
+let AccountCardIdentifier: typeof import('../models/AccountCardIdentifier').AccountCardIdentifier;
 let Entity: typeof import('../models/Entity').Entity;
 let Household: typeof import('../models/Household').Household;
 let resolvePdfAccountFromHeader: typeof import('./runImport').resolvePdfAccountFromHeader;
@@ -13,6 +14,7 @@ before(async () => {
   const models = await import('../models');
   sequelize = models.sequelize;
   Account = models.Account;
+  AccountCardIdentifier = models.AccountCardIdentifier;
   Entity = models.Entity;
   Household = models.Household;
   ({ resolvePdfAccountFromHeader } = await import('./runImport'));
@@ -26,6 +28,7 @@ after(async () => {
 let householdId: number;
 const userId = 1;
 beforeEach(async () => {
+  await AccountCardIdentifier.destroy({ where: {}, truncate: true, force: true });
   await Account.destroy({ where: {}, truncate: true });
   await Entity.destroy({ where: {}, truncate: true });
   await Household.destroy({ where: {}, truncate: true });
@@ -178,4 +181,77 @@ test('re-importing the same personal Wise statement reuses the account (no dupli
   assert.equal(again.accountCreated, false, 're-import must reuse the existing account');
   assert.equal(again.account.id, first.account.id);
   assert.equal((await Account.findAll({ where: { householdId, name: 'Wise EUR' } })).length, 1);
+});
+
+// docs/superpowers/specs/2026-09-11-account-card-identifiers-design.md, Part 2:
+// resolvePdfAccountFromHeader harvests header.accountSuffix into
+// account_card_identifiers whenever it's a clean 4-digit card last-4,
+// regardless of how the account was resolved.
+test('harvests a 4-digit accountSuffix as an identifier when the account is resolved by short_code', async () => {
+  const r = await resolvePdfAccountFromHeader(wiseHeader('EUR', '4444', 'Connor Adams'), householdId, userId);
+
+  const rows = await AccountCardIdentifier.findAll({ where: { accountId: r.account.id } });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].last4, '4444');
+  assert.equal(rows[0].source, 'pdf_statement_header');
+  assert.equal(rows[0].householdId, householdId);
+});
+
+test('harvests the body last-4 even when the account was resolved via the Wealthsimple WSID path (opaque short_code)', async () => {
+  // WS credit-card statements key the account on the filename WSID
+  // (opaque, e.g. 'C13BRX957CAD') rather than the numeric body last-4 -- the
+  // account's short_code therefore stays opaque and resolveAccountLast4
+  // derives nothing from it. The harvest must still fire off
+  // header.accountSuffix (the body-parsed last-4), which is exactly the
+  // "matched by a filename token, not short_code" shape the design calls out
+  // for Costco.
+  const r = await resolvePdfAccountFromHeader(
+    wsCreditCardHeader('3338'),
+    householdId,
+    userId,
+    'C13BRX957CAD_2026-06_CREDIT_CARD.pdf',
+  );
+  assert.equal(r.account.shortCode, 'C13BRX957CAD', 'short_code stays the opaque WSID');
+
+  const rows = await AccountCardIdentifier.findAll({ where: { accountId: r.account.id } });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].last4, '3338');
+  assert.equal(rows[0].source, 'pdf_statement_header');
+});
+
+test('harvests on the name-fallback resolution path too', async () => {
+  // Pre-existing account with a short_code that will NOT match this
+  // statement's key, forcing the name+accountType fallback branch.
+  const existing = await Account.create({
+    householdId, name: 'Wise GBP', accountType: 'checking',
+    owner: 'me', visibility: 'private', defaultCurrency: 'GBP', shortCode: 'stale-token',
+    ownerUserId: userId, entityId: null,
+  });
+
+  const r = await resolvePdfAccountFromHeader(wiseHeader('GBP', '5555', 'Connor Adams'), householdId, userId);
+  assert.equal(r.account.id, existing.id, 'must reuse the account found via the name fallback');
+
+  const rows = await AccountCardIdentifier.findAll({ where: { accountId: r.account.id } });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].last4, '5555');
+  assert.equal(rows[0].source, 'pdf_statement_header');
+});
+
+test('does not harvest when accountSuffix is not exactly 4 digits', async () => {
+  const opaqueHeader = wsCreditCardHeader('3338');
+  const r = await resolvePdfAccountFromHeader(
+    { ...opaqueHeader, accountSuffix: 'HQ6LMLTK8CAD' },
+    householdId,
+    userId,
+  );
+  const rows = await AccountCardIdentifier.findAll({ where: { accountId: r.account.id } });
+  assert.equal(rows.length, 0);
+});
+
+test('re-importing the same statement does not duplicate the identifier row', async () => {
+  const first = await resolvePdfAccountFromHeader(wiseHeader('USD', '6666', 'Connor Adams'), householdId, userId);
+  await resolvePdfAccountFromHeader(wiseHeader('USD', '6666', 'Connor Adams'), householdId, userId);
+
+  const rows = await AccountCardIdentifier.findAll({ where: { accountId: first.account.id } });
+  assert.equal(rows.length, 1, 'upsert must not duplicate on repeat import');
 });

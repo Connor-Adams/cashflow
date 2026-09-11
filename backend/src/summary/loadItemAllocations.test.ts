@@ -444,3 +444,57 @@ test('an Amazon order with a foreign last4, linked to an account WITH a derivabl
   );
   assert.equal(ctx.ordersById.size, 0);
 });
+
+// Regression (docs/superpowers/specs/2026-09-11-account-card-identifiers-design.md,
+// Part 5): loadItemAllocationContext is the hot dashboard/budget money-math
+// chokepoint. A soft-deleted (merged-away) ExternalOrder must never reach an
+// allocation total just because its TransactionOrderLink hasn't been cleaned
+// up yet.
+test('a soft-deleted order does not appear in loadItemAllocationContext', async () => {
+  const account = await Account.create({ name: 'Soft-delete Account' } as never);
+  const txn = await Transaction.create({
+    accountId: account.id,
+    importBatch: 'test',
+    date: '2026-01-03',
+    merchantRaw: 'Amazon',
+    merchantClean: 'Amazon',
+    amount: '-25.00',
+    currency: 'CAD',
+    sourceRowFingerprint: 'fp-soft-deleted-1',
+    sourceIdentityFingerprint: 'sif-soft-deleted-1',
+  } as never);
+  const order = await ExternalOrder.create({
+    vendor: 'amazon',
+    dedupeKey: 'k-soft-deleted-1',
+    total: '25.00',
+    currency: 'CAD',
+    source: 'test',
+  } as never);
+  await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'Widget',
+    quantity: 1,
+    totalPrice: '25.00',
+  } as never);
+  await TransactionOrderLink.create({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    confidence: '90',
+    matchReason: 'test',
+    status: 'accepted',
+    linkedAmount: '25.00',
+  } as never);
+
+  // Sanity check: before the soft delete, the order is allocated normally.
+  const before = await loadItemAllocationContext([txn.id]);
+  assert.equal(before.ordersById.has(order.id), true);
+
+  await order.destroy();
+
+  const after = await loadItemAllocationContext([txn.id]);
+  assert.equal(
+    after.ordersById.has(order.id),
+    false,
+    'a soft-deleted order must never reach an allocation total',
+  );
+});

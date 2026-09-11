@@ -11,6 +11,7 @@ import {
   ImportHistory,
   TransactionSignal,
 } from '../models';
+import { upsertAccountCardIdentifier } from '../models/AccountCardIdentifier';
 import {
   hashContent,
   rowFingerprint,
@@ -1175,6 +1176,28 @@ export async function resolvePdfAccountFromHeader(
     await applyCreditCardStatementSummary({ account, header, userId, householdId });
   } catch (err) {
     logger.error({ err, accountId: account.id }, 'cc-statement: auto-fill failed (non-fatal)');
+  }
+
+  // Harvest a card identifier off the statement header
+  // (docs/superpowers/specs/2026-09-11-account-card-identifiers-design.md,
+  // Part 2). Fires regardless of HOW `account` above was resolved --
+  // short_code, the Wealthsimple WSID path, or the name fallback -- so an
+  // account keyed by an opaque token still gains its real card number.
+  // Never lets a harvesting failure fail the import.
+  if (header.accountSuffix != null && /^\d{4}$/.test(header.accountSuffix)) {
+    try {
+      await upsertAccountCardIdentifier({
+        householdId,
+        accountId: account.id,
+        last4: header.accountSuffix,
+        source: 'pdf_statement_header',
+      });
+    } catch (err) {
+      logger.error(
+        { err, accountId: account.id },
+        'account-card-identifier: pdf statement header harvest failed (non-fatal)',
+      );
+    }
   }
 
   return { account, accountCreated, overrideBusiness };

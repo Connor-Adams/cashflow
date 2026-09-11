@@ -21,8 +21,9 @@ import {
   buildLast4Map,
   classifyCardOwnership,
   classifyCardOwnershipForVendor,
-  resolveAccountLast4,
+  resolveAccountLast4s,
 } from '../amazon/cardOwnership';
+import { loadIdentifierLast4sByAccountId } from '../models/AccountCardIdentifier';
 
 const router = Router();
 
@@ -59,7 +60,7 @@ const router = Router();
  */
 async function foreignOrderIds(
   householdId: number,
-  accounts: { id: number; shortCode: string | null }[],
+  accounts: { id: number; shortCode: string | null; identifierLast4s: string[] }[],
   last4Map: Map<string, number[]>,
 ): Promise<number[]> {
   // Household-level "no basis for comparison" guard: when NOT ONE account in
@@ -104,7 +105,7 @@ async function foreignOrderIds(
   for (const link of links) {
     const accountId = accountIdByTxnId.get(link.transactionId);
     const account = accountId != null ? accountById.get(accountId) : undefined;
-    if (account == null || resolveAccountLast4(account.shortCode) == null) {
+    if (account == null || resolveAccountLast4s(account.shortCode, account.identifierLast4s).length === 0) {
       savedByLink.add(link.externalOrderId);
     }
   }
@@ -112,15 +113,27 @@ async function foreignOrderIds(
   return candidateIds.filter((id) => !savedByLink.has(id));
 }
 
-/** Loads the household's accounts once per request, deriving the last4 map from them. */
+/**
+ * Loads the household's accounts once per request, deriving the last4 map
+ * from them. `identifierLast4s` comes from a single extra
+ * account_card_identifiers query (never per account) so an opaque
+ * short_code (Costco) still contributes a derivable last4 once harvested.
+ */
 async function loadLast4Context(
   householdId: number,
 ): Promise<{
-  accounts: { id: number; shortCode: string | null }[];
+  accounts: { id: number; shortCode: string | null; identifierLast4s: string[] }[];
   last4Map: Map<string, number[]>;
 }> {
-  const accounts = await Account.findAll({ where: { householdId }, attributes: ['id', 'shortCode'] });
-  const plain = accounts.map((a) => ({ id: a.id, shortCode: a.shortCode }));
+  const [accounts, identifierLast4sByAccountId] = await Promise.all([
+    Account.findAll({ where: { householdId }, attributes: ['id', 'shortCode'] }),
+    loadIdentifierLast4sByAccountId(householdId),
+  ]);
+  const plain = accounts.map((a) => ({
+    id: a.id,
+    shortCode: a.shortCode,
+    identifierLast4s: identifierLast4sByAccountId.get(a.id) ?? [],
+  }));
   return { accounts: plain, last4Map: buildLast4Map(plain) };
 }
 
