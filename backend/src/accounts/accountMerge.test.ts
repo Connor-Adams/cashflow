@@ -16,6 +16,7 @@ process.env.DATABASE_PATH = ':memory:';
 let models: typeof import('../models');
 let mergeAccounts: typeof import('./accountMerge').mergeAccounts;
 let AccountMergeError: typeof import('./accountMerge').AccountMergeError;
+let upsertAccountCardIdentifier: typeof import('../models/AccountCardIdentifier').upsertAccountCardIdentifier;
 let household: { id: number };
 let userId: number;
 
@@ -25,6 +26,7 @@ before(async () => {
   const mod = await import('./accountMerge');
   mergeAccounts = mod.mergeAccounts;
   AccountMergeError = mod.AccountMergeError;
+  upsertAccountCardIdentifier = (await import('../models/AccountCardIdentifier')).upsertAccountCardIdentifier;
 });
 
 after(async () => {
@@ -32,6 +34,7 @@ after(async () => {
 });
 
 beforeEach(async () => {
+  await models.AccountCardIdentifier.destroy({ where: {}, force: true });
   await models.Transaction.destroy({ where: {}, truncate: true });
   await models.PlannedEvent.destroy({ where: {}, truncate: true });
   await models.Account.destroy({ where: {}, truncate: true });
@@ -76,6 +79,15 @@ async function seedTxn(accountId: number, amount = -100) {
     sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
     sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
   } as never);
+}
+
+async function seedIdentifier(accountId: number, last4: string) {
+  return upsertAccountCardIdentifier({
+    householdId: household.id,
+    accountId,
+    last4,
+    source: 'test',
+  });
 }
 
 async function seedPlannedEvent(accountId: number) {
@@ -139,6 +151,45 @@ test('zero-transaction source still merges (edge case)', async () => {
   assert.equal(result.movedTransactions, 0);
   await source.reload();
   assert.equal(source.mergedIntoId, target.id);
+});
+
+// FIX 3 (review): AccountCardIdentifier was missing from CHILD_MODELS, so a
+// merged-away source account's harvested last-4s stayed on the hidden source
+// -- buildLast4Map still resolved that last-4 to the source account, while
+// the target's own last-4 set lacked it, tripping scoreAmazonOrderMatch's
+// -25 "different card" penalty against genuinely correct matches on target.
+test('carries harvested card identifiers from source to target (FIX 3)', async () => {
+  const source = await seedAccount('Old');
+  const target = await seedAccount('New');
+  await seedIdentifier(source.id, '1234');
+
+  const result = await mergeAccounts({ sourceId: source.id, targetId: target.id, householdId: household.id });
+
+  assert.equal(result.movedTotal >= 1, true);
+  const sourceRows = await models.AccountCardIdentifier.findAll({ where: { accountId: source.id } });
+  assert.equal(sourceRows.length, 0, 'the identifier must not remain on the hidden source account');
+  const targetRows = await models.AccountCardIdentifier.findAll({ where: { accountId: target.id } });
+  assert.equal(targetRows.length, 1);
+  assert.equal(targetRows[0].last4, '1234');
+});
+
+test('merging a shared last4 does not violate the (account_id, last4) unique index', async () => {
+  const source = await seedAccount('Old');
+  const target = await seedAccount('New');
+  // Both accounts already know this same card -- reassigning the source's
+  // row onto the target would collide with the target's own row under the
+  // UNIQUE(account_id, last4) index unless the merge resolves it first.
+  await seedIdentifier(source.id, '9999');
+  await seedIdentifier(target.id, '9999');
+  await seedIdentifier(source.id, '1111'); // a non-colliding one must still move
+
+  await mergeAccounts({ sourceId: source.id, targetId: target.id, householdId: household.id });
+
+  const targetRows = await models.AccountCardIdentifier.findAll({ where: { accountId: target.id } });
+  const targetLast4s = targetRows.map((r) => r.last4).sort();
+  assert.deepEqual(targetLast4s, ['1111', '9999']);
+  const sourceRows = await models.AccountCardIdentifier.findAll({ where: { accountId: source.id } });
+  assert.equal(sourceRows.length, 0);
 });
 
 test('same-id throws SAME_ID (AC #8)', async () => {

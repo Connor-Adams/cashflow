@@ -17,6 +17,7 @@ import { Op } from 'sequelize';
 import type { Transaction as DbTransaction, Model, ModelStatic } from 'sequelize';
 import {
   Account,
+  AccountCardIdentifier,
   Transaction,
   PlannedEvent,
   AccountStatement,
@@ -89,6 +90,7 @@ const CHILD_MODELS: ReadonlyArray<{ model: ModelStatic<Model>; label: string }> 
   { model: InvestmentActivity, label: 'investmentActivities' },
   { model: PortfolioDailySnapshot, label: 'portfolioDailySnapshots' },
   { model: PdfImportItem, label: 'pdfImportItems' },
+  { model: AccountCardIdentifier, label: 'accountCardIdentifiers' },
 ];
 
 function normalizeCurrency(value: string | null): string {
@@ -146,6 +148,25 @@ export async function mergeAccounts(input: MergeAccountsInput): Promise<MergeAcc
   let movedTotal = 0;
 
   await sequelize.transaction(async (t: DbTransaction) => {
+    // AccountCardIdentifier carries a UNIQUE(account_id, last4) index. A
+    // plain bulk UPDATE reassigning every source row to targetId would
+    // violate it if the source and target already share a last4. The target
+    // already knows that card, so drop the source's row for any last4 the
+    // target already holds -- it would be redundant once the source is
+    // hidden -- before the generic reassignment loop below runs.
+    const targetIdentifiers = await AccountCardIdentifier.findAll({
+      where: { accountId: targetId },
+      attributes: ['last4'],
+      transaction: t,
+    });
+    const targetLast4s = targetIdentifiers.map((r) => r.last4);
+    if (targetLast4s.length > 0) {
+      await AccountCardIdentifier.destroy({
+        where: { accountId: sourceId, last4: { [Op.in]: targetLast4s } },
+        transaction: t,
+      });
+    }
+
     for (const { model, label } of CHILD_MODELS) {
       const [affected] = await model.update(
         { accountId: targetId } as never,
