@@ -1,5 +1,6 @@
 import { sequelize } from '../db';
 import { Account, initAccount } from './Account';
+import { AccountCardIdentifier, initAccountCardIdentifier } from './AccountCardIdentifier';
 import { Rule, initRule } from './Rule';
 import { Transaction, initTransaction } from './Transaction';
 import { ImportHistory, initImportHistory } from './ImportHistory';
@@ -139,6 +140,7 @@ initPartnerSettlement(sequelize);
 initBudgetTarget(sequelize);
 initBudgetExclusion(sequelize);
 initAccount(sequelize);
+initAccountCardIdentifier(sequelize);
 initRule(sequelize);
 initTransaction(sequelize);
 initImportHistory(sequelize);
@@ -368,6 +370,12 @@ Account.hasOne(SimplefinAccountLink, {
   onDelete: 'CASCADE',
 });
 SimplefinAccountLink.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
+
+Account.hasMany(AccountCardIdentifier, {
+  foreignKey: 'account_id',
+  as: 'cardIdentifiers',
+});
+AccountCardIdentifier.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
 
 Account.hasMany(Transaction, { foreignKey: 'account_id', as: 'transactions' });
 Transaction.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
@@ -1112,6 +1120,7 @@ export {
   BudgetTarget,
   BudgetExclusion,
   Account,
+  AccountCardIdentifier,
   Rule,
   Transaction,
   ImportHistory,
