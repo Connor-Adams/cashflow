@@ -1,7 +1,8 @@
 import { Op, type Transaction as DbTransaction } from 'sequelize';
-import { ExternalOrder, Transaction, TransactionOrderLink } from '../models';
+import { Account, ExternalOrder, Transaction, TransactionOrderLink } from '../models';
 import { decideAutoAccept } from './autoAccept';
 import { backfillAutoAcceptAmazonLinks } from './backfillAutoAcceptLinks';
+import { resolveAccountLast4 } from './cardOwnership';
 import { mergeDuplicateAmazonOrders } from './mergeDuplicateOrders';
 import {
   recomputeTransactionsReviewFromItems,
@@ -22,10 +23,6 @@ function numberOrNull(value: unknown): number | null {
   if (value == null || value === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
-}
-
-function last4FromText(text: string | null | undefined): string | null {
-  return String(text || '').match(/\b(\d{4})\b/)?.[1] ?? null;
 }
 
 export type MatchScore = {
@@ -50,10 +47,28 @@ export const MATCH_CONFIDENCE_THRESHOLD = 70;
 export const FALLBACK_MIN_CONFIDENCE = 50;
 
 /**
+ * Resolve a set of candidates tied at the same confidence using the
+ * unambiguous-identity secondary score (exact-cent amount, date proximity,
+ * last4). Returns the sole leader, or [] when the tie is unresolvable —
+ * abstaining rather than guessing.
+ */
+function resolveTie<T extends { confidence: number; secondary?: number }>(tied: T[]): T[] {
+  if (tied.length <= 1) return tied;
+  const bestSecondary = Math.max(...tied.map((c) => c.secondary ?? 0));
+  if (bestSecondary > 0) {
+    const leaders = tied.filter((c) => (c.secondary ?? 0) === bestSecondary);
+    if (leaders.length === 1) return leaders;
+  }
+  return [];
+}
+
+/**
  * Pick which scored orders become suggested links for one transaction.
  *
  * - Every candidate at/above {@link MATCH_CONFIDENCE_THRESHOLD} is returned
- *   (a transaction can legitimately span multiple confident orders).
+ *   (a transaction can legitimately span multiple confident orders) — unless
+ *   the top strong score is itself a tie, in which case it is resolved via
+ *   {@link resolveTie} rather than fanning out.
  * - Otherwise fall back to AT MOST the single best candidate, and only when it
  *   is unambiguous (no tie at the top score) and clears
  *   {@link FALLBACK_MIN_CONFIDENCE}.
@@ -65,28 +80,43 @@ export const FALLBACK_MIN_CONFIDENCE = 50;
  */
 export function selectMatchCandidates<T extends { confidence: number; secondary?: number }>(scored: T[]): T[] {
   const strong = scored.filter((candidate) => candidate.confidence >= MATCH_CONFIDENCE_THRESHOLD);
-  if (strong.length > 0) return strong;
+  if (strong.length > 0) {
+    // The strong tier intentionally returns MULTIPLE candidates — one charge can
+    // legitimately span several orders. But once the account-derived last4 bonus
+    // exists, two exact-cent orders on the same card both reach 85 and tie, and
+    // returning both is the historical fan-out. Guard the top tie only: a tie is
+    // resolved on secondary, or abstained on. Strictly-lower strong candidates
+    // are untouched, preserving genuine multi-order behaviour.
+    const sortedStrong = [...strong].sort((a, b) => b.confidence - a.confidence);
+    const topScore = sortedStrong[0].confidence;
+    const tiedAtTop = sortedStrong.filter((c) => c.confidence === topScore);
+    if (tiedAtTop.length > 1) {
+      const resolved = resolveTie(tiedAtTop);
+      if (resolved.length === 0) return [];
+      return [...resolved, ...sortedStrong.filter((c) => c.confidence < topScore)];
+    }
+    return strong;
+  }
 
   const sorted = [...scored].sort((a, b) => b.confidence - a.confidence);
   const best = sorted[0];
   if (!best || best.confidence < FALLBACK_MIN_CONFIDENCE) return [];
   const tiedAtBest = sorted.filter((candidate) => candidate.confidence === best.confidence);
-  if (tiedAtBest.length > 1) {
-    // Attempt a secondary tiebreak on unambiguous-identity signals (date + last4).
-    // Only resolve the tie when exactly ONE candidate strictly leads on secondary.
-    const bestSecondary = Math.max(...tiedAtBest.map((c) => c.secondary ?? 0));
-    if (bestSecondary > 0) {
-      const leadersOnSecondary = tiedAtBest.filter((c) => (c.secondary ?? 0) === bestSecondary);
-      if (leadersOnSecondary.length === 1) {
-        return [leadersOnSecondary[0]];
-      }
-    }
-    return []; // still ambiguous — abstain rather than guess
-  }
+  if (tiedAtBest.length > 1) return resolveTie(tiedAtBest);
   return [best];
 }
 
-export function scoreAmazonOrderMatch(txn: Transaction, order: ExternalOrder): MatchScore {
+export function scoreAmazonOrderMatch(
+  txn: Transaction,
+  order: ExternalOrder,
+  /**
+   * The last-4 of the card the transaction was charged to, resolved from the
+   * account's short_code. Previously scraped from txn.notes/sourceReference,
+   * which matched 0 of 111 production Amazon transactions while 403 of 538
+   * orders carry a payment_last4 — the join could never fire.
+   */
+  txnLast4: string | null,
+): MatchScore {
   let score = 0;
   let secondary = 0;
   const reasons: string[] = [];
@@ -136,11 +166,14 @@ export function scoreAmazonOrderMatch(txn: Transaction, order: ExternalOrder): M
     reasons.push('merchant indicates Amazon');
   }
 
-  const txnLast4 = last4FromText(`${txn.notes || ''} ${txn.sourceReference || ''}`);
-  if (txnLast4 && order.paymentLast4 && txnLast4 === order.paymentLast4) {
-    score += 20;
-    secondary += 20;
-    reasons.push('payment last4 matches');
+  if (txnLast4 && order.paymentLast4) {
+    if (txnLast4 === order.paymentLast4) {
+      score += 20;
+      secondary += 20;
+      reasons.push('payment last4 matches');
+    }
+    // NOTE: the mismatch penalty lives in Task 12, gated on production
+    // verification. Do not add it here.
   }
 
   return {
@@ -234,6 +267,13 @@ export async function runAmazonMatching(args: {
   const orders = await ExternalOrder.findAll({
     where: { householdId: args.householdId, vendor: 'amazon' },
   });
+  const accounts = await Account.findAll({
+    where: { householdId: args.householdId },
+    attributes: ['id', 'shortCode'],
+  });
+  const last4ByAccountId = new Map<number, string | null>(
+    accounts.map((a) => [a.id, resolveAccountLast4(a.shortCode)]),
+  );
   let suggested = 0;
   let autoAccepted = 0;
   const acceptedOrderIds = new Set<number>();
@@ -242,7 +282,11 @@ export async function runAmazonMatching(args: {
 
   for (const txn of txns.filter((row) => isAmazonLikeMerchant(`${row.merchantRaw} ${row.merchantClean}`))) {
     const scores = orders.map((order) => {
-      const { confidence, matchReason, secondaryScore } = scoreAmazonOrderMatch(txn, order);
+      const { confidence, matchReason, secondaryScore } = scoreAmazonOrderMatch(
+        txn,
+        order,
+        last4ByAccountId.get(txn.accountId) ?? null,
+      );
       return { order, confidence, matchReason, secondary: secondaryScore };
     });
     const candidates = selectMatchCandidates(scores);

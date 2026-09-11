@@ -74,7 +74,7 @@ test('scoreAmazonOrderMatch returns secondaryScore=25 when date is within 5 days
     paymentLast4: null,
   } as unknown as ExternalOrder;
 
-  const result = scoreAmazonOrderMatch(txn, orderWithDate);
+  const result = scoreAmazonOrderMatch(txn, orderWithDate, null);
   assert.equal(result.secondaryScore, 25, 'date within 5 days should contribute 25 secondary points');
 });
 
@@ -95,7 +95,7 @@ test('scoreAmazonOrderMatch returns secondaryScore=20 when last4 matches', async
     paymentLast4: '1234',
   } as unknown as ExternalOrder;
 
-  const result = scoreAmazonOrderMatch(txn, orderWithLast4);
+  const result = scoreAmazonOrderMatch(txn, orderWithLast4, '1234');
   assert.equal(result.secondaryScore, 20, 'last4 match should contribute 20 secondary points');
 });
 
@@ -116,7 +116,7 @@ test('scoreAmazonOrderMatch returns secondaryScore=45 for date+last4 combined', 
     paymentLast4: '1234',
   } as unknown as ExternalOrder;
 
-  const result = scoreAmazonOrderMatch(txn, orderBoth);
+  const result = scoreAmazonOrderMatch(txn, orderBoth, '1234');
   assert.equal(result.secondaryScore, 45, 'date(25) + last4(20) should give secondaryScore=45');
 });
 
@@ -137,7 +137,7 @@ test('scoreAmazonOrderMatch returns secondaryScore=0 for amount-only match (no d
     paymentLast4: null,
   } as unknown as ExternalOrder;
 
-  const result = scoreAmazonOrderMatch(txn, orderAmountOnly);
+  const result = scoreAmazonOrderMatch(txn, orderAmountOnly, null);
   assert.equal(
     result.secondaryScore,
     0,
@@ -175,8 +175,8 @@ test('selectMatchCandidates with scoreAmazonOrderMatch-derived secondaryScore: t
     paymentLast4: null,
   } as unknown as ExternalOrder;
 
-  const scoreA = scoreAmazonOrderMatch(txn, orderDateMatch);
-  const scoreB = scoreAmazonOrderMatch(txn, orderNoDate);
+  const scoreA = scoreAmazonOrderMatch(txn, orderDateMatch, null);
+  const scoreB = scoreAmazonOrderMatch(txn, orderNoDate, null);
 
   // Thread secondaryScore → secondary as runAmazonMatching does
   const candidates = [
@@ -221,19 +221,19 @@ const undatedOrder = (total: string) =>
   ({ total, orderDate: null, shipmentDate: null, paymentLast4: null, currency: 'CAD' } as unknown as ExternalOrder);
 
 test('an exact-cent amount match credits secondaryScore', () => {
-  const exact = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.97'));
+  const exact = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.97'), null);
   assert.equal(exact.secondaryScore >= 20, true, 'exact cent match scores on secondary');
   assert.match(exact.matchReason, /to the cent/);
 });
 
 test('a near-miss inside $0.50 does NOT credit secondaryScore', () => {
-  const near = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.70'));
+  const near = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.70'), null);
   assert.equal(near.secondaryScore, 0);
 });
 
 test('exact-cent and near-miss tie on confidence but the exact one wins', () => {
-  const exact = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.97'));
-  const near = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.70'));
+  const exact = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.97'), null);
+  const near = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.70'), null);
   assert.equal(exact.confidence, near.confidence, 'both score 65 — this is the tie that used to abstain');
 
   const picked = selectMatchCandidates([
@@ -245,16 +245,76 @@ test('exact-cent and near-miss tie on confidence but the exact one wins', () => 
 });
 
 test('an undated exact-cent order stays below the strong threshold', () => {
-  const exact = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.97'));
+  const exact = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.97'), null);
   assert.equal(exact.confidence < 70, true, 'must stay in the fallback tier — fan-out guard');
 });
 
 test('two exact-cent orders abstain rather than fan out', () => {
-  const a = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.97'));
-  const b = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.97'));
+  const a = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.97'), null);
+  const b = scoreAmazonOrderMatch(exactCentTxn, undatedOrder('44.97'), null);
   const picked = selectMatchCandidates([
     { id: 'a', confidence: a.confidence, secondary: a.secondaryScore },
     { id: 'b', confidence: b.confidence, secondary: b.secondaryScore },
   ]);
   assert.equal(picked.length, 0, 'ambiguous — abstain');
+});
+
+// ─── account-derived last4 bonus + strong-tier tie guard (Task 11) ───────────
+// last4FromText scraped txn.notes/sourceReference and matched 0 of 111
+// production Amazon transactions. The card last4 actually lives on the
+// transaction's account (accounts.short_code), resolved via
+// resolveAccountLast4 and threaded in as scoreAmazonOrderMatch's third
+// parameter. Turning this signal on pushes an undated exact-cent match from
+// 65 into the strong tier (50 + 15 + 20 = 85), so these tests also cover the
+// strong-tier tie guard that keeps that from fanning out.
+
+test('the last4 bonus comes from the account, not from txn text', () => {
+  const order = {
+    total: '44.97',
+    orderDate: '2025-08-27',
+    shipmentDate: null,
+    paymentLast4: '1001',
+    currency: 'CAD',
+  } as never;
+  const withAccount = scoreAmazonOrderMatch(exactCentTxn, order, '1001');
+  const withoutAccount = scoreAmazonOrderMatch(exactCentTxn, order, null);
+  assert.equal(withAccount.confidence > withoutAccount.confidence, true);
+  assert.match(withAccount.matchReason, /last4 matches/);
+});
+
+test('two exact-cent orders on the SAME card abstain instead of fanning out', () => {
+  // Both score 50 + 15 + 20 = 85, which clears the strong threshold.
+  const order = {
+    total: '44.97',
+    orderDate: null,
+    shipmentDate: null,
+    paymentLast4: '1001',
+    currency: 'CAD',
+  } as never;
+  const a = scoreAmazonOrderMatch(exactCentTxn, order, '1001');
+  const b = scoreAmazonOrderMatch(exactCentTxn, order, '1001');
+  assert.equal(a.confidence >= 70, true, 'precondition: these are in the strong tier');
+
+  const picked = selectMatchCandidates([
+    { id: 'a', confidence: a.confidence, secondary: a.secondaryScore },
+    { id: 'b', confidence: b.confidence, secondary: b.secondaryScore },
+  ]);
+  assert.equal(picked.length, 0, 'strong-tier tie must abstain, not fan out');
+});
+
+test('a genuine multi-order charge at different strong scores still returns all', () => {
+  const picked = selectMatchCandidates([
+    { id: 'a', confidence: 90, secondary: 20 },
+    { id: 'b', confidence: 75, secondary: 0 },
+  ]);
+  assert.equal(picked.length, 2, 'different scores — not a tie, preserve multi-order behaviour');
+});
+
+test('a resolvable strong tie keeps the winner plus strictly-lower candidates', () => {
+  const picked = selectMatchCandidates([
+    { id: 'tieWinner', confidence: 85, secondary: 20 },
+    { id: 'tieLoser', confidence: 85, secondary: 0 },
+    { id: 'lower', confidence: 75, secondary: 0 },
+  ]);
+  assert.deepEqual(picked.map((p) => (p as { id: string }).id).sort(), ['lower', 'tieWinner']);
 });
