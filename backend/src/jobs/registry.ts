@@ -24,6 +24,10 @@ export function listDefinitions(): JobDefinition[] {
   return Array.from(definitions.values());
 }
 
+export function getJobDefinition(name: string): JobDefinition | undefined {
+  return definitions.get(name);
+}
+
 function nextRunAt(cronExpr: string): string | null {
   try {
     return CronExpressionParser.parse(cronExpr).next().toISOString();
