@@ -1,6 +1,7 @@
 import { Op, type Transaction as DbTransaction } from 'sequelize';
 import { ExternalOrder, Transaction, TransactionOrderLink } from '../models';
 import { decideAutoAccept } from './autoAccept';
+import { backfillAutoAcceptAmazonLinks } from './backfillAutoAcceptLinks';
 import {
   recomputeTransactionsReviewFromItems,
   transactionIdsForOrder,
@@ -270,6 +271,14 @@ export async function runAmazonMatching(args: {
   for (const orderId of acceptedOrderIds) {
     await recomputeTransactionsReviewFromItems(await transactionIdsForOrder(orderId));
   }
+
+  // Reconcile links created before auto-accept existed. upsertSuggestedOrderLink
+  // only promotes rows it touches during THIS scan, so a suggested row whose
+  // transaction no longer produces a candidate would stay pending forever.
+  // The backfill runs its own review recompute for the orders it accepts, which
+  // is why it goes after the loop rather than feeding into it.
+  const backfilled = await backfillAutoAcceptAmazonLinks({ householdId: args.householdId });
+  autoAccepted += backfilled.promoted;
 
   return { suggested, autoAccepted, scannedTransactions: txns.length, matchedDateFrom, matchedDateTo };
 }

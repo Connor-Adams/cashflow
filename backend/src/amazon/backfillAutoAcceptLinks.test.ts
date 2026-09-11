@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { Transaction, ExternalOrder, TransactionOrderLink, Household, Account } from '../models';
 import { backfillAutoAcceptAmazonLinks } from './backfillAutoAcceptLinks';
+import { runAmazonMatching } from './matcher';
 
 before(async () => {
   await sequelize.sync({ force: true });
@@ -82,4 +83,44 @@ test('leaves both links suggested when a transaction has two competing suggested
   for (const l of links) {
     assert.equal(l.status, 'suggested', `link ${l.externalOrderId} must remain suggested`);
   }
+});
+
+test('runAmazonMatching promotes a pre-existing high-confidence suggested link via the backfill', async () => {
+  const householdId = 9103;
+  await Household.create({ id: householdId, name: `HH-${householdId}` } as never);
+  await Account.create({ id: 3, householdId, name: 'Test Account 3' } as never);
+
+  const txn = await Transaction.create({
+    householdId, accountId: 3, date: '2026-06-10', amount: '-44.97', currency: 'CAD',
+    merchantRaw: 'AMZN MKTP CA*Z90R91K22', merchantClean: 'Amazon',
+    txnType: 'purchase', importBatch: 'test',
+    sourceRowFingerprint: `srfp-${householdId}-1`,
+    sourceIdentityFingerprint: `sifp-${householdId}-1`,
+  } as never);
+  // Amount and date are both far off from the transaction on purpose: today's
+  // live scoring floors this pair to confidence 0, so selectMatchCandidates
+  // excludes it entirely and runAmazonMatching's live loop never calls
+  // upsertSuggestedOrderLink for this (txn, order) pair — the pre-existing row
+  // below is left completely untouched by the scan. Only the backfill, which
+  // reasons from the link's OWN stored confidence rather than a fresh score,
+  // can promote it. (An order whose current score still qualifies would be
+  // re-promoted by the live loop itself, which wouldn't exercise the new call.)
+  const order = await ExternalOrder.create({
+    householdId, vendor: 'amazon', vendorOrderId: '701-1111111-2222222',
+    dedupeKey: `b-${householdId}-1`, orderDate: '2020-01-01', total: '999.99', currency: 'CAD',
+    source: 'amazon_report',
+  } as never);
+  // A link created before auto-accept existed: high confidence, still suggested.
+  await TransactionOrderLink.create({
+    transactionId: (txn as { id: number }).id, externalOrderId: (order as { id: number }).id,
+    confidence: '88.00', matchReason: 'legacy', status: 'suggested',
+  } as never);
+
+  const result = await runAmazonMatching({ householdId });
+
+  const link = await TransactionOrderLink.findOne({
+    where: { transactionId: (txn as { id: number }).id, externalOrderId: (order as { id: number }).id },
+  });
+  assert.equal(link?.status, 'accepted');
+  assert.equal(result.autoAccepted >= 1, true);
 });
