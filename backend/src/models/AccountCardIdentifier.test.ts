@@ -6,7 +6,10 @@ import {
   Account,
   AccountCardIdentifier,
 } from './index';
-import { upsertAccountCardIdentifier } from './AccountCardIdentifier';
+import {
+  upsertAccountCardIdentifier,
+  loadIdentifierLast4sByAccountId,
+} from './AccountCardIdentifier';
 
 let householdId: number;
 let accountId: number;
@@ -156,4 +159,35 @@ test('upsertAccountCardIdentifier rejects a non-4-digit last4', async () => {
       source: 'costco_till_receipt-pdf',
     }),
   );
+});
+
+test('loadIdentifierLast4sByAccountId groups rows by account, one query for the whole household', async () => {
+  await upsertAccountCardIdentifier({
+    householdId,
+    accountId,
+    last4: '3114',
+    source: 'costco_till_receipt-pdf',
+  });
+  await upsertAccountCardIdentifier({
+    householdId,
+    accountId,
+    last4: '9999',
+    source: 'pdf_statement_header',
+  });
+  await upsertAccountCardIdentifier({
+    householdId,
+    accountId: otherAccountId,
+    last4: '1001',
+    source: 'pdf_statement_header',
+  });
+
+  const map = await loadIdentifierLast4sByAccountId(householdId);
+  assert.deepEqual(new Set(map.get(accountId)), new Set(['3114', '9999']));
+  assert.deepEqual(map.get(otherAccountId), ['1001']);
+  assert.equal(map.has(999999), false, 'unknown account id has no entry');
+});
+
+test('loadIdentifierLast4sByAccountId returns an empty map when the household has no identifiers', async () => {
+  const map = await loadIdentifierLast4sByAccountId(householdId);
+  assert.equal(map.size, 0);
 });

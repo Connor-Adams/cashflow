@@ -2,9 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   resolveAccountLast4,
+  resolveAccountLast4s,
   buildLast4Map,
   classifyCardOwnership,
   classifyCardOwnershipForVendor,
+  isDeterministicReceiptSource,
+  DETERMINISTIC_RECEIPT_SOURCES,
 } from './cardOwnership';
 
 test('extracts the last 4 digits from an all-numeric short code', () => {
@@ -72,4 +75,77 @@ test('classifyCardOwnershipForVendor: only vendor amazon may ever be foreign', (
   assert.equal(classifyCardOwnershipForVendor('costco', '1001', map), 'known');
   // Non-Amazon, no last4 at all -> unknown, same as the raw classifier.
   assert.equal(classifyCardOwnershipForVendor('costco', null, map), 'unknown');
+});
+
+// docs/superpowers/specs/2026-09-11-account-card-identifiers-design.md, Part 4:
+// an account's last4 set widens to account_card_identifiers rows UNION the
+// short_code-derived value. The short_code fallback is load-bearing (Amex
+// Reserve/Cobalt's 71 date-only-filename PDF imports will never harvest an
+// identifier row), so it must never be dropped.
+test('resolveAccountLast4s: unions identifier rows with the short_code-derived value', () => {
+  // Costco MC shape: opaque short_code ('costco'), only reachable via a
+  // harvested identifier row.
+  assert.deepEqual(resolveAccountLast4s('costco', ['3114']), ['3114']);
+  // Both sources present and distinct -> both survive.
+  assert.deepEqual(
+    new Set(resolveAccountLast4s('701001', ['9999'])),
+    new Set(['1001', '9999']),
+  );
+  // Amex shape: short_code ONLY, no identifier rows -- the fallback must
+  // still resolve on its own.
+  assert.deepEqual(resolveAccountLast4s('701001', []), ['1001']);
+  assert.deepEqual(resolveAccountLast4s('741005', undefined), ['1005']);
+  // Duplicate (the same last4 harvested AND derivable from short_code) does
+  // not produce a repeat.
+  assert.deepEqual(resolveAccountLast4s('5234', ['5234']), ['5234']);
+  // Neither source yields anything -> empty.
+  assert.deepEqual(resolveAccountLast4s('HQ6LMLTK8CAD', []), []);
+});
+
+test('buildLast4Map: an account with both a short_code last4 and identifier rows resolves to both', () => {
+  const map = buildLast4Map([
+    { id: 5, shortCode: 'costco', identifierLast4s: ['3114'] },
+    { id: 1, shortCode: '701001', identifierLast4s: ['9999'] },
+  ]);
+  assert.deepEqual(map.get('3114'), [5]);
+  assert.deepEqual(map.get('1001'), [1]);
+  assert.deepEqual(map.get('9999'), [1]);
+  assert.equal(classifyCardOwnership('3114', map), 'known');
+  assert.equal(classifyCardOwnership('9999', map), 'known');
+});
+
+test('buildLast4Map: an account with only a short_code (the Amex shape) still resolves', () => {
+  // No identifierLast4s field at all -- mirrors every existing call site
+  // before this widening, proving the fallback survives untouched.
+  const map = buildLast4Map([
+    { id: 1, shortCode: '701001' },
+    { id: 40, shortCode: '741005' },
+  ]);
+  assert.deepEqual(map.get('1001'), [1]);
+  assert.deepEqual(map.get('1005'), [40]);
+  assert.equal(classifyCardOwnership('1001', map), 'known');
+});
+
+// The harvest hooks (backend/src/import/runImport.ts, matchReceiptToTransactions.ts)
+// gate on this allowlist before writing an identifier off a receipt tender.
+test('isDeterministicReceiptSource: trusts deterministic parser sources, rejects AI-derived ones', () => {
+  assert.equal(isDeterministicReceiptSource('costco_till_receipt-pdf'), true);
+  assert.equal(isDeterministicReceiptSource('gmail-scan:apple'), true);
+  assert.equal(isDeterministicReceiptSource('gmail-scan:costco_till_receipt-pdf'), false, 'not an enumerated entry');
+
+  // The known-bad production datum: an AI misparse on an Uber Eats receipt.
+  assert.equal(isDeterministicReceiptSource('gmail-scan:ai'), false);
+  assert.equal(isDeterministicReceiptSource('gmail-scan:ai-pdf'), false);
+  assert.equal(isDeterministicReceiptSource('gmail-discovery:ai'), false);
+  // A deterministic parser supplemented by AI is not trusted either.
+  assert.equal(isDeterministicReceiptSource('gmail-scan:apple+ai'), false);
+  assert.equal(isDeterministicReceiptSource('email-paste'), false);
+  assert.equal(isDeterministicReceiptSource('image-upload'), false);
+  assert.equal(isDeterministicReceiptSource(null), false);
+  assert.equal(isDeterministicReceiptSource(undefined), false);
+
+  // No AI-derived or AI-supplemented parser id sneaks into the allowlist.
+  for (const source of DETERMINISTIC_RECEIPT_SOURCES) {
+    assert.ok(!/:ai(-pdf)?$|\+ai(-pdf)?$/.test(source), `${source} must not name an AI-derived parser`);
+  }
 });

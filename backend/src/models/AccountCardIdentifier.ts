@@ -123,3 +123,26 @@ export async function upsertAccountCardIdentifier(args: {
     { transaction: args.transaction },
   );
 }
+
+/**
+ * Every harvested last4 for a household, grouped by account id -- ONE query,
+ * never per-account. Feeds `resolveAccountLast4s`/`buildLast4Map`
+ * (backend/src/amazon/cardOwnership.ts) at the hot dashboard/budget call
+ * sites (items.ts, receipts.ts, loadItemAllocations.ts, amazon/matcher.ts) so
+ * they widen beyond `short_code` without adding a query per account.
+ */
+export async function loadIdentifierLast4sByAccountId(
+  householdId: number,
+): Promise<Map<number, string[]>> {
+  const rows = await AccountCardIdentifier.findAll({
+    where: { householdId },
+    attributes: ['accountId', 'last4'],
+  });
+  const map = new Map<number, string[]>();
+  for (const row of rows) {
+    const list = map.get(row.accountId) ?? [];
+    list.push(row.last4);
+    map.set(row.accountId, list);
+  }
+  return map;
+}
