@@ -23,6 +23,9 @@ import {
   transactionIdsForOrder,
 } from './enrichment/recomputeTransactionReviewFromItems';
 import { decideAutoAccept } from '../amazon/autoAccept';
+import { isDeterministicReceiptSource } from '../amazon/cardOwnership';
+import { upsertAccountCardIdentifier } from '../models/AccountCardIdentifier';
+import { logger } from '../observability/logger';
 
 const MATCH_CONFIDENCE_THRESHOLD = 70;
 const DATE_WINDOW_DAYS = 7;
@@ -232,6 +235,30 @@ export async function matchReceiptOrderToTransactions(args: {
       updated += 1;
     }
     claimed.add(best.txn.id);
+
+    // Harvest a card identifier off this tender onto the linked transaction's
+    // account (docs/superpowers/specs/2026-09-11-account-card-identifiers-design.md,
+    // Part 2) -- gated on the deterministic-source allowlist so an AI
+    // misparse (e.g. 'gmail-scan:ai') can never write a bogus last4. Runs
+    // every time a payment claims a transaction (not just on created/updated
+    // link writes) so a re-run against an already-accepted link still
+    // refreshes lastSeenAt; the upsert is idempotent either way. Never lets
+    // a harvesting failure fail the match.
+    if (payment.paymentLast4 && isDeterministicReceiptSource(order.source)) {
+      try {
+        await upsertAccountCardIdentifier({
+          householdId: args.householdId,
+          accountId: best.txn.accountId,
+          last4: payment.paymentLast4,
+          source: 'receipt_tender',
+        });
+      } catch (err) {
+        logger.error(
+          { err, orderId: order.id, accountId: best.txn.accountId },
+          'account-card-identifier: receipt tender harvest failed (non-fatal)',
+        );
+      }
+    }
   }
 
   // Recompute review flags for newly accepted-linked transactions.

@@ -7,6 +7,7 @@ import {
   ExternalOrder,
   ExternalOrderTender,
   TransactionOrderLink,
+  AccountCardIdentifier,
 } from '../models';
 import { matchReceiptOrderToTransactions } from './matchReceiptToTransactions';
 
@@ -21,6 +22,7 @@ before(async () => {
 });
 
 beforeEach(async () => {
+  await AccountCardIdentifier.destroy({ where: {}, force: true });
   await TransactionOrderLink.destroy({ where: {} });
   await ExternalOrderTender.destroy({ where: {} });
   await ExternalOrder.destroy({ where: {} });
@@ -43,7 +45,12 @@ async function mkTxn(opts: { amount: string; date: string; merchant?: string }):
   } as never);
 }
 
-async function mkOrder(opts: { orderDate: string; total: string; last4?: string }): Promise<ExternalOrder> {
+async function mkOrder(opts: {
+  orderDate: string;
+  total: string;
+  last4?: string;
+  source?: string;
+}): Promise<ExternalOrder> {
   return ExternalOrder.create({
     vendor: 'costco',
     householdId: HH,
@@ -52,7 +59,7 @@ async function mkOrder(opts: { orderDate: string; total: string; last4?: string 
     total: opts.total,
     paymentLast4: opts.last4 ?? null,
     currency: 'CAD',
-    source: 'test',
+    source: opts.source ?? 'test',
   } as never);
 }
 
@@ -154,4 +161,66 @@ test('split-tender: both unambiguous tenders accepted (order-398 shape)', async 
   const links = await TransactionOrderLink.findAll({ where: { externalOrderId: order.id } });
   assert.equal(links.length, 2);
   assert.ok(links.every((l) => l.status === 'accepted'), 'both tenders should auto-accept');
+});
+
+// docs/superpowers/specs/2026-09-11-account-card-identifiers-design.md, Part 2:
+// a receipt tender harvests a card identifier onto the linked transaction's
+// account, but ONLY when the order's source is on the deterministic
+// allowlist (backend/src/amazon/cardOwnership.ts DETERMINISTIC_RECEIPT_SOURCES).
+test('a costco_till_receipt-pdf tender writes an account_card_identifier row', async () => {
+  const txn = await mkTxn({ amount: '-947.04', date: '2025-12-15' });
+  const order = await mkOrder({ orderDate: '2025-12-13', total: '947.04', source: 'costco_till_receipt-pdf' });
+  await ExternalOrderTender.create(
+    { externalOrderId: order.id, sequence: 0, paymentLast4: '3114', amount: '947.04' } as never,
+  );
+
+  await matchReceiptOrderToTransactions({ externalOrderId: order.id, householdId: HH });
+
+  const rows = await AccountCardIdentifier.findAll({ where: { accountId: txn.accountId } });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].last4, '3114');
+  assert.equal(rows[0].source, 'receipt_tender');
+  assert.equal(rows[0].householdId, HH);
+});
+
+// The known production bad datum: an AI misparse ('gmail-scan:ai') produced
+// a bogus last-4 on a non-card Uber Eats total. This must write nothing.
+test('a gmail-scan:ai-sourced order writes NO account_card_identifier row', async () => {
+  await mkTxn({ amount: '-947.04', date: '2025-12-15' });
+  const order = await mkOrder({ orderDate: '2025-12-13', total: '947.04', source: 'gmail-scan:ai' });
+  await ExternalOrderTender.create(
+    { externalOrderId: order.id, sequence: 0, paymentLast4: '9907', amount: '947.04' } as never,
+  );
+
+  await matchReceiptOrderToTransactions({ externalOrderId: order.id, householdId: HH });
+
+  const rows = await AccountCardIdentifier.findAll({ where: { last4: '9907' } });
+  assert.equal(rows.length, 0, 'an AI-extracted last4 must never be harvested');
+});
+
+test('re-running the matcher does not duplicate the harvested identifier row', async () => {
+  const txn = await mkTxn({ amount: '-947.04', date: '2025-12-15' });
+  const order = await mkOrder({ orderDate: '2025-12-13', total: '947.04', source: 'costco_till_receipt-pdf' });
+  await ExternalOrderTender.create(
+    { externalOrderId: order.id, sequence: 0, paymentLast4: '3114', amount: '947.04' } as never,
+  );
+
+  await matchReceiptOrderToTransactions({ externalOrderId: order.id, householdId: HH });
+  await matchReceiptOrderToTransactions({ externalOrderId: order.id, householdId: HH });
+
+  const rows = await AccountCardIdentifier.findAll({ where: { accountId: txn.accountId, last4: '3114' } });
+  assert.equal(rows.length, 1, 'must not duplicate on a repeat run');
+});
+
+test('a tender with no paymentLast4 writes no identifier even on a trusted source', async () => {
+  await mkTxn({ amount: '-947.04', date: '2025-12-15' });
+  const order = await mkOrder({ orderDate: '2025-12-13', total: '947.04', source: 'costco_till_receipt-pdf' });
+  await ExternalOrderTender.create(
+    { externalOrderId: order.id, sequence: 0, paymentLast4: null, amount: '947.04' } as never,
+  );
+
+  await matchReceiptOrderToTransactions({ externalOrderId: order.id, householdId: HH });
+
+  const rows = await AccountCardIdentifier.findAll({ where: { accountId } });
+  assert.equal(rows.length, 0);
 });
