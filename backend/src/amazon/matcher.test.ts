@@ -471,3 +471,99 @@ test(
     assert.equal(linkB, null, 'the tie loser gets no link at all (unchanged fan-out guard)');
   },
 );
+
+test(
+  'runAmazonMatching: an unresolvable tie on a later run must not promote an earlier run\'s resolved-tie link',
+  async () => {
+    // Final-review finding: resolveTie returns [] (not a singleton) when TWO OR
+    // MORE candidates share the best secondary score, so selectMatchCandidates
+    // returns [] and candidates.length === 0 for that transaction. The old guard
+    // `candidates.length === 1 && tied` only fires on the length-1 case, so this
+    // 0-candidate tie was never added to tieAmbiguousTxnIds — leaving a
+    // `suggested` link from an earlier, resolvable run free for the backfill to
+    // promote, even though the identity is now MORE ambiguous, not less.
+    //
+    // Night 1: orders A (44.97, exact-cent, secondary 40) and B (45.40,
+    // within-$0.50, secondary 20) both tie at confidence 85; A wins on
+    // secondary and is linked `suggested`.
+    // Night 2: a repeat order C (also 44.97, secondary 40) imports. Now A and C
+    // tie for the best secondary score too -> resolveTie returns [] ->
+    // candidates.length === 0. The transaction must still be excluded from the
+    // backfill, so link A stays `suggested`.
+    const householdId = 9102;
+    const household = await Household.create({ id: householdId, name: `HH-${householdId}` } as never);
+    const account = await Account.create({
+      householdId: household.id,
+      name: 'Amex Reserve',
+      shortCode: '701001',
+    } as never);
+    const txn = await Transaction.create({
+      householdId: household.id,
+      accountId: account.id,
+      date: '2026-06-10',
+      amount: '-44.97',
+      currency: 'CAD',
+      merchantRaw: 'AMAZON.CA',
+      merchantClean: 'Amazon',
+      txnType: 'purchase',
+      importBatch: 'test',
+      sourceRowFingerprint: `srfp-${householdId}`,
+      sourceIdentityFingerprint: `sifp-${householdId}`,
+    } as never);
+    const orderA = await ExternalOrder.create({
+      householdId: household.id,
+      vendor: 'amazon',
+      orderDate: null,
+      total: '44.97',
+      currency: 'CAD',
+      paymentLast4: '1001',
+      source: 'test',
+      dedupeKey: `t-${householdId}-a`,
+    } as never);
+    await ExternalOrder.create({
+      householdId: household.id,
+      vendor: 'amazon',
+      orderDate: null,
+      total: '45.40',
+      currency: 'CAD',
+      paymentLast4: '1001',
+      source: 'test',
+      dedupeKey: `t-${householdId}-b`,
+    } as never);
+
+    // Night 1: resolvable tie — A wins on secondary score, suggested (not accepted).
+    const first = await runAmazonMatching({ householdId });
+    assert.equal(first.autoAccepted, 0, 'night 1 tie must never auto-accept');
+    const linkAAfterFirst = await TransactionOrderLink.findOne({
+      where: { transactionId: (txn as { id: number }).id, externalOrderId: (orderA as { id: number }).id },
+    });
+    assert.equal(linkAAfterFirst?.status, 'suggested', 'night 1 winner is suggested, not accepted');
+
+    // Night 2: a colliding repeat order C imports, making the tie unresolvable.
+    await ExternalOrder.create({
+      householdId: household.id,
+      vendor: 'amazon',
+      orderDate: null,
+      total: '44.97',
+      currency: 'CAD',
+      paymentLast4: '1001',
+      source: 'test',
+      dedupeKey: `t-${householdId}-c`,
+    } as never);
+
+    const second = await runAmazonMatching({ householdId });
+    assert.equal(
+      second.autoAccepted,
+      0,
+      'a MORE ambiguous unresolvable tie must never auto-accept what a resolvable tie refused',
+    );
+    const linkAAfterSecond = await TransactionOrderLink.findOne({
+      where: { transactionId: (txn as { id: number }).id, externalOrderId: (orderA as { id: number }).id },
+    });
+    assert.equal(
+      linkAAfterSecond?.status,
+      'suggested',
+      'link A must still be suggested — the backfill must not have promoted it',
+    );
+  },
+);

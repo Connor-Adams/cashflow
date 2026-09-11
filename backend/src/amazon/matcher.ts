@@ -90,29 +90,6 @@ function resolveTie<T extends { confidence: number; secondary?: number }>(tied: 
  * sub-threshold score, so one charge whose amount collided with many stale
  * Amazon orders (each scoring 50) produced a link to all of them.
  */
-/**
- * Whether the top confidence tier (strong if any candidate clears
- * {@link MATCH_CONFIDENCE_THRESHOLD}, else the fallback tier) had more than
- * one candidate tied at the top score — i.e. {@link selectMatchCandidates}
- * had to consult {@link resolveTie} to pick a winner.
- *
- * This matters because a resolved tie collapses to a single candidate (the
- * winner, plus only strictly-lower ones) exactly like a genuine lone match
- * would. A caller deciding whether to auto-accept off `candidates.length`
- * cannot tell the two apart from the selection alone — an ambiguous pair
- * that happened to have a secondary-score tiebreaker looks identical to an
- * order nothing else came close to. Callers MUST consult this (on the
- * pre-selection scored list) before trusting a singleton selection as
- * unambiguous.
- */
-export function isTopTied<T extends { confidence: number }>(scored: T[]): boolean {
-  const strong = scored.filter((candidate) => candidate.confidence >= MATCH_CONFIDENCE_THRESHOLD);
-  const pool = strong.length > 0 ? strong : scored;
-  if (pool.length === 0) return false;
-  const top = Math.max(...pool.map((c) => c.confidence));
-  return pool.filter((c) => c.confidence === top).length > 1;
-}
-
 export function selectMatchCandidates<T extends { confidence: number; secondary?: number }>(scored: T[]): T[] {
   const strong = scored.filter((candidate) => candidate.confidence >= MATCH_CONFIDENCE_THRESHOLD);
   if (strong.length > 0) {
@@ -139,6 +116,29 @@ export function selectMatchCandidates<T extends { confidence: number; secondary?
   const tiedAtBest = sorted.filter((candidate) => candidate.confidence === best.confidence);
   if (tiedAtBest.length > 1) return resolveTie(tiedAtBest);
   return [best];
+}
+
+/**
+ * Whether the top confidence tier (strong if any candidate clears
+ * {@link MATCH_CONFIDENCE_THRESHOLD}, else the fallback tier) had more than
+ * one candidate tied at the top score — i.e. {@link selectMatchCandidates}
+ * had to consult {@link resolveTie} to pick a winner.
+ *
+ * This matters because a resolved tie collapses to a single candidate (the
+ * winner, plus only strictly-lower ones) exactly like a genuine lone match
+ * would. A caller deciding whether to auto-accept off `candidates.length`
+ * cannot tell the two apart from the selection alone — an ambiguous pair
+ * that happened to have a secondary-score tiebreaker looks identical to an
+ * order nothing else came close to. Callers MUST consult this (on the
+ * pre-selection scored list) before trusting a singleton selection as
+ * unambiguous.
+ */
+export function isTopTied<T extends { confidence: number }>(scored: T[]): boolean {
+  const strong = scored.filter((candidate) => candidate.confidence >= MATCH_CONFIDENCE_THRESHOLD);
+  const pool = strong.length > 0 ? strong : scored;
+  if (pool.length === 0) return false;
+  const top = Math.max(...pool.map((c) => c.confidence));
+  return pool.filter((c) => c.confidence === top).length > 1;
 }
 
 export function scoreAmazonOrderMatch(
@@ -352,7 +352,7 @@ export async function runAmazonMatching(args: {
     // silently auto-accepting once resolveTie picks a sole leader.
     const tied = isTopTied(scores);
     const auto = candidates.length === 1 && !tied && decideAutoAccept(sortedConf);
-    if (candidates.length === 1 && tied) tieAmbiguousTxnIds.add(txn.id);
+    if (tied) tieAmbiguousTxnIds.add(txn.id);
     for (const candidate of candidates) {
       const { created, accepted } = await upsertSuggestedOrderLink({
         transactionId: txn.id,
