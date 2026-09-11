@@ -1,4 +1,5 @@
 import { ExternalOrder, ExternalOrderItem, sequelize } from '../models';
+import { findExternalOrderForDedupe } from '../models/externalOrderDedupe';
 import { parseAmazonReportCsv } from './parseAmazonReportCsv';
 import type { NormalizedAmazonOrder } from './normalizeAmazonOrder';
 
@@ -15,9 +16,11 @@ async function persistOrder(
   householdId: number,
   userId: number,
 ): Promise<'created' | 'skipped'> {
-  const existing = await ExternalOrder.findOne({
-    where: { householdId, dedupeKey: order.dedupeKey },
-  });
+  // findExternalOrderForDedupe (not a plain findOne) so a row already
+  // soft-deleted by mergeDuplicateAmazonOrders is found (and restored)
+  // rather than missed -- a plain paranoid lookup would miss it and then
+  // collide with external_orders_household_dedupe_unique on create().
+  const existing = await findExternalOrderForDedupe({ householdId, dedupeKey: order.dedupeKey });
   if (existing) return 'skipped';
 
   await sequelize.transaction(async (transaction) => {

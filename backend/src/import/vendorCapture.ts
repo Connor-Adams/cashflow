@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { sequelize, ExternalOrder, ExternalOrderItem } from '../models';
+import { findExternalOrderForDedupe } from '../models/externalOrderDedupe';
 
 export interface CapturedItemInput {
   title: string;
@@ -87,10 +88,14 @@ export async function captureOrders(args: CaptureOrdersArgs): Promise<CaptureRes
   for (const order of args.orders) {
     const dedupeKey = buildDedupeKey(vendor, order);
     await sequelize.transaction(async (t) => {
-      const existing = await ExternalOrder.findOne({
-        where: { householdId: args.householdId, dedupeKey },
-        transaction: t,
-      });
+      // findExternalOrderForDedupe (not a plain findOne) restores a row
+      // already soft-deleted by mergeDuplicateAmazonOrders instead of
+      // missing it and colliding with the unique (household_id, dedupe_key)
+      // index on create().
+      const existing = await findExternalOrderForDedupe(
+        { householdId: args.householdId, dedupeKey },
+        t,
+      );
       if (!existing) {
         const row = await ExternalOrder.create(
           {

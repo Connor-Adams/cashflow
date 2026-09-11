@@ -438,3 +438,67 @@ test('one group throwing during the merge does not block other groups from mergi
   assert.equal(badSurvivors, 2, 'the bad group is left untouched (its own transaction rolled back), not half-merged');
   void goodReport;
 });
+
+// ─── Paranoid soft-delete (docs/superpowers/specs/2026-09-11-account-card-identifiers-design.md, Part 5) ──
+//
+// mergeDuplicateAmazonOrders is the ONLY cron-triggered hard delete in the
+// repo (it runs unattended, nightly, as the first statement of
+// runAmazonMatching). ExternalOrder.paranoid makes `loser.destroy()` a soft
+// delete instead, so a bad merge is recoverable with `restore()`.
+
+test('a merged loser is soft-deleted: absent from a normal query, present under paranoid: false', async () => {
+  const householdId = 16;
+  const { report, email } = await seedPair(householdId);
+
+  await mergeDuplicateAmazonOrders({ householdId });
+
+  const normal = await ExternalOrder.findByPk(email.id);
+  assert.equal(normal, null, 'the loser must not surface in a default (paranoid) query');
+
+  const withDeleted = await ExternalOrder.findByPk(email.id, { paranoid: false });
+  assert.ok(withDeleted, 'the loser row must still exist under paranoid: false');
+  assert.ok(withDeleted!.deletedAt, 'deletedAt must be set on the merged loser');
+  void report;
+});
+
+test('restore() brings a merged loser back, with the survivor\'s items and links intact', async () => {
+  const householdId = 17;
+  const { report, email } = await seedPair(householdId);
+  const { txn } = await seedHouseholdWithTxn(householdId);
+  await TransactionOrderLink.create({
+    transactionId: txn.id, externalOrderId: email.id,
+    confidence: '100', matchReason: 'manually linked by user', status: 'accepted',
+  } as never);
+
+  await mergeDuplicateAmazonOrders({ householdId });
+
+  const loser = await ExternalOrder.findByPk(email.id, { paranoid: false });
+  assert.ok(loser);
+  await loser!.restore();
+
+  const restored = await ExternalOrder.findByPk(email.id);
+  assert.ok(restored, 'restore() must make the loser visible again under a normal query');
+  assert.equal(restored!.deletedAt, null);
+
+  // Restoring the loser must not disturb what the merge already consolidated
+  // onto the survivor: its unioned items and its re-pointed (accepted) link.
+  const survivorItems = await ExternalOrderItem.findAll({ where: { externalOrderId: report.id } });
+  assert.deepEqual(survivorItems.map((i) => i.title).sort(), ['Gadget', 'Widget']);
+
+  const links = await TransactionOrderLink.findAll({ where: { transactionId: txn.id } });
+  assert.equal(links.length, 1, 'the re-pointed link stays on the survivor after the loser is restored');
+  assert.equal(links[0].externalOrderId, report.id);
+  assert.equal(links[0].status, 'accepted');
+});
+
+test('a soft-deleted order is excluded from ExternalOrder.count and ExternalOrder.findAll by default', async () => {
+  const householdId = 18;
+  const { email } = await seedPair(householdId);
+  await mergeDuplicateAmazonOrders({ householdId });
+
+  const all = await ExternalOrder.findAll({ where: { householdId } });
+  assert.ok(!all.some((o) => o.id === email.id), 'the soft-deleted loser must not appear in findAll');
+
+  const count = await ExternalOrder.count({ where: { householdId, id: email.id } });
+  assert.equal(count, 0, 'count() must exclude the soft-deleted loser');
+});
