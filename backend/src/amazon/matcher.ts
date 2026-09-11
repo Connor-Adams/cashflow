@@ -2,6 +2,7 @@ import { Op, type Transaction as DbTransaction } from 'sequelize';
 import { ExternalOrder, Transaction, TransactionOrderLink } from '../models';
 import { decideAutoAccept } from './autoAccept';
 import { backfillAutoAcceptAmazonLinks } from './backfillAutoAcceptLinks';
+import { mergeDuplicateAmazonOrders } from './mergeDuplicateOrders';
 import {
   recomputeTransactionsReviewFromItems,
   transactionIdsForOrder,
@@ -210,6 +211,10 @@ export async function runAmazonMatching(args: {
   /** Latest txn date that received a newly-suggested link, or null if none. */
   matchedDateTo: string | null;
 }> {
+  // Fold CSV/email duplicates before scoring so a partial CSV total never
+  // competes with the full email total for the same order.
+  await mergeDuplicateAmazonOrders({ householdId: args.householdId });
+
   const txns = await Transaction.findAll({
     where: {
       householdId: args.householdId,
