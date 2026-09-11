@@ -490,6 +490,14 @@ export async function scanInbox(
     maxMessages?: number;
     /** Override sinceDate manually (e.g. one-time backfill of more history). */
     sinceDateOverride?: Date | null;
+    /**
+     * Gmail message ids to re-parse even though ProcessedEmailMessage has
+     * already seen them. Used to backfill orders written before a parser fix —
+     * the raw body is not retained, so the message is re-fetched from Gmail.
+     * Existing ExternalOrder rows get NULL fields filled in; non-null fields are
+     * never overwritten, since the user may have corrected them.
+     */
+    forceReprocessMessageIds?: string[];
   },
   callbacks: ScanCallbacks = {},
   deps: Partial<ScanDeps> = {},
@@ -545,6 +553,7 @@ export async function scanInbox(
     });
     for (const r of seenRows) seen.add(r.messageId);
   }
+  for (const id of opts.forceReprocessMessageIds ?? []) seen.delete(id);
 
   const results: ScanResultMessage[] = [];
   let created = 0;
@@ -784,6 +793,25 @@ export async function scanInbox(
         });
         result.orderId = order.id;
         result.orderCreated = createdOrder;
+        if (!createdOrder) {
+          // Reprocess: fill holes only. Never clobber a value already present —
+          // it may have been corrected by hand.
+          const backfill: Record<string, unknown> = {};
+          const fallbackDate = extracted!.orderDate ?? dateFromInternalDate(full.internalDate);
+          if (order.orderDate == null && fallbackDate != null) backfill.orderDate = fallbackDate;
+          if (order.total == null && extracted!.total != null) backfill.total = String(extracted!.total);
+          if (order.subtotal == null && extracted!.subtotal != null) backfill.subtotal = String(extracted!.subtotal);
+          if (order.tax == null && extracted!.tax != null) backfill.tax = String(extracted!.tax);
+          if (order.paymentLast4 == null && extracted!.paymentLast4 != null) {
+            backfill.paymentLast4 = extracted!.paymentLast4;
+          }
+          if (order.vendorOrderId == null && extracted!.orderId != null) {
+            backfill.vendorOrderId = extracted!.orderId;
+          }
+          if (Object.keys(backfill).length > 0) {
+            await order.update(backfill, { transaction: t });
+          }
+        }
         if (createdOrder && extracted!.items.length > 0) {
           await ExternalOrderItem.bulkCreate(
             extracted!.items.map((it) => ({
