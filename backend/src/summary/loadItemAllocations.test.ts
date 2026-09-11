@@ -127,3 +127,81 @@ test('loadItemAllocationContext: excludes suggested and rejected links', async (
   assert.equal(ctx.ordersById.has(suggested.id), false);
   assert.equal(ctx.ordersById.has(rejected.id), false);
 });
+
+// Foreign-card exclusion (task 13): 291 of 538 production Amazon orders carry
+// a last4 belonging to no Cashflow account — an order placed on the shared
+// Amazon account but paid on someone else's card. Those must never reach an
+// allocation total. Orders with NO last4 at all ("unknown", 135 in prod) are
+// deliberately NOT excluded — absence of a last4 is not evidence of a
+// foreign card, and most of those are the household's own.
+let foreignSeedCounter = 0;
+
+async function seedCardOwnershipCase(paymentLast4: string | null) {
+  foreignSeedCounter += 1;
+  const n = foreignSeedCounter;
+  const account = await Account.create({
+    name: `Amex Reserve ${n}`,
+    householdId: 1,
+    shortCode: '701001', // resolveAccountLast4('701001') -> '1001'
+  } as never);
+  const txn = await Transaction.create({
+    accountId: account.id,
+    importBatch: 'test',
+    date: '2025-08-28',
+    merchantRaw: 'AMZN MKTP CA',
+    merchantClean: 'Amazon',
+    amount: '-44.97',
+    currency: 'CAD',
+    sourceRowFingerprint: `fp-card-ownership-${n}`,
+    sourceIdentityFingerprint: `sif-card-ownership-${n}`,
+  } as never);
+  const order = await ExternalOrder.create({
+    householdId: 1,
+    vendor: 'amazon',
+    vendorOrderId: `701-1111111-${n}`,
+    dedupeKey: `k-card-ownership-${n}`,
+    orderDate: '2025-08-27',
+    total: '44.97',
+    currency: 'CAD',
+    paymentLast4,
+    source: 'amazon_report',
+  } as never);
+  await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'Widget',
+    quantity: 1,
+    unitPrice: '44.97',
+    totalPrice: '44.97',
+  } as never);
+  await TransactionOrderLink.create({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    confidence: '90.00',
+    matchReason: 'test',
+    status: 'accepted',
+    linkedAmount: '44.97',
+  } as never);
+  return txn;
+}
+
+test('an order on a known card is allocated', async () => {
+  const txn = await seedCardOwnershipCase('1001');
+  const ctx = await loadItemAllocationContext([txn.id]);
+  assert.equal(ctx.linksByTxn.get(txn.id)?.length, 1);
+});
+
+test('an order with no last4 is allocated — unknown is not foreign', async () => {
+  const txn = await seedCardOwnershipCase(null);
+  const ctx = await loadItemAllocationContext([txn.id]);
+  assert.equal(ctx.linksByTxn.get(txn.id)?.length, 1);
+});
+
+test('an order on a foreign card is excluded from allocation', async () => {
+  const txn = await seedCardOwnershipCase('2662');
+  const ctx = await loadItemAllocationContext([txn.id]);
+  // Missing entry, not an empty array: splitTxnByItems callers all read via
+  // `ctx.linksByTxn.get(row.id) ?? []`, but the map must never grow a key for
+  // a txn whose every link is foreign.
+  assert.equal(ctx.linksByTxn.has(txn.id), false);
+  assert.equal(ctx.ordersById.size, 0);
+});
