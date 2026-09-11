@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
 import { Transaction, TransactionOrderLink } from '../models';
 import { decideAutoAccept } from './autoAccept';
-import { isAmazonLikeMerchant, isAmazonSubscriptionCharge } from './matcher';
+import { isAmazonLikeMerchant, isAmazonSubscriptionCharge } from './merchant';
 import {
   recomputeTransactionsReviewFromItems,
   transactionIdsForOrder,

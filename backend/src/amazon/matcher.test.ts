@@ -353,28 +353,9 @@ test('no penalty when either side lacks a last4', () => {
 });
 
 // ─── Task 17: Prime membership charge filtering ────────────────────────────
-// The annual Prime membership charge ($111.87) is a subscription, never an order,
-// and can never match. Prime Video rentals ARE orders and must keep matching.
-// isAmazonSubscriptionCharge is separate from isAmazonLikeMerchant because the
-// latter drives scoring bonuses and backfill selection — narrowing it would
-// silently change those side effects.
-
-import { isAmazonSubscriptionCharge, isAmazonLikeMerchant } from './matcher';
-
-test('the annual Prime membership charge is a subscription, not an order', () => {
-  assert.equal(isAmazonSubscriptionCharge('AMAZON.CA PRIME MEMBER'), true);
-  assert.equal(isAmazonSubscriptionCharge('Amazon.ca Prime Member'), true);
-});
-
-test('Prime Video rentals are orders and are NOT filtered', () => {
-  assert.equal(isAmazonSubscriptionCharge('AMAZON PRIME VIDEO'), false);
-  assert.equal(isAmazonSubscriptionCharge('AMZN MKTP CA*Z90R91K22'), false);
-});
-
-test('isAmazonLikeMerchant is unchanged — it still matches Prime generally', () => {
-  assert.equal(isAmazonLikeMerchant('AMAZON.CA PRIME MEMBER'), true);
-  assert.equal(isAmazonLikeMerchant('AMAZON PRIME VIDEO'), true);
-});
+// See ./merchant.test.ts for isAmazonSubscriptionCharge / isAmazonLikeMerchant
+// coverage — those predicates now live in ./merchant to avoid a circular
+// dependency between matcher.ts and backfillAutoAcceptLinks.ts.
 
 // ─── FIX 1: a tie-resolved selection must not auto-accept ───────────────────
 //

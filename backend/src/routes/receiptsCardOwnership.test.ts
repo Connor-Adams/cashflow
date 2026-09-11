@@ -13,9 +13,14 @@
  */
 import { before, after, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import crypto from 'crypto';
 import express from 'express';
 import request from 'supertest';
+import {
+  createFingerprinter,
+  makeCardOwnershipAccount,
+  makeAmazonOrder,
+  makeAmazonTransaction,
+} from './cardOwnershipTestHelpers';
 
 process.env.DATABASE_PATH = ':memory:';
 
@@ -53,56 +58,18 @@ beforeEach(async () => {
   household = await models.Household.create({ name: 'Receipts CardOwnership HH' });
 });
 
-let fpCounter = 0;
-function fp(): string {
-  fpCounter += 1;
-  return `fp-receipts-co-${fpCounter}-${crypto.randomBytes(4).toString('hex')}`;
-}
+const fp = createFingerprinter('receipts-co');
 
 async function makeAccount(shortCode: string | null) {
-  return models.Account.create({
-    householdId: household.id,
-    owner: 'me',
-    visibility: 'shared',
-    name: `Account ${shortCode ?? 'none'}`,
-    accountType: 'credit_card',
-    shortCode,
-  } as never);
+  return makeCardOwnershipAccount(models, household.id, shortCode);
 }
 
 async function makeTransaction(accountId: number) {
-  return models.Transaction.create({
-    accountId,
-    householdId: household.id,
-    importBatch: 'test',
-    date: '2026-06-01',
-    merchantRaw: 'AMZN MKTP CA',
-    merchantClean: 'Amazon',
-    amount: '-50.00',
-    currency: 'CAD',
-    sourceRowFingerprint: fp(),
-    sourceIdentityFingerprint: fp(),
-    visibility: 'shared',
-    ownershipType: 'shared',
-    finalCategory: null,
-    finalBusiness: false,
-    finalSplitType: 'none',
-    businessAmount: '0',
-  } as never);
+  return makeAmazonTransaction(models, household.id, accountId, fp);
 }
 
 async function makeOrder(vendor: string, paymentLast4: string | null, dedupeKey: string) {
-  return models.ExternalOrder.create({
-    householdId: household.id,
-    vendor,
-    dedupeKey,
-    orderDate: '2026-06-01',
-    total: '50.00',
-    subtotal: '50.00',
-    currency: 'CAD',
-    paymentLast4,
-    source: 'test',
-  } as never);
+  return makeAmazonOrder(models, household.id, vendor, paymentLast4, dedupeKey);
 }
 
 async function makeReceipt(transactionId: number, externalOrderId: number, originalName: string) {

@@ -15,9 +15,9 @@
  */
 import { before, after, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import crypto from 'crypto';
 import express from 'express';
 import request from 'supertest';
+import { createFingerprinter, makeAmazonTransaction } from './cardOwnershipTestHelpers';
 
 process.env.DATABASE_PATH = ':memory:';
 
@@ -58,11 +58,7 @@ beforeEach(async () => {
   household = await models.Household.create({ name: 'CardOwnership Consistency HH' });
 });
 
-let fpCounter = 0;
-function fp(): string {
-  fpCounter += 1;
-  return `fp-co-consistency-${fpCounter}-${crypto.randomBytes(4).toString('hex')}`;
-}
+const fp = createFingerprinter('co-consistency');
 
 test('the same order reports the same cardOwnership through /api/items and /api/transactions/:id/receipts (derivable-account guard case)', async () => {
   // Wealthsimple-style opaque short code: resolveAccountLast4 returns null,
@@ -75,24 +71,7 @@ test('the same order reports the same cardOwnership through /api/items and /api/
     accountType: 'chequing',
     shortCode: 'HQ6LMLTK8CAD',
   } as never);
-  const txn = await models.Transaction.create({
-    accountId: account.id,
-    householdId: household.id,
-    importBatch: 'test',
-    date: '2026-06-01',
-    merchantRaw: 'AMZN MKTP CA',
-    merchantClean: 'Amazon',
-    amount: '-50.00',
-    currency: 'CAD',
-    sourceRowFingerprint: fp(),
-    sourceIdentityFingerprint: fp(),
-    visibility: 'shared',
-    ownershipType: 'shared',
-    finalCategory: null,
-    finalBusiness: false,
-    finalSplitType: 'none',
-    businessAmount: '0',
-  } as never);
+  const txn = await makeAmazonTransaction(models, household.id, account.id, fp);
   const order = await models.ExternalOrder.create({
     householdId: household.id,
     vendor: 'amazon',

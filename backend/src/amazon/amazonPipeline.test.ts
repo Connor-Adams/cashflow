@@ -10,7 +10,7 @@ import {
   normalizeAmazonOrder,
   normalizeTitle,
 } from './normalizeAmazonOrder';
-import { isAmazonLikeMerchant, scoreAmazonOrderMatch } from './matcher';
+import { scoreAmazonOrderMatch } from './matcher';
 import { categorizeAmazonItem } from './categories';
 import { ExternalOrder } from '../models/ExternalOrder';
 import { Transaction } from '../models/Transaction';
@@ -409,19 +409,8 @@ test('matcher: payment last4 bonus — null txnLast4 → no bonus regardless of 
   assert.equal(a, b, 'no bonus when txnLast4 is null, regardless of order.paymentLast4');
 });
 
-test('isAmazonLikeMerchant: positive cases', () => {
-  assert.equal(isAmazonLikeMerchant('AMZN MKTP CA'), true);
-  assert.equal(isAmazonLikeMerchant('Amazon.ca'), true);
-  assert.equal(isAmazonLikeMerchant('AMAZON MARKETPLACE'), true);
-  assert.equal(isAmazonLikeMerchant('amzn mktp ca *abc'), true);
-  assert.equal(isAmazonLikeMerchant('Prime Video'), true);
-});
-
-test('isAmazonLikeMerchant: PRIMERICA does NOT match (word boundary on \\bprime\\b)', () => {
-  assert.equal(isAmazonLikeMerchant('PRIMERICA INSURANCE'), false);
-  assert.equal(isAmazonLikeMerchant('Cafe Primo'), false);
-  assert.equal(isAmazonLikeMerchant('Costco Wholesale'), false);
-});
+// isAmazonLikeMerchant coverage moved to ./merchant.test.ts alongside its
+// definition in ./merchant.ts.
 
 // ─── categories: rule precedence ───────────────────────────────────────────
 

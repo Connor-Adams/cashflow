@@ -57,13 +57,14 @@ beforeEach(async () => {
 });
 
 test('the job is registered with a valid cron expression', () => {
-  const def = registry.getJobDefinition('gmail_receipt_scan');
+  const def = registry.listDefinitions().find((d) => d.name === 'gmail_receipt_scan');
   assert.ok(def, 'job is registered');
   assert.equal(cron.validate(def!.cronDefault), true);
 });
 
 test('the job is enabled by default', () => {
-  assert.equal(registry.getJobDefinition('gmail_receipt_scan')?.enabledDefault, true);
+  const def = registry.listDefinitions().find((d) => d.name === 'gmail_receipt_scan');
+  assert.equal(def?.enabledDefault, true);
 });
 
 test('resolves householdId via HouseholdMember and scans per integration', async () => {

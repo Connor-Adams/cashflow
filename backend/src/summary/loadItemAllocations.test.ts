@@ -136,13 +136,17 @@ test('loadItemAllocationContext: excludes suggested and rejected links', async (
 // foreign card, and most of those are the household's own.
 let foreignSeedCounter = 0;
 
-async function seedCardOwnershipCase(paymentLast4: string | null) {
+async function seedCardOwnershipCase(
+  paymentLast4: string | null,
+  accountOverrides: Partial<{ name: string; shortCode: string }> = {},
+) {
   foreignSeedCounter += 1;
   const n = foreignSeedCounter;
   const account = await Account.create({
-    name: `Amex Reserve ${n}`,
+    name: accountOverrides.name ?? `Amex Reserve ${n}`,
     householdId: 1,
-    shortCode: '701001', // resolveAccountLast4('701001') -> '1001'
+    // resolveAccountLast4('701001') -> '1001'
+    shortCode: accountOverrides.shortCode ?? '701001',
   } as never);
   const txn = await Transaction.create({
     accountId: account.id,
@@ -181,23 +185,23 @@ async function seedCardOwnershipCase(paymentLast4: string | null) {
     status: 'accepted',
     linkedAmount: '44.97',
   } as never);
-  return txn;
+  return { txn, account, order };
 }
 
 test('an order on a known card is allocated', async () => {
-  const txn = await seedCardOwnershipCase('1001');
+  const { txn } = await seedCardOwnershipCase('1001');
   const ctx = await loadItemAllocationContext([txn.id]);
   assert.equal(ctx.linksByTxn.get(txn.id)?.length, 1);
 });
 
 test('an order with no last4 is allocated — unknown is not foreign', async () => {
-  const txn = await seedCardOwnershipCase(null);
+  const { txn } = await seedCardOwnershipCase(null);
   const ctx = await loadItemAllocationContext([txn.id]);
   assert.equal(ctx.linksByTxn.get(txn.id)?.length, 1);
 });
 
 test('an order on a foreign card is excluded from allocation', async () => {
-  const txn = await seedCardOwnershipCase('2662');
+  const { txn } = await seedCardOwnershipCase('2662');
   const ctx = await loadItemAllocationContext([txn.id]);
   // Missing entry, not an empty array: splitTxnByItems callers all read via
   // `ctx.linksByTxn.get(row.id) ?? []`, but the map must never grow a key for
@@ -409,48 +413,10 @@ test('an Amazon order whose linked transaction account has an opaque short code 
   // Even though the order's last4 matches no account (looks 'foreign'), the
   // order must be kept because the linked account itself has no derivable
   // last4.
-  const account = await Account.create({
+  const { txn, order } = await seedCardOwnershipCase('9999', {
     name: 'Wealthsimple Cash',
-    householdId: 1,
-    shortCode: 'HQ6LMLTK8CAD',
-  } as never);
-  const txn = await Transaction.create({
-    accountId: account.id,
-    importBatch: 'test',
-    date: '2025-08-28',
-    merchantRaw: 'AMZN MKTP CA',
-    merchantClean: 'Amazon',
-    amount: '-44.97',
-    currency: 'CAD',
-    sourceRowFingerprint: 'fp-scope-opaque-1',
-    sourceIdentityFingerprint: 'sif-scope-opaque-1',
-  } as never);
-  const order = await ExternalOrder.create({
-    householdId: 1,
-    vendor: 'amazon',
-    vendorOrderId: '701-opaque-1',
-    dedupeKey: 'k-scope-opaque-1',
-    orderDate: '2025-08-27',
-    total: '44.97',
-    currency: 'CAD',
-    paymentLast4: '9999', // matches no account -- would be 'foreign' if comparable
-    source: 'amazon_report',
-  } as never);
-  await ExternalOrderItem.create({
-    externalOrderId: order.id,
-    title: 'Widget',
-    quantity: 1,
-    unitPrice: '44.97',
-    totalPrice: '44.97',
-  } as never);
-  await TransactionOrderLink.create({
-    transactionId: txn.id,
-    externalOrderId: order.id,
-    confidence: '90.00',
-    matchReason: 'test',
-    status: 'accepted',
-    linkedAmount: '44.97',
-  } as never);
+    shortCode: 'HQ6LMLTK8CAD', // opaque -- resolveAccountLast4 returns null
+  });
 
   const ctx = await loadItemAllocationContext([txn.id]);
   assert.equal(
@@ -465,48 +431,10 @@ test('an Amazon order with a foreign last4, linked to an account WITH a derivabl
   // The feature must still work: when the linked account DOES have a
   // derivable last4 and the order's last4 does not match it (or any other
   // account), the Amazon order is correctly classified 'foreign' and dropped.
-  const account = await Account.create({
+  const { txn } = await seedCardOwnershipCase('2662', {
     name: 'Amex Reserve',
-    householdId: 1,
     shortCode: '701001', // resolveAccountLast4 -> '1001'
-  } as never);
-  const txn = await Transaction.create({
-    accountId: account.id,
-    importBatch: 'test',
-    date: '2025-08-28',
-    merchantRaw: 'AMZN MKTP CA',
-    merchantClean: 'Amazon',
-    amount: '-44.97',
-    currency: 'CAD',
-    sourceRowFingerprint: 'fp-scope-still-foreign-1',
-    sourceIdentityFingerprint: 'sif-scope-still-foreign-1',
-  } as never);
-  const order = await ExternalOrder.create({
-    householdId: 1,
-    vendor: 'amazon',
-    vendorOrderId: '701-still-foreign-1',
-    dedupeKey: 'k-scope-still-foreign-1',
-    orderDate: '2025-08-27',
-    total: '44.97',
-    currency: 'CAD',
-    paymentLast4: '2662', // matches no account -- genuinely foreign
-    source: 'amazon_report',
-  } as never);
-  await ExternalOrderItem.create({
-    externalOrderId: order.id,
-    title: 'Widget',
-    quantity: 1,
-    unitPrice: '44.97',
-    totalPrice: '44.97',
-  } as never);
-  await TransactionOrderLink.create({
-    transactionId: txn.id,
-    externalOrderId: order.id,
-    confidence: '90.00',
-    matchReason: 'test',
-    status: 'accepted',
-    linkedAmount: '44.97',
-  } as never);
+  });
 
   const ctx = await loadItemAllocationContext([txn.id]);
   assert.equal(

@@ -26,9 +26,14 @@
  */
 import { before, after, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import crypto from 'crypto';
 import express from 'express';
 import request from 'supertest';
+import {
+  createFingerprinter,
+  makeCardOwnershipAccount,
+  makeAmazonOrder,
+  makeAmazonTransaction,
+} from './cardOwnershipTestHelpers';
 
 process.env.DATABASE_PATH = ':memory:';
 
@@ -66,35 +71,14 @@ beforeEach(async () => {
   household = await models.Household.create({ name: 'Items Test HH' });
 });
 
-let fpCounter = 0;
-function fp(): string {
-  fpCounter += 1;
-  return `fp-items-${fpCounter}-${crypto.randomBytes(4).toString('hex')}`;
-}
+const fp = createFingerprinter('items');
 
 async function makeAccount(shortCode: string | null) {
-  return models.Account.create({
-    householdId: household.id,
-    owner: 'me',
-    visibility: 'shared',
-    name: `Account ${shortCode ?? 'none'}`,
-    accountType: 'credit_card',
-    shortCode,
-  } as never);
+  return makeCardOwnershipAccount(models, household.id, shortCode);
 }
 
 async function makeOrder(vendor: string, paymentLast4: string | null, dedupeKey: string) {
-  return models.ExternalOrder.create({
-    householdId: household.id,
-    vendor,
-    dedupeKey,
-    orderDate: '2026-06-01',
-    total: '50.00',
-    subtotal: '50.00',
-    currency: 'CAD',
-    paymentLast4,
-    source: 'test',
-  } as never);
+  return makeAmazonOrder(models, household.id, vendor, paymentLast4, dedupeKey);
 }
 
 async function makeItem(orderId: number, title: string) {
@@ -203,24 +187,7 @@ test('an Amazon order linked to an account with no derivable last4 is still SHOW
   // Wealthsimple-style opaque short code: resolveAccountLast4 returns null,
   // so there is no basis to compare the order's last4 against this account.
   const account = await makeAccount('HQ6LMLTK8CAD');
-  const txn = await models.Transaction.create({
-    accountId: account.id,
-    householdId: household.id,
-    importBatch: 'test',
-    date: '2026-06-01',
-    merchantRaw: 'AMZN MKTP CA',
-    merchantClean: 'Amazon',
-    amount: '-50.00',
-    currency: 'CAD',
-    sourceRowFingerprint: fp(),
-    sourceIdentityFingerprint: fp(),
-    visibility: 'shared',
-    ownershipType: 'shared',
-    finalCategory: null,
-    finalBusiness: false,
-    finalSplitType: 'none',
-    businessAmount: '0',
-  } as never);
+  const txn = await makeAmazonTransaction(models, household.id, account.id, fp);
   const order = await makeOrder('amazon', '9999', 'k-opaque-account-1'); // matches no account
   await makeItem(order.id, 'OpaqueAccountWidget');
   await models.TransactionOrderLink.create({

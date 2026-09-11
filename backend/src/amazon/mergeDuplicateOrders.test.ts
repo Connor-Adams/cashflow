@@ -125,6 +125,33 @@ async function seedHouseholdWithTxn(householdId: number) {
   return { txn };
 }
 
+/** Runs the merge, then loads the (post-merge) links for one transaction. */
+async function mergeAndFindLinks(householdId: number, transactionId: number) {
+  await mergeDuplicateAmazonOrders({ householdId });
+  return TransactionOrderLink.findAll({ where: { transactionId } });
+}
+
+/**
+ * Seeds the "weak suggestion against the survivor, accepted match against the
+ * loser" conflict shape shared by the link-precedence tests below.
+ */
+async function seedConflictingLinks(
+  txnId: number,
+  reportId: number,
+  emailId: number,
+  acceptedOverrides: Partial<{ linkedAmount: string }> = {},
+) {
+  await TransactionOrderLink.create({
+    transactionId: txnId, externalOrderId: reportId,
+    confidence: '50', matchReason: 'weak guess', status: 'suggested',
+  } as never);
+  await TransactionOrderLink.create({
+    transactionId: txnId, externalOrderId: emailId,
+    confidence: '100', matchReason: 'manually linked by user', status: 'accepted',
+    ...acceptedOverrides,
+  } as never);
+}
+
 test('a link on the losing order is re-pointed at the survivor, not destroyed', async () => {
   const householdId = 6;
   const { report, email } = await seedPair(householdId);
@@ -137,9 +164,7 @@ test('a link on the losing order is re-pointed at the survivor, not destroyed', 
     confidence: '100', matchReason: 'manually linked by user', status: 'accepted',
   } as never);
 
-  await mergeDuplicateAmazonOrders({ householdId });
-
-  const links = await TransactionOrderLink.findAll({ where: { transactionId: txn.id } });
+  const links = await mergeAndFindLinks(householdId, txn.id);
   assert.equal(links.length, 1, 'the link must survive the merge, re-pointed rather than dropped');
   assert.equal(links[0].externalOrderId, report.id);
   assert.equal(links[0].status, 'accepted', 'the user\'s prior acceptance must not be lost');
@@ -150,20 +175,11 @@ test('a link conflict on the same transaction keeps the higher-precedence link',
   const { report, email } = await seedPair(householdId);
   const { txn } = await seedHouseholdWithTxn(householdId);
 
-  // A weak suggestion already exists against the survivor...
-  await TransactionOrderLink.create({
-    transactionId: txn.id, externalOrderId: report.id,
-    confidence: '50', matchReason: 'weak guess', status: 'suggested',
-  } as never);
-  // ...but the user actually accepted the match against the loser.
-  await TransactionOrderLink.create({
-    transactionId: txn.id, externalOrderId: email.id,
-    confidence: '100', matchReason: 'manually linked by user', status: 'accepted',
-  } as never);
+  // A weak suggestion already exists against the survivor, but the user
+  // actually accepted the match against the loser.
+  await seedConflictingLinks(txn.id, report.id, email.id);
 
-  await mergeDuplicateAmazonOrders({ householdId });
-
-  const links = await TransactionOrderLink.findAll({ where: { transactionId: txn.id } });
+  const links = await mergeAndFindLinks(householdId, txn.id);
   assert.equal(links.length, 1, 'the conflicting pair must collapse into one link');
   assert.equal(links[0].externalOrderId, report.id);
   assert.equal(links[0].status, 'accepted', 'the accepted link must win over the merely-suggested one');
@@ -175,22 +191,13 @@ test('a link conflict on the same transaction also carries linkedAmount from the
   const { report, email } = await seedPair(householdId);
   const { txn } = await seedHouseholdWithTxn(householdId);
 
-  // A weak suggestion already exists against the survivor, with no linkedAmount...
-  await TransactionOrderLink.create({
-    transactionId: txn.id, externalOrderId: report.id,
-    confidence: '50', matchReason: 'weak guess', status: 'suggested',
-  } as never);
-  // ...but the user accepted a split/partial-payment match against the loser,
-  // which carries a real linkedAmount set by matchReceiptToTransactions.
-  await TransactionOrderLink.create({
-    transactionId: txn.id, externalOrderId: email.id,
-    confidence: '100', matchReason: 'manually linked by user', status: 'accepted',
-    linkedAmount: '15.50',
-  } as never);
+  // A weak suggestion already exists against the survivor, with no
+  // linkedAmount, but the user accepted a split/partial-payment match against
+  // the loser, which carries a real linkedAmount set by
+  // matchReceiptToTransactions.
+  await seedConflictingLinks(txn.id, report.id, email.id, { linkedAmount: '15.50' });
 
-  await mergeDuplicateAmazonOrders({ householdId });
-
-  const links = await TransactionOrderLink.findAll({ where: { transactionId: txn.id } });
+  const links = await mergeAndFindLinks(householdId, txn.id);
   assert.equal(links.length, 1, 'the conflicting pair must collapse into one link');
   assert.equal(links[0].externalOrderId, report.id);
   assert.equal(links[0].status, 'accepted');
