@@ -13,6 +13,18 @@ export function isAmazonLikeMerchant(merchant: string): boolean {
   return /\b(amazon(?:\.ca)?|amzn|amzn\s*mktp|amazon marketplace|prime)\b/i.test(merchant);
 }
 
+/**
+ * The annual Amazon Prime membership charge is a subscription, never an order,
+ * so no external_order can ever match it and it sits in the review queue
+ * forever. Deliberately narrow: Prime Video rentals ARE orders and must keep
+ * matching, so this matches the membership merchant string only — and it is a
+ * separate predicate from isAmazonLikeMerchant, which also drives the +15
+ * merchant bonus inside scoreAmazonOrderMatch.
+ */
+export function isAmazonSubscriptionCharge(merchant: string): boolean {
+  return /\bprime\s*member\b/i.test(merchant);
+}
+
 function daysBetween(a: string, b: string): number {
   const one = new Date(`${a}T00:00:00Z`).getTime();
   const two = new Date(`${b}T00:00:00Z`).getTime();
@@ -285,7 +297,11 @@ export async function runAmazonMatching(args: {
   let matchedDateFrom: string | null = null;
   let matchedDateTo: string | null = null;
 
-  for (const txn of txns.filter((row) => isAmazonLikeMerchant(`${row.merchantRaw} ${row.merchantClean}`))) {
+  for (const txn of txns.filter(
+    (row) =>
+      isAmazonLikeMerchant(`${row.merchantRaw} ${row.merchantClean}`) &&
+      !isAmazonSubscriptionCharge(`${row.merchantRaw} ${row.merchantClean}`),
+  )) {
     const scores = orders.map((order) => {
       const { confidence, matchReason, secondaryScore } = scoreAmazonOrderMatch(
         txn,
