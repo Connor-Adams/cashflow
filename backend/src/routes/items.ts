@@ -62,6 +62,16 @@ async function foreignOrderIds(
   accounts: { id: number; shortCode: string | null }[],
   last4Map: Map<string, number[]>,
 ): Promise<number[]> {
+  // Household-level "no basis for comparison" guard: when NOT ONE account in
+  // the household can derive a last4 (every short_code is opaque, e.g. all
+  // Costco/Wealthsimple-style), there is nothing to compare any order's own
+  // last4 against -- not just for orders with an accepted link (guard 3
+  // below), but for every order, linked or not. Without this, a household
+  // whose accounts are all opaque would have every Amazon order with a
+  // payment_last4 classified foreign on its own last4 alone, since an
+  // unlinked order never reaches guard 3 at all.
+  if (last4Map.size === 0) return [];
+
   const orders = await ExternalOrder.findAll({
     where: { householdId, vendor: 'amazon' },
     attributes: ['id', 'paymentLast4'],

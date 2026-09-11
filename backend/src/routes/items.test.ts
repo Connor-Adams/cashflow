@@ -247,3 +247,42 @@ test('an Amazon order linked to an account with no derivable last4 is still SHOW
   const row = res.body.items.find((r: { title: string }) => r.title === 'OpaqueAccountWidget');
   assert.equal(row.order.cardOwnership, 'unknown');
 });
+
+// ─── FIX 2: household-level "no basis for comparison" guard ────────────────
+//
+// foreignOrderIds' guard 3 only "saves" a candidate Amazon order when it has
+// an ACCEPTED link whose account has no derivable last4. An order with no
+// accepted link at all has no linked account to consult, so it fell through
+// to being excluded on its own last4 alone -- even when EVERY account in the
+// household is opaque (e.g. every card is a non-numeric short_code) and
+// there is therefore no basis to call anything foreign, linked or not. This
+// mirrors loadItemAllocations.ts's per-link guard, extended to the
+// household level so it also covers orders with no link.
+test('a household where no account can derive a last4 shows an unlinked Amazon order too', async () => {
+  // Every account's short_code is opaque (non-numeric) -- last4Map ends up
+  // empty. Nothing in this household has a basis for the comparison, so no
+  // order should ever classify foreign, regardless of link status.
+  await makeAccount('costco');
+  const order = await makeOrder('amazon', '4321', 'k-no-basis-household-1');
+  await makeItem(order.id, 'NoBasisWidget');
+
+  const res = await request(app).get('/api/items');
+  assert.equal(res.status, 200);
+  const titles = res.body.items.map((r: { title: string }) => r.title);
+  assert.equal(
+    titles.includes('NoBasisWidget'),
+    true,
+    'no account in this household can derive a last4, so nothing has a basis for comparison',
+  );
+});
+
+test('a household where no account can derive a last4 does not hide items/analyze either', async () => {
+  await makeAccount('costco');
+  const order = await makeOrder('amazon', '4321', 'k-no-basis-household-2');
+  await makeItem(order.id, 'NoBasisAnalyzeWidget');
+
+  const res = await request(app).get('/api/items/analyze');
+  assert.equal(res.status, 200);
+  const names = res.body.topItems.map((r: { name: string }) => r.name.toLowerCase());
+  assert.equal(names.includes('nobasisanalyzewidget'), true);
+});
