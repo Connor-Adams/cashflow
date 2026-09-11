@@ -118,9 +118,12 @@ export function classifyCardOwnershipForVendor(
  * own last4 genuinely matches no account, so it is being counted on benefit
  * of the doubt, not because the card was verified (task 15 finding 2).
  *
- * `linkedAccountShortCode` is:
- *   - a `string | null` -- the short_code of the account the order is
- *     actually attributed through, so the guard can be evaluated; or
+ * `linkedAccountLast4s` is:
+ *   - a `string[]` (the account's FULL last4 set — `resolveAccountLast4s`,
+ *     short_code UNION harvested `account_card_identifiers` rows) for the
+ *     account the order is actually attributed through, so the guard can be
+ *     evaluated -- an empty array means that account has no derivable last4
+ *     at all; or
  *   - `undefined` -- there is no such account to consult (no attribution),
  *     so the guard cannot apply and the raw classification stands.
  *
@@ -144,12 +147,12 @@ export function classifyCardOwnershipForDisplay(
   vendor: string,
   paymentLast4: string | null,
   map: Map<string, number[]>,
-  linkedAccountShortCode: string | null | undefined,
+  linkedAccountLast4s: string[] | undefined,
 ): CardOwnership {
   const raw = classifyCardOwnershipForVendor(vendor, paymentLast4, map);
   if (raw !== 'foreign') return raw;
-  if (linkedAccountShortCode === undefined) return raw;
-  return resolveAccountLast4(linkedAccountShortCode) == null ? 'unknown' : raw;
+  if (linkedAccountLast4s === undefined) return raw;
+  return linkedAccountLast4s.length === 0 ? 'unknown' : raw;
 }
 
 /**

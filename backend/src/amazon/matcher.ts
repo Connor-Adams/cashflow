@@ -2,7 +2,8 @@ import { Op, type Transaction as DbTransaction } from 'sequelize';
 import { Account, ExternalOrder, Transaction, TransactionOrderLink } from '../models';
 import { decideAutoAccept } from './autoAccept';
 import { backfillAutoAcceptAmazonLinks } from './backfillAutoAcceptLinks';
-import { resolveAccountLast4 } from './cardOwnership';
+import { resolveAccountLast4s } from './cardOwnership';
+import { loadIdentifierLast4sByAccountId } from '../models/AccountCardIdentifier';
 import { mergeDuplicateAmazonOrders } from './mergeDuplicateOrders';
 import { isAmazonLikeMerchant, isAmazonSubscriptionCharge } from './merchant';
 import {
@@ -302,8 +303,15 @@ export async function runAmazonMatching(args: {
     where: { householdId: args.householdId },
     attributes: ['id', 'shortCode'],
   });
-  const last4ByAccountId = new Map<number, string | null>(
-    accounts.map((a) => [a.id, resolveAccountLast4(a.shortCode)]),
+  // One extra query (never per-account) so an opaque short_code (Costco)
+  // still contributes a derivable last4 once harvested -- see
+  // resolveAccountLast4s (backend/src/amazon/cardOwnership.ts).
+  const identifierLast4sByAccountId = await loadIdentifierLast4sByAccountId(args.householdId);
+  const last4SetByAccountId = new Map<number, string[]>(
+    accounts.map((a) => [
+      a.id,
+      resolveAccountLast4s(a.shortCode, identifierLast4sByAccountId.get(a.id) ?? []),
+    ]),
   );
   let suggested = 0;
   let autoAccepted = 0;
@@ -323,10 +331,21 @@ export async function runAmazonMatching(args: {
       !isAmazonSubscriptionCharge(`${row.merchantRaw} ${row.merchantClean}`),
   )) {
     const scores = orders.map((order) => {
+      // The account may now carry several last4s (short_code UNION harvested
+      // identifiers). Prefer the one that actually matches this order's
+      // paymentLast4 (so the "payment last4 matches" bonus can fire); when
+      // none match, fall back to the first known last4 so the existing
+      // "charged to a different card" penalty still applies exactly as
+      // before for single-last4 accounts.
+      const accountLast4s = last4SetByAccountId.get(txn.accountId) ?? [];
+      const txnLast4 =
+        order.paymentLast4 != null && accountLast4s.includes(order.paymentLast4)
+          ? order.paymentLast4
+          : (accountLast4s[0] ?? null);
       const { confidence, matchReason, secondaryScore } = scoreAmazonOrderMatch(
         txn,
         order,
-        last4ByAccountId.get(txn.accountId) ?? null,
+        txnLast4,
       );
       return { order, confidence, matchReason, secondary: secondaryScore };
     });
