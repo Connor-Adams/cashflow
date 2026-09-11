@@ -171,9 +171,14 @@ export function scoreAmazonOrderMatch(
       score += 20;
       secondary += 20;
       reasons.push('payment last4 matches');
+    } else {
+      // Two different cards is positive evidence against a match, at the same
+      // magnitude as an amount mismatch. This is NOT foreign-card exclusion: it
+      // is per-pair evidence, applied regardless of ownership, and it never
+      // removes an order from the candidate pool.
+      score -= 25;
+      reasons.push('charged to a different card than the order');
     }
-    // NOTE: the mismatch penalty lives in Task 12, gated on production
-    // verification. Do not add it here.
   }
 
   return {

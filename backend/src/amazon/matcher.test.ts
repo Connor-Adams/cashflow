@@ -318,3 +318,36 @@ test('a resolvable strong tie keeps the winner plus strictly-lower candidates', 
   ]);
   assert.deepEqual(picked.map((p) => (p as { id: string }).id).sort(), ['lower', 'tieWinner']);
 });
+
+test('a last4 mismatch is penalised', () => {
+  const txn = {
+    amount: '-44.97',
+    date: '2025-08-28',
+    merchantRaw: 'AMZN MKTP CA*Z90R91K22',
+    merchantClean: 'Amazon',
+    notes: null,
+    sourceReference: null,
+    accountId: 1,
+  } as unknown as Transaction;
+  const order = { total: '44.97', orderDate: '2025-08-27', shipmentDate: null, paymentLast4: '2662', currency: 'CAD' } as never;
+  const mismatch = scoreAmazonOrderMatch(txn, order, '1001');
+  const noTxnLast4 = scoreAmazonOrderMatch(txn, order, null);
+  assert.equal(mismatch.confidence < noTxnLast4.confidence, true);
+  assert.match(mismatch.matchReason, /different card/);
+});
+
+test('no penalty when either side lacks a last4', () => {
+  const txn = {
+    amount: '-44.97',
+    date: '2025-08-28',
+    merchantRaw: 'AMZN MKTP CA*Z90R91K22',
+    merchantClean: 'Amazon',
+    notes: null,
+    sourceReference: null,
+    accountId: 1,
+  } as unknown as Transaction;
+  const orderNoLast4 = { total: '44.97', orderDate: '2025-08-27', shipmentDate: null, paymentLast4: null, currency: 'CAD' } as never;
+  const a = scoreAmazonOrderMatch(txn, orderNoLast4, '1001');
+  const b = scoreAmazonOrderMatch(txn, orderNoLast4, null);
+  assert.equal(a.confidence, b.confidence, 'absence of evidence is not evidence');
+});
