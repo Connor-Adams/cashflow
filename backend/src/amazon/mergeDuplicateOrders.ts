@@ -95,6 +95,8 @@ export async function mergeDuplicateAmazonOrders(args: {
           subtotal: survivor.subtotal ?? group.find((o) => o.subtotal != null)?.subtotal ?? null,
           tax: survivor.tax ?? group.find((o) => o.tax != null)?.tax ?? null,
           shipping: survivor.shipping ?? group.find((o) => o.shipping != null)?.shipping ?? null,
+          shipmentDate:
+            survivor.shipmentDate ?? group.find((o) => o.shipmentDate != null)?.shipmentDate ?? null,
         },
         { transaction: t },
       );
@@ -132,7 +134,12 @@ export async function mergeDuplicateAmazonOrders(args: {
           }
           if (linkPrecedence(link) > linkPrecedence(existing)) {
             await existing.update(
-              { confidence: link.confidence, matchReason: link.matchReason, status: link.status },
+              {
+                confidence: link.confidence,
+                matchReason: link.matchReason,
+                status: link.status,
+                linkedAmount: link.linkedAmount,
+              },
               { transaction: t },
             );
           }

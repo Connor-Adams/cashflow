@@ -9,6 +9,8 @@ import {
   Transaction,
   Household,
   Account,
+  Receipt,
+  ExternalOrderTender,
 } from '../models';
 import { mergeDuplicateAmazonOrders } from './mergeDuplicateOrders';
 
@@ -166,4 +168,96 @@ test('a link conflict on the same transaction keeps the higher-precedence link',
   assert.equal(links[0].externalOrderId, report.id);
   assert.equal(links[0].status, 'accepted', 'the accepted link must win over the merely-suggested one');
   assert.equal(Number(links[0].confidence), 100);
+});
+
+test('a link conflict on the same transaction also carries linkedAmount from the winning link', async () => {
+  const householdId = 8;
+  const { report, email } = await seedPair(householdId);
+  const { txn } = await seedHouseholdWithTxn(householdId);
+
+  // A weak suggestion already exists against the survivor, with no linkedAmount...
+  await TransactionOrderLink.create({
+    transactionId: txn.id, externalOrderId: report.id,
+    confidence: '50', matchReason: 'weak guess', status: 'suggested',
+  } as never);
+  // ...but the user accepted a split/partial-payment match against the loser,
+  // which carries a real linkedAmount set by matchReceiptToTransactions.
+  await TransactionOrderLink.create({
+    transactionId: txn.id, externalOrderId: email.id,
+    confidence: '100', matchReason: 'manually linked by user', status: 'accepted',
+    linkedAmount: '15.50',
+  } as never);
+
+  await mergeDuplicateAmazonOrders({ householdId });
+
+  const links = await TransactionOrderLink.findAll({ where: { transactionId: txn.id } });
+  assert.equal(links.length, 1, 'the conflicting pair must collapse into one link');
+  assert.equal(links[0].externalOrderId, report.id);
+  assert.equal(links[0].status, 'accepted');
+  assert.equal(
+    Number(links[0].linkedAmount),
+    15.5,
+    'the winning link\'s linkedAmount must be copied onto the survivor\'s link, not dropped',
+  );
+});
+
+// ─── shipmentDate coalescing ─────────────────────────────────────────────────
+
+test('shipmentDate from a losing CSV-sourced row is coalesced onto the survivor', async () => {
+  const householdId = 9;
+  const vendorOrderId = '701-6488283-5477862';
+  // The email row is created first (lower id, so it survives) and, like every
+  // email-sourced row, has no shipmentDate. The CSV/report row is created
+  // second (the loser) and carries the shipmentDate populated by the CSV
+  // import path.
+  const email = await ExternalOrder.create({
+    householdId, vendor: 'amazon', vendorOrderId,
+    dedupeKey: `e-${householdId}`, orderDate: null, total: '38.26', currency: 'CAD',
+    paymentLast4: null, source: 'gmail-scan:ai', shipmentDate: null,
+  } as never);
+  const report = await ExternalOrder.create({
+    householdId, vendor: 'amazon', vendorOrderId,
+    dedupeKey: `r-${householdId}`, orderDate: '2025-08-27', total: '10.11', currency: 'CAD',
+    paymentLast4: '1001', source: 'amazon_report', shipmentDate: '2025-08-29',
+  } as never);
+
+  const out = await mergeDuplicateAmazonOrders({ householdId });
+  assert.equal(out.merged, 1);
+
+  const survivor = await ExternalOrder.findOne({ where: { householdId, vendorOrderId } });
+  assert.equal(survivor?.id, email.id, 'the older (email) row survives');
+  assert.equal(
+    survivor?.shipmentDate,
+    '2025-08-29',
+    'shipmentDate from the losing CSV row must be coalesced onto the survivor',
+  );
+  void report;
+});
+
+// ─── Receipt / ExternalOrderTender re-parenting ──────────────────────────────
+
+test('a Receipt and an ExternalOrderTender on the losing order are re-parented to the survivor', async () => {
+  const householdId = 10;
+  const { report, email } = await seedPair(householdId);
+  const { txn } = await seedHouseholdWithTxn(householdId);
+
+  const receipt = await Receipt.create({
+    transactionId: txn.id,
+    storedFilename: 'stored.png',
+    originalName: 'receipt.png',
+    mimeType: 'image/png',
+    sizeBytes: 1234,
+    externalOrderId: email.id,
+  } as never);
+  const tender = await ExternalOrderTender.create({
+    externalOrderId: email.id,
+    amount: '38.26',
+  } as never);
+
+  await mergeDuplicateAmazonOrders({ householdId });
+
+  await receipt.reload();
+  await tender.reload();
+  assert.equal(receipt.externalOrderId, report.id, 'the Receipt must be re-pointed at the survivor');
+  assert.equal(tender.externalOrderId, report.id, 'the ExternalOrderTender must be re-pointed at the survivor');
 });
