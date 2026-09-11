@@ -224,3 +224,69 @@ test('a tender with no paymentLast4 writes no identifier even on a trusted sourc
   const rows = await AccountCardIdentifier.findAll({ where: { accountId } });
   assert.equal(rows.length, 0);
 });
+
+// FIX 1 (review): the harvest must fire ONLY when the link is, or has just
+// become, accepted. A merely 'suggested' link is the system's own statement
+// that the match is NOT confident -- harvesting off it can permanently record
+// a last4 on the wrong account (production: order 522, suggested, account 14).
+test('a receipt tender on an ambiguous (suggested) link writes NO account_card_identifier row', async () => {
+  // Two same-amount candidates in the date window → ambiguous, stays suggested.
+  await mkTxn({ amount: '-947.04', date: '2025-12-14' });
+  await mkTxn({ amount: '-947.04', date: '2025-12-15' });
+  const order = await mkOrder({ orderDate: '2025-12-13', total: '947.04', source: 'costco_till_receipt-pdf' });
+  await ExternalOrderTender.create(
+    { externalOrderId: order.id, sequence: 0, paymentLast4: '3114', amount: '947.04' } as never,
+  );
+
+  await matchReceiptOrderToTransactions({ externalOrderId: order.id, householdId: HH });
+
+  const links = await TransactionOrderLink.findAll({ where: { externalOrderId: order.id } });
+  assert.equal(links.length, 1);
+  assert.equal(links[0].status, 'suggested', 'sanity check: this scenario must stay suggested');
+  const rows = await AccountCardIdentifier.findAll({ where: { last4: '3114' } });
+  assert.equal(rows.length, 0, 'an unconfirmed (suggested) link must never harvest an identifier');
+});
+
+test('a receipt tender on an already-rejected link writes NO account_card_identifier row', async () => {
+  const txn = await mkTxn({ amount: '-947.04', date: '2025-12-15' });
+  const order = await mkOrder({ orderDate: '2025-12-13', total: '947.04', source: 'costco_till_receipt-pdf' });
+  await TransactionOrderLink.create({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    confidence: '90',
+    matchReason: 'm',
+    status: 'rejected',
+    linkedAmount: '947.04',
+  } as never);
+  await ExternalOrderTender.create(
+    { externalOrderId: order.id, sequence: 0, paymentLast4: '3114', amount: '947.04' } as never,
+  );
+
+  await matchReceiptOrderToTransactions({ externalOrderId: order.id, householdId: HH });
+
+  const rows = await AccountCardIdentifier.findAll({ where: { last4: '3114' } });
+  assert.equal(rows.length, 0, 'a rejected link must never harvest an identifier');
+});
+
+test('a re-run that upgrades a stale suggested link to accepted now harvests the tender', async () => {
+  const txn = await mkTxn({ amount: '-947.04', date: '2025-12-15' });
+  const order = await mkOrder({ orderDate: '2025-12-13', total: '947.04', source: 'costco_till_receipt-pdf' });
+  await TransactionOrderLink.create({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    confidence: '90',
+    matchReason: 'old',
+    status: 'suggested',
+    linkedAmount: '947.04',
+  } as never);
+  await ExternalOrderTender.create(
+    { externalOrderId: order.id, sequence: 0, paymentLast4: '3114', amount: '947.04' } as never,
+  );
+
+  await matchReceiptOrderToTransactions({ externalOrderId: order.id, householdId: HH });
+
+  const link = await TransactionOrderLink.findOne({ where: { externalOrderId: order.id } });
+  assert.equal(link?.status, 'accepted', 'sanity check: this scenario must upgrade to accepted');
+  const rows = await AccountCardIdentifier.findAll({ where: { accountId: txn.accountId, last4: '3114' } });
+  assert.equal(rows.length, 1, 'once the link becomes accepted, the tender must harvest');
+});

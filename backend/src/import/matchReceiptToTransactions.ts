@@ -239,12 +239,19 @@ export async function matchReceiptOrderToTransactions(args: {
     // Harvest a card identifier off this tender onto the linked transaction's
     // account (docs/superpowers/specs/2026-09-11-account-card-identifiers-design.md,
     // Part 2) -- gated on the deterministic-source allowlist so an AI
-    // misparse (e.g. 'gmail-scan:ai') can never write a bogus last4. Runs
-    // every time a payment claims a transaction (not just on created/updated
-    // link writes) so a re-run against an already-accepted link still
-    // refreshes lastSeenAt; the upsert is idempotent either way. Never lets
-    // a harvesting failure fail the match.
-    if (payment.paymentLast4 && isDeterministicReceiptSource(order.source)) {
+    // misparse (e.g. 'gmail-scan:ai') can never write a bogus last4, AND
+    // gated on the link being (or having just become) 'accepted'. A
+    // 'suggested' link is the system's own statement that the match is NOT
+    // confident enough to trust -- harvesting off it, or off an already-
+    // 'rejected' link, would permanently record a last4 that later turns out
+    // wrong with no way to undo it (production: order 522, suggested,
+    // account 14 -- see the finding this guards against). `link.status` has
+    // already been updated in-memory by the block above, so checking it here
+    // covers every case: a fresh accepted create, a suggested→accepted
+    // upgrade, and a re-run against an already-accepted link (which still
+    // refreshes lastSeenAt via the idempotent upsert below). Never lets a
+    // harvesting failure fail the match.
+    if (payment.paymentLast4 && isDeterministicReceiptSource(order.source) && link.status === 'accepted') {
       try {
         await upsertAccountCardIdentifier({
           householdId: args.householdId,
