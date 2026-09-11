@@ -179,3 +179,41 @@ test('does not double-accept: skips backfill promotion when one of two suggested
   });
   assert.equal(accepted.length, 1, 'transaction must end up with exactly one accepted link');
 });
+
+// ─── FIX 6: the backfill must not auto-accept a Prime membership link ──────
+//
+// runAmazonMatching's live loop already excludes the annual Prime membership
+// charge via isAmazonSubscriptionCharge (it can never legitimately match an
+// order). The backfill filtered on isAmazonLikeMerchant only, so a stale
+// suggested link on a Prime membership charge (e.g. one seeded before that
+// exclusion existed, or a false-positive candidate from an older matcher
+// version) would still get silently promoted to 'accepted'.
+test('does not auto-accept a suggested link on a Prime membership charge', async () => {
+  const householdId = 9105;
+  await Household.create({ id: householdId, name: `HH-${householdId}` } as never);
+  await Account.create({ id: 5, householdId, name: 'Test Account 5' } as never);
+
+  const txn = await Transaction.create({
+    householdId, accountId: 5, date: '2026-06-10', amount: '-99.99', currency: 'CAD',
+    merchantRaw: 'AMAZON.CA PRIME MEMBER', merchantClean: 'Amazon Prime Member',
+    txnType: 'purchase', importBatch: 'test',
+    sourceRowFingerprint: `srfp-${householdId}-1`,
+    sourceIdentityFingerprint: `sifp-${householdId}-1`,
+  } as never);
+  const order = await ExternalOrder.create({
+    householdId, vendor: 'amazon', orderDate: '2026-06-09', total: '99.99', currency: 'CAD',
+    source: 'test', dedupeKey: `b-${householdId}-1`,
+  } as never);
+  await TransactionOrderLink.create({
+    transactionId: (txn as { id: number }).id, externalOrderId: (order as { id: number }).id,
+    confidence: '90', matchReason: 'seed', status: 'suggested',
+  } as never);
+
+  const res = await backfillAutoAcceptAmazonLinks({ householdId });
+  assert.equal(res.promoted, 0, 'a Prime membership charge must never be auto-accepted');
+
+  const link = await TransactionOrderLink.findOne({
+    where: { transactionId: (txn as { id: number }).id },
+  });
+  assert.equal(link?.status, 'suggested');
+});

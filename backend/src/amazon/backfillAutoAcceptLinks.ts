@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
 import { Transaction, TransactionOrderLink } from '../models';
 import { decideAutoAccept } from './autoAccept';
-import { isAmazonLikeMerchant } from './matcher';
+import { isAmazonLikeMerchant, isAmazonSubscriptionCharge } from './matcher';
 import {
   recomputeTransactionsReviewFromItems,
   transactionIdsForOrder,
@@ -21,10 +21,24 @@ import {
  */
 export async function backfillAutoAcceptAmazonLinks(args: {
   householdId: number;
+  /**
+   * Transaction ids to skip this run. Used by runAmazonMatching to exclude
+   * transactions whose sole surviving candidate this pass came from a
+   * resolved confidence tie (matcher.ts's isTopTied): that suggested link is
+   * structurally indistinguishable from a genuine lone match (exactly one
+   * non-rejected link), so without this exclusion the backfill would
+   * immediately re-promote it, undoing the tie-must-not-auto-accept guard.
+   */
+  excludeTransactionIds?: Set<number>;
 }): Promise<{ promoted: number; examined: number }> {
   const txns = await Transaction.findAll({ where: { householdId: args.householdId } });
   const amazonTxnIds = txns
-    .filter((t) => isAmazonLikeMerchant(`${t.merchantRaw} ${t.merchantClean}`))
+    .filter(
+      (t) =>
+        isAmazonLikeMerchant(`${t.merchantRaw} ${t.merchantClean}`) &&
+        !isAmazonSubscriptionCharge(`${t.merchantRaw} ${t.merchantClean}`) &&
+        !args.excludeTransactionIds?.has(t.id),
+    )
     .map((t) => t.id);
   if (amazonTxnIds.length === 0) return { promoted: 0, examined: 0 };
 

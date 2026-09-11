@@ -3,7 +3,7 @@ import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { Transaction, ExternalOrder, TransactionOrderLink, Household, Account } from '../models';
-import { runAmazonMatching, scoreAmazonOrderMatch, selectMatchCandidates } from './matcher';
+import { runAmazonMatching, scoreAmazonOrderMatch, selectMatchCandidates, isTopTied } from './matcher';
 
 before(async () => {
   await sequelize.sync({ force: true });
@@ -375,3 +375,99 @@ test('isAmazonLikeMerchant is unchanged — it still matches Prime generally', (
   assert.equal(isAmazonLikeMerchant('AMAZON.CA PRIME MEMBER'), true);
   assert.equal(isAmazonLikeMerchant('AMAZON PRIME VIDEO'), true);
 });
+
+// ─── FIX 1: a tie-resolved selection must not auto-accept ───────────────────
+//
+// selectMatchCandidates collapses a resolved strong-tier tie down to just the
+// winner when there are no strictly-lower candidates — indistinguishable from
+// a genuine lone match by candidates.length alone. isTopTied lets a caller
+// tell the two apart using the pre-selection scored list.
+
+test('isTopTied is true when the top strong score is a tie', () => {
+  const scores = [
+    { confidence: 85, secondary: 40 },
+    { confidence: 85, secondary: 20 },
+  ];
+  assert.equal(isTopTied(scores), true);
+  // selectMatchCandidates still collapses this to the sole winner.
+  assert.equal(selectMatchCandidates(scores).length, 1);
+});
+
+test('isTopTied is false for a genuine lone strong candidate', () => {
+  assert.equal(isTopTied([{ confidence: 90 }]), false);
+});
+
+test('isTopTied is false when strong candidates differ (not a tie)', () => {
+  assert.equal(isTopTied([{ confidence: 90 }, { confidence: 75 }]), false);
+});
+
+test('isTopTied considers the fallback tier when nothing is strong', () => {
+  assert.equal(isTopTied([{ confidence: 50 }, { confidence: 50 }]), true);
+  assert.equal(isTopTied([{ confidence: 50 }, { confidence: 30 }]), false);
+});
+
+test(
+  'runAmazonMatching: a tie resolved by secondary score is suggested, never auto-accepted',
+  async () => {
+    // Concrete repro from the final-review finding: txn on an Amex Reserve
+    // (short_code 701001 -> last4 1001) for $44.97. Order A (undated, total
+    // 44.97, last4 1001) scores 85 with secondary 40 (exact-cent + last4).
+    // Order B (undated, total 45.40, last4 1001) also scores 85, secondary 20
+    // (within-$0.50 + last4). A wins the tie on secondary, but pre-branch
+    // decideAutoAccept([85, 85]) was false — this must stay suggested, not
+    // silently promoted to accepted just because the tie resolved to a
+    // single surviving candidate.
+    const householdId = 9101;
+    const household = await Household.create({ id: householdId, name: `HH-${householdId}` } as never);
+    const account = await Account.create({
+      householdId: household.id,
+      name: 'Amex Reserve',
+      shortCode: '701001',
+    } as never);
+    const txn = await Transaction.create({
+      householdId: household.id,
+      accountId: account.id,
+      date: '2026-06-10',
+      amount: '-44.97',
+      currency: 'CAD',
+      merchantRaw: 'AMAZON.CA',
+      merchantClean: 'Amazon',
+      txnType: 'purchase',
+      importBatch: 'test',
+      sourceRowFingerprint: `srfp-${householdId}`,
+      sourceIdentityFingerprint: `sifp-${householdId}`,
+    } as never);
+    const orderA = await ExternalOrder.create({
+      householdId: household.id,
+      vendor: 'amazon',
+      orderDate: null,
+      total: '44.97',
+      currency: 'CAD',
+      paymentLast4: '1001',
+      source: 'test',
+      dedupeKey: `t-${householdId}-a`,
+    } as never);
+    const orderB = await ExternalOrder.create({
+      householdId: household.id,
+      vendor: 'amazon',
+      orderDate: null,
+      total: '45.40',
+      currency: 'CAD',
+      paymentLast4: '1001',
+      source: 'test',
+      dedupeKey: `t-${householdId}-b`,
+    } as never);
+
+    const res = await runAmazonMatching({ householdId });
+
+    assert.equal(res.autoAccepted, 0, 'an ambiguous tied pair must never auto-accept');
+    const linkA = await TransactionOrderLink.findOne({
+      where: { transactionId: (txn as { id: number }).id, externalOrderId: (orderA as { id: number }).id },
+    });
+    assert.equal(linkA?.status, 'suggested', 'the tie winner is suggested, not accepted');
+    const linkB = await TransactionOrderLink.findOne({
+      where: { transactionId: (txn as { id: number }).id, externalOrderId: (orderB as { id: number }).id },
+    });
+    assert.equal(linkB, null, 'the tie loser gets no link at all (unchanged fan-out guard)');
+  },
+);
