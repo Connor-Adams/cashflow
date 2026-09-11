@@ -335,3 +335,184 @@ test('scope the account lookup: no unscoped Account query when all orders have n
     'order with null householdId should be allocated without household context',
   );
 });
+
+// Task 13 scope correction: the foreign-card exclusion was designed for
+// Amazon but ran against every vendor. Production has zero accepted Amazon
+// links and 7 accepted non-Amazon links (6 costco, 1 uber_eats); 5 of those 7
+// would misclassify as 'foreign' under the old code because the linked
+// account's short_code ('costco') is an opaque, non-numeric label with no
+// derivable last4 -- even though the order correctly carries the real card
+// last4 ('3114'). Two guards fix this: (1) only vendor 'amazon' may ever be
+// excluded as foreign; (2) even for Amazon, an order is not excluded when the
+// LINKED TRANSACTION's account has no derivable last4 -- there is no basis
+// for the comparison.
+
+test('a non-Amazon order with a last4 matching no account is INCLUDED (Costco regression)', async () => {
+  // Costco MC: short_code = 'costco', opaque and non-numeric -- no last4 can
+  // be derived from the account side. The order still carries its own real
+  // last4 ('3114'). Because vendor !== 'amazon', foreign classification must
+  // never apply here regardless of last4 comparability.
+  const account = await Account.create({
+    name: 'Costco MC',
+    householdId: 1,
+    shortCode: 'costco',
+  } as never);
+  const txn = await Transaction.create({
+    accountId: account.id,
+    importBatch: 'test',
+    date: '2025-08-28',
+    merchantRaw: 'COSTCO WHOLESALE',
+    merchantClean: 'Costco',
+    amount: '-120.00',
+    currency: 'CAD',
+    sourceRowFingerprint: 'fp-scope-costco-1',
+    sourceIdentityFingerprint: 'sif-scope-costco-1',
+  } as never);
+  const order = await ExternalOrder.create({
+    householdId: 1,
+    vendor: 'costco',
+    dedupeKey: 'k-scope-costco-1',
+    orderDate: '2025-08-27',
+    total: '120.00',
+    currency: 'CAD',
+    paymentLast4: '3114',
+    source: 'costco_email',
+  } as never);
+  await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'Bulk Eggs',
+    quantity: 1,
+    unitPrice: '120.00',
+    totalPrice: '120.00',
+  } as never);
+  await TransactionOrderLink.create({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    confidence: '90.00',
+    matchReason: 'test',
+    status: 'accepted',
+    linkedAmount: '120.00',
+  } as never);
+
+  const ctx = await loadItemAllocationContext([txn.id]);
+  assert.equal(
+    ctx.linksByTxn.has(txn.id),
+    true,
+    'non-Amazon orders must never be excluded as foreign',
+  );
+  assert.equal(ctx.ordersById.has(order.id), true);
+});
+
+test('an Amazon order whose linked transaction account has an opaque short code is INCLUDED', async () => {
+  // Wealthsimple-style opaque short code: resolveAccountLast4 returns null,
+  // so there is no basis to compare the order's last4 against this account.
+  // Even though the order's last4 matches no account (looks 'foreign'), the
+  // order must be kept because the linked account itself has no derivable
+  // last4.
+  const account = await Account.create({
+    name: 'Wealthsimple Cash',
+    householdId: 1,
+    shortCode: 'HQ6LMLTK8CAD',
+  } as never);
+  const txn = await Transaction.create({
+    accountId: account.id,
+    importBatch: 'test',
+    date: '2025-08-28',
+    merchantRaw: 'AMZN MKTP CA',
+    merchantClean: 'Amazon',
+    amount: '-44.97',
+    currency: 'CAD',
+    sourceRowFingerprint: 'fp-scope-opaque-1',
+    sourceIdentityFingerprint: 'sif-scope-opaque-1',
+  } as never);
+  const order = await ExternalOrder.create({
+    householdId: 1,
+    vendor: 'amazon',
+    vendorOrderId: '701-opaque-1',
+    dedupeKey: 'k-scope-opaque-1',
+    orderDate: '2025-08-27',
+    total: '44.97',
+    currency: 'CAD',
+    paymentLast4: '9999', // matches no account -- would be 'foreign' if comparable
+    source: 'amazon_report',
+  } as never);
+  await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'Widget',
+    quantity: 1,
+    unitPrice: '44.97',
+    totalPrice: '44.97',
+  } as never);
+  await TransactionOrderLink.create({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    confidence: '90.00',
+    matchReason: 'test',
+    status: 'accepted',
+    linkedAmount: '44.97',
+  } as never);
+
+  const ctx = await loadItemAllocationContext([txn.id]);
+  assert.equal(
+    ctx.linksByTxn.has(txn.id),
+    true,
+    'an order linked to an account with no derivable last4 must not be excluded',
+  );
+  assert.equal(ctx.ordersById.has(order.id), true);
+});
+
+test('an Amazon order with a foreign last4, linked to an account WITH a derivable last4, is still EXCLUDED', async () => {
+  // The feature must still work: when the linked account DOES have a
+  // derivable last4 and the order's last4 does not match it (or any other
+  // account), the Amazon order is correctly classified 'foreign' and dropped.
+  const account = await Account.create({
+    name: 'Amex Reserve',
+    householdId: 1,
+    shortCode: '701001', // resolveAccountLast4 -> '1001'
+  } as never);
+  const txn = await Transaction.create({
+    accountId: account.id,
+    importBatch: 'test',
+    date: '2025-08-28',
+    merchantRaw: 'AMZN MKTP CA',
+    merchantClean: 'Amazon',
+    amount: '-44.97',
+    currency: 'CAD',
+    sourceRowFingerprint: 'fp-scope-still-foreign-1',
+    sourceIdentityFingerprint: 'sif-scope-still-foreign-1',
+  } as never);
+  const order = await ExternalOrder.create({
+    householdId: 1,
+    vendor: 'amazon',
+    vendorOrderId: '701-still-foreign-1',
+    dedupeKey: 'k-scope-still-foreign-1',
+    orderDate: '2025-08-27',
+    total: '44.97',
+    currency: 'CAD',
+    paymentLast4: '2662', // matches no account -- genuinely foreign
+    source: 'amazon_report',
+  } as never);
+  await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'Widget',
+    quantity: 1,
+    unitPrice: '44.97',
+    totalPrice: '44.97',
+  } as never);
+  await TransactionOrderLink.create({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    confidence: '90.00',
+    matchReason: 'test',
+    status: 'accepted',
+    linkedAmount: '44.97',
+  } as never);
+
+  const ctx = await loadItemAllocationContext([txn.id]);
+  assert.equal(
+    ctx.linksByTxn.has(txn.id),
+    false,
+    'a genuinely foreign Amazon order linked to a comparable account must still be excluded',
+  );
+  assert.equal(ctx.ordersById.size, 0);
+});
