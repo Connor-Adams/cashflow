@@ -127,9 +127,15 @@ async function loadLast4Context(
  * honest state (task 15 finding 2) and renders the "unverified card" badge
  * rather than silently claiming verification. This mirrors
  * `classifyCardOwnershipForDisplay` in cardOwnership.ts, which
- * backend/src/routes/receipts.ts uses for the same guard case -- see that
- * file for why this endpoint can take the shortcut of clamping any residual
- * 'foreign' rather than re-checking the linked account directly.
+ * backend/src/routes/receipts.ts uses for the same guard case.
+ *
+ * NOTE: Items and Receipts endpoints agree for orders with at most one
+ * accepted link. For a multi-link order, items.ts uses an OR across all
+ * links (saved if ANY link has an opaque account), while receipts.ts checks
+ * the specific account behind each receipt independently. They can therefore
+ * differ in label only (items='unknown', receipts='foreign') for the same
+ * order when receipts are attached to a derivable account. See
+ * cardOwnershipConsistency.test.ts for the regression test.
  */
 function displayCardOwnership(
   vendor: string,

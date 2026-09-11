@@ -98,6 +98,17 @@ export function classifyCardOwnershipForVendor(
  * pre-filter foreign orders out of its result set, so it cannot rely on
  * items.ts's "any residual foreign in a surviving row must be the guard
  * case" shortcut and must check the actual linked account.
+ *
+ * NOTE: The Items page (items.ts) and receipts drawer (receipts.ts) can
+ * disagree on cardOwnership for a multi-link order spanning derivable and
+ * opaque accounts: items.ts saves the order from exclusion if ANY link has
+ * an opaque account (no basis for comparison), then clamps any residual
+ * 'foreign' to 'unknown'. But receipts.ts checks the specific account
+ * behind each receipt independently. A multi-link order can therefore show
+ * 'unknown' on Items and 'foreign' on Receipts when the receipt is attached
+ * to a derivable account. This is a known limitation and cosmetic only
+ * (both endpoints count the item; only the badge differs). See
+ * backend/src/routes/cardOwnershipConsistency.test.ts for a regression test.
  */
 export function classifyCardOwnershipForDisplay(
   vendor: string,
