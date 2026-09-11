@@ -51,18 +51,34 @@ export async function loadItemAllocationContext(
   // excluded: absence of a last4 is not evidence of a foreign card. Accounts
   // are loaded once, scoped to the households the orders belong to, so this
   // chokepoint (nine consumers, hot dashboard/budget path) never issues a
-  // per-order query.
+  // per-order query. When no households are resolvable (all orders have
+  // householdId === null), the query is skipped entirely and we do not filter
+  // by foreign status — with no household context, we have no basis to call
+  // anything foreign.
   const householdIds = Array.from(new Set(orders.map((o) => o.householdId))).filter(
     (id): id is number => id != null,
   );
-  const accounts = await Account.findAll({
-    where: householdIds.length > 0 ? { householdId: { [Op.in]: householdIds } } : {},
-    attributes: ['id', 'shortCode'],
-  });
-  const last4Map = buildLast4Map(accounts.map((a) => ({ id: a.id, shortCode: a.shortCode })));
-  const ownedOrders = orders.filter(
-    (o) => classifyCardOwnership(o.paymentLast4, last4Map) !== 'foreign',
-  );
+
+  let last4Map: Map<string, number[]>;
+  if (householdIds.length > 0) {
+    const accounts = await Account.findAll({
+      where: { householdId: { [Op.in]: householdIds } },
+      attributes: ['id', 'shortCode'],
+    });
+    last4Map = buildLast4Map(accounts.map((a) => ({ id: a.id, shortCode: a.shortCode })));
+  } else {
+    // No household context: skip the query entirely and use an empty map.
+    last4Map = new Map();
+  }
+
+  // Only filter by foreign status if we had household context to determine it.
+  // When householdIds is empty (all orders have null householdId), we cannot
+  // determine ownership, so we include all orders: both 'unknown' (no last4)
+  // and what would be 'foreign' (last4 not in empty map).
+  const ownedOrders =
+    householdIds.length > 0
+      ? orders.filter((o) => classifyCardOwnership(o.paymentLast4, last4Map) !== 'foreign')
+      : orders;
   const ownedOrderIds = new Set(ownedOrders.map((o) => o.id));
 
   const linksByTxn = new Map<number, AllocatorLink[]>();
