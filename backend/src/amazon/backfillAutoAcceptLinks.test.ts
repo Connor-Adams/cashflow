@@ -124,3 +124,58 @@ test('runAmazonMatching promotes a pre-existing high-confidence suggested link v
   assert.equal(link?.status, 'accepted');
   assert.equal(result.autoAccepted >= 1, true);
 });
+
+test('does not double-accept: skips backfill promotion when one of two suggested links was already accepted', async () => {
+  // Reproduces the Task 8 fan-out: a transaction has two stale 'suggested'
+  // links (order A, order B). A live rescan promotes A to 'accepted' inline
+  // (outside the backfill), leaving only B still 'suggested'. The backfill's
+  // ambiguity guard must see that the transaction ALREADY has an accepted
+  // link and promote nothing further — otherwise it queries only
+  // status: 'suggested', finds just B, concludes "unambiguous", and produces
+  // a transaction with two accepted links.
+  const householdId = 9104;
+  await Household.create({ id: householdId, name: `HH-${householdId}` } as never);
+  await Account.create({ id: 4, householdId, name: 'Test Account 4' } as never);
+
+  const txn = await Transaction.create({
+    householdId, accountId: 4, date: '2026-06-10', amount: '-35.00', currency: 'CAD',
+    merchantRaw: 'AMZN', merchantClean: 'Amazon',
+    txnType: 'purchase', importBatch: 'test',
+    sourceRowFingerprint: `srfp-${householdId}-1`,
+    sourceIdentityFingerprint: `sifp-${householdId}-1`,
+  } as never);
+  const orderA = await ExternalOrder.create({
+    householdId, vendor: 'amazon', orderDate: '2026-06-09', total: '35.00', currency: 'CAD',
+    source: 'test', dedupeKey: `b-${householdId}-1`,
+  } as never);
+  const orderB = await ExternalOrder.create({
+    householdId, vendor: 'amazon', orderDate: '2026-06-08', total: '35.00', currency: 'CAD',
+    source: 'test', dedupeKey: `b-${householdId}-2`,
+  } as never);
+  await TransactionOrderLink.create({
+    transactionId: (txn as { id: number }).id, externalOrderId: (orderA as { id: number }).id,
+    confidence: '90', matchReason: 'seed', status: 'suggested',
+  } as never);
+  const linkB = await TransactionOrderLink.create({
+    transactionId: (txn as { id: number }).id, externalOrderId: (orderB as { id: number }).id,
+    confidence: '88', matchReason: 'seed', status: 'suggested',
+  } as never);
+
+  // Simulate the live rescan promoting A to accepted inline, ahead of the
+  // backfill running — exactly what runAmazonMatching now does per Task 8.
+  await TransactionOrderLink.update(
+    { status: 'accepted' },
+    { where: { transactionId: (txn as { id: number }).id, externalOrderId: (orderA as { id: number }).id } },
+  );
+
+  const res = await backfillAutoAcceptAmazonLinks({ householdId });
+  assert.equal(res.promoted, 0, 'must not promote B once A is already accepted for the same transaction');
+
+  await linkB.reload();
+  assert.equal(linkB.status, 'suggested', 'B must remain suggested, not be promoted alongside A');
+
+  const accepted = await TransactionOrderLink.findAll({
+    where: { transactionId: (txn as { id: number }).id, status: 'accepted' },
+  });
+  assert.equal(accepted.length, 1, 'transaction must end up with exactly one accepted link');
+});
