@@ -12,7 +12,7 @@ import {
 } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { visibleTransactionWhere } from '../auth/scope';
-import type { ItemRow, ItemsListResponse } from '@cashflow/shared';
+import type { CardOwnershipView, ItemRow, ItemsListResponse } from '@cashflow/shared';
 import {
   transactionIdsForOrder,
   recomputeTransactionsReviewFromItems,
@@ -20,6 +20,7 @@ import {
 import {
   buildLast4Map,
   classifyCardOwnership,
+  classifyCardOwnershipForVendor,
   resolveAccountLast4,
 } from '../amazon/cardOwnership';
 
@@ -51,18 +52,22 @@ const router = Router();
  * Resolved once per request (never per-row): at most two queries up front,
  * plus two more only when there are foreign-candidate orders with accepted
  * links to check.
+ *
+ * `accounts`/`last4Map` are loaded once per request by {@link loadLast4Context}
+ * and threaded in here (and into cardOwnership serialization below) rather
+ * than re-queried, so a single request never issues the Account query twice.
  */
-async function foreignOrderIds(householdId: number): Promise<number[]> {
-  const [orders, accounts] = await Promise.all([
-    ExternalOrder.findAll({
-      where: { householdId, vendor: 'amazon' },
-      attributes: ['id', 'paymentLast4'],
-    }),
-    Account.findAll({ where: { householdId }, attributes: ['id', 'shortCode'] }),
-  ]);
+async function foreignOrderIds(
+  householdId: number,
+  accounts: { id: number; shortCode: string | null }[],
+  last4Map: Map<string, number[]>,
+): Promise<number[]> {
+  const orders = await ExternalOrder.findAll({
+    where: { householdId, vendor: 'amazon' },
+    attributes: ['id', 'paymentLast4'],
+  });
   if (orders.length === 0) return [];
 
-  const last4Map = buildLast4Map(accounts.map((a) => ({ id: a.id, shortCode: a.shortCode })));
   const candidateIds = orders
     .filter((o) => classifyCardOwnership(o.paymentLast4, last4Map) === 'foreign')
     .map((o) => o.id);
@@ -95,6 +100,34 @@ async function foreignOrderIds(householdId: number): Promise<number[]> {
   }
 
   return candidateIds.filter((id) => !savedByLink.has(id));
+}
+
+/** Loads the household's accounts once per request, deriving the last4 map from them. */
+async function loadLast4Context(
+  householdId: number,
+): Promise<{
+  accounts: { id: number; shortCode: string | null }[];
+  last4Map: Map<string, number[]>;
+}> {
+  const accounts = await Account.findAll({ where: { householdId }, attributes: ['id', 'shortCode'] });
+  const plain = accounts.map((a) => ({ id: a.id, shortCode: a.shortCode }));
+  return { accounts: plain, last4Map: buildLast4Map(plain) };
+}
+
+/**
+ * cardOwnership for an ItemRow, given a row that has already survived
+ * {@link foreignOrderIds}' exclusion filter. A residual 'foreign' result here
+ * can only mean this Amazon order was "saved" by guard 3 above (its accepted
+ * link's account has no derivable last4 -- no basis for the comparison);
+ * since the order was not excluded, it must not be badged foreign either.
+ */
+function displayCardOwnership(
+  vendor: string,
+  paymentLast4: string | null,
+  last4Map: Map<string, number[]>,
+): CardOwnershipView {
+  const c = classifyCardOwnershipForVendor(vendor, paymentLast4, last4Map);
+  return c === 'foreign' ? 'known' : c;
 }
 
 function num(v: string | null): number | null {
@@ -210,7 +243,11 @@ async function loadOrderAttribution(txnWhere: WhereOptions): Promise<Map<number,
   return map;
 }
 
-function mapItemToRow(it: ExternalOrderItem, attribution: Map<number, Attribution>): ItemRow {
+function mapItemToRow(
+  it: ExternalOrderItem,
+  attribution: Map<number, Attribution>,
+  last4Map: Map<string, number[]>,
+): ItemRow {
   const order = (it as ExternalOrderItem & { order?: ExternalOrder }).order!;
   const attr = attribution.get(order.id);
   return {
@@ -226,7 +263,11 @@ function mapItemToRow(it: ExternalOrderItem, attribution: Map<number, Attributio
     businessUseEffective: effectiveBusinessUse(it),
     businessUseOverride:
       it.businessUseOverride == null ? null : Number(it.businessUseOverride) > 0,
-    order: { id: order.id, vendor: order.vendor },
+    order: {
+      id: order.id,
+      vendor: order.vendor,
+      cardOwnership: displayCardOwnership(order.vendor, order.paymentLast4, last4Map),
+    },
     receipt: {
       // Grouping key: the receipt when present, else the transaction (one purchase).
       id: attr?.receiptId ?? attr?.txnId ?? 0,
@@ -350,7 +391,8 @@ router.get('/items/analyze', async (req, res, next) => {
     if (from) orderWhere.orderDate = { ...(orderWhere.orderDate as object ?? {}), [Op.gte]: from };
     if (to) orderWhere.orderDate = { ...(orderWhere.orderDate as object ?? {}), [Op.lte]: to };
 
-    const excludedOrderIds = await foreignOrderIds(household.id);
+    const { accounts: last4Accounts, last4Map } = await loadLast4Context(household.id);
+    const excludedOrderIds = await foreignOrderIds(household.id, last4Accounts, last4Map);
     if (excludedOrderIds.length > 0) {
       orderWhere.id = { [Op.notIn]: excludedOrderIds };
     }
@@ -449,7 +491,8 @@ router.get('/items/analyze/trend', async (req, res, next) => {
     if (to) orderWhere.orderDate = { ...(orderWhere.orderDate as object ?? {}), [Op.lte]: to };
     if (vendorFilter) orderWhere.vendor = vendorFilter;
 
-    const excludedOrderIds = await foreignOrderIds(household.id);
+    const { accounts: last4Accounts, last4Map } = await loadLast4Context(household.id);
+    const excludedOrderIds = await foreignOrderIds(household.id, last4Accounts, last4Map);
     if (excludedOrderIds.length > 0) {
       orderWhere.id = { [Op.notIn]: excludedOrderIds };
     }
@@ -539,7 +582,8 @@ router.get('/items', async (req, res, next) => {
       };
     }
 
-    const excludedOrderIds = await foreignOrderIds(household.id);
+    const { accounts: last4Accounts, last4Map } = await loadLast4Context(household.id);
+    const excludedOrderIds = await foreignOrderIds(household.id, last4Accounts, last4Map);
     if (excludedOrderIds.length > 0) {
       (orderWhere as Record<string, unknown>).id = { [Op.notIn]: excludedOrderIds };
     }
@@ -588,7 +632,7 @@ router.get('/items', async (req, res, next) => {
         as: 'order',
         required: true,
         where: orderWhere,
-        attributes: ['id', 'vendor', 'currency'],
+        attributes: ['id', 'vendor', 'currency', 'paymentLast4'],
       },
     ];
 
@@ -607,7 +651,7 @@ router.get('/items', async (req, res, next) => {
           .json({ error: `Result set too large (>${maxRows} items). Narrow your filters.` });
         return;
       }
-      const csv = rowsToCsv(allItems.map((it) => mapItemToRow(it, attribution)));
+      const csv = rowsToCsv(allItems.map((it) => mapItemToRow(it, attribution, last4Map)));
       const filename = `items-${new Date().toISOString().slice(0, 10)}.csv`;
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -626,7 +670,7 @@ router.get('/items', async (req, res, next) => {
     const hasMore = items.length > limit;
     const sliced = hasMore ? items.slice(0, limit) : items;
 
-    const rows: ItemRow[] = sliced.map((it) => mapItemToRow(it, attribution));
+    const rows: ItemRow[] = sliced.map((it) => mapItemToRow(it, attribution, last4Map));
 
     const last = rows[rows.length - 1];
     const nextCursor = hasMore && last ? encodeCursor({ itemId: last.id }) : null;

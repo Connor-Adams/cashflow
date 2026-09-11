@@ -129,6 +129,18 @@ test('GET /api/items omits items from a foreign-card Amazon order', async () => 
   assert.equal(titles.includes('ForeignCardWidget'), false);
 });
 
+// Task 15: surface cardOwnership on ItemRow.order so the Items page can
+// badge "unverified card" / "not your card" instead of items silently
+// disappearing. classifyCardOwnershipForVendor's vendor-only-foreign guard
+// (cardOwnership.ts) must hold in the serialized response too.
+test('GET /api/items marks a known-card order as cardOwnership "known"', async () => {
+  await seedForeignAndKnownOrders();
+  const res = await request(app).get('/api/items');
+  assert.equal(res.status, 200);
+  const row = res.body.items.find((r: { title: string }) => r.title === 'KnownCardWidget');
+  assert.equal(row.order.cardOwnership, 'known');
+});
+
 test('GET /api/items/analyze omits foreign-card Amazon items', async () => {
   await seedForeignAndKnownOrders();
   const res = await request(app).get('/api/items/analyze');
@@ -162,6 +174,8 @@ test('an unknown-card order (no last4 at all) is shown, not treated as foreign',
   const res = await request(app).get('/api/items');
   const titles = res.body.items.map((r: { title: string }) => r.title);
   assert.equal(titles.includes('NoLast4Widget'), true);
+  const row = res.body.items.find((r: { title: string }) => r.title === 'NoLast4Widget');
+  assert.equal(row.order.cardOwnership, 'unknown');
 });
 
 test('a non-Amazon order with a last4 matching no account is still SHOWN (Costco regression)', async () => {
@@ -179,6 +193,10 @@ test('a non-Amazon order with a last4 matching no account is still SHOWN (Costco
   assert.equal(res.status, 200);
   const titles = res.body.items.map((r: { title: string }) => r.title);
   assert.equal(titles.includes('BulkEggsWidget'), true);
+  const row = res.body.items.find((r: { title: string }) => r.title === 'BulkEggsWidget');
+  // Never 'foreign' for a non-Amazon vendor, even though the order's own
+  // last4 matches no account.
+  assert.equal(row.order.cardOwnership, 'known');
 });
 
 test('an Amazon order linked to an account with no derivable last4 is still SHOWN', async () => {
@@ -218,4 +236,11 @@ test('an Amazon order linked to an account with no derivable last4 is still SHOW
   assert.equal(res.status, 200);
   const titles = res.body.items.map((r: { title: string }) => r.title);
   assert.equal(titles.includes('OpaqueAccountWidget'), true);
+  // The order's own last4 ('9999') matches no account, which would raw-
+  // classify as 'foreign' -- but this row was kept precisely because there
+  // was no basis for that comparison, so it must not be badged foreign
+  // either: an item that counts toward spend must never show "not your
+  // card".
+  const row = res.body.items.find((r: { title: string }) => r.title === 'OpaqueAccountWidget');
+  assert.equal(row.order.cardOwnership, 'known');
 });

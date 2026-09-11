@@ -52,3 +52,27 @@ export function classifyCardOwnership(
   if (paymentLast4 == null || paymentLast4 === '') return 'unknown';
   return map.has(paymentLast4) ? 'known' : 'foreign';
 }
+
+/**
+ * `classifyCardOwnership`, scoped to the vendor guard that governs the
+ * foreign-card exclusion (backend/src/summary/loadItemAllocations.ts,
+ * commit 8b56596a; backend/src/routes/items.ts, commit cc1672dc): only
+ * vendor 'amazon' may ever be classified 'foreign'. Production has zero
+ * accepted Amazon links but 7 accepted non-Amazon links (6 costco, 1
+ * uber_eats), and a vendor-agnostic rule misclassified 5 of those 7 because
+ * an opaque short_code (e.g. Costco's 'costco') derives no last4 even though
+ * the order's own last4 is real.
+ *
+ * Every DTO/serializer that surfaces `cardOwnership` (never a table column —
+ * always derived at request time) should call this rather than
+ * `classifyCardOwnership` directly, so the vendor guard cannot drift between
+ * call sites.
+ */
+export function classifyCardOwnershipForVendor(
+  vendor: string,
+  paymentLast4: string | null,
+  map: Map<string, number[]>,
+): CardOwnership {
+  const raw = classifyCardOwnership(paymentLast4, map);
+  return raw === 'foreign' && vendor !== 'amazon' ? 'known' : raw;
+}
