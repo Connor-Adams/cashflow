@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import multer from 'multer';
 import { Op } from 'sequelize';
 import { Account, Transaction, Receipt, ExternalOrder, ExternalOrderItem, TransactionOrderLink, CostcoProduct } from '../models';
-import { buildLast4Map, classifyCardOwnershipForVendor } from '../amazon/cardOwnership';
+import { buildLast4Map, classifyCardOwnershipForDisplay } from '../amazon/cardOwnership';
 import { extractReceiptFromImage } from '../ai/extractReceiptItems';
 import { persistExtractedOrder } from './externalOrders';
 import { anchorReceiptOrderToTransaction } from '../import/receiptOrderAnchor';
@@ -241,6 +241,12 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
       Account.findAll({ where: { householdId: txn.householdId }, attributes: ['id', 'shortCode'] }),
     ]);
     const last4Map = buildLast4Map(accounts.map((a) => ({ id: a.id, shortCode: a.shortCode })));
+    // Every receipt in this response is attached to the SAME `txn` (this
+    // endpoint is scoped to one transaction id), so its account is the
+    // derivable-account-guard context for every order below -- see
+    // classifyCardOwnershipForDisplay in cardOwnership.ts and the
+    // task-15 comment on items.ts's `displayCardOwnership`.
+    const linkedAccountShortCode = accounts.find((a) => a.id === txn.accountId)?.shortCode;
     const ordersById = new Map(orders.map((o) => [o.id, o]));
     const itemsByOrder = new Map<number, typeof items>();
     for (const it of items) {
@@ -274,10 +280,11 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
                 shipping: order.shipping,
                 total: order.total,
                 currency: order.currency,
-                cardOwnership: classifyCardOwnershipForVendor(
+                cardOwnership: classifyCardOwnershipForDisplay(
                   order.vendor,
                   order.paymentLast4,
                   last4Map,
+                  linkedAccountShortCode,
                 ),
                 trip: orderTrip(order),
               }

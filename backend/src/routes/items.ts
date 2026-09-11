@@ -120,6 +120,16 @@ async function loadLast4Context(
  * can only mean this Amazon order was "saved" by guard 3 above (its accepted
  * link's account has no derivable last4 -- no basis for the comparison);
  * since the order was not excluded, it must not be badged foreign either.
+ *
+ * It also must not be badged 'known': the card was never verified -- the
+ * order's own last4 genuinely matches no account, and we are counting it
+ * only because the linked account's short code is opaque. 'unknown' is the
+ * honest state (task 15 finding 2) and renders the "unverified card" badge
+ * rather than silently claiming verification. This mirrors
+ * `classifyCardOwnershipForDisplay` in cardOwnership.ts, which
+ * backend/src/routes/receipts.ts uses for the same guard case -- see that
+ * file for why this endpoint can take the shortcut of clamping any residual
+ * 'foreign' rather than re-checking the linked account directly.
  */
 function displayCardOwnership(
   vendor: string,
@@ -127,7 +137,7 @@ function displayCardOwnership(
   last4Map: Map<string, number[]>,
 ): CardOwnershipView {
   const c = classifyCardOwnershipForVendor(vendor, paymentLast4, last4Map);
-  return c === 'foreign' ? 'known' : c;
+  return c === 'foreign' ? 'unknown' : c;
 }
 
 function num(v: string | null): number | null {

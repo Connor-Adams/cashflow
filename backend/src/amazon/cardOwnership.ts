@@ -76,3 +76,37 @@ export function classifyCardOwnershipForVendor(
   const raw = classifyCardOwnership(paymentLast4, map);
   return raw === 'foreign' && vendor !== 'amazon' ? 'known' : raw;
 }
+
+/**
+ * `classifyCardOwnershipForVendor`, further scoped to the derivable-account
+ * guard (backend/src/summary/loadItemAllocations.ts guard 2;
+ * backend/src/routes/items.ts `foreignOrderIds`): a raw 'foreign' result is
+ * not shown as foreign when the account backing whatever attribution reached
+ * this order (an accepted TransactionOrderLink, or a receipt's own
+ * transaction) has no derivable last4 -- there is no basis for the
+ * comparison. `unknown` is the honest result here, NOT `known`: the order's
+ * own last4 genuinely matches no account, so it is being counted on benefit
+ * of the doubt, not because the card was verified (task 15 finding 2).
+ *
+ * `linkedAccountShortCode` is:
+ *   - a `string | null` -- the short_code of the account the order is
+ *     actually attributed through, so the guard can be evaluated; or
+ *   - `undefined` -- there is no such account to consult (no attribution),
+ *     so the guard cannot apply and the raw classification stands.
+ *
+ * Used by backend/src/routes/receipts.ts, which (unlike items.ts) does not
+ * pre-filter foreign orders out of its result set, so it cannot rely on
+ * items.ts's "any residual foreign in a surviving row must be the guard
+ * case" shortcut and must check the actual linked account.
+ */
+export function classifyCardOwnershipForDisplay(
+  vendor: string,
+  paymentLast4: string | null,
+  map: Map<string, number[]>,
+  linkedAccountShortCode: string | null | undefined,
+): CardOwnership {
+  const raw = classifyCardOwnershipForVendor(vendor, paymentLast4, map);
+  if (raw !== 'foreign') return raw;
+  if (linkedAccountShortCode === undefined) return raw;
+  return resolveAccountLast4(linkedAccountShortCode) == null ? 'unknown' : raw;
+}

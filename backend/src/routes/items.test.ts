@@ -240,7 +240,10 @@ test('an Amazon order linked to an account with no derivable last4 is still SHOW
   // classify as 'foreign' -- but this row was kept precisely because there
   // was no basis for that comparison, so it must not be badged foreign
   // either: an item that counts toward spend must never show "not your
-  // card".
+  // card". It is also not 'known': the card genuinely isn't verified, we
+  // are only counting this order on benefit of the doubt because the linked
+  // account's short code is opaque. 'unknown' (task 15 finding 2) renders
+  // the honest "unverified card" badge instead of overclaiming verification.
   const row = res.body.items.find((r: { title: string }) => r.title === 'OpaqueAccountWidget');
-  assert.equal(row.order.cardOwnership, 'known');
+  assert.equal(row.order.cardOwnership, 'unknown');
 });

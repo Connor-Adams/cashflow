@@ -13,7 +13,7 @@ import type {
 } from '../import/splitTxnByItems';
 import {
   buildLast4Map,
-  classifyCardOwnership,
+  classifyCardOwnershipForVendor,
   resolveAccountLast4,
 } from '../amazon/cardOwnership';
 
@@ -115,15 +115,18 @@ export async function loadItemAllocationContext(
     if (householdIds.length === 0) return false;
     const order = ordersByIdRaw.get(link.externalOrderId);
     if (!order) return false;
-    // Guard 1: only Amazon orders may ever be classified foreign.
-    if (order.vendor !== 'amazon') return false;
     // Guard 2: the linked transaction's account must have a derivable last4
     // to have any basis for comparison.
     const accountId = accountIdByTxnId.get(link.transactionId);
     const linkedAccountLast4 =
       accountId != null ? derivableLast4ByAccountId.get(accountId) : undefined;
     if (linkedAccountLast4 == null) return false;
-    return classifyCardOwnership(order.paymentLast4, last4Map) === 'foreign';
+    // Guard 1 (only Amazon orders may ever be classified foreign) is folded
+    // into classifyCardOwnershipForVendor -- reused here rather than
+    // reimplemented, so the vendor rule cannot drift between this exclusion
+    // chokepoint and the DTO serializers (backend/src/amazon/cardOwnership.ts,
+    // backend/src/routes/items.ts, backend/src/routes/receipts.ts).
+    return classifyCardOwnershipForVendor(order.vendor, order.paymentLast4, last4Map) === 'foreign';
   }
 
   const linksByTxn = new Map<number, AllocatorLink[]>();

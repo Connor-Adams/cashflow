@@ -160,3 +160,25 @@ test('a non-Amazon order with an unmatched last4 is never "foreign" (Costco regr
   assert.equal(res.status, 200);
   assert.equal(res.body[0].order.cardOwnership, 'known');
 });
+
+// Task 15 findings 1 & 2: the derivable-account guard must also apply here,
+// not just on the Items page (backend/src/routes/items.ts). An Amazon order
+// reached via a receipt whose transaction sits on an opaque-short-code
+// account (e.g. Wealthsimple's 'HQ6LMLTK8CAD') has no basis for comparison --
+// the order's own last4 matching no account is not evidence of a foreign
+// card when the account side cannot be compared at all. Before this fix,
+// receipts.ts had no such guard and serialized a raw 'foreign', disagreeing
+// with the Items page (which clamps the very same order). The honest result
+// is 'unknown' (counted on benefit of the doubt), not 'known' (which would
+// overclaim verification) and not 'foreign' (which would badge "not your
+// card" on an order nothing excludes).
+test('an Amazon order whose transaction sits on an account with no derivable last4 surfaces "unknown", not "foreign"', async () => {
+  const account = await makeAccount('HQ6LMLTK8CAD'); // opaque -- derives no last4
+  const txn = await makeTransaction(account.id);
+  const order = await makeOrder('amazon', '9999', 'k-receipts-opaque-1'); // matches no account
+  await makeReceipt(txn.id, order.id, 'opaque.pdf');
+
+  const res = await request(app).get(`/api/transactions/${txn.id}/receipts`);
+  assert.equal(res.status, 200);
+  assert.equal(res.body[0].order.cardOwnership, 'unknown');
+});
