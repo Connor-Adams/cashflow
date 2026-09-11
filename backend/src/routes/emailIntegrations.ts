@@ -40,6 +40,16 @@ const router = Router();
  * backfill this exists for, without being unbounded. Returns undefined when
  * the field is absent, not an array, or empty after filtering — scanInbox
  * treats that the same as "no forced reprocess".
+ *
+ * FOOTGUN: forceReprocessMessageIds only lifts the "already seen" skip — it
+ * does not widen the Gmail LIST query window that decides which messages are
+ * even fetched. That window is `sinceDateOverride ?? integ.lastScanAt ?? now
+ * - 30d` (scanInbox), so ids outside it are never returned by Gmail and
+ * silently never reprocessed. A manual one-shot reprocess of old messages
+ * (e.g. the 141 dateless production orders) MUST also send `sinceDays` wide
+ * enough to cover them — `{ sinceDays: 3650, maxMessages: 5000,
+ * forceReprocessMessageIds: [...] }` — or the request returns `created: 0`
+ * and looks like a success while doing nothing.
  */
 export function parseForceReprocessMessageIds(body: Record<string, unknown>): string[] | undefined {
   if (!Array.isArray(body.forceReprocessMessageIds)) return undefined;

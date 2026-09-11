@@ -78,120 +78,123 @@ export async function mergeDuplicateAmazonOrders(args: {
 
     try {
       await sequelize.transaction(async (t) => {
-      const largestTotalOrder = group.reduce<ExternalOrder | null>((best, o) => {
-        const n = numberOrNull(o.total);
-        if (n == null) return best;
-        const bestN = best == null ? null : numberOrNull(best.total);
-        return bestN == null || n > bestN ? o : best;
-      }, null);
+        const largestTotalOrder = group.reduce<ExternalOrder | null>((best, o) => {
+          const n = numberOrNull(o.total);
+          if (n == null) return best;
+          const bestN = best == null ? null : numberOrNull(best.total);
+          return bestN == null || n > bestN ? o : best;
+        }, null);
 
-      // FIX 4: ProcessedEmailMessage.external_order_id is ON DELETE SET NULL,
-      // so once the email-sourced loser is destroyed below, rawPayload
-      // .gmailMessageId is the only remaining path back to the Gmail message
-      // (scanReceipts.ts's findExistingOrderForMessage falls back to it).
-      // Never overwrite a gmailMessageId the survivor already carries.
-      const survivorGmailMessageId = extractGmailMessageId(survivor.rawPayload);
-      const gmailMessageId =
-        survivorGmailMessageId ?? group.map((o) => extractGmailMessageId(o.rawPayload)).find((id) => id != null) ?? null;
+        // ProcessedEmailMessage.external_order_id is ON DELETE SET NULL,
+        // so once the email-sourced loser is destroyed below, rawPayload
+        // .gmailMessageId is the only remaining path back to the Gmail message
+        // (scanReceipts.ts's findExistingOrderForMessage falls back to it).
+        // Never overwrite a gmailMessageId the survivor already carries.
+        const survivorGmailMessageId = extractGmailMessageId(survivor.rawPayload);
+        const gmailMessageId =
+          survivorGmailMessageId ?? group.map((o) => extractGmailMessageId(o.rawPayload)).find((id) => id != null) ?? null;
 
-      await survivor.update(
-        {
-          // Keep the original string value (never reconstruct via Number/toFixed)
-          // so we don't lose precision on a DECIMAL(14,4) column.
-          total: largestTotalOrder ? largestTotalOrder.total : survivor.total,
-          orderDate: survivor.orderDate ?? group.find((o) => o.orderDate != null)?.orderDate ?? null,
-          paymentLast4:
-            survivor.paymentLast4 ?? group.find((o) => o.paymentLast4 != null)?.paymentLast4 ?? null,
-          subtotal: survivor.subtotal ?? group.find((o) => o.subtotal != null)?.subtotal ?? null,
-          tax: survivor.tax ?? group.find((o) => o.tax != null)?.tax ?? null,
-          shipping: survivor.shipping ?? group.find((o) => o.shipping != null)?.shipping ?? null,
-          shipmentDate:
-            survivor.shipmentDate ?? group.find((o) => o.shipmentDate != null)?.shipmentDate ?? null,
-          rawPayload:
-            gmailMessageId != null
-              ? {
-                  ...(survivor.rawPayload != null && typeof survivor.rawPayload === 'object'
-                    ? (survivor.rawPayload as Record<string, unknown>)
-                    : {}),
-                  gmailMessageId,
-                }
-              : survivor.rawPayload,
-        },
-        { transaction: t },
-      );
+        await survivor.update(
+          {
+            // Keep the original string value (never reconstruct via Number/toFixed)
+            // so we don't lose precision on a DECIMAL(14,4) column.
+            total: largestTotalOrder ? largestTotalOrder.total : survivor.total,
+            orderDate: survivor.orderDate ?? group.find((o) => o.orderDate != null)?.orderDate ?? null,
+            paymentLast4:
+              survivor.paymentLast4 ?? group.find((o) => o.paymentLast4 != null)?.paymentLast4 ?? null,
+            subtotal: survivor.subtotal ?? group.find((o) => o.subtotal != null)?.subtotal ?? null,
+            tax: survivor.tax ?? group.find((o) => o.tax != null)?.tax ?? null,
+            shipping: survivor.shipping ?? group.find((o) => o.shipping != null)?.shipping ?? null,
+            shipmentDate:
+              survivor.shipmentDate ?? group.find((o) => o.shipmentDate != null)?.shipmentDate ?? null,
+            rawPayload:
+              gmailMessageId != null
+                ? {
+                    ...(survivor.rawPayload != null && typeof survivor.rawPayload === 'object'
+                      ? (survivor.rawPayload as Record<string, unknown>)
+                      : {}),
+                    gmailMessageId,
+                  }
+                : survivor.rawPayload,
+          },
+          { transaction: t },
+        );
 
-      for (const loser of losers) {
-        // --- items: union onto the survivor, skipping ones already present ---
-        const [survivorItems, loserItems] = await Promise.all([
-          ExternalOrderItem.findAll({ where: { externalOrderId: survivor.id }, transaction: t }),
-          ExternalOrderItem.findAll({ where: { externalOrderId: loser.id }, transaction: t }),
-        ]);
-        const survivorItemsByKey = new Map(survivorItems.map((it) => [itemDedupeKey(it), it]));
-        for (const item of loserItems) {
-          const key = itemDedupeKey(item);
-          const existing = survivorItemsByKey.get(key);
-          if (existing) {
-            // FIX 5: categoryOverride/categoryOverrideId/businessUseOverride/
-            // businessUsePercent are hand-entered values the survivor's twin
-            // may lack — copy any it's missing before discarding the loser
-            // item, so a nightly merge never silently deletes them.
-            const overridePatch = missingOverrideFields(existing, item);
-            if (Object.keys(overridePatch).length > 0) {
-              await existing.update(overridePatch as never, { transaction: t });
+        for (const loser of losers) {
+          // --- items: union onto the survivor, skipping ones already present ---
+          const [survivorItems, loserItems] = await Promise.all([
+            ExternalOrderItem.findAll({ where: { externalOrderId: survivor.id }, transaction: t }),
+            ExternalOrderItem.findAll({ where: { externalOrderId: loser.id }, transaction: t }),
+          ]);
+          const survivorItemsByKey = new Map(survivorItems.map((it) => [itemDedupeKey(it), it]));
+          for (const item of loserItems) {
+            const key = itemDedupeKey(item);
+            const existing = survivorItemsByKey.get(key);
+            if (existing) {
+              // categoryOverride/categoryOverrideId/businessUseOverride are hand-entered
+              // values the survivor's twin may lack; businessUsePercent is the
+              // exception — scanReceipts.ts writes it from the extractor at item
+              // creation, but coalescing it the same direction as the rest is still
+              // right for two rows describing one order. Copy any of these the
+              // survivor is missing before discarding the loser item, so a nightly
+              // merge never silently deletes them.
+              const overridePatch = missingOverrideFields(existing, item);
+              if (Object.keys(overridePatch).length > 0) {
+                await existing.update(overridePatch as never, { transaction: t });
+              }
+              await item.destroy({ transaction: t });
+            } else {
+              survivorItemsByKey.set(key, item);
+              await item.update({ externalOrderId: survivor.id }, { transaction: t });
             }
-            await item.destroy({ transaction: t });
-          } else {
-            survivorItemsByKey.set(key, item);
-            await item.update({ externalOrderId: survivor.id }, { transaction: t });
           }
-        }
 
-        // --- transaction<->order links: re-parent, resolving same-transaction conflicts ---
-        const loserLinks = await TransactionOrderLink.findAll({
-          where: { externalOrderId: loser.id },
-          transaction: t,
-        });
-        for (const link of loserLinks) {
-          const existing = await TransactionOrderLink.findOne({
-            where: { transactionId: link.transactionId, externalOrderId: survivor.id },
+          // --- transaction<->order links: re-parent, resolving same-transaction conflicts ---
+          const loserLinks = await TransactionOrderLink.findAll({
+            where: { externalOrderId: loser.id },
             transaction: t,
           });
-          if (!existing) {
-            await link.update({ externalOrderId: survivor.id }, { transaction: t });
-            continue;
+          for (const link of loserLinks) {
+            const existing = await TransactionOrderLink.findOne({
+              where: { transactionId: link.transactionId, externalOrderId: survivor.id },
+              transaction: t,
+            });
+            if (!existing) {
+              await link.update({ externalOrderId: survivor.id }, { transaction: t });
+              continue;
+            }
+            if (linkPrecedence(link) > linkPrecedence(existing)) {
+              await existing.update(
+                {
+                  confidence: link.confidence,
+                  matchReason: link.matchReason,
+                  status: link.status,
+                  linkedAmount: link.linkedAmount,
+                },
+                { transaction: t },
+              );
+            }
+            await link.destroy({ transaction: t });
           }
-          if (linkPrecedence(link) > linkPrecedence(existing)) {
-            await existing.update(
-              {
-                confidence: link.confidence,
-                matchReason: link.matchReason,
-                status: link.status,
-                linkedAmount: link.linkedAmount,
-              },
-              { transaction: t },
-            );
-          }
-          await link.destroy({ transaction: t });
+
+          // --- receipts & tenders: re-parent so nothing gets orphaned/nulled ---
+          await Receipt.update(
+            { externalOrderId: survivor.id },
+            { where: { externalOrderId: loser.id }, transaction: t },
+          );
+          await ExternalOrderTender.update(
+            { externalOrderId: survivor.id },
+            { where: { externalOrderId: loser.id }, transaction: t },
+          );
+
+          await loser.destroy({ transaction: t });
         }
-
-        // --- receipts & tenders: re-parent so nothing gets orphaned/nulled ---
-        await Receipt.update(
-          { externalOrderId: survivor.id },
-          { where: { externalOrderId: loser.id }, transaction: t },
-        );
-        await ExternalOrderTender.update(
-          { externalOrderId: survivor.id },
-          { where: { externalOrderId: loser.id }, transaction: t },
-        );
-
-        await loser.destroy({ transaction: t });
-      }
       });
 
       merged += 1;
       logger.info({ vendorOrderId, folded: losers.length }, 'amazon_duplicate_orders_merged');
     } catch (err) {
-      // FIX 7: this used to reject the whole function on one bad group —
+      // This used to reject the whole function on one bad group —
       // and since mergeDuplicateAmazonOrders is the first statement of
       // runAmazonMatching, that silently blocked matching entirely, every
       // night, once the cron (gmailReceiptScan.ts) started calling it
@@ -227,9 +230,11 @@ type ItemWithOverrides = Pick<ExternalOrderItem, ItemOverrideField>;
 
 /**
  * Hand-entered override fields the survivor item lacks but its about-to-be-
- * destroyed dedupe-collision twin (loser) carries. Never includes a field the
- * survivor item already has a value for — the survivor's own override always
- * wins.
+ * destroyed dedupe-collision twin (loser) carries (businessUsePercent is the
+ * one exception — scanReceipts.ts writes it from the extractor at item
+ * creation, not by hand — but it coalesces the same direction as the rest).
+ * Never includes a field the survivor item already has a value for — the
+ * survivor's own override always wins.
  */
 function missingOverrideFields(survivorItem: ItemWithOverrides, loserItem: ItemWithOverrides): Record<string, unknown> {
   const patch: Record<string, unknown> = {};
