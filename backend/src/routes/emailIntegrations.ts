@@ -30,6 +30,25 @@ import { emailScanLimiter } from './emailRateLimit';
 
 const router = Router();
 
+/**
+ * Parse the optional `forceReprocessMessageIds` body field for POST
+ * /scan/google — a list of Gmail message ids to bypass the "already seen"
+ * skip for, so a fixed parser can re-fetch and re-parse them and backfill
+ * NULL fields on the ExternalOrder rows they already created
+ * (scanReceipts.ts's findExistingOrderForMessage). Non-string / empty
+ * entries are dropped; the list is capped well above the 141-order Amazon
+ * backfill this exists for, without being unbounded. Returns undefined when
+ * the field is absent, not an array, or empty after filtering — scanInbox
+ * treats that the same as "no forced reprocess".
+ */
+export function parseForceReprocessMessageIds(body: Record<string, unknown>): string[] | undefined {
+  if (!Array.isArray(body.forceReprocessMessageIds)) return undefined;
+  const ids = body.forceReprocessMessageIds.filter(
+    (id): id is string => typeof id === 'string' && id.length > 0,
+  );
+  return ids.length > 0 ? ids.slice(0, 500) : undefined;
+}
+
 function publicStatus(integ: UserEmailIntegration | null) {
   if (!integ) return { connected: false };
   return {
@@ -171,6 +190,7 @@ router.post('/scan/google', emailScanLimiter, async (req, res, next) => {
       }
       return undefined;
     })();
+    const forceReprocessMessageIds = parseForceReprocessMessageIds(body);
 
     const accept = String(req.headers['accept'] ?? '').toLowerCase();
     const wantsStream =
@@ -184,6 +204,7 @@ router.post('/scan/google', emailScanLimiter, async (req, res, next) => {
         householdId: household.id,
         maxMessages,
         sinceDateOverride,
+        forceReprocessMessageIds,
       });
       logger.info({
         userId: user.id,
@@ -213,6 +234,7 @@ router.post('/scan/google', emailScanLimiter, async (req, res, next) => {
           householdId: household.id,
           maxMessages,
           sinceDateOverride,
+          forceReprocessMessageIds,
         },
         {
           onPhase: (e) => emit({ kind: 'phase', ...e }),

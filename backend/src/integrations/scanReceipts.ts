@@ -17,6 +17,7 @@
  * The link-items pipeline stage matches the new orders to card transactions
  * on the next backfill / import.
  */
+import { QueryTypes, type Transaction as DbTransaction } from 'sequelize';
 import {
   sequelize,
   ExternalOrder,
@@ -30,6 +31,7 @@ import { tryDeterministicParse } from './parsers';
 import { dateFromInternalDate } from './internalDate';
 import type { ExtractedReceiptOrder } from '../ai/extractReceiptItems';
 import { decryptSecret, encryptSecret } from '../util/symmetricEncryption';
+import { jsonExtractText } from '../util/dialectSql';
 import {
   buildAuthUrl,
   exchangeCodeForTokens,
@@ -430,6 +432,57 @@ export function receiptCurrencyOrDefault(extractedCurrency: string | null | unde
   return extractedCurrency ?? defaultCurrency;
 }
 
+/**
+ * Locate the ExternalOrder a forced reprocess should backfill, by Gmail
+ * message id rather than by re-deriving a content-based dedupeKey.
+ *
+ * A reparse exists specifically to IMPROVE extraction (e.g. finding an order
+ * date the original parser missed), so its dedupeKey — built from
+ * vendor:orderId:orderDate:total:itemCount:messageId — almost always differs
+ * from the one stored on the original row. Looking the order up by
+ * dedupeKey therefore misses the existing row and creates a duplicate
+ * instead of backfilling it, which is exactly backwards for a feature whose
+ * whole point is fixing already-imported orders.
+ *
+ * Two lookups, in order of preference:
+ *   1. ProcessedEmailMessage.externalOrderId for this (household, provider,
+ *      messageId) — set by every scan's recordProcessed call.
+ *   2. ExternalOrder.rawPayload.gmailMessageId — every gmail-scan order
+ *      stamps this at creation (and mergeDuplicateAmazonOrders coalesces it
+ *      onto the merge survivor), so it survives even a row whose
+ *      ProcessedEmailMessage was never written or had its externalOrderId
+ *      nulled by ON DELETE SET NULL after an unrelated order was destroyed.
+ */
+async function findExistingOrderForMessage(
+  householdId: number | null,
+  messageId: string,
+  transaction?: DbTransaction,
+): Promise<ExternalOrder | null> {
+  if (householdId == null) return null;
+
+  const seenRow = await ProcessedEmailMessage.findOne({
+    where: { householdId, provider: 'google', messageId },
+    transaction,
+  });
+  if (seenRow?.externalOrderId != null) {
+    const order = await ExternalOrder.findOne({
+      where: { id: seenRow.externalOrderId, householdId },
+      transaction,
+    });
+    if (order) return order;
+  }
+
+  const rows = await sequelize.query<{ id: number }>(
+    `SELECT id FROM external_orders
+      WHERE household_id = :householdId
+        AND ${jsonExtractText('raw_payload', 'gmailMessageId')} = :messageId
+      LIMIT 1`,
+    { replacements: { householdId, messageId }, type: QueryTypes.SELECT, transaction },
+  );
+  if (rows.length === 0) return null;
+  return ExternalOrder.findOne({ where: { id: rows[0].id, householdId }, transaction });
+}
+
 export interface ScanResultMessage {
   messageId: string;
   from: string | null;
@@ -765,32 +818,50 @@ export async function scanInbox(
         // preserving cross-message dedup when the same receipt arrives twice.
         summary.id,
       ].join(':');
+      const isForceReprocess = (opts.forceReprocessMessageIds ?? []).includes(summary.id);
 
       await sequelize.transaction(async (t) => {
-        const [order, createdOrder] = await ExternalOrder.findOrCreate({
-          where:
-            opts.householdId != null
-              ? { householdId: opts.householdId, dedupeKey }
-              : { dedupeKey },
-          defaults: {
-            householdId: opts.householdId,
-            createdByUserId: opts.userId,
-            vendor: extracted!.vendor,
-            vendorOrderId: extracted!.orderId,
-            dedupeKey,
-            orderDate: extracted!.orderDate ?? dateFromInternalDate(full.internalDate),
-            shipmentDate: null,
-            subtotal: extracted!.subtotal != null ? String(extracted!.subtotal) : null,
-            tax: extracted!.tax != null ? String(extracted!.tax) : null,
-            shipping: null,
-            total: extracted!.total != null ? String(extracted!.total) : null,
-            currency: receiptCurrencyOrDefault(extracted!.currency),
-            paymentLast4: extracted!.paymentLast4,
-            source: `gmail-scan:${parser}${fromPdf ? '-pdf' : ''}`,
-            rawPayload: { extracted, gmailMessageId: summary.id, parser, trip: extracted!.trip ?? null } as unknown,
-          } as never,
-          transaction: t,
-        });
+        // A forced reprocess must locate the order it is improving by Gmail
+        // message id, NOT by this content-derived dedupeKey — the reparse
+        // exists to fix fields the key is built from, so a genuine
+        // improvement almost always computes a different key and would
+        // otherwise miss the existing row and create a duplicate (see
+        // findExistingOrderForMessage's doc comment).
+        const existingForReprocess = isForceReprocess
+          ? await findExistingOrderForMessage(opts.householdId, summary.id, t)
+          : null;
+
+        const [order, createdOrder] = existingForReprocess
+          ? [existingForReprocess, false]
+          : await ExternalOrder.findOrCreate({
+              where:
+                opts.householdId != null
+                  ? { householdId: opts.householdId, dedupeKey }
+                  : { dedupeKey },
+              defaults: {
+                householdId: opts.householdId,
+                createdByUserId: opts.userId,
+                vendor: extracted!.vendor,
+                vendorOrderId: extracted!.orderId,
+                dedupeKey,
+                orderDate: extracted!.orderDate ?? dateFromInternalDate(full.internalDate),
+                shipmentDate: null,
+                subtotal: extracted!.subtotal != null ? String(extracted!.subtotal) : null,
+                tax: extracted!.tax != null ? String(extracted!.tax) : null,
+                shipping: null,
+                total: extracted!.total != null ? String(extracted!.total) : null,
+                currency: receiptCurrencyOrDefault(extracted!.currency),
+                paymentLast4: extracted!.paymentLast4,
+                source: `gmail-scan:${parser}${fromPdf ? '-pdf' : ''}`,
+                rawPayload: {
+                  extracted,
+                  gmailMessageId: summary.id,
+                  parser,
+                  trip: extracted!.trip ?? null,
+                } as unknown,
+              } as never,
+              transaction: t,
+            });
         result.orderId = order.id;
         result.orderCreated = createdOrder;
         if (!createdOrder) {
