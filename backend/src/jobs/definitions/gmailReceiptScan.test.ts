@@ -1,6 +1,7 @@
-import { after, before, beforeEach, test } from 'node:test';
+import { after, before, beforeEach, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import cron from 'node-cron';
+import { logger } from '../../observability/logger';
 
 let models: typeof import('../../models');
 let registry: typeof import('../registry');
@@ -172,6 +173,35 @@ test('skips an integration with no household membership without crashing', async
 
   assert.equal(scanCalled, false);
   assert.equal(result.summary?.errors, 0);
+});
+
+// FIX 7: this was the only failure mode in the job that produced no output
+// at all — a userless-membership integration was silently skipped with no
+// log line, so an operator would see errors: 0 and assume everything was
+// scanned.
+test('warns when skipping an integration with no household membership', async () => {
+  const user = await makeUser();
+  const integ = await makeIntegration(user.id);
+
+  const warn = mock.method(logger, 'warn', () => undefined);
+  try {
+    await gmailReceiptScan.runGmailReceiptScan({
+      scanInbox: async () => {
+        throw new Error('should not be called');
+      },
+      runAmazonMatching: async () => {
+        throw new Error('should not be called');
+      },
+    });
+
+    assert.equal(warn.mock.callCount(), 1);
+    const [fields, message] = warn.mock.calls[0].arguments as [Record<string, unknown>, string];
+    assert.equal(message, 'gmail_receipt_scan_no_household_membership');
+    assert.equal(fields.integrationId, integ.id);
+    assert.equal(fields.userId, user.id);
+  } finally {
+    warn.mock.restore();
+  }
 });
 
 test('a scanning failure in one household does not abort the run for others', async () => {

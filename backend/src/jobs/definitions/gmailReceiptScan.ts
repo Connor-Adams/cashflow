@@ -49,7 +49,17 @@ export async function runGmailReceiptScan(deps: GmailReceiptScanDeps = defaultDe
         where: { userId: integration.userId },
         order: [['id', 'ASC']],
       });
-      if (membership == null) continue;
+      if (membership == null) {
+        // Currently the only failure mode in this job that produces no
+        // output at all: without this, an integration whose user has no
+        // HouseholdMember row is silently skipped and the run summary shows
+        // errors: 0, so an operator has no signal anything was missed.
+        logger.warn(
+          { integrationId: integration.id, userId: integration.userId },
+          'gmail_receipt_scan_no_household_membership',
+        );
+        continue;
+      }
 
       const result = await deps.scanInbox({
         userId: integration.userId,

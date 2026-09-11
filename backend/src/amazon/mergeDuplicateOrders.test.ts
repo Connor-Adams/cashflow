@@ -261,3 +261,173 @@ test('a Receipt and an ExternalOrderTender on the losing order are re-parented t
   assert.equal(receipt.externalOrderId, report.id, 'the Receipt must be re-pointed at the survivor');
   assert.equal(tender.externalOrderId, report.id, 'the ExternalOrderTender must be re-pointed at the survivor');
 });
+
+// ─── FIX 4: rawPayload.gmailMessageId survives the merge ────────────────────
+//
+// ProcessedEmailMessage.external_order_id is ON DELETE SET NULL, so once the
+// email-sourced (loser) row is destroyed, the only remaining path back to
+// the Gmail message is rawPayload.gmailMessageId -- but only if it now lives
+// on the SURVIVOR. Without this, forceReprocess (scanReceipts.ts's
+// findExistingOrderForMessage) can never find the order again.
+
+test('rawPayload.gmailMessageId is coalesced onto the survivor before the loser is destroyed', async () => {
+  const householdId = 11;
+  const vendorOrderId = '701-1111111-2222222';
+  const report = await ExternalOrder.create({
+    householdId, vendor: 'amazon', vendorOrderId,
+    dedupeKey: `r-${householdId}`, orderDate: '2025-08-27', total: '10.11', currency: 'CAD',
+    source: 'amazon_report', rawPayload: null,
+  } as never);
+  const email = await ExternalOrder.create({
+    householdId, vendor: 'amazon', vendorOrderId,
+    dedupeKey: `e-${householdId}`, orderDate: null, total: '38.26', currency: 'CAD',
+    source: 'gmail-scan:ai', rawPayload: { gmailMessageId: 'msg-xyz', parser: 'ai' },
+  } as never);
+
+  await mergeDuplicateAmazonOrders({ householdId });
+
+  const survivor = await ExternalOrder.findOne({ where: { householdId, vendorOrderId } });
+  assert.equal(survivor?.id, report.id, 'the older (report) row survives');
+  const rawPayload = survivor?.rawPayload as { gmailMessageId?: string } | null;
+  assert.equal(
+    rawPayload?.gmailMessageId,
+    'msg-xyz',
+    'the loser\'s Gmail message id must survive on the survivor so a reprocess can still find this order',
+  );
+  void email;
+});
+
+test('the survivor keeps its own rawPayload.gmailMessageId when it already has one', async () => {
+  const householdId = 12;
+  const vendorOrderId = '701-3333333-4444444';
+  const email1 = await ExternalOrder.create({
+    householdId, vendor: 'amazon', vendorOrderId,
+    dedupeKey: `e1-${householdId}`, orderDate: '2025-08-27', total: '10.11', currency: 'CAD',
+    source: 'gmail-scan:ai', rawPayload: { gmailMessageId: 'msg-survivor-own' },
+  } as never);
+  await ExternalOrder.create({
+    householdId, vendor: 'amazon', vendorOrderId,
+    dedupeKey: `e2-${householdId}`, orderDate: null, total: '38.26', currency: 'CAD',
+    source: 'gmail-scan:ai', rawPayload: { gmailMessageId: 'msg-loser' },
+  } as never);
+
+  await mergeDuplicateAmazonOrders({ householdId });
+
+  const survivor = await ExternalOrder.findOne({ where: { householdId, vendorOrderId } });
+  assert.equal(survivor?.id, email1.id);
+  const rawPayload = survivor?.rawPayload as { gmailMessageId?: string } | null;
+  assert.equal(rawPayload?.gmailMessageId, 'msg-survivor-own', 'the survivor\'s own gmailMessageId is never overwritten');
+});
+
+// ─── FIX 5: colliding item overrides survive the merge ──────────────────────
+//
+// An item dedupe collision (title|totalPrice|quantity) destroys the loser
+// item outright. categoryOverride/categoryOverrideId/businessUseOverride/
+// businessUsePercent are hand-entered values the survivor's twin may lack --
+// losing them to a nightly cron is real data loss.
+
+test('a colliding item copies missing override fields from the loser before being destroyed', async () => {
+  const householdId = 13;
+  const vendorOrderId = '701-5555555-6666666';
+  await Household.create({ id: householdId, name: `HH-${householdId}` } as never);
+  const report = await ExternalOrder.create({
+    householdId, vendor: 'amazon', vendorOrderId,
+    dedupeKey: `r-${householdId}`, orderDate: '2025-08-27', total: '10.11', currency: 'CAD',
+    source: 'amazon_report',
+  } as never);
+  const email = await ExternalOrder.create({
+    householdId, vendor: 'amazon', vendorOrderId,
+    dedupeKey: `e-${householdId}`, orderDate: null, total: '10.11', currency: 'CAD',
+    source: 'gmail-scan:ai',
+  } as never);
+  const survivorItem = await ExternalOrderItem.create({
+    externalOrderId: report.id, title: 'Widget', quantity: 1,
+    unitPrice: '10.11', totalPrice: '10.11',
+  } as never);
+  const loserItem = await ExternalOrderItem.create({
+    externalOrderId: email.id, title: 'Widget', quantity: 1,
+    unitPrice: '10.11', totalPrice: '10.11',
+    categoryOverride: 'Business Supplies',
+    businessUseOverride: '100',
+    businessUsePercent: '80',
+  } as never);
+
+  await mergeDuplicateAmazonOrders({ householdId });
+
+  await survivorItem.reload();
+  assert.equal(survivorItem.categoryOverride, 'Business Supplies', 'categoryOverride is copied from the loser');
+  assert.equal(Number(survivorItem.businessUseOverride), 100, 'businessUseOverride is copied from the loser');
+  assert.equal(Number(survivorItem.businessUsePercent), 80, 'businessUsePercent is copied from the loser');
+
+  const stillThere = await ExternalOrderItem.findByPk(loserItem.id);
+  assert.equal(stillThere, null, 'the colliding loser item is still destroyed, not kept as a duplicate');
+});
+
+test('a colliding item never overwrites an override the survivor twin already has', async () => {
+  const householdId = 14;
+  const vendorOrderId = '701-7777777-8888888';
+  await Household.create({ id: householdId, name: `HH-${householdId}` } as never);
+  const report = await ExternalOrder.create({
+    householdId, vendor: 'amazon', vendorOrderId,
+    dedupeKey: `r-${householdId}`, orderDate: '2025-08-27', total: '10.11', currency: 'CAD',
+    source: 'amazon_report',
+  } as never);
+  const email = await ExternalOrder.create({
+    householdId, vendor: 'amazon', vendorOrderId,
+    dedupeKey: `e-${householdId}`, orderDate: null, total: '10.11', currency: 'CAD',
+    source: 'gmail-scan:ai',
+  } as never);
+  const survivorItem = await ExternalOrderItem.create({
+    externalOrderId: report.id, title: 'Widget', quantity: 1,
+    unitPrice: '10.11', totalPrice: '10.11',
+    categoryOverride: 'Groceries',
+  } as never);
+  await ExternalOrderItem.create({
+    externalOrderId: email.id, title: 'Widget', quantity: 1,
+    unitPrice: '10.11', totalPrice: '10.11',
+    categoryOverride: 'Business Supplies',
+  } as never);
+
+  await mergeDuplicateAmazonOrders({ householdId });
+
+  await survivorItem.reload();
+  assert.equal(survivorItem.categoryOverride, 'Groceries', 'the survivor twin\'s own override is never clobbered by the loser\'s');
+});
+
+// ─── FIX 7: per-group isolation ──────────────────────────────────────────────
+//
+// mergeDuplicateAmazonOrders is the first statement of runAmazonMatching, so
+// one group throwing used to reject the whole function and block matching
+// entirely -- every night, silently, once the cron (gmailReceiptScan.ts)
+// started calling it unattended. Each group must be isolated: a failure logs
+// and the loop continues, and each group's own transaction stays atomic.
+
+test('one group throwing during the merge does not block other groups from merging', async () => {
+  const householdId = 15;
+  const { report: badReport } = await seedPair(householdId, 'BAD-VENDOR-ORDER-1');
+  const { report: goodReport } = await seedPair(householdId, 'GOOD-VENDOR-ORDER-1');
+
+  const originalFindAll = ExternalOrderItem.findAll.bind(ExternalOrderItem);
+  (ExternalOrderItem as unknown as { findAll: typeof ExternalOrderItem.findAll }).findAll = (async (
+    options?: { where?: { externalOrderId?: unknown } },
+  ) => {
+    if (options?.where?.externalOrderId === badReport.id) {
+      throw new Error('simulated failure merging BAD-VENDOR-ORDER-1');
+    }
+    return originalFindAll(options as never);
+  }) as typeof ExternalOrderItem.findAll;
+
+  try {
+    const out = await mergeDuplicateAmazonOrders({ householdId });
+    assert.equal(out.merged, 1, 'the good group merges despite the bad group throwing');
+  } finally {
+    ExternalOrderItem.findAll = originalFindAll;
+  }
+
+  const goodSurvivors = await ExternalOrder.count({ where: { householdId, vendorOrderId: 'GOOD-VENDOR-ORDER-1' } });
+  assert.equal(goodSurvivors, 1, 'the good group merged down to one row');
+
+  const badSurvivors = await ExternalOrder.count({ where: { householdId, vendorOrderId: 'BAD-VENDOR-ORDER-1' } });
+  assert.equal(badSurvivors, 2, 'the bad group is left untouched (its own transaction rolled back), not half-merged');
+  void goodReport;
+});

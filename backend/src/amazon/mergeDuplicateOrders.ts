@@ -76,13 +76,23 @@ export async function mergeDuplicateAmazonOrders(args: {
     // Oldest row survives; every other field is unioned/coalesced onto it below.
     const [survivor, ...losers] = group;
 
-    await sequelize.transaction(async (t) => {
+    try {
+      await sequelize.transaction(async (t) => {
       const largestTotalOrder = group.reduce<ExternalOrder | null>((best, o) => {
         const n = numberOrNull(o.total);
         if (n == null) return best;
         const bestN = best == null ? null : numberOrNull(best.total);
         return bestN == null || n > bestN ? o : best;
       }, null);
+
+      // FIX 4: ProcessedEmailMessage.external_order_id is ON DELETE SET NULL,
+      // so once the email-sourced loser is destroyed below, rawPayload
+      // .gmailMessageId is the only remaining path back to the Gmail message
+      // (scanReceipts.ts's findExistingOrderForMessage falls back to it).
+      // Never overwrite a gmailMessageId the survivor already carries.
+      const survivorGmailMessageId = extractGmailMessageId(survivor.rawPayload);
+      const gmailMessageId =
+        survivorGmailMessageId ?? group.map((o) => extractGmailMessageId(o.rawPayload)).find((id) => id != null) ?? null;
 
       await survivor.update(
         {
@@ -97,6 +107,15 @@ export async function mergeDuplicateAmazonOrders(args: {
           shipping: survivor.shipping ?? group.find((o) => o.shipping != null)?.shipping ?? null,
           shipmentDate:
             survivor.shipmentDate ?? group.find((o) => o.shipmentDate != null)?.shipmentDate ?? null,
+          rawPayload:
+            gmailMessageId != null
+              ? {
+                  ...(survivor.rawPayload != null && typeof survivor.rawPayload === 'object'
+                    ? (survivor.rawPayload as Record<string, unknown>)
+                    : {}),
+                  gmailMessageId,
+                }
+              : survivor.rawPayload,
         },
         { transaction: t },
       );
@@ -107,13 +126,22 @@ export async function mergeDuplicateAmazonOrders(args: {
           ExternalOrderItem.findAll({ where: { externalOrderId: survivor.id }, transaction: t }),
           ExternalOrderItem.findAll({ where: { externalOrderId: loser.id }, transaction: t }),
         ]);
-        const have = new Set(survivorItems.map(itemDedupeKey));
+        const survivorItemsByKey = new Map(survivorItems.map((it) => [itemDedupeKey(it), it]));
         for (const item of loserItems) {
           const key = itemDedupeKey(item);
-          if (have.has(key)) {
+          const existing = survivorItemsByKey.get(key);
+          if (existing) {
+            // FIX 5: categoryOverride/categoryOverrideId/businessUseOverride/
+            // businessUsePercent are hand-entered values the survivor's twin
+            // may lack — copy any it's missing before discarding the loser
+            // item, so a nightly merge never silently deletes them.
+            const overridePatch = missingOverrideFields(existing, item);
+            if (Object.keys(overridePatch).length > 0) {
+              await existing.update(overridePatch as never, { transaction: t });
+            }
             await item.destroy({ transaction: t });
           } else {
-            have.add(key);
+            survivorItemsByKey.set(key, item);
             await item.update({ externalOrderId: survivor.id }, { transaction: t });
           }
         }
@@ -158,13 +186,59 @@ export async function mergeDuplicateAmazonOrders(args: {
 
         await loser.destroy({ transaction: t });
       }
-      merged += 1;
-    });
+      });
 
-    logger.info({ vendorOrderId, folded: losers.length }, 'amazon_duplicate_orders_merged');
+      merged += 1;
+      logger.info({ vendorOrderId, folded: losers.length }, 'amazon_duplicate_orders_merged');
+    } catch (err) {
+      // FIX 7: this used to reject the whole function on one bad group —
+      // and since mergeDuplicateAmazonOrders is the first statement of
+      // runAmazonMatching, that silently blocked matching entirely, every
+      // night, once the cron (gmailReceiptScan.ts) started calling it
+      // unattended. Each group's transaction is already atomic (rolled back
+      // on throw); isolate the group itself too, so one bad group can never
+      // take down every other group's merge.
+      logger.error({ err, vendorOrderId }, 'amazon_duplicate_orders_merge_failed');
+    }
   }
 
   return { merged };
+}
+
+/** The Gmail message id an ExternalOrder's rawPayload carries, or null. Every
+ * gmail-scan order stamps this at creation (scanReceipts.ts). */
+function extractGmailMessageId(rawPayload: unknown): string | null {
+  if (rawPayload != null && typeof rawPayload === 'object' && 'gmailMessageId' in rawPayload) {
+    const v = (rawPayload as Record<string, unknown>).gmailMessageId;
+    return typeof v === 'string' ? v : null;
+  }
+  return null;
+}
+
+const ITEM_OVERRIDE_FIELDS = [
+  'categoryOverride',
+  'categoryOverrideId',
+  'businessUseOverride',
+  'businessUsePercent',
+] as const;
+
+type ItemOverrideField = (typeof ITEM_OVERRIDE_FIELDS)[number];
+type ItemWithOverrides = Pick<ExternalOrderItem, ItemOverrideField>;
+
+/**
+ * Hand-entered override fields the survivor item lacks but its about-to-be-
+ * destroyed dedupe-collision twin (loser) carries. Never includes a field the
+ * survivor item already has a value for — the survivor's own override always
+ * wins.
+ */
+function missingOverrideFields(survivorItem: ItemWithOverrides, loserItem: ItemWithOverrides): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  for (const field of ITEM_OVERRIDE_FIELDS) {
+    if (survivorItem[field] == null && loserItem[field] != null) {
+      patch[field] = loserItem[field];
+    }
+  }
+  return patch;
 }
 
 function numberOrNull(value: unknown): number | null {
