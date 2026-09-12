@@ -144,15 +144,22 @@ async function linkedAccountsForOrder(order: ExternalOrder): Promise<LinkedAccou
 }
 
 /**
- * Run the backfill. `dryRun: true` (the default when called with no args is
- * `false` -- callers wanting a preview must ask for it explicitly, exactly
- * like `migrateWsDepositActivities`) computes and returns the full report
- * without writing anything.
+ * Run the backfill. `dryRun` is REQUIRED — there is deliberately no default.
+ *
+ * The sibling one-time operations here (`migrateWsDepositActivities`,
+ * `restoreBundle`, `interacCounterparty`) all default `dryRun` to `false`, i.e.
+ * a no-argument call writes. Following that convention would be consistent but
+ * wrong for this function specifically: an `account_card_identifiers` row
+ * grants a card permanent identity that feeds `buildLast4Map`, ownership
+ * classification and match scoring, and NOTHING in the app can delete one once
+ * written. Inverting the default instead would make this the odd one out among
+ * four siblings, which is its own trap. So the caller must state intent and
+ * cannot get it wrong by omission.
  */
 export async function backfillAccountCardIdentifiers(
-  opts: { dryRun?: boolean } = {},
+  opts: { dryRun: boolean },
 ): Promise<BackfillReport> {
-  const dryRun = opts.dryRun === true;
+  const { dryRun } = opts;
 
   const orders = await ExternalOrder.findAll({
     where: { source: { [Op.in]: Array.from(DETERMINISTIC_RECEIPT_SOURCES) } },
