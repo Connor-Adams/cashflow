@@ -103,7 +103,7 @@ test('a costco till-receipt tender linked to an account-5-shaped transaction yie
   );
   await mkLink({ transactionId: txn.id, externalOrderId: order.id, linkedAmount: '947.04' });
 
-  const report = await backfillAccountCardIdentifiers();
+  const report = await backfillAccountCardIdentifiers({ dryRun: false });
 
   const rows = await AccountCardIdentifier.findAll({ where: { accountId: costcoAccountId } });
   assert.equal(rows.length, 1);
@@ -126,7 +126,7 @@ test('an AI-sourced (gmail-scan:ai) 9907 on an Uber Eats order yields NONE', asy
   );
   await mkLink({ transactionId: txn.id, externalOrderId: order.id, linkedAmount: '32.50' });
 
-  await backfillAccountCardIdentifiers();
+  await backfillAccountCardIdentifiers({ dryRun: false });
 
   const rows = await AccountCardIdentifier.findAll({ where: { last4: '9907' } });
   assert.equal(rows.length, 0, 'an AI-extracted last4 must never be harvested by the backfill');
@@ -144,8 +144,8 @@ test('re-running the backfill writes nothing new and does not duplicate', async 
   );
   await mkLink({ transactionId: txn.id, externalOrderId: order.id, linkedAmount: '947.04' });
 
-  await backfillAccountCardIdentifiers();
-  const second = await backfillAccountCardIdentifiers();
+  await backfillAccountCardIdentifiers({ dryRun: false });
+  const second = await backfillAccountCardIdentifiers({ dryRun: false });
 
   const rows = await AccountCardIdentifier.findAll({
     where: { accountId: costcoAccountId, last4: '3114' },
@@ -186,7 +186,7 @@ test('an order with no tender rows falls back to order.paymentLast4', async () =
   });
   await mkLink({ transactionId: txn.id, externalOrderId: order.id, linkedAmount: '100.00' });
 
-  const report = await backfillAccountCardIdentifiers();
+  const report = await backfillAccountCardIdentifiers({ dryRun: false });
 
   const rows = await AccountCardIdentifier.findAll({ where: { accountId: costcoAccountId } });
   assert.equal(rows.length, 1);
@@ -206,7 +206,7 @@ test('a non-allowlisted source produces no candidates even with a tender and a l
   );
   await mkLink({ transactionId: txn.id, externalOrderId: order.id, linkedAmount: '10.00' });
 
-  const report = await backfillAccountCardIdentifiers();
+  const report = await backfillAccountCardIdentifiers({ dryRun: false });
 
   assert.equal(report.newRows.length, 0);
   const rows = await AccountCardIdentifier.findAll({ where: { last4: '4321' } });
@@ -238,7 +238,7 @@ test('a suggested link with an amount-matched tender still writes NOTHING (tende
     status: 'suggested',
   });
 
-  const report = await backfillAccountCardIdentifiers();
+  const report = await backfillAccountCardIdentifiers({ dryRun: false });
 
   const rows = await AccountCardIdentifier.findAll({ where: { accountId: costcoAccountId } });
   assert.equal(rows.length, 0, 'an unconfirmed (suggested) link must never be harvested');
@@ -262,7 +262,7 @@ test('a rejected link with an amount-matched tender still writes NOTHING (tender
     status: 'rejected',
   });
 
-  const report = await backfillAccountCardIdentifiers();
+  const report = await backfillAccountCardIdentifiers({ dryRun: false });
 
   const rows = await AccountCardIdentifier.findAll({ where: { accountId: costcoAccountId } });
   assert.equal(rows.length, 0, 'a rejected link must never be harvested');
@@ -284,7 +284,7 @@ test('a suggested link on a no-tender order still writes NOTHING (no-tender fall
     status: 'suggested',
   });
 
-  const report = await backfillAccountCardIdentifiers();
+  const report = await backfillAccountCardIdentifiers({ dryRun: false });
 
   const rows = await AccountCardIdentifier.findAll({ where: { accountId: costcoAccountId } });
   assert.equal(rows.length, 0, 'the no-tender fallback must not harvest off a suggested link');
@@ -306,7 +306,7 @@ test('a rejected link on a no-tender order still writes NOTHING (no-tender fallb
     status: 'rejected',
   });
 
-  const report = await backfillAccountCardIdentifiers();
+  const report = await backfillAccountCardIdentifiers({ dryRun: false });
 
   const rows = await AccountCardIdentifier.findAll({ where: { accountId: costcoAccountId } });
   assert.equal(rows.length, 0, 'the no-tender fallback must not harvest off a rejected link');
