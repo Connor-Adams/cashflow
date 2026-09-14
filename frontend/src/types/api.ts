@@ -1522,8 +1522,15 @@ export type CashflowSettings = {
 
 export type SafeToSpendBreakdown = {
   currentCash: number;
-  /** Recurring income projected to land inside the window — added back. */
+  /**
+   * Total income expected inside the window — added back. The sum of
+   * `recurringIncome` and `ownerDrawIncome`, which explain where it came from.
+   */
   expectedIncome: number;
+  /** Recurring-paycheck share of `expectedIncome` (#970). */
+  recurringIncome: number;
+  /** Owner-draw (corp → personal distribution) share of `expectedIncome` (#990). */
+  ownerDrawIncome: number;
   upcomingRequiredExpenses: number;
   requiredSavingsContributions: number;
   expectedCreditCardPayments: number;
