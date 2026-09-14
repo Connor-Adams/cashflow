@@ -846,6 +846,14 @@ export async function parseStatementFile(opts: {
       usedParser: 'pdf' as const,
       usedProfileId: parser.id,
       ...(parser.crossSourceDedup ? { crossSourceDedup: parser.crossSourceDedup } : {}),
+      // Rate-history rows (RBC Royal Credit Line). Carried verbatim — the
+      // parser already emits fixed-4 decimal strings and ISO dates, and the
+      // commit pipeline is what decides whether they can be persisted.
+      // Omitted entirely when the parser emitted none, so previews for every
+      // other source keep their existing shape.
+      ...(out.ratePeriods && out.ratePeriods.length > 0
+        ? { ratePeriods: out.ratePeriods }
+        : {}),
       transactions,
       investmentActivities,
       holdings,

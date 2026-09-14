@@ -1,4 +1,5 @@
 import type { TxnType } from './enrichment/types';
+import type { PdfRatePeriod } from './pdf/types';
 
 export type StatementParserId = 'csv' | 'ofx' | 'pdf';
 
@@ -120,6 +121,16 @@ export type StatementPreview = {
    * statement does not produce two InvestmentActivity rows.
    */
   crossSourceDedup?: 'fuzzy-window-5d';
+  /**
+   * Interest-rate windows printed on the statement's rate-history table, as
+   * emitted by the RBC Royal Credit Line parser (`PdfParseResult.ratePeriods`).
+   * The commit pipeline upserts these into `account_rate_periods` keyed on
+   * (accountId, fromDate). Absent for every source that prints no rate table.
+   *
+   * Type-only import of `PdfRatePeriod` — pdf/types.ts imports the Normalized*
+   * types from here, so a value import would close a runtime cycle.
+   */
+  ratePeriods?: PdfRatePeriod[];
   /**
    * When true, every Transaction inserted during commit forces
    * autoBusiness=true, regardless of what the enrichment pipeline produced.

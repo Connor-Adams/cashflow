@@ -2,6 +2,7 @@ import { Op } from 'sequelize';
 import type { Transaction as SequelizeTransaction } from 'sequelize';
 import {
   Account,
+  AccountRatePeriod,
   HoldingSnapshot,
   ImportHistory,
   InvestmentActivity,
@@ -210,6 +211,75 @@ async function createHolding(
   } catch (e) {
     if (isUniqueLike(e)) return 'duplicate';
     throw e;
+  }
+}
+
+/**
+ * Upsert the statement's interest-rate windows onto the account.
+ *
+ * Keyed on (accountId, fromDate) — the same pair carried by the model's
+ * UNIQUE index. Two statements legitimately describe the same window: the
+ * month a rate changed appears on both that statement and the next one, and
+ * the later printing is the authoritative one (it knows the interest that
+ * was ultimately applied). So a known window is UPDATED in place rather than
+ * inserted again. The unique index is the backstop, not the mechanism — we
+ * do not lean on catching a constraint violation, because on Postgres that
+ * would poison the surrounding transaction.
+ *
+ * `householdId` and `accountId` come from the Account the commit path already
+ * resolved under the caller's household scope, never from the preview payload.
+ *
+ * `sourceStatementId` is left null: nothing on the import path creates an
+ * AccountStatement. Those are registered by hand through
+ * `POST /api/accounts/:id/statements` (backend/src/routes/statements.ts is
+ * the only `AccountStatement.create` in the codebase), so there is no
+ * statement row to point at here. The column is nullable precisely for this.
+ *
+ * Sequelize's own `upsert` is deliberately NOT used: on v6 it derives the
+ * ON CONFLICT target from `model.uniqueKeys`, which is populated from
+ * attribute-level `unique:` flags — not from `options.indexes`, where this
+ * model's composite index is declared. It would conflict on the primary key
+ * instead and raise the very unique violation we are avoiding.
+ */
+async function persistRatePeriods(
+  periods: NonNullable<StatementPreview['ratePeriods']>,
+  account: Account,
+  householdId: number,
+  t: SequelizeTransaction,
+): Promise<void> {
+  for (const p of periods) {
+    const existing = await AccountRatePeriod.findOne({
+      where: { accountId: account.id, fromDate: p.fromDate },
+      transaction: t,
+    });
+    if (existing) {
+      // Only the rate facts move; the row keeps its household, account, and
+      // whatever statement it was first attributed to.
+      existing.toDate = p.toDate;
+      existing.primeRate = p.primeRate;
+      existing.premium = p.premium;
+      existing.effectiveRate = p.effectiveRate;
+      existing.applicableInterest = p.applicableInterest;
+      await existing.save({
+        transaction: t,
+        fields: ['toDate', 'primeRate', 'premium', 'effectiveRate', 'applicableInterest'],
+      });
+    } else {
+      await AccountRatePeriod.create(
+        {
+          householdId,
+          accountId: account.id,
+          fromDate: p.fromDate,
+          toDate: p.toDate,
+          primeRate: p.primeRate,
+          premium: p.premium,
+          effectiveRate: p.effectiveRate,
+          applicableInterest: p.applicableInterest,
+          sourceStatementId: null,
+        },
+        { transaction: t },
+      );
+    }
   }
 }
 
@@ -594,6 +664,38 @@ export async function commitStatementImport(
       const status = await createHolding(row, account, preview, t);
       if (status === 'inserted') insertedHoldings += 1;
       else skippedDuplicates += 1;
+    }
+
+    // Rate-history capture (RBC Royal Credit Line). Transactions are the
+    // reason to import a statement; the rate table is a bonus that feeds the
+    // interest allocator. So this NEVER fails the import: the writes run
+    // inside a SAVEPOINT (same Postgres-safety rationale as createHolding —
+    // an error inside an open transaction otherwise aborts it and every
+    // later query returns "current transaction is aborted"), and any failure
+    // is downgraded to a warning on the commit result while the surrounding
+    // transaction goes on to commit the ledger.
+    if (preview.ratePeriods && preview.ratePeriods.length > 0) {
+      const periods = preview.ratePeriods;
+      if (account.householdId == null) {
+        // account_rate_periods.household_id is NOT NULL, and a rate window
+        // with no household could not be scoped or erased. Skip loudly.
+        preview.warnings.push(
+          `Statement rate history not saved: account ${account.id} has no household.`,
+        );
+      } else {
+        const householdId = account.householdId;
+        try {
+          await sequelize.transaction({ transaction: t }, async (sp) => {
+            await persistRatePeriods(periods, account, householdId, sp);
+          });
+        } catch (e) {
+          preview.warnings.push(
+            `Statement rate history not saved (${periods.length} window(s)): ${
+              e instanceof Error ? e.message : String(e)
+            }. Transactions were imported normally.`,
+          );
+        }
+      }
     }
 
     const inserted =
