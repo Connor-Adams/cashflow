@@ -36,6 +36,7 @@ router.get('/', async (req, res, next) => {
       isSelf: r.isSelf,
       aliases: r.aliases,
       normalizedName: r.normalizedName,
+      loanDefault: r.loanDefault,
     })));
   } catch (e) {
     next(e);
@@ -243,6 +244,14 @@ router.patch('/:id', async (req, res, next) => {
         return;
       }
       row.set('isSelf', parsed);
+    }
+    if (b.loanDefault !== undefined) {
+      const parsed = coerceBool(b.loanDefault);
+      if (parsed === null) {
+        res.status(400).json({ error: 'loanDefault must be boolean' });
+        return;
+      }
+      row.set('loanDefault', parsed);
     }
     await row.save();
     res.json(row);

@@ -27,6 +27,7 @@ import {
 } from '../ai/counterpartyPromotions';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
+import { COUNTERPARTY_ROLES, isCounterpartyRole } from '../contacts/counterpartyRole';
 import {
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,
@@ -438,6 +439,7 @@ const PATCHABLE_KEYS = [
   'ownershipType',
   'ownershipContactId',
   'counterpartyContactId',
+  'counterpartyRole',
   'status',
 ] as const;
 
@@ -513,6 +515,18 @@ export async function applyPatchBody(
             throw err;
           }
           txn.set('counterpartyContactId', contact.id);
+        }
+      } else if (k === 'counterpartyRole') {
+        if (b[k] == null || b[k] === '') {
+          txn.set('counterpartyRole', null);
+        } else if (isCounterpartyRole(b[k])) {
+          txn.set('counterpartyRole', b[k]);
+        } else {
+          const err = new Error(
+            'counterpartyRole must be one of: ' + COUNTERPARTY_ROLES.join(', '),
+          ) as Error & { status?: number };
+          err.status = 400;
+          throw err;
         }
       } else if (k === 'status') {
         if (!isTransactionStatus(b[k])) {
