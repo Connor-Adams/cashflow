@@ -339,7 +339,9 @@ router.get('/:id/ledger', async (req, res, next) => {
       return {
         id: t.id,
         date: t.date,
-        amount: String(t.amount),
+        // DECIMAL(14,4) round-trips as a string on Postgres and a JS number on
+        // SQLite; toFixed(4) makes the DTO dialect-independent.
+        amount: Number(t.amount).toFixed(4),
         currency: t.currency,
         // Raw text: merchantClean strips the counterparty name off RBC transfers,
         // which is what made 157 Stephen rows indistinguishable.
@@ -370,7 +372,7 @@ router.get('/:id/ledger', async (req, res, next) => {
       loanBalance,
       trackedOutstandingByCurrency: summary.outstandingByCurrency,
       transfers,
-    });
+    } satisfies ContactLedgerResponse);
   } catch (e) {
     next(e);
   }

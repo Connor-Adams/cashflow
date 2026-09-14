@@ -143,10 +143,10 @@ test('GET /:id/ledger excludes both legs of a cancelled e-transfer', async () =>
 
 test('GET /:id/ledger returns raw bank text, not the stripped merchant', async () => {
   const res = await getLedger(contactId);
-  // Matched numerically, not as '-3648.0000': DECIMAL(14,4) round-trips as a
-  // JS number under SQLite (these tests) and as a fixed-4 string under Postgres
-  // (production), so `String(t.amount)` is '-3648' here and '-3648.0000' there.
-  const row = res.body.transfers.find((t: { amount: string }) => Number(t.amount) === -3648);
+  // Matched as the exact string: DECIMAL(14,4) round-trips as a JS number under
+  // SQLite (these tests) and as a fixed-4 string under Postgres (production),
+  // and the handler's `Number(t.amount).toFixed(4)` normalizes both to this.
+  const row = res.body.transfers.find((t: { amount: string }) => t.amount === '-3648.0000');
   assert.match(row.merchant, /ARVIND MALLYA/, 'merchant_clean would hide the counterparty');
 });
 

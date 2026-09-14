@@ -47,28 +47,47 @@ test('GET /api/contacts/:id/ledger returns net + tracked + flagged transfers', a
   assert.equal(loanRow.direction, 'out');
 });
 
-test('GET /api/contacts/:id/ledger excludes Rent-categorized transfers from net + list', async () => {
+test('GET /api/contacts/:id/ledger keeps rent-tagged transfers out of the loan balance', async () => {
   const { Account, Contact, Transaction } = await import('../../src/models');
   const acct = await Account.create({ householdId, name: 'Chequing2', accountType: 'checking', currency: 'CAD' });
   const stephen = await Contact.create({ householdId, name: 'Stephen' });
-  // A real loan outflow (no category) + a Rent-tagged outflow to the same person.
+  // A real loan outflow + a rent outflow to the same person. `final_category`
+  // is deliberately still 'Rent' on the second row: the category no longer
+  // decides anything — `counterparty_role` does — and this proves the old
+  // category-based exclusion is gone rather than silently still running.
   const loan = await Transaction.create({
     householdId, accountId: acct.id, date: '2021-01-01', amount: '-1000.0000', currency: 'CAD',
     txnType: 'transfer', merchantRaw: 'TRANSFER STEPHEN', merchantClean: 'Transfer', counterpartyContactId: stephen.id,
+    counterpartyRole: 'loan',
     importBatch: 'rent-batch', sourceRowFingerprint: 'fp-loan', sourceIdentityFingerprint: 'si-loan',
   });
   const rent = await Transaction.create({
     householdId, accountId: acct.id, date: '2021-02-01', amount: '-400.0000', currency: 'CAD',
     txnType: 'transfer', merchantRaw: 'TRANSFER STEPHEN', merchantClean: 'Transfer', counterpartyContactId: stephen.id,
-    finalCategory: 'Rent',
+    finalCategory: 'Rent', counterpartyRole: 'rent',
     importBatch: 'rent-batch', sourceRowFingerprint: 'fp-rent', sourceIdentityFingerprint: 'si-rent',
   });
 
   const res = await authed.get(`/api/contacts/${stephen.id}/ledger`);
   assert.equal(res.status, 200);
-  // Net reflects only the $1000 loan, not the $400 rent.
-  assert.deepEqual(res.body.transferNet, [{ currency: 'CAD', sent: '1000.0000', received: '0.0000', net: '1000.0000' }]);
-  // The rent row is absent from the transfer list; the loan row is present.
-  assert.ok(res.body.transfers.find((t: { id: number }) => t.id === loan.id), 'loan transfer present');
-  assert.equal(res.body.transfers.find((t: { id: number }) => t.id === rent.id), undefined, 'rent transfer excluded');
+
+  // The debt number counts the $1000 loan and nothing else — rent is not a debt.
+  assert.deepEqual(
+    res.body.loanBalance,
+    [{ currency: 'CAD', lent: '1000.0000', repaid: '0.0000', balance: '1000.0000' }],
+    'rent contributes nothing to the loan balance',
+  );
+  // transferNet is now descriptive raw flow, so it DOES include the rent money.
+  // That split is the point: raw flow ≠ owed.
+  assert.deepEqual(res.body.transferNet, [{ currency: 'CAD', sent: '1400.0000', received: '0.0000', net: '1400.0000' }]);
+
+  // Both rows are listed; the rent row shows *why* it counted for nothing.
+  const loanRow = res.body.transfers.find((t: { id: number }) => t.id === loan.id);
+  assert.ok(loanRow, 'loan transfer present');
+  assert.equal(loanRow.ledgerEffect, 'loan');
+  const rentRow = res.body.transfers.find((t: { id: number }) => t.id === rent.id);
+  assert.ok(rentRow, 'rent transfer is listed, not hidden');
+  assert.equal(rentRow.counterpartyRole, 'rent');
+  assert.equal(rentRow.ledgerEffect, 'none', 'rent is inert in the balance');
+  assert.equal(rentRow.amount, '-400.0000', 'amounts are fixed to 4 decimals on both dialects');
 });
