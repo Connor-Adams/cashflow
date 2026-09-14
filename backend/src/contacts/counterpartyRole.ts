@@ -8,18 +8,14 @@
  * `loc_interest` is the one value that lives on a row with no counterparty — it
  * marks a line-of-credit interest charge as allocatable in phase 2.
  */
-export const COUNTERPARTY_ROLES = [
-  'loan',
-  'repayment',
-  'purchase',
-  'business',
-  'rent',
-  'gift',
-  'self',
-  'loc_interest',
-] as const;
+import { COUNTERPARTY_ROLES } from '@cashflow/shared';
+import type { CounterpartyRole } from '@cashflow/shared';
 
-export type CounterpartyRole = (typeof COUNTERPARTY_ROLES)[number];
+// One definition, in the DTO contract, so the frontend's role <select> and this
+// validator can never drift apart. Re-exported here because every backend call
+// site already imports the vocabulary from this module.
+export { COUNTERPARTY_ROLES };
+export type { CounterpartyRole };
 
 const ROLE_SET: ReadonlySet<string> = new Set(COUNTERPARTY_ROLES);
 

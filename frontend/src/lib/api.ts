@@ -1,6 +1,7 @@
 import { clientLogger } from './clientLogger'
 import type {
   ContactLedgerResponse,
+  CounterpartyRole,
   TransferLinkResult,
   SelfSuggestionsResponse,
   SimplefinConnectResponse,
@@ -159,6 +160,17 @@ export function getSelfSuggestions(): Promise<SelfSuggestionsResponse> {
 }
 export function setContactSelf(id: number, isSelf: boolean): Promise<unknown> {
   return patchJson(`/api/contacts/${id}`, { isSelf })
+}
+/**
+ * Tag what a transfer means. `null` clears the tag and hands the row back to
+ * the contact's `loanDefault`. The PATCH response does NOT echo
+ * `counterpartyRole`, so callers must refetch the ledger rather than trust it.
+ */
+export function setCounterpartyRole(txnId: number, role: CounterpartyRole | null): Promise<unknown> {
+  return patchJson(`/api/transactions/${txnId}`, { counterpartyRole: role })
+}
+export function setContactLoanDefault(id: number, loanDefault: boolean): Promise<unknown> {
+  return patchJson(`/api/contacts/${id}`, { loanDefault })
 }
 
 // SimpleFIN Bridge bank connection (issue #790)

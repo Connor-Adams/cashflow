@@ -1953,15 +1953,18 @@ export type PeriodInsightResp = {
  * accounts. `loc_interest` marks a line-of-credit interest charge as
  * allocatable and sits on rows with no counterparty.
  */
-export type CounterpartyRole =
-  | 'loan'
-  | 'repayment'
-  | 'purchase'
-  | 'business'
-  | 'rent'
-  | 'gift'
-  | 'self'
-  | 'loc_interest'
+export const COUNTERPARTY_ROLES = [
+  'loan',
+  'repayment',
+  'purchase',
+  'business',
+  'rent',
+  'gift',
+  'self',
+  'loc_interest',
+] as const;
+
+export type CounterpartyRole = (typeof COUNTERPARTY_ROLES)[number];
 
 export interface LedgerTransferRow {
   id: number;

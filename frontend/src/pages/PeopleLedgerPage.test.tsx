@@ -14,13 +14,33 @@ vi.mock('@/components/ui/toast', () => ({
 }));
 
 const MOCK_CONTACT = { id: 1, name: 'Caelan', isSelf: false };
+
+/**
+ * Caelan lent-and-was-repaid in CAD and is still owed 480, while 550 of raw
+ * flow crossed between them. The two numbers deliberately differ: the balance
+ * is the debt, the net is movement.
+ */
 const MOCK_LEDGER = {
   contactId: 1,
   name: 'Caelan',
+  loanDefault: false,
   transferNet: [{ currency: 'CAD', sent: '550.0000', received: '70.0000', net: '480.0000' }],
+  loanBalance: [{ currency: 'CAD', lent: '500.0000', repaid: '20.0000', balance: '480.0000' }],
   trackedOutstandingByCurrency: { CAD: '200.0000' },
   transfers: [
-    { id: 10, date: '2020-01-01', amount: '-200.0000', currency: 'CAD', merchant: 'Transfer', direction: 'out', isLoan: false },
+    {
+      id: 10,
+      date: '2020-01-01',
+      amount: '-200.0000',
+      currency: 'CAD',
+      merchant: 'Transfer',
+      direction: 'out',
+      isLoan: false,
+      counterpartyRole: null,
+      ledgerEffect: 'none',
+      roleMismatch: false,
+      cancelled: false,
+    },
   ],
 };
 
@@ -32,7 +52,7 @@ beforeEach(() => {
 });
 
 describe('PeopleLedgerPage — landing list', () => {
-  it('shows net owed for a contact on the landing list', async () => {
+  it('leads with the loan balance, and labels raw flow without a debt claim', async () => {
     render(
       <MemoryRouter initialEntries={['/planned/people']}>
         <PeopleLedgerPage />
@@ -42,10 +62,16 @@ describe('PeopleLedgerPage — landing list', () => {
     // Contact name in list
     expect(await screen.findByText('Caelan')).toBeInTheDocument();
 
-    // Net owed label — scoped to the contact row to avoid collision
     const contactRow = await screen.findByTestId('contact-row-1');
+
+    // The balance is the only cell allowed to say "owed"
+    const balanceCell = within(contactRow).getByTestId('balance-1');
+    expect(within(balanceCell).getByText('CAD 480.00 owed to you')).toBeInTheDocument();
+
+    // Raw flow is described, never claimed
     const netCell = within(contactRow).getByTestId('net-1');
-    expect(within(netCell).getByText(/480\.00 owed to you/)).toBeInTheDocument();
+    expect(within(netCell).getByText('CAD 480.00 net out')).toBeInTheDocument();
+    expect(netCell.textContent).not.toMatch(/owed|you owe/i);
   });
 
   it('shows metrics card with people count', async () => {
@@ -63,6 +89,94 @@ describe('PeopleLedgerPage — landing list', () => {
     const peopleCard = peopleLabel.closest('div[class*="flex-col"]');
     expect(peopleCard).not.toBeNull();
     expect(within(peopleCard as HTMLElement).getByText('1')).toBeInTheDocument();
+  });
+
+  it('shows one balance metric per currency instead of dropping all but the first', async () => {
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue({
+      ...MOCK_LEDGER,
+      loanBalance: [
+        { currency: 'CAD', lent: '500.0000', repaid: '20.0000', balance: '480.0000' },
+        { currency: 'USD', lent: '0.0000', repaid: '3570.5100', balance: '-3570.5100' },
+      ],
+    } as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const metrics = await screen.findByTestId('loan-balance-metrics');
+    expect(within(metrics).getByText('CAD 480.00 owed to you')).toBeInTheDocument();
+    // The USD leg used to be silently discarded by the CAD-or-first pick.
+    expect(within(metrics).getByText('USD 3570.51 you owe')).toBeInTheDocument();
+  });
+
+  it('does not net opposing debts across people into "settled"', async () => {
+    vi.spyOn(api, 'getJson').mockResolvedValue([
+      { id: 1, name: 'Caelan', isSelf: false },
+      { id: 2, name: 'Stephen', isSelf: false },
+    ] as never);
+    vi.spyOn(api, 'getContactLedger').mockImplementation((id: number) =>
+      Promise.resolve({
+        ...MOCK_LEDGER,
+        contactId: id,
+        loanBalance:
+          id === 1
+            ? [{ currency: 'CAD', lent: '480.0000', repaid: '0.0000', balance: '480.0000' }]
+            : [{ currency: 'CAD', lent: '0.0000', repaid: '480.0000', balance: '-480.0000' }],
+      }) as never,
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const metrics = await screen.findByTestId('loan-balance-metrics');
+    // +480 and -480 must NOT cancel into "CAD 0.00 settled" — two live debts.
+    expect(within(metrics).getByText('CAD 480.00 owed to you')).toBeInTheDocument();
+    expect(within(metrics).getByText('CAD 480.00 you owe')).toBeInTheDocument();
+    expect(metrics.textContent).not.toMatch(/settled/i);
+  });
+
+  it('says a balance could not be loaded rather than claiming there is none', async () => {
+    vi.spyOn(api, 'getContactLedger').mockRejectedValue(new Error('boom') as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const contactRow = await screen.findByTestId('contact-row-1');
+    const balanceCell = within(contactRow).getByTestId('balance-1');
+    // An unknown balance is not a zero balance.
+    expect(balanceCell).toHaveTextContent("Couldn't load");
+    expect(balanceCell).not.toHaveTextContent('No tracked loans');
+  });
+
+  it('makes no owed or owe claim for a contact with no loan balance', async () => {
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue({
+      ...MOCK_LEDGER,
+      loanBalance: [],
+      transferNet: [{ currency: 'CAD', sent: '117506.17', received: '73871.32', net: '43634.85' }],
+    } as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const contactRow = await screen.findByTestId('contact-row-1');
+    expect(within(contactRow).getByText('CAD 43634.85 net out')).toBeInTheDocument();
+    // 43k of raw flow, zero debt: nothing on this row may say "owed" or "owe".
+    expect(contactRow.textContent).not.toMatch(/owed|you owe/i);
+
+    const metrics = await screen.findByTestId('loan-balance-metrics');
+    expect(metrics.textContent).not.toMatch(/owed|you owe/i);
   });
 });
 
@@ -120,15 +234,20 @@ describe('PeopleLedgerPage — self-account suggestions', () => {
 });
 
 describe('PeopleLedgerPage — drill-in', () => {
-  it('shows raw net and tracked balance for a selected contact', async () => {
+  it('shows the balance, the raw flow, and the tracked balance for a selected contact', async () => {
     render(
       <MemoryRouter initialEntries={['/planned/people?contact=1']}>
         <PeopleLedgerPage />
       </MemoryRouter>,
     );
-    // Raw-net label — scoped to the summary card
     const summaryCard = await screen.findByTestId('ledger-summary-card');
-    expect(within(summaryCard).getByText(/CAD 480.00 owed to you/)).toBeInTheDocument();
+    // The debt
+    const balanceSection = within(summaryCard).getByTestId('loan-balance');
+    expect(within(balanceSection).getByText('CAD 480.00 owed to you')).toBeInTheDocument();
+    // The movement — described, not claimed
+    const netSection = within(summaryCard).getByTestId('raw-net-flow');
+    expect(within(netSection).getByText('CAD 480.00 net out')).toBeInTheDocument();
+    expect(netSection.textContent).not.toMatch(/owed|you owe/i);
     // Tracked outstanding — scoped to its container to avoid collision with transfer row
     const outstandingSection = await screen.findByTestId('tracked-outstanding');
     expect(within(outstandingSection).getByText(/200\.00/)).toBeInTheDocument();
@@ -137,6 +256,124 @@ describe('PeopleLedgerPage — drill-in', () => {
     expect(within(transfersTable).getByText('CAD -200.00')).toBeInTheDocument();
     // Mark as loan button
     expect(await screen.findByRole('button', { name: /mark as loan/i })).toBeInTheDocument();
+  });
+
+  it('tags a transfer via the role select and refetches the ledger', async () => {
+    const setRoleSpy = vi.spyOn(api, 'setCounterpartyRole').mockResolvedValue({} as never);
+    const getLedgerSpy = vi.spyOn(api, 'getContactLedger').mockResolvedValue(MOCK_LEDGER as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const select = await screen.findByTestId('role-select-10');
+    const callsBefore = getLedgerSpy.mock.calls.length;
+    await userEvent.selectOptions(select, 'loan');
+
+    await waitFor(() => {
+      expect(setRoleSpy).toHaveBeenCalledWith(10, 'loan');
+    });
+    // PATCH /api/transactions/:id does not echo counterpartyRole back, so the
+    // page must refetch rather than trust the write.
+    await waitFor(() => {
+      expect(getLedgerSpy.mock.calls.length).toBeGreaterThan(callsBefore);
+    });
+  });
+
+  it('clears a tag back to the contact default with the auto option', async () => {
+    const setRoleSpy = vi.spyOn(api, 'setCounterpartyRole').mockResolvedValue({} as never);
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue({
+      ...MOCK_LEDGER,
+      transfers: [{ ...MOCK_LEDGER.transfers[0], counterpartyRole: 'loan', ledgerEffect: 'loan' }],
+    } as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const select = await screen.findByTestId('role-select-10');
+    expect(select).toHaveValue('loan');
+    await userEvent.selectOptions(select, '');
+
+    await waitFor(() => {
+      expect(setRoleSpy).toHaveBeenCalledWith(10, null);
+    });
+  });
+
+  it('strikes through a cancelled e-transfer leg and says why', async () => {
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue({
+      ...MOCK_LEDGER,
+      transfers: [{ ...MOCK_LEDGER.transfers[0], cancelled: true }],
+    } as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const row = await screen.findByTestId('transfer-row-10');
+    expect(row.className).toMatch(/line-through/);
+    expect(row).toHaveAttribute('title', 'cancelled e-transfer pair');
+  });
+
+  it('warns when a tag disagrees with the direction', async () => {
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue({
+      ...MOCK_LEDGER,
+      transfers: [
+        { ...MOCK_LEDGER.transfers[0], counterpartyRole: 'repayment', ledgerEffect: 'loan', roleMismatch: true },
+      ],
+    } as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId('role-mismatch-10')).toHaveTextContent(
+      'tag disagrees with direction',
+    );
+    expect(await screen.findByTestId('mismatch-summary')).toHaveTextContent(
+      '1 transfer is tagged against its direction',
+    );
+  });
+
+  it('toggles the contact loanDefault', async () => {
+    const setDefaultSpy = vi.spyOn(api, 'setContactLoanDefault').mockResolvedValue({} as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const toggle = await screen.findByTestId('loan-default-toggle');
+    await userEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(setDefaultSpy).toHaveBeenCalledWith(1, true);
+    });
+  });
+
+  it('shows raw bank text in the merchant column', async () => {
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue({
+      ...MOCK_LEDGER,
+      transfers: [{ ...MOCK_LEDGER.transfers[0], merchant: 'e-Transfer sent Caelan' }],
+    } as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const transfersTable = await screen.findByTestId('transfers-table');
+    expect(within(transfersTable).getByText('e-Transfer sent Caelan')).toBeInTheDocument();
   });
 });
 
