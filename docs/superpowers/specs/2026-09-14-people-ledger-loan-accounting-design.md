@@ -59,7 +59,7 @@ A loan owed to you is an **Expectation**: expected money movement, with
 `Reimbursement` is its physical table. Interest owed is also expected movement,
 so it lands in the same primitive with a discriminator.
 
-`transferPurpose` and `loanDefault` are discriminator fields on **Transaction**
+`counterpartyRole` and `loanDefault` are discriminator fields on **Transaction**
 and **Counterparty** respectively. No new tables beyond one child table for
 allocation detail in Phase 3.
 
@@ -71,25 +71,35 @@ implementation should patch `2026-05-30-cashflow-primitives-design.md` to say so
 
 | change | table | notes |
 |---|---|---|
-| `transfer_purpose` STRING(16) NULL | `transactions` | `loan` · `repayment` · `purchase` · `business` · `rent` · `gift` · `self` · `loc_interest`. Null means untagged. |
+| `counterparty_role` STRING(16) NULL | `transactions` | `loan` · `repayment` · `purchase` · `business` · `rent` · `gift` · `self` · `loc_interest`. Null means untagged. |
 | `loan_default` BOOLEAN NOT NULL DEFAULT false | `contacts` | "Treat untagged transfers with this person as loans." |
 | `kind` STRING(16) NOT NULL DEFAULT `'principal'` | `reimbursements` | `principal` \| `interest`. |
 | `source_transaction_id` INTEGER NULL FK → transactions | `reimbursements` | The `loc_interest` charge an interest row was derived from. Unique on `(source_transaction_id, contact_id)`. |
 
-`transfer_purpose` is deliberately one column doing two jobs: on a transfer it
+`counterparty_role` is deliberately one column doing two jobs: on a transfer it
 says what the transfer was; on a line-of-credit interest charge (`loc_interest`)
 it marks the charge as allocatable. Interest charges have no counterparty, so
 they need no contact and no second mechanism.
 
+**It is a new column, not the existing `transactions.transfer_purpose`.** That
+column (issue #222, 2026-06-03) carries `owner_draw · owner_contribution ·
+reimbursement · investment · internal · income` and answers a different question:
+what role a transfer plays between the user's *own* accounts. It is read by
+`reciprocity.ts`, `routes/transfers.ts`, `routes/reports.ts`,
+`routes/statements.ts` and `sync/tables.ts`. It is null on all 5,361 production
+rows, which makes it look reusable — but 11 rows are both contact-linked and
+pair-linked, so loan-vocabulary values would surface in
+`GET /api/transfers/stats`'s `byPurpose` breakdown. Two questions, two columns.
+
 `NON_LOAN_LEDGER_CATEGORIES` and `isNonLoanCategory` are **deleted**. Category
-answers "what kind of spend"; purpose answers "does this create a debt".
+answers "what kind of spend"; role answers "does this create a debt".
 Conflating the two axes is why the exclusion never worked.
 
 ## Behaviour
 
-### Purpose resolution
+### Role resolution
 
-Explicit `transfer_purpose` wins. Otherwise the contact's `loan_default`.
+Explicit `counterparty_role` wins. Otherwise the contact's `loan_default`.
 Otherwise not a loan.
 
 This is what makes the volume tractable. Caelan is `loan_default = true`, so his
@@ -179,7 +189,7 @@ already does.
 
 Each phase ships independently.
 
-**Phase 1 — the numbers become correct.** `transfer_purpose`, `loan_default`,
+**Phase 1 — the numbers become correct.** `counterparty_role`, `loan_default`,
 signed balance, `merchant_raw` in the ledger, cancel pairing, per-currency
 display, deletion of `NON_LOAN_LEDGER_CATEGORIES`. On its own this takes Evan to
 −371.82, removes Stephen's false 43,634.85, and leaves Caelan honest.
@@ -198,7 +208,7 @@ without it.
 
 TDD throughout, colocated `*.test.ts` beside each unit.
 
-- **Purpose resolution** — explicit beats contact default beats not-a-loan.
+- **Role resolution** — explicit beats contact default beats not-a-loan.
 - **Balance** — signs, multi-currency isolation, repayment exceeding principal
   crossing zero, zero-amount rows skipped.
 - **Interest allocation** — shares sum to the charge exactly under awkward
