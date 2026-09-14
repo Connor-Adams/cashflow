@@ -1,4 +1,4 @@
-import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader } from './types';
+import type { PdfLine, PdfParser, PdfParseResult, PdfRatePeriod, PdfStatementHeader } from './types';
 import { normalizeMerchant } from '../normalizeMerchant';
 import { dayMonthToIso, parseLongDate, parseMoney, type Period } from './dateHelpers';
 
@@ -379,6 +379,89 @@ export function parseRbcCreditLineActivity(
   return { rows, parseErrors };
 }
 
+const RATE_HEADING_RE = /Rate History for your Statement Period/i;
+
+/** Match one column of a rate row: "4.450 %", "+4.490 %", "-0.500 %". */
+const RATE_PCT_RE = /^([+-]?[\d.]+)\s*%$/;
+
+/**
+ * Parse one candidate line from the Rate History table into a rate period,
+ * or null if it doesn't have the row shape.
+ *
+ * Row layout (glued into one span by pdfjs, per the module header note):
+ *   "<from date>   <to date>   <prime> %   <premium> %   <effective> %   <interest>"
+ * Split on 2+ spaces (dates and "Prime Rate" text use single spaces
+ * internally, so this cleanly separates the six columns) then validate each
+ * column's shape. Requiring both dates to parse via parseLongDate is what
+ * rejects the column-header row ("Rate from and including ...") and the
+ * page-1 marketing line ("Prime Rate + 4.490 % = 8.940 %  ...") even though
+ * the latter also contains percentages.
+ */
+function parseRateRow(text: string): PdfRatePeriod | null {
+  const parts = text.trim().split(/\s{2,}/);
+  if (parts.length !== 6) return null;
+  const [fromRaw, toRaw, primeRaw, premiumRaw, effectiveRaw, interestRaw] = parts;
+
+  const fromDate = parseLongDate(fromRaw);
+  const toDate = parseLongDate(toRaw);
+  if (!fromDate || !toDate) return null;
+
+  const primeMatch = RATE_PCT_RE.exec(primeRaw.trim());
+  const premiumMatch = RATE_PCT_RE.exec(premiumRaw.trim());
+  const effectiveMatch = RATE_PCT_RE.exec(effectiveRaw.trim());
+  if (!primeMatch || !premiumMatch || !effectiveMatch) return null;
+
+  const interest = parseMoney(interestRaw.trim());
+  if (!Number.isFinite(interest)) return null;
+
+  const fixed4 = (n: number) => n.toFixed(4);
+  return {
+    fromDate,
+    toDate,
+    primeRate: fixed4(Number(primeMatch[1])),
+    premium: fixed4(Number(premiumMatch[1])),
+    effectiveRate: fixed4(Number(effectiveMatch[1])),
+    applicableInterest: fixed4(interest),
+  };
+}
+
+/**
+ * Read the "Rate History for your Statement Period" table: one row per
+ * window during which the prime rate (and thus the effective rate charged)
+ * held steady. Returns [] when the heading is absent — the annual-summary
+ * format and any statement predating this section both fall through here
+ * without throwing.
+ *
+ * Scans lines strictly after the heading, on the same page, until a line
+ * fails to parse as a row after at least one row has already been read
+ * (signalling the next section, e.g. "Important information about your
+ * account"). A single non-row line before the first match is tolerated —
+ * that's the column-header row ("Rate from and including ...") — and simply
+ * skipped rather than treated as a terminator.
+ */
+export function parseRbcCreditLineRates(lines: PdfLine[]): PdfRatePeriod[] {
+  const headingIdx = lines.findIndex((l) => RATE_HEADING_RE.test(l.text));
+  if (headingIdx === -1) return [];
+
+  const headingPage = lines[headingIdx].page;
+  const rows: PdfRatePeriod[] = [];
+
+  for (let i = headingIdx + 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.page !== headingPage) break;
+
+    const row = parseRateRow(l.text);
+    if (row) {
+      rows.push(row);
+      continue;
+    }
+    if (rows.length > 0) break;
+    // Otherwise: the column-header row (or blank filler) before any data — skip it.
+  }
+
+  return rows;
+}
+
 export const rbcCreditLineParser: PdfParser = {
   id: 'rbc_credit_line',
   label: 'RBC Royal Credit Line',
@@ -451,6 +534,7 @@ export const rbcCreditLineParser: PdfParser = {
     return {
       transactions,
       header,
+      ratePeriods: parseRbcCreditLineRates(lines),
       warnings: [],
       parseErrors,
     };
