@@ -107,6 +107,23 @@ export function RulesPage() {
     null | 'counting' | { matches: number } | { error: string }
   >(null)
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Guards every preview state write against a component that is already gone.
+  // Both escape hatches matter: the debounce timer can fire after unmount, and
+  // a request that was already in flight can resolve after it. Either one
+  // dispatching setState post-teardown makes React reach for a `window` that
+  // no longer exists.
+  const previewActiveRef = useRef(true)
+
+  useEffect(() => {
+    previewActiveRef.current = true
+    return () => {
+      previewActiveRef.current = false
+      if (previewTimerRef.current) {
+        clearTimeout(previewTimerRef.current)
+        previewTimerRef.current = null
+      }
+    }
+  }, [])
 
   const validateShares = useCallback((pctMe: string, pctPartner: string, splitType: string) => {
     if (splitType !== 'shared') { setShareError(null); return true; }
@@ -133,6 +150,7 @@ export function RulesPage() {
   }, [])
 
   const fetchPreview = useCallback(async (pattern: string, matchKind: string) => {
+    if (!previewActiveRef.current) return
     if (!pattern) { setPreviewState(null); return; }
     setPreviewState('counting')
     try {
@@ -140,9 +158,11 @@ export function RulesPage() {
         pattern,
         matchType: matchKind,
       })
+      if (!previewActiveRef.current) return
       setPreviewState({ matches: result.matches })
       setPatternError(null)
     } catch (e) {
+      if (!previewActiveRef.current) return
       const message = e instanceof Error ? e.message : 'Invalid pattern'
       setPreviewState({ error: message })
       if (matchKind === 'regex') setPatternError(`Invalid pattern: ${message}`)
