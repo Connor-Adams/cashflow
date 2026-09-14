@@ -475,6 +475,42 @@ for (const fx of Object.values(KIND_FIXTURES)) {
     assert.ok(res.body.chain[1].computed);
   });
 
+  // A chain whose later years fall outside the encoded rate tables must not
+  // take down the whole strip: the year-N anchor still has to render. One
+  // uncomputable member degrades to `computed: null` + an `error` string on
+  // that entry, not a 500 on the entire request.
+  test(`[${fx.kind}] GET ${base}/:id/chain isolates a member that cannot compute`, async () => {
+    const models = await import('../models/index.js');
+    const fresh = await seedFreshEntity(fx.kind, `ChainErr-${fx.kind}`);
+    const anchor = await authed.post(base).send({
+      entityId: fresh.id,
+      year: 2026,
+      name: 'ChainErrAnchor',
+      overrides: fx.sampleOverride,
+    });
+    assert.equal(anchor.status, 201, JSON.stringify(anchor.body));
+    // 2098 has no rate table and never will — a stable stand-in for "the user
+    // projected past the last year we encode".
+    const beyond = await authed.post(base).send({
+      entityId: fresh.id,
+      year: 2098,
+      name: 'ChainErrBeyond',
+    });
+    assert.equal(beyond.status, 201, JSON.stringify(beyond.body));
+    await models.Scenario.update(
+      { nextYearId: beyond.body.scenario.id },
+      { where: { id: anchor.body.scenario.id } },
+    );
+
+    const res = await authed.get(`${base}/${anchor.body.scenario.id}/chain`);
+    assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+    assert.equal(res.body.chain.length, 2);
+    assert.ok(res.body.chain[0].computed, 'anchor year must still compute');
+    assert.equal(res.body.chain[0].error, null);
+    assert.equal(res.body.chain[1].computed, null);
+    assert.match(String(res.body.chain[1].error), /2098/);
+  });
+
   test(`[${fx.kind}] GET ${base}/:id/chain returns 404 on unknown id`, async () => {
     const res = await authed.get(`${base}/9999999/chain`);
     assert.equal(res.status, 404, `expected 404, got ${res.status}: ${JSON.stringify(res.body)}`);

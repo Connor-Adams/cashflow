@@ -17,6 +17,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { Router } from 'express';
 import { currentAuth } from '../auth/middleware';
 import { Entity, Scenario } from '../models';
+import { logger } from '../observability/logger';
 import {
   SCENARIO_KIND_CONFIG,
   isScenarioEntityKind,
@@ -293,11 +294,25 @@ router.get(
       fwd = nextNode;
     }
 
+    // Compute each year independently. A single uncomputable year — most
+    // commonly a projection that has run past the last encoded rate table —
+    // must NOT 500 the whole request: the year strip is the only way to
+    // navigate back to the years that DO compute, so taking it down strands
+    // the user on a dead page. The bad year degrades to `computed: null` plus
+    // an `error` string and the client renders it as an errored cell.
     const chain = await Promise.all(
-      chainScenarios.map(async (s) => ({
-        scenario: s,
-        computed: await cfg.compute(s.id),
-      })),
+      chainScenarios.map(async (s) => {
+        try {
+          return { scenario: s, computed: await cfg.compute(s.id), error: null };
+        } catch (err) {
+          const message = (err as Error).message;
+          logger.warn(
+            { scenarioId: s.id, year: s.year, kind: cfg.kind, err: message },
+            'scenario_chain_entry_compute_failed',
+          );
+          return { scenario: s, computed: null, error: message };
+        }
+      }),
     );
     res.json({ chain });
   }),
