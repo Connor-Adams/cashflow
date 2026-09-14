@@ -6,6 +6,7 @@ import { Input } from '@connor-adams/designsystem'
 import { Label } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
 import { postJson } from '@/lib/api'
+import { useUnmountSafeTimeout } from '@/hooks/useUnmountSafeTimeout'
 import { buildInviteUrl, type CreatedInvite } from './inviteLink'
 
 type InviteModalProps = {
@@ -22,6 +23,7 @@ export function InviteModal({ open, onOpenChange, onCreated }: InviteModalProps)
   const [created, setCreated] = useState<CreatedInvite | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const scheduleTimeout = useUnmountSafeTimeout()
 
   function reset() {
     setEmail('')
@@ -61,7 +63,7 @@ export function InviteModal({ open, onOpenChange, onCreated }: InviteModalProps)
       await navigator.clipboard.writeText(url)
       setCopied(true)
       showToast({ title: 'Copied!', variant: 'success', durationMs: 2000 })
-      window.setTimeout(() => setCopied(false), 2000)
+      scheduleTimeout(() => setCopied(false), 2000)
     } catch {
       // Clipboard permission denied — select the field so the user can copy
       // manually, and tell them what happened.

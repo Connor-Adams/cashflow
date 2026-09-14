@@ -1,6 +1,7 @@
 import React, { Component, useState, type ErrorInfo, type ReactNode } from 'react'
 import { Button } from '@connor-adams/designsystem'
 import { clientLogger } from '../lib/clientLogger'
+import { useUnmountSafeTimeout } from '../hooks/useUnmountSafeTimeout'
 
 void React
 
@@ -29,6 +30,7 @@ function ErrorBoundaryFallback({
   errorStack: string | null
 }): React.JSX.Element {
   const [copyFailed, setCopyFailed] = useState(false)
+  const scheduleTimeout = useUnmountSafeTimeout()
   const rawMessage = error.message || error.toString() || 'Unknown render error'
   const truncated = truncate(rawMessage)
 
@@ -41,7 +43,7 @@ function ErrorBoundaryFallback({
       setCopyFailed(false)
     } catch {
       setCopyFailed(true)
-      setTimeout(() => setCopyFailed(false), 2000)
+      scheduleTimeout(() => setCopyFailed(false), 2000)
     }
   }
 
