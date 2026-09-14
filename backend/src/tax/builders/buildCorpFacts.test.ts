@@ -21,6 +21,10 @@ beforeEach(async () => {
   await sequelize.sync({ force: true });
 });
 
+// NOTE: this test was already skipped, and its premise is now obsolete —
+// `finalBusiness` no longer decides what counts as active business income. See
+// corpPerimeter.ts and the perimeter tests at the bottom of this file for the
+// current rule. Do not un-skip without rewriting the assertions.
 test.skip('builds corp facts from seeded business transaction', async () => {
   const household = await Household.create({ name: 'Corp Test HH' });
   const entity = await Entity.create({
@@ -453,4 +457,130 @@ test.skip('dividend investment income routes to eligible vs non_eligible by secu
 
   assert.equal(eligSum.toFixed(2), '3000.00');
   assert.equal(nonElSum.toFixed(2), '1500.00');
+});
+
+// --- active business income: perimeter rule (replaces the finalBusiness sum) ---
+//
+// Revenue arrives as a multi-hop chain across the corp's own accounts. Only the
+// hop that crosses the corporate perimeter is income; every downstream hop is
+// the same dollar moving house. See corpPerimeter.ts for the rule and why
+// `linkedTransactionId` alone is not enough to detect an internal leg.
+
+async function seedPerimeterCorp() {
+  const household = await Household.create({ name: 'Perimeter HH' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'corp', legalName: 'CDG LABS INC.',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const wiseUsd = await Account.create({
+    name: 'Wise Corporate USD', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'USD',
+  } as never);
+  const chequing = await Account.create({
+    name: 'Corp Chequing', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  return { household, entity, wiseUsd, chequing };
+}
+
+let perimeterFp = 0;
+async function seedTxn(
+  ctx: { household: { id: number }; entity: { id: number } },
+  account: { id: number },
+  over: Record<string, unknown>,
+) {
+  perimeterFp += 1;
+  const merchantRaw = String(over.merchantRaw ?? 'SEED');
+  return Transaction.create({
+    accountId: account.id,
+    householdId: ctx.household.id,
+    entityId: ctx.entity.id,
+    currency: 'CAD',
+    importBatch: 'test-perimeter',
+    merchantClean: merchantRaw,
+    sourceRowFingerprint: `fp-perimeter-${perimeterFp}`,
+    sourceIdentityFingerprint: `sif-perimeter-${perimeterFp}`,
+    ...over,
+    merchantRaw,
+  } as never);
+}
+
+test('active business income counts the external receipt, not the internal hops', async () => {
+  const ctx = await seedPerimeterCorp();
+  await FxRate.create({
+    fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: '2025-03-13',
+    rate: '1.40', source: 'manual_seed', fetchedAt: new Date(),
+  } as never);
+
+  // Hop 1 — the money enters the corp from a customer. THIS is revenue.
+  await seedTxn(ctx, ctx.wiseUsd, {
+    date: '2025-03-13', amount: '5000.0000', currency: 'USD', txnType: 'transfer',
+    merchantRaw: 'Received money from WANDERCOM', merchantClean: 'Received money from WANDERCOM',
+    finalBusiness: false,
+  });
+  // Hop 2 — leaves Wise, pointing at the arrival row. Internal.
+  const out = await seedTxn(ctx, ctx.wiseUsd, {
+    date: '2025-03-13', amount: '-5000.0000', currency: 'USD', txnType: 'transfer',
+    merchantRaw: 'Sent money to CDG Labs Inc.', finalBusiness: true,
+  });
+  // Hop 3 — the arrival. Unlinked itself, but it is hop 2's target. Internal.
+  const arrival = await seedTxn(ctx, ctx.chequing, {
+    date: '2025-03-13', amount: '7000.0000', txnType: 'unknown',
+    merchantRaw: 'Misc Payment CDG LABS INC', finalBusiness: true,
+  });
+  await out.update({ linkedTransactionId: arrival.id });
+
+  const facts = await buildCorpFacts(ctx.entity.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+
+  assert.equal(facts.activeBusinessIncome.length, 1, 'exactly one hop is revenue');
+  // USD 5,000 at 1.40 = CAD 7,000 — the same money as hop 3, counted once.
+  assert.equal(facts.activeBusinessIncome[0].cadAmount.toFixed(2), '7000.00');
+  assert.deepEqual(facts.factWarnings ?? [], [], 'a named external payer needs no warning');
+});
+
+test('an orphaned arrival leg is counted but warned about', async () => {
+  const ctx = await seedPerimeterCorp();
+  // No upstream hops exist (the source account was never imported), so this
+  // looks external. Count it, but say so.
+  await seedTxn(ctx, ctx.chequing, {
+    date: '2025-06-30', amount: '14891.9900', txnType: 'income',
+    merchantRaw: 'Direct deposit from CDG LABS INC', finalBusiness: false,
+  });
+
+  const facts = await buildCorpFacts(ctx.entity.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+
+  assert.equal(facts.activeBusinessIncome.length, 1);
+  assert.equal(facts.activeBusinessIncome[0].cadAmount.toFixed(2), '14891.99');
+  assert.equal((facts.factWarnings ?? []).length, 1);
+  assert.match((facts.factWarnings ?? [])[0], /no external counterparty/);
+});
+
+test('business expenses exclude transfers and securities purchases', async () => {
+  const ctx = await seedPerimeterCorp();
+  await seedTxn(ctx, ctx.chequing, {
+    date: '2025-04-01', amount: '10000.0000', txnType: 'income',
+    merchantRaw: 'ACME CORP invoice 12', finalBusiness: false,
+  });
+  await seedTxn(ctx, ctx.chequing, {
+    date: '2025-04-02', amount: '-6.0000', txnType: 'fee',
+    merchantRaw: 'Account fee', finalBusiness: true,
+  });
+  // Capital deployment, not a cost of doing business.
+  await seedTxn(ctx, ctx.chequing, {
+    date: '2025-04-03', amount: '-9999.4100', txnType: 'investment',
+    merchantRaw: 'Buy VFV', finalBusiness: false,
+  });
+
+  const facts = await buildCorpFacts(ctx.entity.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+
+  const net = facts.activeBusinessIncome.reduce(
+    (acc, i) => acc.plus(i.cadAmount), D(0),
+  );
+  assert.equal(net.toFixed(2), '9994.00', 'revenue 10000 less the 6.00 fee only');
 });

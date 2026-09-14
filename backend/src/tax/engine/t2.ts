@@ -5,7 +5,9 @@ import { sbdEligibleIncome } from './sbd';
 import { computeIntegration, isConnectedSource } from './integration';
 
 export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
-  const warnings: string[] = [];
+  // Fact-assembly caveats ride along with the engine's own warnings so the
+  // return surfaces both to the caller as one list.
+  const warnings: string[] = [...(facts.factWarnings ?? [])];
   const lines: TaxLine[] = [];
   const push = (code: string, label: string, amount: Decimal, inputs: { source: string; amount: Decimal }[] = [], formula?: string) => {
     lines.push({ code, label, amount, inputs, formula });
