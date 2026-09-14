@@ -61,6 +61,35 @@ describe('YearStripNav', () => {
     expect(onSelectYear).toHaveBeenCalledWith(2025, 11)
   })
 
+  // A year whose return could not be computed (e.g. projected past the last
+  // encoded rate table) still has to be listed and clickable — it is flagged,
+  // not hidden, so the user can see which year is broken and why.
+  it('flags a chain entry that failed to compute', () => {
+    render(
+      <YearStripNav
+        entityId={1}
+        activeYear={2024}
+        activeScenarioId={10}
+        chain={[
+          CHAIN[0],
+          {
+            scenario: { id: 12, year: 2098, kind: 'projection_root', name: 'Projection 2098' },
+            computed: null,
+            error: 'no rate table encoded for year 2098',
+          },
+        ]}
+        onSelectYear={vi.fn()}
+        onProjectNextYear={vi.fn()}
+        isProjecting={false}
+      />,
+    )
+    const broken = screen.getByRole('button', { name: /2098/ })
+    expect(broken).toHaveAttribute('title', expect.stringContaining('no rate table encoded for year 2098'))
+    expect(screen.getByLabelText('year failed to compute')).toBeInTheDocument()
+    // Still navigable — the user must be able to select and inspect it.
+    expect(broken).toBeEnabled()
+  })
+
   it('shows projecting state on project button', () => {
     render(
       <YearStripNav

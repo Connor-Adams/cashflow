@@ -3,6 +3,7 @@ import type { Bracket, RateTable } from './types';
 import { RATES_2024 } from '../data/rates-2024';
 import { RATES_2025 } from '../data/rates-2025';
 import { RATES_2026 } from '../data/rates-2026';
+import { RATES_2027 } from '../data/rates-2027';
 
 export class RateTableMissingError extends Error {
   constructor(year: number) {
@@ -17,6 +18,10 @@ const TABLES: Record<number, RateTable> = {
   2024: RATES_2024,
   2025: RATES_2025,
   2026: RATES_2026,
+  // 2027 is a PROJECTION (2026 indexed by an assumed factor) so multi-year
+  // scenario chains can roll forward past the last published year. See
+  // rates-2027.ts before trusting any 2027 number.
+  2027: RATES_2027,
 };
 
 export function ratesFor(year: number): RateTable {
