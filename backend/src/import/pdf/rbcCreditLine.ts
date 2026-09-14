@@ -1,4 +1,4 @@
-import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader } from './types';
+import type { PdfLine, PdfParser, PdfParseResult, PdfRatePeriod, PdfStatementHeader } from './types';
 import { normalizeMerchant } from '../normalizeMerchant';
 import { dayMonthToIso, parseLongDate, parseMoney, type Period } from './dateHelpers';
 
@@ -31,6 +31,16 @@ import { dayMonthToIso, parseLongDate, parseMoney, type Period } from './dateHel
  * original column-midpoint (findColumnAnchors) approach found 0 money items.
  * Fix: split each row on 2+ spaces, extract trailing money tokens, use
  * running-balance delta to determine sign. Mirror rbcBusinessBanking approach.
+ *
+ * No-balance rows: when the balance-owing column can't be read for a row, the
+ * sign is resolved by (1) the description, for interest/fee wording, which the
+ * delta arithmetic cannot resolve because interest never moves the principal;
+ * (2) a two-row balance lookahead; (3) the description again, for the
+ * payment/withdrawal wording RBC uses. Only a description matching nothing
+ * falls back to the blind "withdrawal" guess, and that records a parseError.
+ * See classifyRowByDescription — guessing "withdrawal + principal change"
+ * unconditionally booked a 6,400 payment as a 6,400 withdrawal (a 12,800 error)
+ * and leaked interest rows into the principal.
  *
  * Reconciliation gate: |opening_principal + Σsigned_principal_impact| - closing_principal| ≤ 0.015.
  * Interest rows do not impact principal, so they are excluded from the sum.
@@ -156,6 +166,39 @@ function extractClosingPrincipal(lines: PdfLine[]): number | null {
     }
   }
   return closing;
+}
+
+/**
+ * What an activity row does to the account, read off its description alone.
+ *
+ * The balance-owing column is the authoritative signal and is used whenever it
+ * is readable; this is the fallback for rows where it is not. RBC's wording on
+ * a Royal Credit Line is unambiguous:
+ *
+ *   - `WWW PMT <ref> (<amount>) Principal` — a payment against the line.
+ *     Positive cashflow; reduces the principal owed.
+ *   - `WWW TFR <ref>` / `Withdrawal` / `Advance` — money drawn off the line.
+ *     Negative cashflow; increases the principal owed.
+ *   - `Interest Payment` (and other interest/fee/insurance wording) — billed to
+ *     the linked chequing account, NOT capitalised into the principal. Negative
+ *     cashflow, but `isPrincipalChange: false`: it must stay out of the
+ *     reconciliation sum and out of the emitted transactions (the chequing
+ *     statement already records the same cash leaving).
+ *
+ * Interest is tested FIRST because "Interest Payment" also contains "Payment" —
+ * matching payment first would flip a cost into a credit.
+ */
+type RowKind = 'payment' | 'withdrawal' | 'interest';
+
+const INTEREST_DESC_RE = /\b(interest|fee|fees|insurance|loanprotector|premium|service\s+charge)\b/i;
+const PAYMENT_DESC_RE = /\b(WWW\s+PMT|payment|pmt)\b/i;
+const WITHDRAWAL_DESC_RE = /\b(WWW\s+TFR|withdrawal|advance|tfr)\b/i;
+
+function classifyRowByDescription(description: string): RowKind | null {
+  if (INTEREST_DESC_RE.test(description)) return 'interest';
+  if (PAYMENT_DESC_RE.test(description)) return 'payment';
+  if (WITHDRAWAL_DESC_RE.test(description)) return 'withdrawal';
+  return null;
 }
 
 type PendingRow = {
@@ -322,7 +365,50 @@ export function parseRbcCreditLineActivity(
       rows.push({ date: row.date, description: row.description, amount, isPrincipalChange });
       runningSignedBalance = row.signedBalance;
     } else {
-      // No balance column: look ahead for sign resolution.
+      // No balance column. Resolve the sign from the description first where
+      // the description settles the matter on its own, then fall back to the
+      // two-row balance lookahead, then to the description again.
+      const kind = classifyRowByDescription(row.description);
+
+      // Interest/fee rows never move the principal, so there is no balance
+      // delta for the lookahead below to match against — running it would at
+      // best fail and at worst find a coincidental combination. Short-circuit:
+      // negative cashflow, NOT a principal change, running balance untouched.
+      if (kind === 'interest') {
+        rows.push({
+          date: row.date,
+          description: row.description,
+          amount: -row.rawAmount,
+          isPrincipalChange: false,
+        });
+        continue;
+      }
+
+      /**
+       * Last resort once the balance column has failed to settle the sign:
+       * believe the description. Only a description that matches nothing keeps
+       * the historical blind "withdrawal" guess, and that case still records a
+       * parseError so the reconciliation gate's verdict can be read against it.
+       */
+      const resolveFromDescription = () => {
+        const isPayment = kind === 'payment';
+        const amount = isPayment ? row.rawAmount : -row.rawAmount;
+        rows.push({
+          date: row.date,
+          description: row.description,
+          amount,
+          isPrincipalChange: true,
+        });
+        runningSignedBalance += amount;
+        if (kind === null) {
+          parseErrors.push({
+            rowIndex: i + 1,
+            message: `Could not determine sign for no-balance row (description matches no known credit-line wording), defaulting to withdrawal: ${row.description}`,
+          });
+        }
+      };
+
+      // Look ahead for sign resolution.
       let nextBalance: number | null = null;
       let unknownsBetween = 0;
       for (let j = i + 1; j < pending.length; j++) {
@@ -364,19 +450,98 @@ export function parseRbcCreditLineActivity(
           runningSignedBalance = nextNextBalance;
           i++;
         } else {
-          rows.push({ date: row.date, description: row.description, amount: -row.rawAmount, isPrincipalChange: true });
-          parseErrors.push({ rowIndex: i + 1, message: `Could not determine sign for no-balance row: ${row.description}` });
-          runningSignedBalance -= row.rawAmount;
+          resolveFromDescription();
         }
       } else {
-        rows.push({ date: row.date, description: row.description, amount: -row.rawAmount, isPrincipalChange: true });
-        parseErrors.push({ rowIndex: i + 1, message: `No-balance row, defaulting to withdrawal: ${row.description}` });
-        runningSignedBalance -= row.rawAmount;
+        resolveFromDescription();
       }
     }
   }
 
   return { rows, parseErrors };
+}
+
+const RATE_HEADING_RE = /Rate History for your Statement Period/i;
+
+/** Match one column of a rate row: "4.450 %", "+4.490 %", "-0.500 %". */
+const RATE_PCT_RE = /^([+-]?[\d.]+)\s*%$/;
+
+/**
+ * Parse one candidate line from the Rate History table into a rate period,
+ * or null if it doesn't have the row shape.
+ *
+ * Row layout (glued into one span by pdfjs, per the module header note):
+ *   "<from date>   <to date>   <prime> %   <premium> %   <effective> %   <interest>"
+ * Split on 2+ spaces (dates and "Prime Rate" text use single spaces
+ * internally, so this cleanly separates the six columns) then validate each
+ * column's shape. Requiring both dates to parse via parseLongDate is what
+ * rejects the column-header row ("Rate from and including ...") and the
+ * page-1 marketing line ("Prime Rate + 4.490 % = 8.940 %  ...") even though
+ * the latter also contains percentages.
+ */
+function parseRateRow(text: string): PdfRatePeriod | null {
+  const parts = text.trim().split(/\s{2,}/);
+  if (parts.length !== 6) return null;
+  const [fromRaw, toRaw, primeRaw, premiumRaw, effectiveRaw, interestRaw] = parts;
+
+  const fromDate = parseLongDate(fromRaw);
+  const toDate = parseLongDate(toRaw);
+  if (!fromDate || !toDate) return null;
+
+  const primeMatch = RATE_PCT_RE.exec(primeRaw.trim());
+  const premiumMatch = RATE_PCT_RE.exec(premiumRaw.trim());
+  const effectiveMatch = RATE_PCT_RE.exec(effectiveRaw.trim());
+  if (!primeMatch || !premiumMatch || !effectiveMatch) return null;
+
+  const interest = parseMoney(interestRaw.trim());
+  if (!Number.isFinite(interest)) return null;
+
+  const fixed4 = (n: number) => n.toFixed(4);
+  return {
+    fromDate,
+    toDate,
+    primeRate: fixed4(Number(primeMatch[1])),
+    premium: fixed4(Number(premiumMatch[1])),
+    effectiveRate: fixed4(Number(effectiveMatch[1])),
+    applicableInterest: fixed4(interest),
+  };
+}
+
+/**
+ * Read the "Rate History for your Statement Period" table: one row per
+ * window during which the prime rate (and thus the effective rate charged)
+ * held steady. Returns [] when the heading is absent — the annual-summary
+ * format and any statement predating this section both fall through here
+ * without throwing.
+ *
+ * Scans lines strictly after the heading, on the same page, until a line
+ * fails to parse as a row after at least one row has already been read
+ * (signalling the next section, e.g. "Important information about your
+ * account"). A single non-row line before the first match is tolerated —
+ * that's the column-header row ("Rate from and including ...") — and simply
+ * skipped rather than treated as a terminator.
+ */
+export function parseRbcCreditLineRates(lines: PdfLine[]): PdfRatePeriod[] {
+  const headingIdx = lines.findIndex((l) => RATE_HEADING_RE.test(l.text));
+  if (headingIdx === -1) return [];
+
+  const headingPage = lines[headingIdx].page;
+  const rows: PdfRatePeriod[] = [];
+
+  for (let i = headingIdx + 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.page !== headingPage) break;
+
+    const row = parseRateRow(l.text);
+    if (row) {
+      rows.push(row);
+      continue;
+    }
+    if (rows.length > 0) break;
+    // Otherwise: the column-header row (or blank filler) before any data — skip it.
+  }
+
+  return rows;
 }
 
 export const rbcCreditLineParser: PdfParser = {
@@ -451,6 +616,7 @@ export const rbcCreditLineParser: PdfParser = {
     return {
       transactions,
       header,
+      ratePeriods: parseRbcCreditLineRates(lines),
       warnings: [],
       parseErrors,
     };

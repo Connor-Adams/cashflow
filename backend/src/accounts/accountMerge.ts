@@ -18,6 +18,7 @@ import type { Transaction as DbTransaction, Model, ModelStatic } from 'sequelize
 import {
   Account,
   AccountCardIdentifier,
+  AccountRatePeriod,
   Transaction,
   PlannedEvent,
   AccountStatement,
@@ -91,6 +92,7 @@ const CHILD_MODELS: ReadonlyArray<{ model: ModelStatic<Model>; label: string }> 
   { model: PortfolioDailySnapshot, label: 'portfolioDailySnapshots' },
   { model: PdfImportItem, label: 'pdfImportItems' },
   { model: AccountCardIdentifier, label: 'accountCardIdentifiers' },
+  { model: AccountRatePeriod, label: 'accountRatePeriods' },
 ];
 
 function normalizeCurrency(value: string | null): string {
@@ -163,6 +165,24 @@ export async function mergeAccounts(input: MergeAccountsInput): Promise<MergeAcc
     if (targetLast4s.length > 0) {
       await AccountCardIdentifier.destroy({
         where: { accountId: sourceId, last4: { [Op.in]: targetLast4s } },
+        transaction: t,
+      });
+    }
+
+    // AccountRatePeriod carries a UNIQUE(account_id, from_date) index for the
+    // same reason: a bulk reassignment could collide if the source and
+    // target both hold a rate window starting on the same date. Drop the
+    // source's row for any from_date the target already has before the
+    // generic reassignment loop runs.
+    const targetRatePeriods = await AccountRatePeriod.findAll({
+      where: { accountId: targetId },
+      attributes: ['fromDate'],
+      transaction: t,
+    });
+    const targetFromDates = targetRatePeriods.map((r) => r.fromDate);
+    if (targetFromDates.length > 0) {
+      await AccountRatePeriod.destroy({
+        where: { accountId: sourceId, fromDate: { [Op.in]: targetFromDates } },
         transaction: t,
       });
     }

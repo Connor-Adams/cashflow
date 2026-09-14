@@ -113,6 +113,7 @@ import { VaultDocument, initVaultDocument } from './VaultDocument';
 import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
 import { SavedSearch, initSavedSearch } from './SavedSearch';
 import { AccountStatement, initAccountStatement } from './AccountStatement';
+import { AccountRatePeriod, initAccountRatePeriod } from './AccountRatePeriod';
 import { SyncBackup, initSyncBackup } from './SyncBackup';
 import { DataExport, initDataExport } from './DataExport';
 import { LiabilityAccount, initLiabilityAccount } from './LiabilityAccount';
@@ -216,6 +217,7 @@ initFinanceEvent(sequelize);
 initBudgetAlertState(sequelize);
 initSavedSearch(sequelize);
 initAccountStatement(sequelize);
+initAccountRatePeriod(sequelize);
 initSyncBackup(sequelize);
 initDataExport(sequelize);
 initLiabilityAccount(sequelize);
@@ -930,6 +932,41 @@ AccountStatement.belongsTo(User, {
   as: 'createdByUser',
 });
 
+// AccountRatePeriod: the interest-rate windows printed on a statement.
+// Reference data hanging off Account (same shape as FxRate/SecurityPrice),
+// and a period child exactly as AccountStatement is -- no lifecycle of its
+// own, so not a new primitive. `sourceStatement` is nullable provenance,
+// not ownership: deleting the statement nulls the reference (SET NULL in
+// the migration) rather than destroying the rate row.
+Household.hasMany(AccountRatePeriod, {
+  foreignKey: 'household_id',
+  as: 'accountRatePeriods',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AccountRatePeriod.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+Account.hasMany(AccountRatePeriod, {
+  foreignKey: 'account_id',
+  as: 'ratePeriods',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AccountRatePeriod.belongsTo(Account, {
+  foreignKey: 'account_id',
+  as: 'account',
+});
+AccountStatement.hasMany(AccountRatePeriod, {
+  foreignKey: 'source_statement_id',
+  as: 'ratePeriods',
+});
+AccountRatePeriod.belongsTo(AccountStatement, {
+  foreignKey: 'source_statement_id',
+  as: 'sourceStatement',
+});
+
 // Large purchase review sidecar (issue #244). 1:1 with transactions; mirrors
 // the return-metadata sidecar pattern. Cascade on transaction delete so the
 // sidecar is never orphaned.
@@ -1195,6 +1232,7 @@ export {
   SavedSearch,
   VaultDocument,
   AccountStatement,
+  AccountRatePeriod,
   SyncBackup,
   DataExport,
   LiabilityAccount,

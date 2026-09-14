@@ -86,6 +86,22 @@ export type PdfStatementHeader = {
   minimumPayment?: number | null;
 };
 
+/**
+ * One row of an RBC Royal Credit Line "Rate History" table: the prime rate,
+ * premium/discount, and resulting effective rate over a dated window, plus
+ * the interest RBC actually applied for that window. All numeric fields are
+ * fixed-4 decimal strings (e.g. "4.4500", "-0.5000") to avoid float drift
+ * when these are later summed/compared; dates are ISO yyyy-mm-dd.
+ */
+export type PdfRatePeriod = {
+  fromDate: string;
+  toDate: string;
+  primeRate: string;
+  premium: string;
+  effectiveRate: string;
+  applicableInterest: string;
+};
+
 export type PdfParseResult = {
   /** Transactions in cashflow's sign convention (positive = credit, negative = charge for credit cards). */
   transactions: Array<{
@@ -129,6 +145,13 @@ export type PdfParseResult = {
    * existing parsers (CIBC) don't need to be retrofitted.
    */
   header?: PdfStatementHeader;
+  /**
+   * Rate-history rows read off the RBC Royal Credit Line "Rate History"
+   * table (per-period prime/premium/effective rate + applied interest).
+   * Optional — only the RBC Credit Line parser emits this; omitted (or
+   * empty) for statements without a rate table.
+   */
+  ratePeriods?: PdfRatePeriod[];
   warnings: string[];
   parseErrors: { rowIndex: number; message: string }[];
 };
