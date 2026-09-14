@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -47,6 +47,7 @@ function mockFetch(rules: typeof SAMPLE_RULES, overrides: MockOverrides = {}) {
       duplicateRules: [],
       topMerchantsWithoutRules: [],
     }) } as Response)
+    if (url.endsWith('/api/rules/preview-pattern')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ matches: 3 }) } as Response)
     if (url.endsWith('/api/rules/suggestions')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ suggestions: [] }) } as Response)
     if (url.endsWith('/api/transactions/category-hints')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ categories: [] }) } as Response)
     if (url.endsWith('/api/labels')) return Promise.resolve({ ok: true, json: () => Promise.resolve([
@@ -215,5 +216,45 @@ describe('RulesPage', () => {
       // there are no suggestions to surface.
       expect(screen.queryByText(/Auto-rule suggestions/i)).toBeNull()
     })
+  })
+  describe('preview debounce lifecycle', () => {
+    function renderRules() {
+      return render(
+        <MemoryRouter initialEntries={['/rules']}>
+          <ToastProvider>
+            <RulesPage />
+          </ToastProvider>
+        </MemoryRouter>,
+      )
+    }
+
+    function previewCalls() {
+      return vi
+        .mocked(fetch)
+        .mock.calls.filter((c) => String(c[0]).includes('/api/rules/preview-pattern'))
+    }
+
+    it('clears the pending preview debounce when the page unmounts', async () => {
+      // Regression: the 300ms debounce timer was never cleared on unmount, so
+      // it fired after the test environment was torn down and React touched a
+      // `window` that no longer existed — an unhandled rejection that reds the
+      // whole vitest run without failing a single test.
+      const { unmount } = renderRules()
+      await waitFor(() => expect(screen.getByText('amazon')).toBeInTheDocument())
+
+      vi.useFakeTimers()
+      try {
+        fireEvent.change(screen.getByLabelText(/^pattern$/i), {
+          target: { value: 'costco' },
+        })
+        unmount()
+        vi.advanceTimersByTime(5000)
+      } finally {
+        vi.useRealTimers()
+      }
+
+      expect(previewCalls()).toHaveLength(0)
+    })
+
   })
 })
