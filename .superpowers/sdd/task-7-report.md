@@ -381,3 +381,150 @@ $ yarn workspace cashflow-backend run typecheck  # clean
   mechanisms. Folding the old one into the role-based balance is a data
   migration, not a UI change, and no task in this plan covers it. Worth a
   follow-up.
+
+---
+
+## Review round 2 — five findings fixed
+
+Two IMPORTANT findings were the same false-claim bug class the task exists to
+remove, one level up from the row. All five are fixed TDD: each test was added
+first and observed failing (7 new page tests red, 2 green as guards) before any
+implementation landed.
+
+### Finding 1 (IMPORTANT) — the headline claimed "Nothing outstanding" over balances it could not load
+
+`deriveMetrics` builds `balanceByCurrency` only from ledgers that loaded, so an
+empty `balanceEntries` is ambiguous: it means "no debt" only when nothing
+failed. The metrics card never consulted `failedLedgerIds`, so N failed fetches
+rendered `Loan balance / Nothing outstanding` — a positive zero-debt assertion
+over N unknown balances.
+
+`PeopleLedgerPage.tsx` now derives, alongside `balanceEntries`:
+
+- `failedCount` — `realContacts` ∩ `failedLedgerIds`
+- `allBalancesUnknown` — every real contact's fetch failed
+- `balancesIncomplete` — any failed
+
+and branches three ways:
+
+| state | Loan balance tile | caption |
+|---|---|---|
+| nothing failed | `Nothing outstanding` / the per-currency tiles | none |
+| some failed | the tiles that did load, or `Incomplete` | `metrics-incomplete`, naming the count |
+| all failed | `Couldn't load` — **no total at all** | `metrics-incomplete` |
+
+The `Tracked loans` tile is derived from the same ledgers, so it renders `—`
+rather than a bare `0` when nothing loaded (`0` would read as "none tracked").
+This was found while fixing the finding, not reported in it.
+
+`deriveMetrics`' doc comment claimed failures "are reported separately — see
+`failedLedgerIds` at the call site", which was not true of this call site. It
+now states that the totals are a floor rather than a sum, that the map cannot
+distinguish "nobody owes anything" from "nothing could be loaded", and that
+callers MUST pair it with `failedLedgerIds` before wording anything.
+
+### Finding 2 (IMPORTANT) — two competing debt numbers with nothing distinguishing them
+
+`Loan balance` (CAD 480.00 owed to you) and `Tracked loans outstanding`
+(CAD 200.00) sat adjacent for the same contact with no explanation. Traced the
+older number to its source to caption it accurately:
+`backend/src/reimbursements/serialize.ts` `summarize()` — it is the sum of the
+contact's Reimbursement rows whose effective status is `expected` or `overdue`,
+i.e. claims logged **by hand**. It never reads `counterparty_role`, so it is a
+different quantity from `loanBalance` and is not expected to agree with it.
+
+Captions added (app-side `TileCaption` component + four exported string
+constants, so drill-in and landing-column wording cannot drift apart):
+
+- `tracked-outstanding-caption`: "Unpaid reimbursement claims you logged by
+  hand. A separate, older tally that ignores transfer tags — the loan balance is
+  this page's answer to what they owe you."
+- `loan-balance-caption`: "What they owe you: every transfer tagged loan or
+  repayment, netted. This page's answer."
+- landing column captions for all three money columns (`Loan balance`,
+  `Raw transfer flow`, `Outstanding loans`).
+
+The existing raw-flow caption was folded into `TileCaption` unchanged. Folding
+the two mechanisms together remains a data migration and is still out of scope.
+
+### Finding 3 (MINOR) — `reload()` cancellation guard opened a stuck-loading state
+
+The navigation effect cleared `ledgerLoading` only inside `if (isCurrent())`
+and `reload` never cleared it, so a `reload` that bumped `ledgerRequestRef`
+while the navigation fetch was in flight pinned `ledgerLoading` true forever —
+the drill-in rendered "Loading…" over a populated ledger until the user
+navigated away. Reachable from `onCommitLink`, whose button renders outside the
+loading gate.
+
+Fixed in `reload`, not the effect: clearing unconditionally in the effect would
+regress a real case — navigation A finishing after navigation B started would
+unveil A's stale ledger under B's heading. Instead `reload` clears the flag in a
+token-guarded `finally`; whoever holds the token owns the flag.
+
+The test drives the exact interleaving: the navigation fetch is left unresolved,
+"Link transfers" fires `reload`, and the assertion is that the summary card
+renders and "Loading…" is gone. It failed against the old code with a 1s
+`findByTestId` timeout over a DOM containing only "Loading…".
+
+### Finding 4 (MINOR) — orphan "Lent vs repaid" heading
+
+The block was gated on `ledger.loanBalance.length > 0` while
+`computeBarSegments` skips any currency with `lent === 0`. Stephen Masseur's
+real USD row (lent 0 / repaid 3570.51 / balance −3570.51) rendered the heading
+over nothing. Now gated on `computeBarSegments(ledger).length > 0`. Two tests:
+the repaid-only row omits the heading, a normal lending row keeps it.
+
+### Finding 5 (MINOR) — `formatBalanceLabel` read a non-numeric balance as "settled"
+
+`Number(b.balance)` yields `NaN`, which fails both `> 0` and `< 0`, producing
+`CAD NaN settled`. Extracted `parseAmount()` in `frontend/src/lib/peopleLedger.ts`
+returning `number | null`, and both formatters now bail to `balance unknown` /
+`flow unknown` instead of making a claim.
+
+`parseAmount` also rejects `null`, `undefined` and the empty string, which the
+finding did not mention: `Number('')` and `Number(null)` are both `0`, so a bare
+`Number()` turns "no value" into the claim "settled" just as surely as `NaN`
+did. `formatNetFlowLabel` got the same guard for the same reason.
+
+### Verification
+
+```
+$ yarn workspace frontend run test PeopleLedgerPage
+  Test Files  1 passed (1)        Tests  25 passed (25)     # was 16; +9 new
+
+$ yarn workspace frontend run test peopleLedger
+  Test Files  2 passed (2)        Tests  31 passed (31)     # lib 6 (+3), page 25
+
+$ yarn workspace frontend run lint
+  exit 0, clean
+
+$ yarn ci
+  FAILS — but only in the integration tier, which cannot run on this machine.
+```
+
+`yarn ci` aborts at `yarn workspace cashflow-backend run test:integration`:
+1645 of 1698 subtests fail with `code: 'ECONNREFUSED'` / `failureType: 'hookFailed'`
+before any assertion runs. Confirmed environmental, not caused by these changes:
+`TEST_DATABASE_URL` is unset and a TCP probe of `127.0.0.1:5432` returns
+`ECONNREFUSED` — there is no local Postgres. The changes here are frontend-only
+and touch no backend code path. **The integration tier was NOT run; CI's
+dedicated Postgres job is the gate for it.**
+
+Every other `yarn ci` stage was run individually and passed:
+
+```
+$ yarn test:workflows                             # 76 pass, 0 fail
+$ yarn workspace @cashflow/shared run test        # 0 fail
+$ yarn workspace cashflow-backend run typecheck   # exit 0
+$ yarn workspace cashflow-backend run test        # 4559 tests: 4535 pass, 0 fail, 24 skipped
+$ yarn workspace cashflow-backend run build       # exit 0
+$ yarn workspace frontend run test                # 218 files, 1225 pass, 0 fail
+$ yarn workspace frontend run build               # exit 0
+$ yarn workspace frontend run lint                # exit 0
+$ yarn workspace frontend run lint:palette        # 377 files clean
+```
+
+Design-system rules held: no `@connor-adams/designsystem` component was
+restyled — the column captions are plain `<span>`s nested inside `TableHead`,
+and `TileCaption` is an app-side Tailwind component. All Tailwind classes are
+literal strings.

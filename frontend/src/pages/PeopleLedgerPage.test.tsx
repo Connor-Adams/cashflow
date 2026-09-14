@@ -157,6 +157,115 @@ describe('PeopleLedgerPage — landing list', () => {
     expect(balanceCell).not.toHaveTextContent('No tracked loans');
   });
 
+  it('does not claim nothing is outstanding when every balance failed to load', async () => {
+    vi.spyOn(api, 'getContactLedger').mockRejectedValue(new Error('boom') as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const metricsCard = await screen.findByTestId('metrics-card');
+    // Zero loaded balances is not zero debt. The headline may not assert one.
+    expect(metricsCard.textContent).not.toMatch(/nothing outstanding/i);
+    const metrics = within(metricsCard).getByTestId('loan-balance-metrics');
+    expect(metrics).toHaveTextContent(/couldn't load/i);
+    // …and with nothing loaded there is no total to show at all.
+    expect(metrics.textContent).not.toMatch(/owed to you|you owe|settled/i);
+    expect(
+      within(metricsCard).getByTestId('metrics-incomplete').textContent,
+    ).toMatch(/1 contact/i);
+
+    // "Tracked loans" is derived from the same ledgers, so a bare 0 there
+    // would read as "none tracked" over a set nobody could load.
+    const trackedLabel = within(metricsCard).getByText('Tracked loans');
+    const trackedTile = trackedLabel.closest('div[class*="flex-col"]');
+    expect(trackedTile).not.toBeNull();
+    expect(within(trackedTile as HTMLElement).queryByText('0')).toBeNull();
+  });
+
+  it('marks the headline total incomplete when only some balances failed', async () => {
+    vi.spyOn(api, 'getJson').mockResolvedValue([
+      { id: 1, name: 'Caelan', isSelf: false },
+      { id: 2, name: 'Stephen', isSelf: false },
+    ] as never);
+    vi.spyOn(api, 'getContactLedger').mockImplementation((id: number) =>
+      id === 1
+        ? (Promise.resolve(MOCK_LEDGER) as never)
+        : (Promise.reject(new Error('boom')) as never),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const metricsCard = await screen.findByTestId('metrics-card');
+    const metrics = within(metricsCard).getByTestId('loan-balance-metrics');
+    // The balance that did load is still shown…
+    expect(within(metrics).getByText('CAD 480.00 owed to you')).toBeInTheDocument();
+    // …but the page says the total is partial, and by how much.
+    const marker = within(metricsCard).getByTestId('metrics-incomplete');
+    expect(marker.textContent).toMatch(/incomplete/i);
+    expect(marker.textContent).toMatch(/1 contact/i);
+  });
+
+  it('says incomplete rather than "nothing outstanding" when the loaded ledgers carry no debt', async () => {
+    vi.spyOn(api, 'getJson').mockResolvedValue([
+      { id: 1, name: 'Caelan', isSelf: false },
+      { id: 2, name: 'Stephen', isSelf: false },
+    ] as never);
+    vi.spyOn(api, 'getContactLedger').mockImplementation((id: number) =>
+      id === 1
+        ? (Promise.resolve({ ...MOCK_LEDGER, loanBalance: [] }) as never)
+        : (Promise.reject(new Error('boom')) as never),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const metricsCard = await screen.findByTestId('metrics-card');
+    // One contact loaded clean, one is unknown — "nothing outstanding" would
+    // be a zero-debt assertion over a balance nobody has seen.
+    expect(metricsCard.textContent).not.toMatch(/nothing outstanding/i);
+    expect(within(metricsCard).getByTestId('metrics-incomplete')).toBeInTheDocument();
+  });
+
+  it('still says nothing is outstanding when every ledger loaded clean', async () => {
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue({
+      ...MOCK_LEDGER,
+      loanBalance: [],
+    } as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const metricsCard = await screen.findByTestId('metrics-card');
+    expect(metricsCard).toHaveTextContent(/nothing outstanding/i);
+    expect(within(metricsCard).queryByTestId('metrics-incomplete')).toBeNull();
+  });
+
+  it('captions the tracked-loans column so it is not read as the balance', async () => {
+    render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByTestId('contact-row-1');
+    const caption = screen.getByTestId('outstanding-loans-caption');
+    expect(caption.textContent).toMatch(/reimbursement/i);
+    expect(caption.textContent).toMatch(/not the (loan )?balance/i);
+  });
+
   it('makes no owed or owe claim for a contact with no loan balance', async () => {
     vi.spyOn(api, 'getContactLedger').mockResolvedValue({
       ...MOCK_LEDGER,
@@ -358,6 +467,93 @@ describe('PeopleLedgerPage — drill-in', () => {
     await waitFor(() => {
       expect(setDefaultSpy).toHaveBeenCalledWith(1, true);
     });
+  });
+
+  it('distinguishes the tracked-loans tile from the loan balance', async () => {
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    // CAD 480.00 and CAD 200.00 sit side by side and mean different things.
+    const outstanding = await screen.findByTestId('tracked-outstanding');
+    const caption = within(outstanding).getByTestId('tracked-outstanding-caption');
+    expect(caption.textContent).toMatch(/reimbursement/i);
+    // It must point at the loan balance as the page's answer.
+    expect(caption.textContent).toMatch(/loan balance/i);
+
+    const balance = await screen.findByTestId('loan-balance');
+    expect(
+      within(balance).getByTestId('loan-balance-caption').textContent,
+    ).toMatch(/what they owe you|this page's answer/i);
+  });
+
+  it('omits the lent-vs-repaid heading when there is no bar to draw', async () => {
+    // Stephen's real USD row: nothing lent, 3570.51 repaid. computeBarSegments
+    // draws nothing for it, so the heading must not stand alone over a void.
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue({
+      ...MOCK_LEDGER,
+      loanBalance: [{ currency: 'USD', lent: '0.0000', repaid: '3570.5100', balance: '-3570.5100' }],
+    } as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const summaryCard = await screen.findByTestId('ledger-summary-card');
+    expect(within(summaryCard).getByText('USD 3570.51 you owe')).toBeInTheDocument();
+    expect(within(summaryCard).queryByText('Lent vs repaid')).toBeNull();
+  });
+
+  it('keeps the lent-vs-repaid heading when there is a bar to draw', async () => {
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const summaryCard = await screen.findByTestId('ledger-summary-card');
+    expect(within(summaryCard).getByText('Lent vs repaid')).toBeInTheDocument();
+  });
+
+  it('does not stick on "Loading…" when a reload supersedes the navigation fetch', async () => {
+    // The navigation fetch is left in flight; `reload` (fired by "Link
+    // transfers") bumps the request token, so the navigation fetch's
+    // `isCurrent()` guard skips its own cleanup. Someone still has to clear
+    // `ledgerLoading`, or the drill-in renders "Loading…" until navigation.
+    let releaseNavFetch: (l: unknown) => void = () => {};
+    const navFetch = new Promise((resolve) => { releaseNavFetch = resolve; });
+    const getLedgerSpy = vi
+      .spyOn(api, 'getContactLedger')
+      .mockReturnValueOnce(navFetch as never)
+      .mockResolvedValue(MOCK_LEDGER as never);
+    vi.spyOn(api, 'commitTransferLink').mockResolvedValue({
+      linked: 0,
+      ambiguous: [],
+    } as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    // The action bar renders outside the loading gate, so this is reachable.
+    expect(await screen.findByText('Loading…')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /link transfers/i }));
+
+    await waitFor(() => {
+      expect(getLedgerSpy.mock.calls.length).toBeGreaterThan(1);
+    });
+    // The reload's ledger is on screen; the stale in-flight fetch must not
+    // leave the page pinned to the loading state.
+    expect(await screen.findByTestId('ledger-summary-card')).toBeInTheDocument();
+    expect(screen.queryByText('Loading…')).toBeNull();
+
+    releaseNavFetch(MOCK_LEDGER);
   });
 
   it('shows raw bank text in the merchant column', async () => {

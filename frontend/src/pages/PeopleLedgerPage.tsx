@@ -17,7 +17,7 @@
  * Both are per-currency and neither collapses to a primary currency: a CAD
  * balance and a USD balance are different debts and are shown separately.
  */
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
@@ -155,9 +155,13 @@ function roundCents(n: number): number {
  *    That is the same false-claim bug as the one this page is being fixed for,
  *    one level up.
  *
- * Contacts whose ledger failed to load contribute nothing here and are
- * reported separately — see `failedLedgerIds` at the call site. An absent
- * ledger is not a zero balance.
+ * Contacts whose ledger failed to load contribute nothing here — an absent
+ * ledger is not a zero balance. That makes these totals a floor, not a sum,
+ * and the returned map cannot tell "nobody owes anything" apart from "nothing
+ * could be loaded". Callers MUST therefore pair the result with
+ * `failedLedgerIds` before wording anything, and must not render an empty map
+ * as "Nothing outstanding" while a fetch is unaccounted for. The metrics card
+ * below does exactly that.
  */
 function deriveMetrics(cwl: ContactWithLedger[]): {
   balanceByCurrency: Map<string, CurrencyTotals>
@@ -226,6 +230,42 @@ function MetricCard({
     </div>
   )
 }
+
+// ── TileCaption ──────────────────────────────────────────────────────────────
+
+/**
+ * The small print under a number. This page shows two debt-shaped figures side
+ * by side — the signed `loanBalance` and the older `trackedOutstanding` — and
+ * in production they disagree. Without a caption the reader has to guess which
+ * one answers "what do they owe me", so every one of them says what it is.
+ */
+function TileCaption({ children, testId }: { children: ReactNode; testId?: string }) {
+  return (
+    <div className="mt-1 max-w-xs text-xs text-muted-foreground" data-testid={testId}>
+      {children}
+    </div>
+  )
+}
+
+/**
+ * What `trackedOutstandingByCurrency` actually is, in one sentence. It is the
+ * sum of this contact's Reimbursement rows still expected or overdue — claims
+ * logged by hand. It never reads `counterparty_role`, so it is not the same
+ * quantity as `loanBalance` and is not expected to agree with it.
+ */
+const TRACKED_OUTSTANDING_CAPTION =
+  'Unpaid reimbursement claims you logged by hand. A separate, older tally that ignores transfer tags — the loan balance is this page’s answer to what they owe you.'
+
+/** The landing column's shorter form of the same disclaimer. */
+const TRACKED_OUTSTANDING_COLUMN_CAPTION =
+  'Hand-logged reimbursement claims — not the loan balance'
+
+/** What `loanBalance` is, stated once so the tile above can be trusted. */
+const LOAN_BALANCE_CAPTION =
+  'What they owe you: every transfer tagged loan or repayment, netted. This page’s answer.'
+
+/** The landing column's shorter form. */
+const LOAN_BALANCE_COLUMN_CAPTION = 'What they owe you — the page’s answer'
 
 // ── LoanBar ──────────────────────────────────────────────────────────────────
 
@@ -478,6 +518,15 @@ export function PeopleLedgerPage() {
    * the table away on each tag. The control that was used is disabled for the
    * duration instead (`savingRole` / `savingDefault`), which is the localised
    * affordance; a failed refetch leaves the previous ledger on screen.
+   *
+   * It does, however, have to LOWER `ledgerLoading`. Taking the token orphans
+   * any navigation fetch still in flight, and that fetch's `finally` only
+   * clears the flag while it is still current — so whoever took the token owns
+   * the flag from then on. Without this, a reload racing the initial fetch
+   * (reachable from "Link transfers", whose button renders outside the loading
+   * gate) pins the drill-in to "Loading…" over a ledger that is right there.
+   * The clear is itself token-guarded: if a newer navigation has since taken
+   * over, that effect is mid-fetch and will clear the flag when it lands.
    */
   const reload = useCallback(async () => {
     if (selectedId == null) return
@@ -488,6 +537,8 @@ export function PeopleLedgerPage() {
       if (token === ledgerRequestRef.current) setLedger(data)
     } catch {
       // Keep the ledger on screen; the failing write already toasted.
+    } finally {
+      if (token === ledgerRequestRef.current) setLedgerLoading(false)
     }
   }, [selectedId])
 
@@ -614,6 +665,18 @@ export function PeopleLedgerPage() {
     .sort(([a], [b]) => a.localeCompare(b))
   const mismatchCount = countMismatches(ledger)
 
+  // How much of the headline the page is actually entitled to claim.
+  // `balanceEntries` is built only from ledgers that loaded, so on its own an
+  // empty array is ambiguous: it means "no debt" only when nothing failed.
+  const failedCount = realContacts.filter((c) => failedLedgerIds.has(c.id)).length
+  /** Nothing loaded at all — there is no total to show, only an apology. */
+  const allBalancesUnknown = realContacts.length > 0 && failedCount === realContacts.length
+  /** Some loaded, some didn't: show what we have, labelled as partial. */
+  const balancesIncomplete = failedCount > 0
+
+  const failedContactsPhrase =
+    failedCount === 1 ? "1 contact's balance" : `${failedCount} contacts' balances`
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -693,8 +756,16 @@ export function PeopleLedgerPage() {
           {!contactsLoading && !ledgersLoading && (
             <Card className="mb-4 p-4" data-testid="metrics-card">
               <div className="flex flex-wrap gap-8" data-testid="loan-balance-metrics">
-                {balanceEntries.length === 0 ? (
-                  <MetricCard label="Loan balance" value="Nothing outstanding" />
+                {allBalancesUnknown ? (
+                  // Every ledger fetch failed. A total here would be a total of
+                  // nothing, and "Nothing outstanding" would assert zero debt
+                  // over N balances nobody has seen.
+                  <MetricCard label="Loan balance" value="Couldn't load" />
+                ) : balanceEntries.length === 0 ? (
+                  <MetricCard
+                    label="Loan balance"
+                    value={balancesIncomplete ? 'Incomplete' : 'Nothing outstanding'}
+                  />
                 ) : (
                   balanceEntries.flatMap(([currency, totals]) => {
                     // Both directions get their own tile. Netting them would
@@ -727,13 +798,24 @@ export function PeopleLedgerPage() {
                 />
                 <MetricCard
                   label="Tracked loans"
-                  value={trackedLoansCount}
+                  // Also derived from the ledgers, so it is also unknown when
+                  // none of them loaded. A bare 0 would read as "none".
+                  value={allBalancesUnknown ? '—' : trackedLoansCount}
                 />
                 <MetricCard
                   label="Flagged to exclude"
                   value={selfContacts.length + selfSuggestions.length}
                 />
               </div>
+              {balancesIncomplete && (
+                <div
+                  className="mt-3 text-xs text-muted-foreground"
+                  data-testid="metrics-incomplete"
+                >
+                  Incomplete: {failedContactsPhrase} couldn&apos;t be loaded, so these
+                  totals are a floor, not the whole picture.
+                </div>
+              )}
             </Card>
           )}
 
@@ -750,9 +832,39 @@ export function PeopleLedgerPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Contact</TableHead>
-                  <TableHead>Loan balance</TableHead>
-                  <TableHead>Raw transfer flow</TableHead>
-                  <TableHead>Outstanding loans</TableHead>
+                  {/* Three money columns, two of which look like debts. Each
+                      carries its own one-liner so the reader never has to
+                      guess which one answers "what do they owe me". */}
+                  <TableHead>
+                    <div className="flex flex-col gap-0.5">
+                      <span>Loan balance</span>
+                      <span
+                        className="text-xs font-normal normal-case text-muted-foreground"
+                        data-testid="loan-balance-column-caption"
+                      >
+                        {LOAN_BALANCE_COLUMN_CAPTION}
+                      </span>
+                    </div>
+                  </TableHead>
+                  <TableHead>
+                    <div className="flex flex-col gap-0.5">
+                      <span>Raw transfer flow</span>
+                      <span className="text-xs font-normal normal-case text-muted-foreground">
+                        Everything that moved — not a debt
+                      </span>
+                    </div>
+                  </TableHead>
+                  <TableHead>
+                    <div className="flex flex-col gap-0.5">
+                      <span>Outstanding loans</span>
+                      <span
+                        className="text-xs font-normal normal-case text-muted-foreground"
+                        data-testid="outstanding-loans-caption"
+                      >
+                        {TRACKED_OUTSTANDING_COLUMN_CAPTION}
+                      </span>
+                    </div>
+                  </TableHead>
                   <TableHead>Lent vs repaid</TableHead>
                 </TableRow>
               </TableHeader>
@@ -904,6 +1016,9 @@ export function PeopleLedgerPage() {
                         </div>
                       ))
                     )}
+                    <TileCaption testId="loan-balance-caption">
+                      {LOAN_BALANCE_CAPTION}
+                    </TileCaption>
                   </div>
                   <div data-testid="raw-net-flow">
                     <div className="text-muted-foreground mb-1 text-xs uppercase tracking-wide">
@@ -918,9 +1033,9 @@ export function PeopleLedgerPage() {
                         </div>
                       ))
                     )}
-                    <div className="mt-1 max-w-xs text-xs text-muted-foreground">
+                    <TileCaption testId="raw-net-flow-caption">
                       Everything that moved between you — not a debt.
-                    </div>
+                    </TileCaption>
                   </div>
                   <div data-testid="tracked-outstanding">
                     <div className="text-muted-foreground mb-1 text-xs uppercase tracking-wide">Tracked loans outstanding</div>
@@ -933,6 +1048,9 @@ export function PeopleLedgerPage() {
                         </div>
                       ))
                     )}
+                    <TileCaption testId="tracked-outstanding-caption">
+                      {TRACKED_OUTSTANDING_CAPTION}
+                    </TileCaption>
                   </div>
                 </div>
                 {mismatchCount > 0 && (
@@ -942,8 +1060,13 @@ export function PeopleLedgerPage() {
                       : `${mismatchCount} transfers are tagged against their direction. Direction wins.`}
                   </div>
                 )}
-                {/* Lent / repaid bar for this contact */}
-                {ledger.loanBalance.length > 0 && (
+                {/* Lent / repaid bar for this contact. Gated on there being a
+                    segment to draw, not on the balance being non-empty:
+                    `computeBarSegments` skips any currency with nothing lent,
+                    and a repaid-only row (Stephen's real USD leg — lent 0,
+                    repaid 3570.51) would otherwise leave this heading standing
+                    over an empty box. */}
+                {computeBarSegments(ledger).length > 0 && (
                   <div className="mt-4 max-w-sm">
                     <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
                       Lent vs repaid
