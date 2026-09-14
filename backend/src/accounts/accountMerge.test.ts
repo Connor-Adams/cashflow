@@ -35,6 +35,7 @@ after(async () => {
 
 beforeEach(async () => {
   await models.AccountCardIdentifier.destroy({ where: {}, force: true });
+  await models.AccountRatePeriod.destroy({ where: {}, force: true });
   await models.Transaction.destroy({ where: {}, truncate: true });
   await models.PlannedEvent.destroy({ where: {}, truncate: true });
   await models.Account.destroy({ where: {}, truncate: true });
@@ -88,6 +89,19 @@ async function seedIdentifier(accountId: number, last4: string) {
     last4,
     source: 'test',
   });
+}
+
+async function seedRatePeriod(accountId: number, fromDate: string) {
+  return models.AccountRatePeriod.create({
+    householdId: household.id,
+    accountId,
+    fromDate,
+    toDate: '2026-12-31',
+    primeRate: '4.4500',
+    premium: '-0.5000',
+    effectiveRate: '3.9500',
+    applicableInterest: '12.3400',
+  } as never);
 }
 
 async function seedPlannedEvent(accountId: number) {
@@ -189,6 +203,46 @@ test('merging a shared last4 does not violate the (account_id, last4) unique ind
   const targetLast4s = targetRows.map((r) => r.last4).sort();
   assert.deepEqual(targetLast4s, ['1111', '9999']);
   const sourceRows = await models.AccountCardIdentifier.findAll({ where: { accountId: source.id } });
+  assert.equal(sourceRows.length, 0);
+});
+
+// Task 2 (Royal Credit Line rate history capture): AccountRatePeriod is a
+// new account-scoped child table with its own UNIQUE(account_id, from_date)
+// index. Mirrors the AccountCardIdentifier FIX 3 regression above -- a
+// merged-away source account's rate windows must not stay orphaned on the
+// hidden source.
+test('carries rate periods from source to target', async () => {
+  const source = await seedAccount('Old');
+  const target = await seedAccount('New');
+  await seedRatePeriod(source.id, '2026-01-15');
+
+  const result = await mergeAccounts({ sourceId: source.id, targetId: target.id, householdId: household.id });
+
+  assert.equal(result.movedTotal >= 1, true);
+  const sourceRows = await models.AccountRatePeriod.findAll({ where: { accountId: source.id } });
+  assert.equal(sourceRows.length, 0, 'the rate period must not remain on the hidden source account');
+  const targetRows = await models.AccountRatePeriod.findAll({ where: { accountId: target.id } });
+  assert.equal(targetRows.length, 1);
+  assert.equal(targetRows[0].fromDate, '2026-01-15');
+});
+
+test('merging a shared from_date does not violate the (account_id, from_date) unique index', async () => {
+  const source = await seedAccount('Old');
+  const target = await seedAccount('New');
+  // Both accounts already have a rate window starting on the same date --
+  // reassigning the source's row onto the target would collide with the
+  // target's own row under the UNIQUE(account_id, from_date) index unless
+  // the merge resolves it first.
+  await seedRatePeriod(source.id, '2026-01-15');
+  await seedRatePeriod(target.id, '2026-01-15');
+  await seedRatePeriod(source.id, '2026-02-15'); // a non-colliding one must still move
+
+  await mergeAccounts({ sourceId: source.id, targetId: target.id, householdId: household.id });
+
+  const targetRows = await models.AccountRatePeriod.findAll({ where: { accountId: target.id } });
+  const targetFromDates = targetRows.map((r) => r.fromDate).sort();
+  assert.deepEqual(targetFromDates, ['2026-01-15', '2026-02-15']);
+  const sourceRows = await models.AccountRatePeriod.findAll({ where: { accountId: source.id } });
   assert.equal(sourceRows.length, 0);
 });
 
