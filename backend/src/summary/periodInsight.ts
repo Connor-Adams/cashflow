@@ -1,6 +1,5 @@
 // backend/src/summary/periodInsight.ts
 import { num } from '../util/numbers';
-import { isNonLoanCategory } from '../contacts/transferLedger';
 
 export type OwedBackRow = {
   id: number;
@@ -51,6 +50,30 @@ export type PeerLendingRow = {
 };
 
 export type PeerLendingTotals = { lent: number; received: number };
+
+/**
+ * Final-category values whose contact-linked transfers are NOT peer lending.
+ * Rent and shared-household payments to a counterparty are recurring
+ * obligations, not money owed back. Compared case-insensitively. Extend as new
+ * non-loan categories surface.
+ *
+ * Lived in contacts/transferLedger.ts until the per-person loan ledger stopped
+ * using it — that surface now decides loan vs not from
+ * `transactions.counterparty_role` (see contacts/counterpartyRole.ts), which is
+ * an explicit per-row tag rather than a guess from a spend category. This
+ * category guess survives only here, for the dashboard's peer-lending split.
+ */
+export const NON_LOAN_LEDGER_CATEGORIES: ReadonlySet<string> = new Set([
+  'rent',
+  'household',
+]);
+
+/** True when a transfer's final category marks it as a non-loan flow (e.g.
+ *  Rent). Null/empty categories are treated as lending. */
+export function isNonLoanCategory(finalCategory: string | null | undefined): boolean {
+  if (!finalCategory) return false;
+  return NON_LOAN_LEDGER_CATEGORIES.has(finalCategory.trim().toLowerCase());
+}
 
 /**
  * Per-currency peer-lending split for one window: money LENT (amount<0) vs

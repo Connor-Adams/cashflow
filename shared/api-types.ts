@@ -1947,14 +1947,42 @@ export type PeriodInsightResp = {
 
 // ── Per-person loan ledger (per-person loan ledger feature) ──────────────────
 
+/**
+ * What a transfer means between the user and another person. Distinct from
+ * {@link TransferPurpose}, which describes movement between the user's own
+ * accounts. `loc_interest` marks a line-of-credit interest charge as
+ * allocatable and sits on rows with no counterparty.
+ */
+export const COUNTERPARTY_ROLES = [
+  'loan',
+  'repayment',
+  'purchase',
+  'business',
+  'rent',
+  'gift',
+  'self',
+  'loc_interest',
+] as const;
+
+export type CounterpartyRole = (typeof COUNTERPARTY_ROLES)[number];
+
 export interface LedgerTransferRow {
   id: number;
   date: string;
   amount: string;
   currency: string;
+  /** Raw bank text — `merchant_clean` strips the counterparty name off RBC transfers. */
   merchant: string | null;
   direction: 'out' | 'in';
   isLoan: boolean;
+  /** Explicit tag, or null when the contact's default decides. */
+  counterpartyRole: CounterpartyRole | null;
+  /** How this row actually landed in the balance after direction resolution. */
+  ledgerEffect: 'loan' | 'repayment' | 'none';
+  /** True when the tag contradicted the direction; direction won. */
+  roleMismatch: boolean;
+  /** True when this row is one leg of a cancelled e-transfer pair. */
+  cancelled: boolean;
 }
 
 export interface TransferNet {
@@ -1964,10 +1992,23 @@ export interface TransferNet {
   net: string;
 }
 
+/** Signed per-currency loan balance. Positive: they owe you. */
+export interface LoanBalance {
+  currency: string;
+  lent: string;
+  repaid: string;
+  balance: string;
+}
+
 export interface ContactLedgerResponse {
   contactId: number;
   name: string;
+  /** Treat untagged transfers with this contact as loans. */
+  loanDefault: boolean;
+  /** Descriptive raw flow. Carries no owed/owe claim. */
   transferNet: TransferNet[];
+  /** The number that means "owes you". */
+  loanBalance: LoanBalance[];
   trackedOutstandingByCurrency: Record<string, string>;
   transfers: LedgerTransferRow[];
 }

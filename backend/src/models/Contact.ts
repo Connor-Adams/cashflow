@@ -40,6 +40,12 @@ export class Contact extends Model<
    * Spine note: a discriminator field on the Contact primitive, NOT a new primitive.
    */
   declare isSelf: CreationOptional<boolean>;
+  /**
+   * Treat this contact's untagged transfers as loans. False (default) means an
+   * untagged transfer contributes nothing to the balance; true means outflows
+   * count as loans and inflows as repayments unless a row says otherwise.
+   */
+  declare loanDefault: CreationOptional<boolean>;
   /** Lowercase + whitespace-collapsed key for dedup; auto-set by a hook. */
   declare normalizedName: CreationOptional<string | null>;
   declare readonly createdAt: CreationOptional<Date>;
@@ -72,6 +78,12 @@ export function initContact(sequelize: Sequelize): typeof Contact {
       isSelf: {
         type: DataTypes.BOOLEAN,
         field: 'is_self',
+        allowNull: false,
+        defaultValue: false,
+      },
+      loanDefault: {
+        type: DataTypes.BOOLEAN,
+        field: 'loan_default',
         allowNull: false,
         defaultValue: false,
       },

@@ -42,6 +42,13 @@ export class Transaction extends Model<
   declare autoConfidence: string | null;
   declare linkedTransactionId: number | null;
   declare transferPurpose: string | null;
+  /**
+   * People-ledger role: what this transfer means between the user and another
+   * person. See COUNTERPARTY_ROLES. Null = untagged; the contact's loanDefault
+   * decides. Distinct from `transferPurpose`, which describes movement between
+   * the user's own accounts.
+   */
+  declare counterpartyRole: string | null;
   declare transferLinkedAt: Date | null;
   declare isRecurring: CreationOptional<boolean>;
 
@@ -339,6 +346,11 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       transferPurpose: {
         type: DataTypes.STRING(32),
         field: 'transfer_purpose',
+        allowNull: true,
+      },
+      counterpartyRole: {
+        type: DataTypes.STRING(16),
+        field: 'counterparty_role',
         allowNull: true,
       },
       transferLinkedAt: {

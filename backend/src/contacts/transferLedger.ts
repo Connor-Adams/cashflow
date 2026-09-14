@@ -3,25 +3,6 @@ export interface TransferRow {
   currency: string;
 }
 
-/**
- * Final-category values whose linked transfers are NOT loans and must be
- * excluded from the per-person loan ledger (raw net + transfer list). Rent and
- * shared-household payments to a counterparty are recurring obligations, not
- * money owed back. Compared case-insensitively. Extend as new non-loan
- * categories surface.
- */
-export const NON_LOAN_LEDGER_CATEGORIES: ReadonlySet<string> = new Set([
-  'rent',
-  'household',
-]);
-
-/** True when a transfer's final category marks it as a non-loan flow (e.g.
- *  Rent) that the loan ledger must ignore. Null/empty categories are loans. */
-export function isNonLoanCategory(finalCategory: string | null | undefined): boolean {
-  if (!finalCategory) return false;
-  return NON_LOAN_LEDGER_CATEGORIES.has(finalCategory.trim().toLowerCase());
-}
-
 export interface TransferNet {
   currency: string;
   sent: string;
@@ -34,8 +15,16 @@ function toCents(n: number): number {
 }
 
 /** Per-currency raw net flow: sent (money out, amount<0) minus received
- *  (money in, amount>0). Positive net = the person owes you. Fixed-4 strings,
- *  integer-cents math to avoid float drift, sorted by currency. */
+ *  (money in, amount>0). Fixed-4 strings, integer-cents math to avoid float
+ *  drift, sorted by currency.
+ *
+ *  This is a DESCRIPTIVE statistic — how much money crossed, and which way. It
+ *  is NOT a debt: a positive net means more went out than came in, which is all
+ *  it means. Rent split evenly and settled every month nets to whatever the
+ *  last payment left behind, owing nobody anything. Claiming otherwise is the
+ *  bug this module was demoted for; `computeLoanBalance` is the only function
+ *  here allowed to answer "what do they owe me", and `formatNetFlowLabel` on
+ *  the frontend words this one as "net out"/"net in" for that reason. */
 export function computeTransferNet(rows: TransferRow[]): TransferNet[] {
   const sent = new Map<string, number>();
   const recv = new Map<string, number>();

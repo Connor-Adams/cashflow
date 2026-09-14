@@ -1,7 +1,7 @@
 // backend/src/summary/periodInsight.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeOwedBack, realCostOf, type OwedBackRow } from './periodInsight';
+import { computeOwedBack, isNonLoanCategory, realCostOf, type OwedBackRow } from './periodInsight';
 
 function row(o: Partial<OwedBackRow>): OwedBackRow {
   return { id: 1, currency: 'CAD', amount: '-100.00', partnerShareAmount: null, ...o };
@@ -86,4 +86,17 @@ test('computePeerLending excludes non-loan categories and null counterparties', 
     new Set<number>(),
   );
   assert.equal(out.has('CAD'), false);
+});
+
+// Moved here from contacts/transferLedger.test.ts: the per-person loan ledger
+// stopped consulting final_category (it reads counterparty_role now), so
+// computePeerLending is the last caller of this exclusion.
+test('isNonLoanCategory flags Rent/Household case-insensitively, not loans/null', () => {
+  assert.equal(isNonLoanCategory('Rent'), true);
+  assert.equal(isNonLoanCategory('rent'), true);
+  assert.equal(isNonLoanCategory(' Household '), true);
+  assert.equal(isNonLoanCategory('Groceries'), false);
+  assert.equal(isNonLoanCategory(null), false);
+  assert.equal(isNonLoanCategory(undefined), false);
+  assert.equal(isNonLoanCategory(''), false);
 });

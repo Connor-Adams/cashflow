@@ -11,8 +11,12 @@ import {
   resolveToday,
   type ReimbursementRow,
 } from '../reimbursements/serialize';
-import { computeTransferNet, isNonLoanCategory, type TransferRow } from '../contacts/transferLedger';
+import { computeTransferNet, type TransferRow } from '../contacts/transferLedger';
+import { computeLoanBalance } from '../contacts/loanBalance';
+import { resolveLedgerRole } from '../contacts/counterpartyRole';
+import { findCancelledTransferIds } from '../contacts/cancelPairing';
 import { tokenize, suggestSelfContacts } from '../contacts/selfAccountSuggest';
+import type { ContactLedgerResponse } from '@cashflow/shared';
 
 const router = Router();
 
@@ -32,6 +36,7 @@ router.get('/', async (req, res, next) => {
       isSelf: r.isSelf,
       aliases: r.aliases,
       normalizedName: r.normalizedName,
+      loanDefault: r.loanDefault,
     })));
   } catch (e) {
     next(e);
@@ -240,6 +245,14 @@ router.patch('/:id', async (req, res, next) => {
       }
       row.set('isSelf', parsed);
     }
+    if (b.loanDefault !== undefined) {
+      const parsed = coerceBool(b.loanDefault);
+      if (parsed === null) {
+        res.status(400).json({ error: 'loanDefault must be boolean' });
+        return;
+      }
+      row.set('loanDefault', parsed);
+    }
     await row.save();
     res.json(row);
   } catch (e) {
@@ -263,11 +276,21 @@ router.delete('/:id', async (req, res, next) => {
 });
 
 /**
- * Per-person loan ledger (per-person loan ledger feature). Two numbers side by
- * side: raw net transfer flow (auto, over transfers linked via
- * counterparty_contact_id) and tracked-loan outstanding (Reimbursements for
- * this contact). Plus the linked transfer rows, each flagged whether it is
- * already a tracked loan. Per-currency; no FX.
+ * Per-person loan ledger (per-person loan ledger feature). Three numbers, all
+ * per-currency and FX-free, over transfers linked via counterparty_contact_id:
+ *
+ *   - `loanBalance` — the signed debt, and the ONLY number that means "owes
+ *     you". Folded from each row's counterparty_role (with the contact's
+ *     loanDefault standing in for untagged rows), so purchases, business flows
+ *     and gifts contribute nothing.
+ *   - `transferNet` — raw money in/out. Descriptive only; it used to be served
+ *     as the amount owed, which reported ~79k of non-debt across four contacts.
+ *   - `trackedOutstandingByCurrency` — the Reimbursements for this contact.
+ *
+ * Plus every linked transfer row, each carrying how it landed in the balance
+ * (`ledgerEffect`), whether its tag fought its direction (`roleMismatch`),
+ * whether it is a cancelled e-transfer leg (`cancelled`), and whether it is
+ * already a tracked loan (`isLoan`).
  */
 router.get('/:id/ledger', async (req, res, next) => {
   try {
@@ -282,34 +305,65 @@ router.get('/:id/ledger', async (req, res, next) => {
       return;
     }
     // Ledger is household-scoped to match the link pass and tracked-loan balance,
-    // so raw-net and tracked-outstanding are computed over the same row set.
+    // so raw-net and loan balance are computed over the same row set.
     const txnsRaw = await Transaction.findAll({
       where: { ...householdWhere(req), counterpartyContactId: id },
-      attributes: ['id', 'date', 'amount', 'currency', 'merchantClean', 'merchantRaw', 'finalCategory'],
+      attributes: [
+        'id', 'date', 'amount', 'currency',
+        'merchantClean', 'merchantRaw', 'counterpartyRole',
+      ],
       order: [['date', 'ASC'], ['id', 'ASC']],
     });
-    // Drop non-loan flows (e.g. Rent paid to this counterparty) from BOTH the
-    // raw-net and the transfer list — rent is a recurring obligation, not money
-    // owed back. Tagging a transfer's category Rent is how the user excludes it.
-    const txns = txnsRaw.filter((t) => !isNonLoanCategory(t.finalCategory));
-    const reimbs = await Reimbursement.findAll({ where: { ...householdWhere(req), contactId: id } });
 
+    // Cancelled e-transfer pairs drop out entirely: the reversal is not a
+    // repayment, and the original never moved money.
+    const cancelled = findCancelledTransferIds(
+      txnsRaw.map((t) => ({ id: t.id, merchantText: t.merchantRaw ?? t.merchantClean ?? null })),
+    );
+    const txns = txnsRaw.filter((t) => !cancelled.has(t.id));
+
+    const loanDefault = contact.loanDefault ?? false;
+    const balanceRows = txns.map((t) => ({
+      amount: t.amount,
+      currency: t.currency,
+      counterpartyRole: t.counterpartyRole ?? null,
+    }));
+    const loanBalance = computeLoanBalance(balanceRows, loanDefault);
+
+    const reimbs = await Reimbursement.findAll({
+      where: { ...householdWhere(req), contactId: id },
+    });
     const loanTxnIds = new Set(reimbs.map((r) => r.transactionId));
-    // Skip zero-amount rows to match computeTransferNet which also skips them.
-    const transfers = txns
-      .filter((t) => Number(t.amount) !== 0)
-      .map((t) => {
-        const amt = Number(t.amount);
-        return {
-          id: t.id,
-          date: t.date,
-          amount: String(t.amount),
-          currency: t.currency,
-          merchant: t.merchantClean ?? t.merchantRaw ?? null,
-          direction: amt < 0 ? ('out' as const) : ('in' as const),
-          isLoan: loanTxnIds.has(t.id),
-        };
+
+    // Every linked row is listed, cancelled ones included, so the user can see
+    // why a pair contributed nothing rather than wondering where it went.
+    const transfers = txnsRaw.map((t) => {
+      const amt = Number(t.amount);
+      const { effect, mismatch } = resolveLedgerRole({
+        role: t.counterpartyRole ?? null,
+        amount: amt,
+        loanDefault,
       });
+      const isCancelled = cancelled.has(t.id);
+      return {
+        id: t.id,
+        date: t.date,
+        // DECIMAL(14,4) round-trips as a string on Postgres and a JS number on
+        // SQLite; toFixed(4) makes the DTO dialect-independent.
+        amount: Number(t.amount).toFixed(4),
+        currency: t.currency,
+        // Raw text: merchantClean strips the counterparty name off RBC transfers,
+        // which is what made 157 Stephen rows indistinguishable.
+        merchant: t.merchantRaw ?? t.merchantClean ?? null,
+        direction: amt < 0 ? ('out' as const) : ('in' as const),
+        isLoan: loanTxnIds.has(t.id),
+        counterpartyRole: (t.counterpartyRole ?? null) as ContactLedgerResponse['transfers'][number]['counterpartyRole'],
+        ledgerEffect: isCancelled ? ('none' as const) : effect,
+        roleMismatch: isCancelled ? false : mismatch,
+        cancelled: isCancelled,
+      };
+    });
+
     const transferNet = computeTransferNet(
       txns.map((t) => ({ amount: t.amount, currency: t.currency }) as TransferRow),
     );
@@ -322,10 +376,12 @@ router.get('/:id/ledger', async (req, res, next) => {
     res.json({
       contactId: contact.id,
       name: contact.name,
+      loanDefault,
       transferNet,
+      loanBalance,
       trackedOutstandingByCurrency: summary.outstandingByCurrency,
       transfers,
-    });
+    } satisfies ContactLedgerResponse);
   } catch (e) {
     next(e);
   }

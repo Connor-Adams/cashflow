@@ -684,13 +684,49 @@ test('unrelated transfers are untouched', () => {
   assert.equal(ids.size, 0);
 });
 
-test('two sends sharing one code both pair with a single cancel', () => {
+test('an ambiguous code with two originals and one cancel excludes nothing', () => {
+  // A trailing surname can collide across unrelated transfers and act as a
+  // pseudo-code. With two originals sharing it, the cancel can't be matched
+  // to either one, so nothing for this code should be excluded.
   const ids = findCancelledTransferIds([
     { id: 9, merchantText: 'E-TRANSFER SENT EVAN LEROSE W8XN3J' },
-    { id: 10, merchantText: 'E-TRANSFER CANCEL EVAN LEROSE W8XN3J' },
-    { id: 11, merchantText: 'E-TRANSFER SENT EVAN LEROSE W8XN3J' },
+    { id: 10, merchantText: 'E-TRANSFER SENT EVAN LEROSE W8XN3J' },
+    { id: 11, merchantText: 'E-TRANSFER CANCEL EVAN LEROSE W8XN3J' },
   ]);
-  assert.deepEqual([...ids].sort((a, b) => a - b), [9, 10, 11]);
+  assert.equal(ids.size, 0, 'an ambiguous pairing must not hide any of these rows');
+});
+
+test('one original with two cancels for the same code excludes nothing', () => {
+  const ids = findCancelledTransferIds([
+    { id: 12, merchantText: 'E-TRANSFER SENT EVAN LEROSE Q7F3ZK' },
+    { id: 13, merchantText: 'E-TRANSFER CANCEL EVAN LEROSE Q7F3ZK' },
+    { id: 14, merchantText: 'E-TRANSFER CANCEL EVAN LEROSE Q7F3ZK' },
+  ]);
+  assert.equal(ids.size, 0, 'an ambiguous pairing must not hide any of these rows');
+});
+
+test('a trailing surname acting as the shared code still pairs when unambiguous', () => {
+  // EVAN ADCOCK: the surname ADCOCK is captured as the "code" here, exactly
+  // like the ambiguous cases above. But with exactly one original and exactly
+  // one cancel sharing it, the pairing is unambiguous and safe to exclude —
+  // pinning that this is deliberate, not accidental.
+  const ids = findCancelledTransferIds([
+    { id: 15, merchantText: 'E-TRANSFER SENT EVAN ADCOCK' },
+    { id: 16, merchantText: 'E-TRANSFER CANCEL EVAN ADCOCK' },
+  ]);
+  assert.deepEqual([...ids].sort((a, b) => a - b), [15, 16]);
+});
+
+test('E-TRANSFER CANCELLATION FEE is not treated as a cancel', () => {
+  const ids = findCancelledTransferIds([
+    { id: 17, merchantText: 'E-TRANSFER SENT EVAN LEROSE DPKGQG' },
+    { id: 18, merchantText: 'E-TRANSFER CANCELLATION FEE DPKGQG' },
+  ]);
+  assert.equal(
+    ids.size,
+    0,
+    'CANCELLATION FEE must not match the CANCEL marker, so no pairing should occur',
+  );
 });
 ```
 
@@ -714,9 +750,17 @@ Create `backend/src/contacts/cancelPairing.ts`:
  * code. Counting the reversal as an inflow reads as a repayment that never
  * happened, so both legs are excluded from the balance.
  *
- * A cancel with no matching original is deliberately NOT excluded: without its
- * pair we cannot tell a reversal from a real inbound transfer, and dropping it
- * would hide money.
+ * The trailing "code" is just the last run of 5+ alphanumeric characters, so a
+ * plain surname (e.g. `ADCOCK`) can look exactly like a confirmation code. A
+ * cancel is only paired with an original when the code has EXACTLY one
+ * original and EXACTLY one cancel — a strict one-to-one match. Any other
+ * count for a given code (two originals sharing it, two cancels, or a cancel
+ * with no original at all) excludes NOTHING for that code: with more than one
+ * candidate on either side we cannot tell which pairs with which, and a wrong
+ * guess would silently drop a real, never-cancelled transfer from the
+ * balance. This is the same asymmetry the module has always followed — when
+ * the matcher cannot be certain, it declines to hide money — extended from
+ * "no original" to "any ambiguous count".
  */
 
 /** Trailing alphanumeric confirmation code, at least 5 chars. */
@@ -730,8 +774,8 @@ function codeOf(text: string | null, marker: RegExp): string | null {
   return m ? m[1] : null;
 }
 
-const CANCEL = /E-?TRANSFER\s+CANCEL/;
-const ORIGINAL = /E-?TRANSFER\s+(SENT|REQUEST FULFILLED)/;
+const CANCEL = /E-?TRANSFER\s+CANCEL\b/;
+const ORIGINAL = /E-?TRANSFER\s+(SENT|REQUEST FULFILLED)\b/;
 
 export function findCancelledTransferIds(
   rows: Array<{ id: number; merchantText: string | null }>,
@@ -758,9 +802,9 @@ export function findCancelledTransferIds(
   const out = new Set<number>();
   for (const [code, cancelIds] of cancelsByCode) {
     const originalIds = originalsByCode.get(code);
-    if (!originalIds || originalIds.length === 0) continue;
-    for (const id of cancelIds) out.add(id);
-    for (const id of originalIds) out.add(id);
+    if (!originalIds || originalIds.length !== 1 || cancelIds.length !== 1) continue;
+    out.add(cancelIds[0]);
+    out.add(originalIds[0]);
   }
   return out;
 }
@@ -772,7 +816,7 @@ export function findCancelledTransferIds(
 cd backend && yarn tsx --import ./test/setup.ts --test src/contacts/cancelPairing.test.ts
 ```
 
-Expected: PASS, 5/5.
+Expected: PASS, 8/8.
 
 - [ ] **Step 5: Commit**
 
@@ -783,14 +827,22 @@ git commit -m "feat(contacts): pair cancelled e-transfers out of the ledger"
 
 ---
 
-### Task 5: Shared DTOs
+### Task 5: Shared DTOs and the ledger route
+
+The DTO change and the route rewrite are one deliverable: a DTO nothing serves
+does not typecheck, so splitting them would mean committing a knowingly broken
+intermediate state.
 
 **Files:**
 - Modify: `shared/api-types.ts:1948-1973` (the per-person loan ledger block)
+- Modify: `backend/src/routes/contacts.ts:272-330` (the `GET /:id/ledger` handler)
+- Modify: `backend/src/contacts/transferLedger.ts` (delete `NON_LOAN_LEDGER_CATEGORIES` and `isNonLoanCategory`)
+- Modify: `backend/src/contacts/transferLedger.test.ts` (drop the tests for the deleted exports)
+- Create: `backend/src/routes/contactsLedger.test.ts`
 
 **Interfaces:**
-- Consumes: nothing.
-- Produces: `CounterpartyRole`, `LoanBalance`, extended `LedgerTransferRow`, extended `ContactLedgerResponse`.
+- Consumes: `computeLoanBalance`, `mismatchedRowCount` (Task 3); `resolveLedgerRole` (Task 2); `findCancelledTransferIds` (Task 4).
+- Produces: `CounterpartyRole`, `LoanBalance`, extended `LedgerTransferRow`, extended `ContactLedgerResponse`; `GET /api/contacts/:id/ledger` returning `ContactLedgerResponse`.
 
 - [ ] **Step 1: Replace the ledger DTO block**
 
@@ -863,36 +915,9 @@ export interface ContactLedgerResponse {
 }
 ```
 
-- [ ] **Step 2: Typecheck both workspaces**
+Do not run typecheck or commit yet — the route below is what makes this DTO valid.
 
-```bash
-yarn workspace cashflow-backend run typecheck
-```
-
-Expected: errors in `backend/src/routes/contacts.ts` only — the route does not yet supply `loanDefault`, `loanBalance`, or the new row fields. That is the next task.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add shared/api-types.ts
-git commit -m "feat(shared): loan balance and counterparty role in the ledger DTO"
-```
-
----
-
-### Task 6: Ledger route
-
-**Files:**
-- Modify: `backend/src/routes/contacts.ts:272-330` (the `GET /:id/ledger` handler)
-- Modify: `backend/src/contacts/transferLedger.ts` (delete `NON_LOAN_LEDGER_CATEGORIES` and `isNonLoanCategory`)
-- Modify: `backend/src/contacts/transferLedger.test.ts` (drop the tests for the deleted exports)
-- Create: `backend/src/routes/contactsLedger.test.ts`
-
-**Interfaces:**
-- Consumes: `computeLoanBalance`, `mismatchedRowCount` (Task 3); `resolveLedgerRole` (Task 2); `findCancelledTransferIds` (Task 4); DTOs (Task 5).
-- Produces: `GET /api/contacts/:id/ledger` returning `ContactLedgerResponse`.
-
-- [ ] **Step 1: Write the failing route test**
+- [ ] **Step 2: Write the failing route test**
 
 This must exercise the **route**, not re-test Tasks 3 and 4. A test that only calls `computeLoanBalance` would pass the moment it is written, which proves nothing about the handler.
 
@@ -938,7 +963,7 @@ test('GET /:id/ledger echoes the contact loan default', async () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 3: Run the test to verify it fails**
 
 ```bash
 cd backend && yarn tsx --import ./test/setup.ts --test src/routes/contactsLedger.test.ts
@@ -946,7 +971,7 @@ cd backend && yarn tsx --import ./test/setup.ts --test src/routes/contactsLedger
 
 Expected: FAIL — `res.body.loanBalance` is `undefined` and `res.body.merchant` still holds the stripped `merchant_clean`. If it fails on import instead, finish Tasks 2–4 first.
 
-- [ ] **Step 3: Rewrite the ledger handler**
+- [ ] **Step 4: Rewrite the ledger handler**
 
 In `backend/src/routes/contacts.ts`, replace the body of `router.get('/:id/ledger', ...)` between loading `contact` and `res.json(...)`:
 
@@ -1040,7 +1065,7 @@ import type { ContactLedgerResponse } from '@cashflow/shared';
 
 Note `isNonLoanCategory` is gone from that import and `finalCategory` is gone from the `attributes` list.
 
-- [ ] **Step 4: Delete the dead category exclusion**
+- [ ] **Step 5: Delete the dead category exclusion**
 
 In `backend/src/contacts/transferLedger.ts`, delete `NON_LOAN_LEDGER_CATEGORIES` and `isNonLoanCategory` entirely, keeping `TransferRow`, `TransferNet` and `computeTransferNet`. Delete the corresponding tests from `backend/src/contacts/transferLedger.test.ts`.
 
@@ -1052,7 +1077,7 @@ grep -rn "isNonLoanCategory\|NON_LOAN_LEDGER_CATEGORIES" backend/src frontend/sr
 
 Expected: no output.
 
-- [ ] **Step 5: Run the backend suite**
+- [ ] **Step 6: Run the backend suite**
 
 ```bash
 yarn workspace cashflow-backend run typecheck
@@ -1061,16 +1086,16 @@ yarn workspace cashflow-backend run test
 
 Expected: typecheck clean, suite green.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add backend/src/routes/contacts.ts backend/src/contacts/transferLedger.ts backend/src/contacts/transferLedger.test.ts backend/src/routes/contactsLedger.test.ts
+git add shared/api-types.ts backend/src/routes/contacts.ts backend/src/contacts/transferLedger.ts backend/src/contacts/transferLedger.test.ts backend/src/routes/contactsLedger.test.ts
 git commit -m "feat(contacts): serve a signed loan balance and raw merchant text"
 ```
 
 ---
 
-### Task 7: Write endpoints for role and default
+### Task 6: Write endpoints for role and default
 
 **Files:**
 - Modify: `backend/src/routes/transactions.ts:430-445` (the patchable-field list) and the validation branch near line 500
@@ -1081,21 +1106,69 @@ git commit -m "feat(contacts): serve a signed loan balance and raw merchant text
 - Consumes: `isCounterpartyRole` (Task 2).
 - Produces: `PATCH /api/transactions/:id { counterpartyRole }`, `PATCH /api/contacts/:id { loanDefault }`.
 
-- [ ] **Step 1: Write the failing validation test**
+- [ ] **Step 1: Write the failing endpoint test**
 
-Create `backend/src/routes/counterpartyRolePatch.test.ts`:
+This must exercise the endpoints. A test that only calls `isCounterpartyRole` would pass the moment it is written and would prove nothing about the routes.
+
+Reuse the app/auth bootstrap helper from the route test written in Task 5. Create `backend/src/routes/counterpartyRolePatch.test.ts`:
 
 ```ts
-import { test } from 'node:test';
+import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isCounterpartyRole } from '../contacts/counterpartyRole';
+// Same app/auth bootstrap helper as backend/src/routes/contactsLedger.test.ts.
+// Seed: one contact and one transaction in the test household.
 
-test('the patch validator accepts the ledger vocabulary only', () => {
-  assert.equal(isCounterpartyRole('loan'), true);
-  assert.equal(isCounterpartyRole('loc_interest'), true);
-  // transfer_purpose's vocabulary must be rejected: different column, different question.
-  assert.equal(isCounterpartyRole('owner_draw'), false);
-  assert.equal(isCounterpartyRole('internal'), false);
+test('PATCH /api/transactions/:id accepts a ledger role and persists it', async () => {
+  const res = await patchTransaction(txnId, { counterpartyRole: 'loan' });
+  assert.equal(res.status, 200);
+  const fresh = await Transaction.findByPk(txnId);
+  assert.equal(fresh?.counterpartyRole, 'loan');
+});
+
+test('PATCH /api/transactions/:id clears the role on null', async () => {
+  await patchTransaction(txnId, { counterpartyRole: 'loan' });
+  const res = await patchTransaction(txnId, { counterpartyRole: null });
+  assert.equal(res.status, 200);
+  const fresh = await Transaction.findByPk(txnId);
+  assert.equal(fresh?.counterpartyRole, null);
+});
+
+test('PATCH /api/transactions/:id rejects transfer_purpose vocabulary', async () => {
+  // owner_draw belongs to transfer_purpose — a different column answering a
+  // different question. Accepting it here would silently cross the two.
+  const res = await patchTransaction(txnId, { counterpartyRole: 'owner_draw' });
+  assert.equal(res.status, 400);
+  const fresh = await Transaction.findByPk(txnId);
+  assert.equal(fresh?.counterpartyRole, null, 'a rejected patch must not write');
+});
+
+test('a retag is recorded in the audit log', async () => {
+  await patchTransaction(txnId, { counterpartyRole: 'repayment' });
+  const entry = await AuditLog.findOne({
+    where: { entityType: 'transaction', entityId: txnId },
+    order: [['createdAt', 'DESC']],
+  });
+  assert.ok(entry, 'untraceable retags are what made this audit necessary');
+  assert.match(JSON.stringify(entry?.after), /counterpartyRole/);
+});
+
+test('PATCH /api/contacts/:id sets loanDefault', async () => {
+  const res = await patchContact(contactId, { loanDefault: true });
+  assert.equal(res.status, 200);
+  const fresh = await Contact.findByPk(contactId);
+  assert.equal(fresh?.loanDefault, true);
+});
+
+test('PATCH /api/contacts/:id rejects a non-boolean loanDefault', async () => {
+  const res = await patchContact(contactId, { loanDefault: 'maybe' });
+  assert.equal(res.status, 400);
+});
+
+test('GET /api/contacts returns loanDefault so the list can render the toggle', async () => {
+  await patchContact(contactId, { loanDefault: true });
+  const res = await getContacts();
+  const row = res.body.find((c: { id: number }) => c.id === contactId);
+  assert.equal(row.loanDefault, true);
 });
 ```
 
@@ -1105,7 +1178,7 @@ test('the patch validator accepts the ledger vocabulary only', () => {
 cd backend && yarn tsx --import ./test/setup.ts --test src/routes/counterpartyRolePatch.test.ts
 ```
 
-Expected: PASS if Task 2 is complete — this test guards the vocabulary boundary rather than introducing new behaviour. If it fails, Task 2 is incomplete.
+Expected: FAIL — `counterpartyRole` is not a patchable field, so it is silently ignored and `fresh.counterpartyRole` stays null; `loanDefault` likewise, and it is absent from the contact list projection.
 
 - [ ] **Step 3: Add `counterpartyRole` to the transaction patch**
 
@@ -1169,7 +1242,7 @@ git commit -m "feat(api): patch counterpartyRole on transactions and loanDefault
 
 ---
 
-### Task 8: Frontend
+### Task 7: Frontend
 
 **Files:**
 - Modify: `frontend/src/lib/api.ts` (add two client calls)
@@ -1178,7 +1251,7 @@ git commit -m "feat(api): patch counterpartyRole on transactions and loanDefault
 - Modify: `frontend/src/lib/peopleLedger.ts` and `frontend/src/lib/peopleLedger.test.ts`
 
 **Interfaces:**
-- Consumes: `ContactLedgerResponse`, `LoanBalance`, `CounterpartyRole` (Task 5); the endpoints from Task 7.
+- Consumes: `ContactLedgerResponse`, `LoanBalance`, `CounterpartyRole` (Task 5); the endpoints from Task 6.
 - Produces: no exports other tasks depend on.
 
 - [ ] **Step 1: Write the failing label test**
@@ -1309,7 +1382,7 @@ git commit -m "feat(people): lead with the signed loan balance, show raw bank te
 
 ---
 
-### Task 9: Place Reimbursement in the primitives spine
+### Task 8: Place Reimbursement in the primitives spine
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-05-30-cashflow-primitives-design.md:69` (the Expectation row of the fold table)

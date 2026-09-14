@@ -1,6 +1,7 @@
 import { clientLogger } from './clientLogger'
 import type {
   ContactLedgerResponse,
+  CounterpartyRole,
   TransferLinkResult,
   SelfSuggestionsResponse,
   SimplefinConnectResponse,
@@ -159,6 +160,19 @@ export function getSelfSuggestions(): Promise<SelfSuggestionsResponse> {
 }
 export function setContactSelf(id: number, isSelf: boolean): Promise<unknown> {
   return patchJson(`/api/contacts/${id}`, { isSelf })
+}
+/**
+ * Tag what a transfer means. `null` clears the tag and hands the row back to
+ * the contact's `loanDefault`. The response does echo the saved row back, but
+ * the loan balance it feeds is recomputed server-side over every row at once,
+ * so callers must refetch the ledger — the echoed row cannot tell them what the
+ * tag did to the total.
+ */
+export function setCounterpartyRole(txnId: number, role: CounterpartyRole | null): Promise<unknown> {
+  return patchJson(`/api/transactions/${txnId}`, { counterpartyRole: role })
+}
+export function setContactLoanDefault(id: number, loanDefault: boolean): Promise<unknown> {
+  return patchJson(`/api/contacts/${id}`, { loanDefault })
 }
 
 // SimpleFIN Bridge bank connection (issue #790)

@@ -1,18 +1,28 @@
 /**
  * Per-person loan ledger (issue: per-person-loan-ledger). One-stop view of
- * each contact's raw transfer flow and tracked-loan outstanding. Drill into a
- * contact to see their linked transfers, mark outflows as loans, run the
+ * each contact's raw transfer flow and their actual debt. Drill into a contact
+ * to see their linked transfers, tag what each transfer meant, run the
  * "Link transfers" auto-matcher, and resolve ambiguous matches manually.
  *
- * Landing now shows numbers: net owed per currency, horizontal CSS bar
- * (net-owed portion vs returned portion). Contacts marked isSelf are shown in
- * a muted exclusion section, not in the owed list.
+ * Two numbers, and they are NOT the same number:
+ *
+ *   - `loanBalance` is the signed debt, folded from transfers that were tagged
+ *     `loan`/`repayment` (or that fall under the contact's `loanDefault`). It
+ *     is the ONLY number on this page allowed to say "owed" or "owe".
+ *   - `transferNet` is raw movement — every dollar that crossed between you,
+ *     rent and groceries and gifts included. It is a description, never a
+ *     claim. Labelling it "owed to you" is exactly the bug this page shipped
+ *     with; it reported ~79k of debt that was almost entirely not debt.
+ *
+ * Both are per-currency and neither collapses to a primary currency: a CAD
+ * balance and a USD balance are different debts and are shown separately.
  */
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Badge, Icon } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card } from '@connor-adams/designsystem'
+import { Label, NativeSelect, Switch } from '@connor-adams/designsystem'
 import { EmptyTableRow } from '@/lib/ds-extras'
 import { PageHeader } from '@/components/ui/page-header'
 import { SkeletonRow } from '@/lib/ds-extras'
@@ -20,9 +30,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/components/ui/toast'
 import type {
   ContactLedgerResponse,
+  CounterpartyRole,
   SelfSuggestion,
   TransferLinkResult,
 } from '@cashflow/shared'
+import { COUNTERPARTY_ROLES } from '@cashflow/shared'
 import {
   getJson,
   getContactLedger,
@@ -32,8 +44,10 @@ import {
   setTransactionContact,
   getSelfSuggestions,
   setContactSelf,
+  setCounterpartyRole,
+  setContactLoanDefault,
 } from '../lib/api'
-import { formatNetLabel } from '../lib/peopleLedger'
+import { formatBalanceLabel, formatNetFlowLabel } from '../lib/peopleLedger'
 import { formatMoney } from '../lib/formatMoney'
 
 // ── Local types ──────────────────────────────────────────────────────────────
@@ -50,56 +64,138 @@ interface ContactWithLedger {
   ledger: ContactLedgerResponse | null
 }
 
-const TRANSFER_COL_COUNT = 5
+/** Date, Merchant, Amount, Direction, Role, actions. */
+const TRANSFER_COL_COUNT = 6
+
+/** Landing columns: Contact, Loan balance, Raw net flow, Outstanding loans, Flow. */
+const LANDING_COL_COUNT = 5
+
+/** Display names for the role vocabulary. Keyed exhaustively so a new role in
+ *  `COUNTERPARTY_ROLES` fails typecheck here rather than rendering a raw slug. */
+const ROLE_LABELS: Record<CounterpartyRole, string> = {
+  loan: 'Loan',
+  repayment: 'Repayment',
+  purchase: 'Purchase',
+  business: 'Business',
+  rent: 'Rent',
+  gift: 'Gift',
+  self: 'Self',
+  loc_interest: 'LOC interest',
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Compute the primary CAD (or first-currency) sent/returned bar widths from
- * a ledger's transferNet. Returns { sentPct, netPct } as 0–100 values.
- * Used for the horizontal bar visual on the landing list.
- *
- * "sent" = total out; "returned" = total in; "net" = sent − returned.
- * The bar's full width = sent. net portion (darker) + returned portion (lighter).
- */
-function computeBarSegments(ledger: ContactLedgerResponse | null): {
-  netPct: number
-  returnedPct: number
+interface BarSegment {
   currency: string
-  sent: number
-  net: number
-} | null {
-  if (!ledger || ledger.transferNet.length === 0) return null
-  // prefer CAD, else first entry
-  const row =
-    ledger.transferNet.find((n) => n.currency === 'CAD') ??
-    ledger.transferNet[0]
-  const sent = Math.abs(Number(row.sent))
-  const returned = Math.abs(Number(row.received))
-  const net = Number(row.net)
-  if (sent === 0) return null
-  const returnedPct = Math.min(100, (returned / sent) * 100)
-  const netPct = Math.max(0, 100 - returnedPct)
-  return { netPct, returnedPct, currency: row.currency, sent, net }
+  lent: number
+  repaid: number
+  balance: number
+  /** Share of what was lent that is still outstanding, 0–100. */
+  outstandingPct: number
+  /** Share of what was lent that has come back, 0–100. */
+  repaidPct: number
 }
 
 /**
- * Derive top-level metric totals from all loaded ledgers.
- * grossNetOwed = sum of positive-net (owed to us) amounts across all contacts,
- * in the first/primary currency. We keep it simple: CAD sum or first currency.
+ * Lent/repaid bar widths per currency, read off the *loan balance* rather than
+ * raw flow — a bar drawn from raw flow is a picture of movement, not of debt.
+ *
+ * One segment per currency with something lent; currencies are never merged.
+ * Returns an empty array when the contact has no tracked lending at all, so a
+ * non-lending contact renders net-flow text and no bar. (The brief called for
+ * `null` here; an empty array is the same "nothing to draw" signal in the
+ * shape the per-currency requirement forces.)
  */
-function deriveMetrics(cwl: ContactWithLedger[]) {
-  let grossNetOwedCad = 0
+function computeBarSegments(ledger: ContactLedgerResponse | null): BarSegment[] {
+  if (!ledger) return []
+  const segments: BarSegment[] = []
+  for (const b of ledger.loanBalance) {
+    const lent = Math.abs(Number(b.lent))
+    const repaid = Math.abs(Number(b.repaid))
+    const balance = Number(b.balance)
+    if (!Number.isFinite(lent) || lent === 0) continue
+    const repaidPct = Math.min(100, (repaid / lent) * 100)
+    segments.push({
+      currency: b.currency,
+      lent,
+      repaid,
+      balance,
+      repaidPct,
+      outstandingPct: Math.max(0, 100 - repaidPct),
+    })
+  }
+  return segments
+}
+
+/** What a currency's debts add up to, in each direction. Never netted. */
+interface CurrencyTotals {
+  /** Sum of the positive balances — what people owe you. */
+  owedToYou: number
+  /** Sum of the negative balances, as a positive number — what you owe. */
+  youOwe: number
+}
+
+/**
+ * Money scale for accumulation: integers of 1/10_000 of a currency unit.
+ *
+ * Matches `computeLoanBalance` and `computeTransferNet` on the backend, which
+ * both fold at this scale and emit fixed-4 strings. Summing those strings back
+ * as floats and mopping up with a cents round afterwards was wrong twice over:
+ * the residue is only invisible until enough contacts are loaded, and a cents
+ * round destroys sub-cent balances outright — several contacts each owing a
+ * fraction of a cent totalled to exactly 0 and the tile then showed nothing
+ * outstanding over live debts.
+ */
+const MONEY_SCALE = 10_000
+
+/** A fixed-4 decimal amount as an exact integer count of 1/10_000 units. */
+function toMoneyUnits(n: number): number {
+  return Math.round(n * MONEY_SCALE)
+}
+
+/**
+ * Top-level metrics across all loaded ledgers.
+ *
+ * Two independent axes, and the totals cross NEITHER of them:
+ *
+ *  - **Currency.** Every currency a contact carries is summed. The old version
+ *    took the CAD row (or whichever row happened to be first) and dropped the
+ *    rest, which silently hid a real USD −3,570.51 balance in production.
+ *  - **Direction.** Owed-to-you and you-owe are accumulated separately rather
+ *    than netted across people. Netting would let "Caelan owes you 3,648" and
+ *    "you owe someone else 3,648" cancel into `CAD 0.00 settled` — a headline
+ *    asserting nothing is outstanding while two live debts sit underneath it.
+ *    That is the same false-claim bug as the one this page is being fixed for,
+ *    one level up.
+ *
+ * Contacts whose ledger failed to load contribute nothing here — an absent
+ * ledger is not a zero balance. That makes these totals a floor, not a sum,
+ * and the returned map cannot tell "nobody owes anything" apart from "nothing
+ * could be loaded". Callers MUST therefore pair the result with
+ * `failedLedgerIds` before wording anything, and must not render an empty map
+ * as "Nothing outstanding" while a fetch is unaccounted for. The metrics card
+ * below does exactly that.
+ */
+function deriveMetrics(cwl: ContactWithLedger[]): {
+  balanceByCurrency: Map<string, CurrencyTotals>
+  trackedLoansCount: number
+} {
+  const balanceByCurrency = new Map<string, CurrencyTotals>()
+  // Accumulated in whole `MONEY_SCALE` units; converted back exactly at the end.
+  const unitsByCurrency = new Map<string, CurrencyTotals>()
   let trackedLoansCount = 0
   const seen = new Set<number>()
   for (const { contact, ledger } of cwl) {
     if (contact.isSelf || contact.isPartner || !ledger) continue
-    const cadRow =
-      ledger.transferNet.find((n) => n.currency === 'CAD') ??
-      ledger.transferNet[0]
-    if (cadRow) {
-      const v = Number(cadRow.net)
-      if (v > 0) grossNetOwedCad += v
+    for (const b of ledger.loanBalance) {
+      const v = Number(b.balance)
+      if (!Number.isFinite(v)) continue
+      const units = toMoneyUnits(v)
+      if (units === 0) continue
+      const totals = unitsByCurrency.get(b.currency) ?? { owedToYou: 0, youOwe: 0 }
+      if (units > 0) totals.owedToYou += units
+      else totals.youOwe += -units
+      unitsByCurrency.set(b.currency, totals)
     }
     const loanCount = Object.keys(ledger.trackedOutstandingByCurrency).filter(
       (cur) => Number(ledger.trackedOutstandingByCurrency[cur]) > 0,
@@ -109,7 +205,33 @@ function deriveMetrics(cwl: ContactWithLedger[]) {
       trackedLoansCount++
     }
   }
-  return { grossNetOwedCad, trackedLoansCount }
+  for (const [currency, t] of unitsByCurrency) {
+    // Exact: an integer divided by the scale it was built at. No residue to
+    // round away, and a sub-cent total survives to be shown rather than being
+    // rounded to 0 and dropped by the `> 0` gate on the tile.
+    balanceByCurrency.set(currency, {
+      owedToYou: t.owedToYou / MONEY_SCALE,
+      youOwe: t.youOwe / MONEY_SCALE,
+    })
+  }
+  return { balanceByCurrency, trackedLoansCount }
+}
+
+/** Largest absolute balance a contact carries in any currency; the sort key. */
+function peakBalance(ledger: ContactLedgerResponse | null): number {
+  if (!ledger) return 0
+  let peak = 0
+  for (const b of ledger.loanBalance) {
+    const v = Math.abs(Number(b.balance))
+    if (Number.isFinite(v) && v > peak) peak = v
+  }
+  return peak
+}
+
+/** How many rows carry a tag that fought their direction. Direction won. */
+function countMismatches(ledger: ContactLedgerResponse | null): number {
+  if (!ledger) return 0
+  return ledger.transfers.filter((t) => t.roleMismatch).length
 }
 
 // ── MetricCard ───────────────────────────────────────────────────────────────
@@ -129,34 +251,138 @@ function MetricCard({
   )
 }
 
-// ── NetBar ───────────────────────────────────────────────────────────────────
+// ── TileCaption ──────────────────────────────────────────────────────────────
 
-/** Horizontal stacked bar: net-owed (primary) + returned (lighter). */
-function NetBar({ ledger }: { ledger: ContactLedgerResponse | null }) {
-  const segs = computeBarSegments(ledger)
-  if (!segs) return null
-  const { netPct, returnedPct, currency, sent, net } = segs
+/**
+ * The small print under a number. This page shows two debt-shaped figures side
+ * by side — the signed `loanBalance` and the older `trackedOutstanding` — and
+ * in production they disagree. Without a caption the reader has to guess which
+ * one answers "what do they owe me", so every one of them says what it is.
+ */
+function TileCaption({ children, testId }: { children: ReactNode; testId?: string }) {
   return (
-    <div className="flex flex-col gap-1">
-      <div
-        className="relative h-2 w-full overflow-hidden rounded-full bg-muted"
-        aria-label={`Net owed bar: ${currency} ${net.toFixed(2)}`}
-      >
-        {/* returned portion — lighter accent */}
-        <div
-          className="absolute right-0 top-0 h-full bg-primary/20"
-          style={{ width: `${returnedPct.toFixed(1)}%` }}
-        />
-        {/* net-owed portion — solid primary */}
-        <div
-          className="absolute left-0 top-0 h-full bg-primary"
-          style={{ width: `${netPct.toFixed(1)}%` }}
-        />
-      </div>
-      <div className="text-xs text-muted-foreground">
-        sent {formatMoney(sent, currency)} · {netPct > 0 ? `${netPct.toFixed(0)}% outstanding` : 'fully returned'}
-      </div>
+    <div className="mt-1 max-w-xs text-xs text-muted-foreground" data-testid={testId}>
+      {children}
     </div>
+  )
+}
+
+/**
+ * What `trackedOutstandingByCurrency` actually is, in one sentence. It is the
+ * sum of this contact's Reimbursement rows still expected or overdue — claims
+ * logged by hand. It never reads `counterparty_role`, so it is not the same
+ * quantity as `loanBalance` and is not expected to agree with it.
+ */
+const TRACKED_OUTSTANDING_CAPTION =
+  'Unpaid reimbursement claims you logged by hand. A separate, older tally that ignores transfer tags — the loan balance is this page’s answer to what they owe you.'
+
+/** The landing column's shorter form of the same disclaimer. */
+const TRACKED_OUTSTANDING_COLUMN_CAPTION =
+  'Hand-logged reimbursement claims — not the loan balance'
+
+/**
+ * What `loanBalance` is — which depends on the contact's `loanDefault`.
+ *
+ * With it off, only rows carrying a loan/repayment tag are folded in. With it
+ * on, `resolveLedgerRole` also folds in every UNTAGGED row by direction, which
+ * on the real Evan and Caelan data is most of the balance. A single fixed
+ * sentence was therefore false half the time, and worse than useless with the
+ * toggle sitting twenty pixels above it: the reader flips it, watches the
+ * number move, and reads a caption saying it shouldn't have.
+ */
+function loanBalanceCaption(loanDefault: boolean): string {
+  return loanDefault
+    ? 'What they owe you: every transfer tagged loan or repayment, PLUS every untagged transfer counted by its direction — because the toggle above is on. This page’s answer.'
+    : 'What they owe you: every transfer tagged loan or repayment, netted. Untagged transfers are not counted. This page’s answer.'
+}
+
+/**
+ * The landing column's shorter form. This header stands over every contact at
+ * once and `loanDefault` is per-contact, so no single sentence can describe the
+ * state of the column — the contacts in it disagree. It states the RULE
+ * instead, which is true of every row regardless of how each toggle is set;
+ * the per-contact drill-in caption is where the current state is stated.
+ */
+const LOAN_BALANCE_COLUMN_CAPTION =
+  'What they owe you — tagged transfers, plus untagged ones for contacts set to treat untagged as loans'
+
+// ── LoanBar ──────────────────────────────────────────────────────────────────
+
+/**
+ * One horizontal stacked bar per currency: outstanding (solid) + repaid
+ * (lighter). Draws nothing for a contact with no tracked lending.
+ */
+function LoanBar({ ledger }: { ledger: ContactLedgerResponse | null }) {
+  const segments = computeBarSegments(ledger)
+  if (segments.length === 0) return null
+  return (
+    <div className="flex flex-col gap-2">
+      {segments.map((s) => (
+        <div key={s.currency} className="flex flex-col gap-1">
+          <div
+            role="img"
+            className="relative h-2 w-full overflow-hidden rounded-full bg-muted"
+            aria-label={`Loan balance bar: ${formatBalanceLabel({ currency: s.currency, balance: String(s.balance) })}`}
+          >
+            {/* repaid portion — lighter accent */}
+            <div
+              className="absolute right-0 top-0 h-full bg-primary/20"
+              style={{ width: `${s.repaidPct.toFixed(1)}%` }}
+            />
+            {/* outstanding portion — solid primary */}
+            <div
+              className="absolute left-0 top-0 h-full bg-primary"
+              style={{ width: `${s.outstandingPct.toFixed(1)}%` }}
+            />
+          </div>
+          <div className="text-xs text-muted-foreground">
+            lent {formatMoney(s.lent, s.currency)} ·{' '}
+            {s.outstandingPct > 0 ? `${s.outstandingPct.toFixed(0)}% outstanding` : 'fully repaid'}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── RoleSelect ───────────────────────────────────────────────────────────────
+
+/**
+ * Per-row role tag. The empty option hands the row back to the contact's
+ * `loanDefault` rather than asserting anything about it.
+ */
+function RoleSelect({
+  txnId,
+  rowLabel,
+  value,
+  disabled,
+  onChange,
+}: {
+  txnId: number
+  /** How the row reads on screen — a database id names nothing to the user. */
+  rowLabel: string
+  value: CounterpartyRole | null
+  disabled: boolean
+  onChange: (role: CounterpartyRole | null) => void
+}) {
+  return (
+    <NativeSelect
+      size="sm"
+      aria-label={`Role for ${rowLabel}`}
+      data-testid={`role-select-${txnId}`}
+      disabled={disabled}
+      value={value ?? ''}
+      onChange={(e) =>
+        onChange(e.target.value === '' ? null : (e.target.value as CounterpartyRole))
+      }
+    >
+      <option value="">Auto (contact default)</option>
+      {COUNTERPARTY_ROLES.map((r) => (
+        <option key={r} value={r}>
+          {ROLE_LABELS[r]}
+        </option>
+      ))}
+    </NativeSelect>
   )
 }
 
@@ -224,6 +450,10 @@ export function PeopleLedgerPage() {
   const [contactsLoading, setContactsLoading] = useState(true)
   const [ledgerMap, setLedgerMap] = useState<Map<number, ContactLedgerResponse>>(new Map())
   const [ledgersLoading, setLedgersLoading] = useState(false)
+  // Contacts whose ledger fetch failed. Kept apart from "loaded with no debt":
+  // rendering an unknown balance as "No tracked loans" would assert zero debt
+  // for someone who may owe thousands — the same false claim, by omission.
+  const [failedLedgerIds, setFailedLedgerIds] = useState<Set<number>>(new Set())
   const [selfSuggestions, setSelfSuggestions] = useState<SelfSuggestion[]>([])
   const [excluding, setExcluding] = useState<Set<number>>(new Set())
 
@@ -232,6 +462,8 @@ export function PeopleLedgerPage() {
   const [ledgerLoading, setLedgerLoading] = useState(false)
   const [linkResult, setLinkResult] = useState<TransferLinkResult | null>(null)
   const [linking, setLinking] = useState(false)
+  const [savingRole, setSavingRole] = useState<Set<number>>(new Set())
+  const [savingDefault, setSavingDefault] = useState(false)
 
   // ── Load contacts + per-contact ledgers + self-suggestions ──────────────
 
@@ -253,15 +485,27 @@ export function PeopleLedgerPage() {
           realContacts.map((c) =>
             getContactLedger(c.id)
               .then((l) => [c.id, l] as [number, ContactLedgerResponse])
-              .catch(() => null),
+              .catch(() => c.id),
           ),
         )
         const m = new Map<number, ContactLedgerResponse>()
+        const failed = new Set<number>()
         for (const e of entries) {
-          if (e) m.set(e[0], e[1])
+          if (Array.isArray(e)) m.set(e[0], e[1])
+          else failed.add(e)
         }
         if (isActive()) setLedgerMap(m)
+        if (isActive()) setFailedLedgerIds(failed)
         if (isActive()) setLedgersLoading(false)
+        if (isActive() && failed.size > 0) {
+          showToastRef.current({
+            title:
+              failed.size === 1
+                ? "Couldn't load 1 contact's balance"
+                : `Couldn't load ${failed.size} contacts' balances`,
+            variant: 'destructive',
+          })
+        }
       }
     } catch (e) {
       if (isActive()) showToastRef.current({
@@ -282,24 +526,70 @@ export function PeopleLedgerPage() {
 
   // ── Load drill-in ledger ──────────────────────────────────────────────────
 
+  /**
+   * Monotonic token shared by the navigation effect and `reload`. Every fetch
+   * takes the next value and only applies its result if it still holds it, so
+   * a late refetch can never paint one contact's ledger onto another's page,
+   * and two rapid role tags settle on the newer answer rather than whichever
+   * response happened to land last.
+   */
+  const ledgerRequestRef = useRef(0)
+
   useEffect(() => {
-    if (selectedId == null) { setLedger(null); return }
-    let cancelled = false
+    if (selectedId == null) { ledgerRequestRef.current++; setLedger(null); return }
+    const token = ++ledgerRequestRef.current
+    const isCurrent = () => token === ledgerRequestRef.current
     setLedgerLoading(true)
     getContactLedger(selectedId)
-      .then((data) => { if (!cancelled) setLedger(data) })
-      .catch(() => { if (!cancelled) setLedger(null) })
-      .finally(() => { if (!cancelled) setLedgerLoading(false) })
-    return () => { cancelled = true }
+      .then((data) => { if (isCurrent()) setLedger(data) })
+      .catch(() => { if (isCurrent()) setLedger(null) })
+      .finally(() => { if (isCurrent()) setLedgerLoading(false) })
   }, [selectedId])
 
-  const reload = useCallback(() => {
+  /**
+   * Refetch the ledger. Required after any write that changes the balance: the
+   * balance is recomputed server-side from every row at once, so no local patch
+   * of the written row can produce it. The server is the only thing that knows
+   * what the write did to the total.
+   *
+   * Deliberately does NOT raise `ledgerLoading` — that swaps the whole card and
+   * table for "Loading…", and with a role dropdown on every row it would blink
+   * the table away on each tag. The control that was used is disabled for the
+   * duration instead (`savingRole` / `savingDefault`), which is the localised
+   * affordance; a failed refetch leaves the previous ledger on screen.
+   *
+   * It does, however, have to LOWER `ledgerLoading`. Taking the token orphans
+   * any navigation fetch still in flight, and that fetch's `finally` only
+   * clears the flag while it is still current — so whoever took the token owns
+   * the flag from then on. Without this, a reload racing the initial fetch
+   * (reachable from "Link transfers", whose button renders outside the loading
+   * gate) pins the drill-in to "Loading…" over a ledger that is right there.
+   * The clear is itself token-guarded: if a newer navigation has since taken
+   * over, that effect is mid-fetch and will clear the flag when it lands.
+   */
+  const reload = useCallback(async () => {
     if (selectedId == null) return
-    setLedgerLoading(true)
-    getContactLedger(selectedId)
-      .then(setLedger)
-      .catch(() => {})
-      .finally(() => setLedgerLoading(false))
+    const token = ++ledgerRequestRef.current
+    try {
+      const data = await getContactLedger(selectedId)
+      // Discard if the user navigated away or a newer refetch superseded us.
+      if (token === ledgerRequestRef.current) setLedger(data)
+    } catch {
+      // `reload` only ever runs AFTER a write has succeeded, so nothing else
+      // has toasted — the write's own catch was never entered. Silence here
+      // leaves the pre-write balance on screen under "What they owe you", the
+      // role dropdown snapped back and the loanDefault Switch visibly
+      // reverted, all while the server holds the new value. Say so; the stale
+      // ledger stays on screen because it is still the last thing we know.
+      if (token === ledgerRequestRef.current) {
+        showToastRef.current({
+          title: 'Saved, but the balance couldn’t be refreshed.',
+          variant: 'destructive',
+        })
+      }
+    } finally {
+      if (token === ledgerRequestRef.current) setLedgerLoading(false)
+    }
   }, [selectedId])
 
   // ── Drill-in actions ──────────────────────────────────────────────────────
@@ -308,10 +598,43 @@ export function PeopleLedgerPage() {
     if (selectedId == null) return
     try {
       await markTransactionAsLoan(txnId, selectedId)
-      showToastRef.current({ title: 'Marked as loan', variant: 'success' })
-      reload()
+      showToastRef.current({ title: 'Reimbursement claim logged', variant: 'success' })
+      await reload()
     } catch (e) {
       showToastRef.current({ title: e instanceof Error ? e.message : 'Update failed', variant: 'destructive' })
+    }
+  }
+
+  async function onSetRole(txnId: number, role: CounterpartyRole | null) {
+    setSavingRole((prev) => new Set([...prev, txnId]))
+    try {
+      await setCounterpartyRole(txnId, role)
+      // The PATCH does echo the saved row back, but the balance this row feeds
+      // is folded server-side across every row at once — no local edit of one
+      // row can produce it. The ledger is the only source of truth for what the
+      // tag did to the total, so refetch instead of patching state.
+      await reload()
+    } catch (e) {
+      showToastRef.current({ title: e instanceof Error ? e.message : 'Tag failed', variant: 'destructive' })
+    } finally {
+      setSavingRole((prev) => {
+        const next = new Set(prev)
+        next.delete(txnId)
+        return next
+      })
+    }
+  }
+
+  async function onToggleLoanDefault(next: boolean) {
+    if (ledger == null) return
+    setSavingDefault(true)
+    try {
+      await setContactLoanDefault(ledger.contactId, next)
+      await reload()
+    } catch (e) {
+      showToastRef.current({ title: e instanceof Error ? e.message : 'Update failed', variant: 'destructive' })
+    } finally {
+      setSavingDefault(false)
     }
   }
 
@@ -330,7 +653,7 @@ export function PeopleLedgerPage() {
       const r = await commitTransferLink()
       setLinkResult(r)
       showToastRef.current({ title: 'Transfers linked', variant: 'success' })
-      reload()
+      await reload()
     } catch (e) {
       showToastRef.current({ title: e instanceof Error ? e.message : 'Link failed', variant: 'destructive' })
     } finally {
@@ -372,23 +695,12 @@ export function PeopleLedgerPage() {
 
   const ambiguous = linkResult?.ambiguous ?? []
 
-  // Non-self, non-partner contacts sorted by their primary net desc
+  // Non-self, non-partner contacts sorted by their largest debt in any currency
+  // — the page leads with the balance, so it sorts by the balance too.
   const realContacts = contacts.filter((c) => !c.isSelf && !c.isPartner)
-  const sortedContacts = [...realContacts].sort((a, b) => {
-    const aLedger = ledgerMap.get(a.id)
-    const bLedger = ledgerMap.get(b.id)
-    const aNet = aLedger
-      ? Number(
-          (aLedger.transferNet.find((n) => n.currency === 'CAD') ?? aLedger.transferNet[0])?.net ?? 0,
-        )
-      : 0
-    const bNet = bLedger
-      ? Number(
-          (bLedger.transferNet.find((n) => n.currency === 'CAD') ?? bLedger.transferNet[0])?.net ?? 0,
-        )
-      : 0
-    return bNet - aNet
-  })
+  const sortedContacts = [...realContacts].sort(
+    (a, b) => peakBalance(ledgerMap.get(b.id) ?? null) - peakBalance(ledgerMap.get(a.id) ?? null),
+  )
 
   const selfContacts = contacts.filter((c) => c.isSelf)
 
@@ -396,7 +708,25 @@ export function PeopleLedgerPage() {
     contact: c,
     ledger: ledgerMap.get(c.id) ?? null,
   }))
-  const { grossNetOwedCad, trackedLoansCount } = deriveMetrics(cwl)
+  const { balanceByCurrency, trackedLoansCount } = deriveMetrics(cwl)
+  // Drop any currency whose two sides both rounded away to zero, so the
+  // "Nothing outstanding" fallback below can't be skipped by an empty entry.
+  const balanceEntries = [...balanceByCurrency.entries()]
+    .filter(([, t]) => t.owedToYou > 0 || t.youOwe > 0)
+    .sort(([a], [b]) => a.localeCompare(b))
+  const mismatchCount = countMismatches(ledger)
+
+  // How much of the headline the page is actually entitled to claim.
+  // `balanceEntries` is built only from ledgers that loaded, so on its own an
+  // empty array is ambiguous: it means "no debt" only when nothing failed.
+  const failedCount = realContacts.filter((c) => failedLedgerIds.has(c.id)).length
+  /** Nothing loaded at all — there is no total to show, only an apology. */
+  const allBalancesUnknown = realContacts.length > 0 && failedCount === realContacts.length
+  /** Some loaded, some didn't: show what we have, labelled as partial. */
+  const balancesIncomplete = failedCount > 0
+
+  const failedContactsPhrase =
+    failedCount === 1 ? "1 contact's balance" : `${failedCount} contacts' balances`
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -404,7 +734,7 @@ export function PeopleLedgerPage() {
     <div className="page">
       <PageHeader
         title="People"
-        description="Track raw transfer flow and tracked-loan balances with each contact."
+        description="Who actually owes whom, and the raw transfer flow behind it."
       />
 
       {/* Link-transfers action bar */}
@@ -476,24 +806,67 @@ export function PeopleLedgerPage() {
           {/* Metric cards */}
           {!contactsLoading && !ledgersLoading && (
             <Card className="mb-4 p-4" data-testid="metrics-card">
-              <div className="flex flex-wrap gap-8">
-                <MetricCard
-                  label="Gross net owed"
-                  value={formatMoney(grossNetOwedCad, 'CAD')}
-                />
+              <div className="flex flex-wrap gap-8" data-testid="loan-balance-metrics">
+                {allBalancesUnknown ? (
+                  // Every ledger fetch failed. A total here would be a total of
+                  // nothing, and "Nothing outstanding" would assert zero debt
+                  // over N balances nobody has seen.
+                  <MetricCard label="Loan balance" value="Couldn't load" />
+                ) : balanceEntries.length === 0 ? (
+                  <MetricCard
+                    label="Loan balance"
+                    value={balancesIncomplete ? 'Incomplete' : 'Nothing outstanding'}
+                  />
+                ) : (
+                  balanceEntries.flatMap(([currency, totals]) => {
+                    // Both directions get their own tile. Netting them would
+                    // let equal-and-opposite debts read as "settled".
+                    const cards = []
+                    if (totals.owedToYou > 0) {
+                      cards.push(
+                        <MetricCard
+                          key={`${currency}-owed-to-you`}
+                          label={`Owed to you · ${currency}`}
+                          value={formatBalanceLabel({ currency, balance: String(totals.owedToYou) })}
+                        />,
+                      )
+                    }
+                    if (totals.youOwe > 0) {
+                      cards.push(
+                        <MetricCard
+                          key={`${currency}-you-owe`}
+                          label={`You owe · ${currency}`}
+                          value={formatBalanceLabel({ currency, balance: String(-totals.youOwe) })}
+                        />,
+                      )
+                    }
+                    return cards
+                  })
+                )}
                 <MetricCard
                   label="People"
                   value={realContacts.length}
                 />
                 <MetricCard
                   label="Tracked loans"
-                  value={trackedLoansCount}
+                  // Also derived from the ledgers, so it is also unknown when
+                  // none of them loaded. A bare 0 would read as "none".
+                  value={allBalancesUnknown ? '—' : trackedLoansCount}
                 />
                 <MetricCard
                   label="Flagged to exclude"
                   value={selfContacts.length + selfSuggestions.length}
                 />
               </div>
+              {balancesIncomplete && (
+                <div
+                  className="mt-3 text-xs text-muted-foreground"
+                  data-testid="metrics-incomplete"
+                >
+                  Incomplete: {failedContactsPhrase} couldn&apos;t be loaded, so these
+                  totals are a floor, not the whole picture.
+                </div>
+              )}
             </Card>
           )}
 
@@ -510,19 +883,50 @@ export function PeopleLedgerPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Contact</TableHead>
-                  <TableHead>Raw net</TableHead>
-                  <TableHead>Outstanding loans</TableHead>
-                  <TableHead>Flow</TableHead>
+                  {/* Three money columns, two of which look like debts. Each
+                      carries its own one-liner so the reader never has to
+                      guess which one answers "what do they owe me". */}
+                  <TableHead>
+                    <div className="flex flex-col gap-0.5">
+                      <span>Loan balance</span>
+                      <span
+                        className="text-xs font-normal normal-case text-muted-foreground"
+                        data-testid="loan-balance-column-caption"
+                      >
+                        {LOAN_BALANCE_COLUMN_CAPTION}
+                      </span>
+                    </div>
+                  </TableHead>
+                  <TableHead>
+                    <div className="flex flex-col gap-0.5">
+                      <span>Raw transfer flow</span>
+                      <span className="text-xs font-normal normal-case text-muted-foreground">
+                        Everything that moved — not a debt
+                      </span>
+                    </div>
+                  </TableHead>
+                  <TableHead>
+                    <div className="flex flex-col gap-0.5">
+                      <span>Outstanding loans</span>
+                      <span
+                        className="text-xs font-normal normal-case text-muted-foreground"
+                        data-testid="outstanding-loans-caption"
+                      >
+                        {TRACKED_OUTSTANDING_COLUMN_CAPTION}
+                      </span>
+                    </div>
+                  </TableHead>
+                  <TableHead>Lent vs repaid</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {contactsLoading || ledgersLoading ? (
                   Array.from({ length: 3 }).map((_, i) => (
-                    <SkeletonRow key={`people-skel-${i}`} cols={4} />
+                    <SkeletonRow key={`people-skel-${i}`} cols={LANDING_COL_COUNT} />
                   ))
                 ) : sortedContacts.length === 0 ? (
                   <EmptyTableRow
-                    colSpan={4}
+                    colSpan={LANDING_COL_COUNT}
                     title="No contacts yet."
                     description="Add contacts in Settings to start tracking transfers with them."
                   />
@@ -542,12 +946,29 @@ export function PeopleLedgerPage() {
                             <span>{c.name}</span>
                           </div>
                         </TableCell>
+                        <TableCell data-testid={`balance-${c.id}`}>
+                          {failedLedgerIds.has(c.id) ? (
+                            <span className="text-sm text-muted-foreground">Couldn&apos;t load</span>
+                          ) : cl && cl.loanBalance.length > 0 ? (
+                            <div className="flex flex-col gap-0.5">
+                              {cl.loanBalance.map((b) => (
+                                <span key={b.currency} className="text-sm font-medium">
+                                  {formatBalanceLabel(b)}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">No tracked loans</span>
+                          )}
+                        </TableCell>
                         <TableCell data-testid={`net-${c.id}`}>
-                          {cl && cl.transferNet.length > 0 ? (
+                          {failedLedgerIds.has(c.id) ? (
+                            <span className="text-sm text-muted-foreground">—</span>
+                          ) : cl && cl.transferNet.length > 0 ? (
                             <div className="flex flex-col gap-0.5">
                               {cl.transferNet.map((n) => (
-                                <span key={n.currency} className="text-sm font-medium">
-                                  {formatNetLabel(n)}
+                                <span key={n.currency} className="text-sm text-muted-foreground">
+                                  {formatNetFlowLabel(n)}
                                 </span>
                               ))}
                             </div>
@@ -573,7 +994,7 @@ export function PeopleLedgerPage() {
                           )}
                         </TableCell>
                         <TableCell className="min-w-32">
-                          <NetBar ledger={cl ?? null} />
+                          <LoanBar ledger={cl ?? null} />
                         </TableCell>
                       </TableRow>
                     )
@@ -617,21 +1038,55 @@ export function PeopleLedgerPage() {
             </Card>
           ) : ledger ? (
             <>
-              {/* Summary card: two numbers + sent/returned visual */}
+              {/* Summary card: the debt, then the raw flow behind it */}
               <Card className="mb-4 p-4" data-testid="ledger-summary-card">
-                <h2 className="mb-3 text-base font-semibold">{ledger.name}</h2>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="text-base font-semibold">{ledger.name}</h2>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="loan-default-toggle"
+                      data-testid="loan-default-toggle"
+                      checked={ledger.loanDefault}
+                      disabled={savingDefault}
+                      onCheckedChange={(next) => void onToggleLoanDefault(next)}
+                    />
+                    <Label htmlFor="loan-default-toggle">
+                      Treat untagged transfers as loans
+                    </Label>
+                  </div>
+                </div>
                 <div className="flex flex-wrap gap-8">
-                  <div>
-                    <div className="text-muted-foreground mb-1 text-xs uppercase tracking-wide">Raw net flow</div>
+                  <div data-testid="loan-balance">
+                    <div className="text-muted-foreground mb-1 text-xs uppercase tracking-wide">Loan balance</div>
+                    {ledger.loanBalance.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">No tracked loans</div>
+                    ) : (
+                      ledger.loanBalance.map((b) => (
+                        <div key={b.currency} className="text-lg font-semibold">
+                          {formatBalanceLabel(b)}
+                        </div>
+                      ))
+                    )}
+                    <TileCaption testId="loan-balance-caption">
+                      {loanBalanceCaption(ledger.loanDefault)}
+                    </TileCaption>
+                  </div>
+                  <div data-testid="raw-net-flow">
+                    <div className="text-muted-foreground mb-1 text-xs uppercase tracking-wide">
+                      Raw transfer flow
+                    </div>
                     {ledger.transferNet.length === 0 ? (
                       <div className="text-sm">—</div>
                     ) : (
                       ledger.transferNet.map((n) => (
                         <div key={n.currency} className="text-lg font-semibold">
-                          {formatNetLabel(n)}
+                          {formatNetFlowLabel(n)}
                         </div>
                       ))
                     )}
+                    <TileCaption testId="raw-net-flow-caption">
+                      Everything that moved between you — not a debt.
+                    </TileCaption>
                   </div>
                   <div data-testid="tracked-outstanding">
                     <div className="text-muted-foreground mb-1 text-xs uppercase tracking-wide">Tracked loans outstanding</div>
@@ -644,15 +1099,30 @@ export function PeopleLedgerPage() {
                         </div>
                       ))
                     )}
+                    <TileCaption testId="tracked-outstanding-caption">
+                      {TRACKED_OUTSTANDING_CAPTION}
+                    </TileCaption>
                   </div>
                 </div>
-                {/* Sent / returned bar for this contact */}
-                {ledger.transferNet.length > 0 && (
+                {mismatchCount > 0 && (
+                  <div className="mt-3 text-xs text-muted-foreground" data-testid="mismatch-summary">
+                    {mismatchCount === 1
+                      ? '1 transfer is tagged against its direction. Direction wins.'
+                      : `${mismatchCount} transfers are tagged against their direction. Direction wins.`}
+                  </div>
+                )}
+                {/* Lent / repaid bar for this contact. Gated on there being a
+                    segment to draw, not on the balance being non-empty:
+                    `computeBarSegments` skips any currency with nothing lent,
+                    and a repaid-only row (Stephen's real USD leg — lent 0,
+                    repaid 3570.51) would otherwise leave this heading standing
+                    over an empty box. */}
+                {computeBarSegments(ledger).length > 0 && (
                   <div className="mt-4 max-w-sm">
                     <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
-                      Sent vs returned
+                      Lent vs repaid
                     </div>
-                    <NetBar ledger={ledger} />
+                    <LoanBar ledger={ledger} />
                   </div>
                 )}
               </Card>
@@ -666,6 +1136,7 @@ export function PeopleLedgerPage() {
                       <TableHead>Merchant</TableHead>
                       <TableHead>Amount</TableHead>
                       <TableHead>Direction</TableHead>
+                      <TableHead>Role</TableHead>
                       <TableHead aria-label="actions" />
                     </TableRow>
                   </TableHeader>
@@ -678,9 +1149,14 @@ export function PeopleLedgerPage() {
                       />
                     ) : (
                       ledger.transfers.map((t) => (
-                        <TableRow key={t.id}>
+                        <TableRow
+                          key={t.id}
+                          data-testid={`transfer-row-${t.id}`}
+                          className={t.cancelled ? 'text-muted-foreground line-through' : undefined}
+                          title={t.cancelled ? 'cancelled e-transfer pair' : undefined}
+                        >
                           <TableCell>{t.date}</TableCell>
-                          <TableCell>{t.merchant}</TableCell>
+                          <TableCell>{t.merchant ?? '—'}</TableCell>
                           <TableCell>
                             {t.currency} {Number(t.amount).toFixed(2)}
                           </TableCell>
@@ -690,19 +1166,45 @@ export function PeopleLedgerPage() {
                             </Badge>
                           </TableCell>
                           <TableCell>
+                            <div className="flex flex-col items-start gap-1">
+                              <RoleSelect
+                                txnId={t.id}
+                                rowLabel={`${t.date} ${t.merchant ?? 'transfer'} ${t.currency} ${Number(t.amount).toFixed(2)}`}
+                                value={t.counterpartyRole}
+                                disabled={savingRole.has(t.id) || t.cancelled}
+                                onChange={(role) => void onSetRole(t.id, role)}
+                              />
+                              {t.roleMismatch && (
+                                <Badge variant="destructive" data-testid={`role-mismatch-${t.id}`}>
+                                  tag disagrees with direction
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
                             <div className="flex justify-end">
-                              {t.direction === 'out' && !t.isLoan && (
+                              {/* This posts a Reimbursement, which moves
+                                  "Tracked loans outstanding" and NOTHING else.
+                                  It used to read "Mark as loan", one cell from
+                                  a Role dropdown whose "Loan" option moves the
+                                  loan balance instead — two controls with the
+                                  same name moving two numbers that disagree in
+                                  production. The label and the tooltip now say
+                                  which tile each one is for. */}
+                              {t.direction === 'out' && !t.isLoan && !t.cancelled && (
                                 <Button
                                   type="button"
                                   variant="outline"
                                   size="sm"
+                                  data-testid={`log-claim-${t.id}`}
+                                  title="Logs a reimbursement claim — moves “Tracked loans outstanding”. To change the loan balance, use the Role dropdown."
                                   onClick={() => onMarkLoan(t.id)}
                                 >
-                                  Mark as loan
+                                  Log reimbursement claim
                                 </Button>
                               )}
                               {t.isLoan && (
-                                <Badge variant="default">Loan</Badge>
+                                <Badge variant="default">Claim logged</Badge>
                               )}
                             </div>
                           </TableCell>
