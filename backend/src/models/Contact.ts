@@ -89,8 +89,21 @@ export function initContact(sequelize: Sequelize): typeof Contact {
       timestamps: true,
     }
   );
-  Contact.beforeValidate((contact) => {
+  // Keep normalized_name derived from name on every write path.
+  //
+  // The `options.fields` push is load-bearing, not defensive: Sequelize's
+  // `instance.save()` snapshots `options.fields` from `this.changed()` BEFORE
+  // running hooks, so a field this hook sets afterwards is silently dropped
+  // from the emitted UPDATE. Renaming a contact therefore persisted `name` but
+  // left a stale `normalized_name` — and since the transfer-link matcher reads
+  // `normalizedName ?? normalizeContactName(name)`, the stale key kept winning
+  // and the unique dedup index drifted out of sync with the visible name.
+  Contact.beforeValidate((contact, options) => {
     contact.set('normalizedName', normalizeContactName(contact.get('name')));
+    const fields = (options as { fields?: string[] }).fields;
+    if (Array.isArray(fields) && !fields.includes('normalizedName')) {
+      fields.push('normalizedName');
+    }
   });
   return Contact;
 }
