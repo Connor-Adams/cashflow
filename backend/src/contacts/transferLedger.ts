@@ -15,8 +15,16 @@ function toCents(n: number): number {
 }
 
 /** Per-currency raw net flow: sent (money out, amount<0) minus received
- *  (money in, amount>0). Positive net = the person owes you. Fixed-4 strings,
- *  integer-cents math to avoid float drift, sorted by currency. */
+ *  (money in, amount>0). Fixed-4 strings, integer-cents math to avoid float
+ *  drift, sorted by currency.
+ *
+ *  This is a DESCRIPTIVE statistic — how much money crossed, and which way. It
+ *  is NOT a debt: a positive net means more went out than came in, which is all
+ *  it means. Rent split evenly and settled every month nets to whatever the
+ *  last payment left behind, owing nobody anything. Claiming otherwise is the
+ *  bug this module was demoted for; `computeLoanBalance` is the only function
+ *  here allowed to answer "what do they owe me", and `formatNetFlowLabel` on
+ *  the frontend words this one as "net out"/"net in" for that reason. */
 export function computeTransferNet(rows: TransferRow[]): TransferNet[] {
   const sent = new Map<string, number>();
   const recv = new Map<string, number>();

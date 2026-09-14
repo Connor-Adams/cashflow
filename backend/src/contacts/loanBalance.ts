@@ -65,23 +65,12 @@ export function computeLoanBalance(
   });
 }
 
-/**
- * How many rows carry a loan/repayment tag contradicting their direction. The
- * balance already resolves these by direction; this is what the UI uses to say
- * so out loud instead of silently disagreeing with the user's dropdown.
+/*
+ * There was a `mismatchedRowCount(rows, loanDefault)` here. It is deliberately
+ * gone: its only caller was its own test, and it would have given a DIFFERENT
+ * answer from the one the UI shows. The ledger route ships a per-row
+ * `roleMismatch` and zeroes it for cancelled legs; this helper ran the
+ * pre-cancellation set and counted them. A second, subtly-wrong path to a
+ * number the route already computes is a drift hazard, not a convenience.
+ * Direction-mismatch resolution stays covered by `counterpartyRole.test.ts`.
  */
-export function mismatchedRowCount(
-  rows: BalanceInputRow[],
-  loanDefault: boolean,
-): number {
-  let n = 0;
-  for (const r of rows) {
-    const { mismatch } = resolveLedgerRole({
-      role: r.counterpartyRole,
-      amount: Number(r.amount),
-      loanDefault,
-    });
-    if (mismatch) n++;
-  }
-  return n;
-}

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeLoanBalance, mismatchedRowCount } from './loanBalance';
+import { computeLoanBalance } from './loanBalance';
 
 test('a lending contact nets outflows against inflows', () => {
   const rows = [
@@ -66,13 +66,4 @@ test('string amounts are accepted', () => {
   assert.deepEqual(computeLoanBalance(rows, false), [
     { currency: 'CAD', lent: '40.0000', repaid: '0.0000', balance: '40.0000' },
   ]);
-});
-
-test('mismatchedRowCount counts tags contradicting their direction', () => {
-  const rows = [
-    { amount: 600, currency: 'CAD', counterpartyRole: 'loan' },
-    { amount: -600, currency: 'CAD', counterpartyRole: 'loan' },
-    { amount: -600, currency: 'CAD', counterpartyRole: 'purchase' },
-  ];
-  assert.equal(mismatchedRowCount(rows, false), 1);
 });

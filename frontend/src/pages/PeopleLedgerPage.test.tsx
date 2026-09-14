@@ -9,8 +9,15 @@ import * as api from '../lib/api';
 
 vi.mock('../lib/api', async (orig) => ({ ...(await orig<typeof api>()), }));
 
+/**
+ * One stable spy for the whole file. A fresh `vi.fn()` per `useToast()` call
+ * would be unassertable — the page keeps its own ref to whichever function it
+ * got, so the test could never see the same object it does.
+ */
+const showToastMock = vi.hoisted(() => vi.fn());
+
 vi.mock('@/components/ui/toast', () => ({
-  useToast: () => ({ showToast: vi.fn(), dismissToast: vi.fn() }),
+  useToast: () => ({ showToast: showToastMock, dismissToast: vi.fn() }),
 }));
 
 const MOCK_CONTACT = { id: 1, name: 'Caelan', isSelf: false };
@@ -45,6 +52,7 @@ const MOCK_LEDGER = {
 };
 
 beforeEach(() => {
+  showToastMock.mockClear();
   vi.spyOn(api, 'getJson').mockResolvedValue([MOCK_CONTACT] as never);
   vi.spyOn(api, 'getContactLedger').mockResolvedValue(MOCK_LEDGER as never);
   vi.spyOn(api, 'getSelfSuggestions').mockResolvedValue({ suggestions: [] } as never);
@@ -363,8 +371,9 @@ describe('PeopleLedgerPage — drill-in', () => {
     // Transfer row amount — scoped to the transfers table
     const transfersTable = await screen.findByTestId('transfers-table');
     expect(within(transfersTable).getByText('CAD -200.00')).toBeInTheDocument();
-    // Mark as loan button
-    expect(await screen.findByRole('button', { name: /mark as loan/i })).toBeInTheDocument();
+    // The reimbursement-claim button, named so it cannot be read as the Role
+    // dropdown's "Loan" option (they move different numbers).
+    expect(await screen.findByTestId('log-claim-10')).toBeInTheDocument();
   });
 
   it('tags a transfer via the role select and refetches the ledger', async () => {
@@ -570,6 +579,200 @@ describe('PeopleLedgerPage — drill-in', () => {
 
     const transfersTable = await screen.findByTestId('transfers-table');
     expect(within(transfersTable).getByText('e-Transfer sent Caelan')).toBeInTheDocument();
+  });
+});
+
+describe('PeopleLedgerPage — drill-in captions and controls', () => {
+  // ── I1: the caption must describe the balance actually on screen ──────────
+
+  it('says untagged transfers are counted when the loanDefault toggle is on', async () => {
+    // With `loanDefault` on, `resolveLedgerRole` folds every untagged row in by
+    // direction — on the real Evan and Caelan data that is most of the balance.
+    // The toggle sits directly above this caption, so a caption that still said
+    // "tagged loan or repayment" would be false the moment it is flipped.
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue({
+      ...MOCK_LEDGER,
+      loanDefault: true,
+    } as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const balance = await screen.findByTestId('loan-balance');
+    const caption = within(balance).getByTestId('loan-balance-caption').textContent ?? '';
+    expect(caption).toMatch(/untagged/i);
+    // …and it must point at the control that made it true.
+    expect(caption).toMatch(/toggle/i);
+  });
+
+  it('says untagged transfers are not counted when the toggle is off', async () => {
+    // MOCK_LEDGER.loanDefault is false.
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const balance = await screen.findByTestId('loan-balance');
+    const caption = within(balance).getByTestId('loan-balance-caption').textContent ?? '';
+    expect(caption).toMatch(/untagged transfers are not counted/i);
+  });
+
+  // ── I2: a landed write with a failed refetch must not look like nothing ────
+
+  it('warns when the write lands but the refetch fails', async () => {
+    vi.spyOn(api, 'setCounterpartyRole').mockResolvedValue({} as never);
+    vi.spyOn(api, 'getContactLedger')
+      .mockResolvedValueOnce(MOCK_LEDGER as never)
+      .mockRejectedValue(new Error('network down'));
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const select = await screen.findByTestId('role-select-10');
+    await userEvent.selectOptions(select, 'loan');
+
+    // The PATCH succeeded, so no write toast fires. Without this one the page
+    // silently renders the pre-write balance under "What they owe you".
+    await waitFor(() => {
+      expect(showToastMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: expect.stringMatching(/couldn.t be refreshed/i),
+        }),
+      );
+    });
+  });
+
+  it('warns when the loanDefault toggle saves but the refetch fails', async () => {
+    vi.spyOn(api, 'setContactLoanDefault').mockResolvedValue({} as never);
+    vi.spyOn(api, 'getContactLedger')
+      .mockResolvedValueOnce(MOCK_LEDGER as never)
+      .mockRejectedValue(new Error('network down'));
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByTestId('loan-default-toggle'));
+
+    // The Switch visibly reverts here while the server holds the new value.
+    await waitFor(() => {
+      expect(showToastMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: expect.stringMatching(/couldn.t be refreshed/i),
+        }),
+      );
+    });
+  });
+
+  // ── I3: two controls called "loan" moved two different numbers ────────────
+
+  it('names the reimbursement button apart from the Role dropdown', async () => {
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const button = await screen.findByTestId('log-claim-10');
+    // "Mark as loan" collided with the Role dropdown's "Loan" option while
+    // moving a different tile.
+    expect(button.textContent ?? '').not.toMatch(/mark as loan/i);
+    expect(button.textContent ?? '').toMatch(/claim/i);
+    // It must say which tile it actually moves.
+    expect(button.getAttribute('title') ?? '').toMatch(/tracked loans outstanding/i);
+    expect(button.getAttribute('title') ?? '').toMatch(/loan balance/i);
+  });
+
+  it('still posts the reimbursement endpoint under the new label', async () => {
+    const markSpy = vi.spyOn(api, 'markTransactionAsLoan').mockResolvedValue({} as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByTestId('log-claim-10'));
+
+    await waitFor(() => {
+      expect(markSpy).toHaveBeenCalledWith(10, 1);
+    });
+  });
+});
+
+// ── M4: metric totals accumulate as integers, not floats ────────────────────
+
+describe('PeopleLedgerPage — metric totals', () => {
+  it('does not round sub-cent balances away into "Nothing outstanding"', async () => {
+    vi.spyOn(api, 'getJson').mockResolvedValue([
+      { id: 1, name: 'Caelan', isSelf: false },
+      { id: 2, name: 'Stephen', isSelf: false },
+    ] as never);
+    vi.spyOn(api, 'getContactLedger').mockImplementation((id: number) =>
+      Promise.resolve({
+        ...MOCK_LEDGER,
+        contactId: id,
+        loanBalance: [
+          { currency: 'CAD', lent: '0.0002', repaid: '0.0000', balance: '0.0002' },
+        ],
+      } as never),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const metrics = await screen.findByTestId('loan-balance-metrics');
+    // Cents-rounding the accumulator zeroed these and the tile then claimed
+    // nothing was outstanding over two live balances.
+    await waitFor(() => {
+      expect(metrics.textContent ?? '').not.toMatch(/nothing outstanding/i);
+    });
+    // Two contacts at 0.0002 each. Cents-rounding the accumulator collapsed
+    // the total to 0, the tile vanished, and the debts are still real.
+    expect(within(metrics).getByText('CAD 0.00 owed to you')).toBeInTheDocument();
+  });
+
+  it('sums many balances without float drift', async () => {
+    // 0.1 + 0.2 in binary floating point is 0.30000000000000004.
+    vi.spyOn(api, 'getJson').mockResolvedValue([
+      { id: 1, name: 'Caelan', isSelf: false },
+      { id: 2, name: 'Stephen', isSelf: false },
+    ] as never);
+    vi.spyOn(api, 'getContactLedger').mockImplementation((id: number) =>
+      Promise.resolve({
+        ...MOCK_LEDGER,
+        contactId: id,
+        loanBalance: [
+          {
+            currency: 'CAD',
+            lent: id === 1 ? '0.1000' : '0.2000',
+            repaid: '0.0000',
+            balance: id === 1 ? '0.1000' : '0.2000',
+          },
+        ],
+      } as never),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const metrics = await screen.findByTestId('loan-balance-metrics');
+    expect(await within(metrics).findByText('CAD 0.30 owed to you')).toBeInTheDocument();
   });
 });
 

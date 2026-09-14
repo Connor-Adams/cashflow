@@ -163,8 +163,10 @@ export function setContactSelf(id: number, isSelf: boolean): Promise<unknown> {
 }
 /**
  * Tag what a transfer means. `null` clears the tag and hands the row back to
- * the contact's `loanDefault`. The PATCH response does NOT echo
- * `counterpartyRole`, so callers must refetch the ledger rather than trust it.
+ * the contact's `loanDefault`. The response does echo the saved row back, but
+ * the loan balance it feeds is recomputed server-side over every row at once,
+ * so callers must refetch the ledger — the echoed row cannot tell them what the
+ * tag did to the total.
  */
 export function setCounterpartyRole(txnId: number, role: CounterpartyRole | null): Promise<unknown> {
   return patchJson(`/api/transactions/${txnId}`, { counterpartyRole: role })

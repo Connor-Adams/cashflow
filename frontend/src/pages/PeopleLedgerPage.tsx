@@ -135,9 +135,22 @@ interface CurrencyTotals {
   youOwe: number
 }
 
-/** Cents. Keeps float accumulation from leaking a 1e-13 residue into a label. */
-function roundCents(n: number): number {
-  return Math.round(n * 100) / 100
+/**
+ * Money scale for accumulation: integers of 1/10_000 of a currency unit.
+ *
+ * Matches `computeLoanBalance` and `computeTransferNet` on the backend, which
+ * both fold at this scale and emit fixed-4 strings. Summing those strings back
+ * as floats and mopping up with a cents round afterwards was wrong twice over:
+ * the residue is only invisible until enough contacts are loaded, and a cents
+ * round destroys sub-cent balances outright — several contacts each owing a
+ * fraction of a cent totalled to exactly 0 and the tile then showed nothing
+ * outstanding over live debts.
+ */
+const MONEY_SCALE = 10_000
+
+/** A fixed-4 decimal amount as an exact integer count of 1/10_000 units. */
+function toMoneyUnits(n: number): number {
+  return Math.round(n * MONEY_SCALE)
 }
 
 /**
@@ -168,17 +181,21 @@ function deriveMetrics(cwl: ContactWithLedger[]): {
   trackedLoansCount: number
 } {
   const balanceByCurrency = new Map<string, CurrencyTotals>()
+  // Accumulated in whole `MONEY_SCALE` units; converted back exactly at the end.
+  const unitsByCurrency = new Map<string, CurrencyTotals>()
   let trackedLoansCount = 0
   const seen = new Set<number>()
   for (const { contact, ledger } of cwl) {
     if (contact.isSelf || contact.isPartner || !ledger) continue
     for (const b of ledger.loanBalance) {
       const v = Number(b.balance)
-      if (!Number.isFinite(v) || v === 0) continue
-      const totals = balanceByCurrency.get(b.currency) ?? { owedToYou: 0, youOwe: 0 }
-      if (v > 0) totals.owedToYou += v
-      else totals.youOwe += -v
-      balanceByCurrency.set(b.currency, totals)
+      if (!Number.isFinite(v)) continue
+      const units = toMoneyUnits(v)
+      if (units === 0) continue
+      const totals = unitsByCurrency.get(b.currency) ?? { owedToYou: 0, youOwe: 0 }
+      if (units > 0) totals.owedToYou += units
+      else totals.youOwe += -units
+      unitsByCurrency.set(b.currency, totals)
     }
     const loanCount = Object.keys(ledger.trackedOutstandingByCurrency).filter(
       (cur) => Number(ledger.trackedOutstandingByCurrency[cur]) > 0,
@@ -188,10 +205,13 @@ function deriveMetrics(cwl: ContactWithLedger[]): {
       trackedLoansCount++
     }
   }
-  for (const [currency, t] of balanceByCurrency) {
+  for (const [currency, t] of unitsByCurrency) {
+    // Exact: an integer divided by the scale it was built at. No residue to
+    // round away, and a sub-cent total survives to be shown rather than being
+    // rounded to 0 and dropped by the `> 0` gate on the tile.
     balanceByCurrency.set(currency, {
-      owedToYou: roundCents(t.owedToYou),
-      youOwe: roundCents(t.youOwe),
+      owedToYou: t.owedToYou / MONEY_SCALE,
+      youOwe: t.youOwe / MONEY_SCALE,
     })
   }
   return { balanceByCurrency, trackedLoansCount }
@@ -260,12 +280,31 @@ const TRACKED_OUTSTANDING_CAPTION =
 const TRACKED_OUTSTANDING_COLUMN_CAPTION =
   'Hand-logged reimbursement claims — not the loan balance'
 
-/** What `loanBalance` is, stated once so the tile above can be trusted. */
-const LOAN_BALANCE_CAPTION =
-  'What they owe you: every transfer tagged loan or repayment, netted. This page’s answer.'
+/**
+ * What `loanBalance` is — which depends on the contact's `loanDefault`.
+ *
+ * With it off, only rows carrying a loan/repayment tag are folded in. With it
+ * on, `resolveLedgerRole` also folds in every UNTAGGED row by direction, which
+ * on the real Evan and Caelan data is most of the balance. A single fixed
+ * sentence was therefore false half the time, and worse than useless with the
+ * toggle sitting twenty pixels above it: the reader flips it, watches the
+ * number move, and reads a caption saying it shouldn't have.
+ */
+function loanBalanceCaption(loanDefault: boolean): string {
+  return loanDefault
+    ? 'What they owe you: every transfer tagged loan or repayment, PLUS every untagged transfer counted by its direction — because the toggle above is on. This page’s answer.'
+    : 'What they owe you: every transfer tagged loan or repayment, netted. Untagged transfers are not counted. This page’s answer.'
+}
 
-/** The landing column's shorter form. */
-const LOAN_BALANCE_COLUMN_CAPTION = 'What they owe you — the page’s answer'
+/**
+ * The landing column's shorter form. This header stands over every contact at
+ * once and `loanDefault` is per-contact, so no single sentence can describe the
+ * state of the column — the contacts in it disagree. It states the RULE
+ * instead, which is true of every row regardless of how each toggle is set;
+ * the per-contact drill-in caption is where the current state is stated.
+ */
+const LOAN_BALANCE_COLUMN_CAPTION =
+  'What they owe you — tagged transfers, plus untagged ones for contacts set to treat untagged as loans'
 
 // ── LoanBar ──────────────────────────────────────────────────────────────────
 
@@ -508,10 +547,10 @@ export function PeopleLedgerPage() {
   }, [selectedId])
 
   /**
-   * Refetch the ledger. Required after any write that changes the balance:
-   * `PATCH /api/transactions/:id` does not echo `counterpartyRole` back, and
-   * the balance is recomputed server-side anyway, so there is nothing local to
-   * patch optimistically.
+   * Refetch the ledger. Required after any write that changes the balance: the
+   * balance is recomputed server-side from every row at once, so no local patch
+   * of the written row can produce it. The server is the only thing that knows
+   * what the write did to the total.
    *
    * Deliberately does NOT raise `ledgerLoading` — that swaps the whole card and
    * table for "Loading…", and with a role dropdown on every row it would blink
@@ -536,7 +575,18 @@ export function PeopleLedgerPage() {
       // Discard if the user navigated away or a newer refetch superseded us.
       if (token === ledgerRequestRef.current) setLedger(data)
     } catch {
-      // Keep the ledger on screen; the failing write already toasted.
+      // `reload` only ever runs AFTER a write has succeeded, so nothing else
+      // has toasted — the write's own catch was never entered. Silence here
+      // leaves the pre-write balance on screen under "What they owe you", the
+      // role dropdown snapped back and the loanDefault Switch visibly
+      // reverted, all while the server holds the new value. Say so; the stale
+      // ledger stays on screen because it is still the last thing we know.
+      if (token === ledgerRequestRef.current) {
+        showToastRef.current({
+          title: 'Saved, but the balance couldn’t be refreshed.',
+          variant: 'destructive',
+        })
+      }
     } finally {
       if (token === ledgerRequestRef.current) setLedgerLoading(false)
     }
@@ -548,7 +598,7 @@ export function PeopleLedgerPage() {
     if (selectedId == null) return
     try {
       await markTransactionAsLoan(txnId, selectedId)
-      showToastRef.current({ title: 'Marked as loan', variant: 'success' })
+      showToastRef.current({ title: 'Reimbursement claim logged', variant: 'success' })
       await reload()
     } catch (e) {
       showToastRef.current({ title: e instanceof Error ? e.message : 'Update failed', variant: 'destructive' })
@@ -559,9 +609,10 @@ export function PeopleLedgerPage() {
     setSavingRole((prev) => new Set([...prev, txnId]))
     try {
       await setCounterpartyRole(txnId, role)
-      // The PATCH response omits counterpartyRole, so the ledger is the only
-      // source of truth for what the row now means and what it did to the
-      // balance — refetch rather than trusting the write.
+      // The PATCH does echo the saved row back, but the balance this row feeds
+      // is folded server-side across every row at once — no local edit of one
+      // row can produce it. The ledger is the only source of truth for what the
+      // tag did to the total, so refetch instead of patching state.
       await reload()
     } catch (e) {
       showToastRef.current({ title: e instanceof Error ? e.message : 'Tag failed', variant: 'destructive' })
@@ -1017,7 +1068,7 @@ export function PeopleLedgerPage() {
                       ))
                     )}
                     <TileCaption testId="loan-balance-caption">
-                      {LOAN_BALANCE_CAPTION}
+                      {loanBalanceCaption(ledger.loanDefault)}
                     </TileCaption>
                   </div>
                   <div data-testid="raw-net-flow">
@@ -1132,18 +1183,28 @@ export function PeopleLedgerPage() {
                           </TableCell>
                           <TableCell>
                             <div className="flex justify-end">
+                              {/* This posts a Reimbursement, which moves
+                                  "Tracked loans outstanding" and NOTHING else.
+                                  It used to read "Mark as loan", one cell from
+                                  a Role dropdown whose "Loan" option moves the
+                                  loan balance instead — two controls with the
+                                  same name moving two numbers that disagree in
+                                  production. The label and the tooltip now say
+                                  which tile each one is for. */}
                               {t.direction === 'out' && !t.isLoan && !t.cancelled && (
                                 <Button
                                   type="button"
                                   variant="outline"
                                   size="sm"
+                                  data-testid={`log-claim-${t.id}`}
+                                  title="Logs a reimbursement claim — moves “Tracked loans outstanding”. To change the loan balance, use the Role dropdown."
                                   onClick={() => onMarkLoan(t.id)}
                                 >
-                                  Mark as loan
+                                  Log reimbursement claim
                                 </Button>
                               )}
                               {t.isLoan && (
-                                <Badge variant="default">Loan</Badge>
+                                <Badge variant="default">Claim logged</Badge>
                               )}
                             </div>
                           </TableCell>
