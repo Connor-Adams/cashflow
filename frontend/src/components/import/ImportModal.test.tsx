@@ -25,11 +25,28 @@ describe('detectMode', () => {
     ).toBe('ws-bundle')
   })
 
-  it('routes a single RBC statement CSV to standard, NOT ws-bundle (bank files must not hit the WS importer)', () => {
-    // Same tokens, different field order — this is an RBC export, not a WS one.
+  it('routes a date-suffixed Wealthsimple monthly export to ws-bundle', () => {
+    // WS moved the date to the end of the name in 2026-08:
+    // <name>-monthly-statement-transactions-<WSID>-<YYYY-MM-DD>.csv
+    // This case was previously asserted to be an RBC export and forced to
+    // 'standard'. It is not — WK3DD9X35CAD is a WS account id, and RBC issues
+    // no such token. Field ORDER never identified the institution; the WSID does.
     expect(
       detectMode([csv('Chequing-monthly-statement-transactions-WK3DD9X35CAD-2026-01-01.csv')]),
+    ).toBe('ws-bundle')
+    expect(
+      detectMode([
+        csv('Corporate chequing-monthly-statement-transactions-WK79NVW07CAD-2026-08-01.csv'),
+      ]),
+    ).toBe('ws-bundle')
+  })
+
+  it('routes a genuine bank statement CSV to standard, NOT ws-bundle (bank files must not hit the WS importer)', () => {
+    // A real RBC export carries no WS account id, in any field position.
+    expect(
+      detectMode([csv('Chequing-monthly-statement-transactions-2026-01-01.csv')]),
     ).toBe('standard')
+    expect(detectMode([csv('rbc-chequing-6985-2026-01.csv')])).toBe('standard')
   })
 
   it('routes a plain bank download CSV to standard', () => {

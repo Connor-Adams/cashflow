@@ -27,9 +27,17 @@ const WS_CREDIT_CARD_RE =
   /^Wealthsimple-credit-card-\d{4}-\d{2}-\d{2}-credit-card-statement-transactions-ca-credit-card-[A-Za-z0-9]+\.csv$/
 const WS_MONTHLY_RE =
   /^.+?-\d{4}-\d{2}-\d{2}-monthly-statement-transactions-[A-Za-z0-9]+CAD?\.csv$/
+// WS moved the period-end date to the end of the name in 2026-08. The WSID
+// segment — not the field order — is what identifies the file as theirs.
+const WS_MONTHLY_DATE_SUFFIX_RE =
+  /^.+?-monthly-statement-transactions-[A-Za-z0-9]+CAD?-\d{4}-\d{2}-\d{2}\.csv$/
 
 function isWealthsimpleExport(name: string): boolean {
-  return WS_CREDIT_CARD_RE.test(name) || WS_MONTHLY_RE.test(name)
+  return (
+    WS_CREDIT_CARD_RE.test(name) ||
+    WS_MONTHLY_RE.test(name) ||
+    WS_MONTHLY_DATE_SUFFIX_RE.test(name)
+  )
 }
 
 export function detectMode(files: File[]): DetectedMode {
