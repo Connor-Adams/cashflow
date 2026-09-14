@@ -76,6 +76,13 @@ export type CorpTaxYearFacts = {
   salaryPaid: Decimal;                  // T4 box 14 from corp to owner
   carryforwards: CorpCarryforwards;
   /**
+   * Caveats raised while ASSEMBLING these facts (as opposed to while computing
+   * the return). buildT2 seeds its own `warnings` from this so a shaky input —
+   * e.g. a receipt counted as revenue that names no external payer — is visible
+   * on the return itself rather than only in the builder.
+   */
+  factWarnings?: string[];
+  /**
    * P11b: Associated-group AAII total. When present, used in place of per-corp
    * AAII for the SBD grind so all corps in an associated group share the
    * $500k SBD limit / $50k AAII threshold under s.125(5.1).

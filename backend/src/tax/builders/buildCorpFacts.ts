@@ -11,6 +11,7 @@ import {
 import { D } from '../util/decimal';
 import { computeAcb } from '../../portfolio/acb';
 import { toCad } from '../../fx/toCad';
+import { partitionCorpPerimeter } from './corpPerimeter';
 import type {
   CapGainEvent,
   CorpCarryforwards,
@@ -37,21 +38,49 @@ export async function buildCorpFacts(
     where: { entityId, date: { [Op.between]: [startDate, endDate] } },
   });
 
-  // Active business income — transactions with finalBusiness=true
+  // Active business income — money that actually crossed the corporate
+  // perimeter, in or out. A single customer payment can occupy several rows as
+  // it hops between the corp's own accounts; only the hop that enters from
+  // outside is income. `corpPerimeter` owns that rule and documents why
+  // `linkedTransactionId` alone cannot detect an internal leg.
+  //
+  // The link-target set is built from the entity's FULL history, not the fiscal
+  // window: a transfer initiated in December and settled in January would
+  // otherwise look external on both sides of the year boundary.
+  const allEntityTxns = await Transaction.findAll({
+    where: { entityId },
+    attributes: ['id', 'linkedTransactionId'],
+  });
+  const linkTargetIds = new Set<number>();
+  for (const t of allEntityTxns) {
+    if (t.linkedTransactionId != null) linkTargetIds.add(t.linkedTransactionId);
+  }
+
+  const perimeter = partitionCorpPerimeter(
+    txns.map((t) => ({
+      id: t.id,
+      amount: String(t.amount),
+      currency: t.currency ?? 'CAD',
+      date: t.date as unknown as string,
+      txnType: (t as unknown as { txnType?: string | null }).txnType ?? null,
+      linkedTransactionId: t.linkedTransactionId ?? null,
+      taxTreatmentOverride: t.taxTreatmentOverride ?? null,
+      merchant: t.merchantClean ?? t.merchantRaw ?? null,
+    })),
+    { legalName: entity.legalName ?? '', linkTargetIds },
+  );
+
+  // Revenue and expenses both land in activeBusinessIncome; expenses keep their
+  // negative sign so the engine's signed sum nets them off.
   const activeBusinessIncome: IncomeItem[] = [];
-  for (const t of txns) {
-    if (t.finalBusiness) {
-      const { cad } = await toCad(
-        D(t.amount as unknown as string),
-        t.currency ?? 'CAD',
-        t.date as unknown as string,
-      );
-      activeBusinessIncome.push({
-        source: `Txn #${t.id} ${t.finalCategory ?? ''}`,
-        amount: D(t.amount as unknown as string),
-        cadAmount: cad,
-      });
-    }
+  for (const t of [...perimeter.revenue, ...perimeter.expenses]) {
+    const raw = D(t.amount);
+    const { cad } = await toCad(raw, t.currency, t.date);
+    activeBusinessIncome.push({
+      source: `Txn #${t.id} ${t.merchant ?? ''}`.trim(),
+      amount: raw,
+      cadAmount: cad,
+    });
   }
 
   const activity = accountIds.length
@@ -255,5 +284,6 @@ export async function buildCorpFacts(
     dividendsPaid,
     salaryPaid,
     carryforwards,
+    factWarnings: perimeter.warnings,
   };
 }
