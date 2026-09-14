@@ -149,4 +149,142 @@ describe('ImportModal — Wealthsimple bundle', () => {
       )
     })
   })
+
+  /**
+   * The submit handler set the feedback banner and then called reset(), which
+   * clears it. React batches both updates into one render, so last-write-wins
+   * left feedback null and the user saw a successful import render nothing at
+   * all. The old test above mocked `{ results: [] }` and asserted only that the
+   * fetch happened, so it stayed green throughout.
+   */
+  async function submitWsBundle(results: unknown[]) {
+    vi.spyOn(api, 'getJson').mockResolvedValue([] as never)
+    vi.spyOn(api, 'postFormData').mockResolvedValue({ results } as never)
+
+    render(
+      <MemoryRouter>
+        <ImportModal open onOpenChange={() => {}} accounts={[]} onCommitted={() => {}} />
+      </MemoryRouter>,
+    )
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File(
+      ['date,transaction,description,amount,balance,currency\n'],
+      'Chequing-monthly-statement-transactions-WK3DD9X35CAD-2026-08-01.csv',
+      { type: 'text/csv' },
+    )
+    Object.defineProperty(fileInput, 'files', { value: [file], configurable: true })
+    fireEvent.change(fileInput)
+
+    fireEvent.click(await screen.findByRole('button', { name: /^import 1$/i }))
+  }
+
+  it('shows the result banner after a successful bundle import', async () => {
+    await submitWsBundle([
+      {
+        file: 'Chequing-monthly-statement-transactions-WK3DD9X35CAD-2026-08-01.csv',
+        accountName: 'Wealthsimple Chequing',
+        accountCreated: false,
+        inserted: 15,
+        skippedDuplicates: 0,
+        rowErrors: 0,
+        parseErrors: [],
+        warnings: [],
+      },
+    ])
+
+    expect(await screen.findByText(/1\/1 imported/)).toBeInTheDocument()
+    // The per-file line, not the headline count — both mention the row total.
+    expect(
+      screen.getByText('Wealthsimple Chequing: 15 row(s)'),
+    ).toBeInTheDocument()
+  })
+
+  it('names the account each file landed in, not just the filename', async () => {
+    await submitWsBundle([
+      {
+        file: 'Corporate chequing-monthly-statement-transactions-WK79NVW07CAD-2026-08-01.csv',
+        accountName: 'Wealthsimple Corporate Chequing',
+        accountCreated: false,
+        inserted: 4,
+        skippedDuplicates: 0,
+        rowErrors: 0,
+        parseErrors: [],
+        warnings: [],
+      },
+    ])
+
+    expect(await screen.findByText(/Wealthsimple Corporate Chequing/)).toBeInTheDocument()
+  })
+
+  it('reports duplicates skipped on a re-import instead of a bare 0 rows', async () => {
+    // Re-importing the same statement inserts nothing and skips every row as a
+    // duplicate. `skippedDuplicates` is the field the backend actually sends;
+    // the UI previously read a `skipped` flag that no endpoint ever returns, so
+    // this case was indistinguishable from a silent no-op.
+    await submitWsBundle([
+      {
+        file: 'Chequing-monthly-statement-transactions-WK3DD9X35CAD-2026-08-01.csv',
+        accountName: 'Wealthsimple Chequing',
+        accountCreated: false,
+        inserted: 0,
+        skippedDuplicates: 15,
+        rowErrors: 0,
+        parseErrors: [],
+        warnings: [],
+      },
+    ])
+
+    expect(await screen.findByText(/15 duplicate/)).toBeInTheDocument()
+  })
+
+  it('surfaces a per-file error and flags the batch as not fully imported', async () => {
+    await submitWsBundle([
+      {
+        file: 'Chequing-monthly-statement-transactions-WK3DD9X35CAD-2026-08-01.csv',
+        accountName: 'Wealthsimple Chequing',
+        accountCreated: false,
+        inserted: 12,
+        skippedDuplicates: 0,
+        rowErrors: 0,
+        parseErrors: [],
+        warnings: [],
+      },
+      {
+        file: 'Corporate chequing-monthly-statement-transactions-WK79NVW07CAD-2026-08-01.csv',
+        accountName: null,
+        accountCreated: false,
+        inserted: 0,
+        skippedDuplicates: 0,
+        rowErrors: 0,
+        parseErrors: [],
+        warnings: [],
+        error: 'unrecognized Wealthsimple filename',
+      },
+    ])
+
+    expect(await screen.findByText(/1\/2 imported/)).toBeInTheDocument()
+    expect(screen.getByText(/unrecognized Wealthsimple filename/)).toBeInTheDocument()
+  })
+
+  it('clears the staged file list even though the banner stays', async () => {
+    await submitWsBundle([
+      {
+        file: 'Chequing-monthly-statement-transactions-WK3DD9X35CAD-2026-08-01.csv',
+        accountName: 'Wealthsimple Chequing',
+        accountCreated: false,
+        inserted: 15,
+        skippedDuplicates: 0,
+        rowErrors: 0,
+        parseErrors: [],
+        warnings: [],
+      },
+    ])
+
+    // Banner visible…
+    expect(await screen.findByText(/1\/1 imported/)).toBeInTheDocument()
+    // …and the drop-zone is ready for the next drop: the submit button falls
+    // back to its empty-state label rather than still offering "Import 1".
+    expect(screen.queryByRole('button', { name: /^import 1$/i })).not.toBeInTheDocument()
+  })
 })

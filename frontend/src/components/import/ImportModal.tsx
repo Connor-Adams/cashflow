@@ -54,15 +54,38 @@ type PdfBatchStatus = {
   items: PdfBatchItem[]
 }
 
+/**
+ * Mirror of the backend's `BundleFileResult` (backend/src/import/runImport.ts).
+ * It carries no `skipped`/`reason` pair — that shape belongs to the standard
+ * upload endpoint. A bundle file either errored or committed, and rows it
+ * declined are counted in `skippedDuplicates`.
+ */
 type WsBundleFileResult = {
   file: string
-  accountShortCode: string | null
+  accountName: string | null
+  accountCreated: boolean
   inserted: number
+  skippedDuplicates: number
   rowErrors: number
   parseErrors: { rowIndex: number; message: string }[]
-  skipped?: boolean
-  reason?: string | null
+  warnings: string[]
   error?: string
+}
+
+/**
+ * One line per file in the result banner. Leads with the destination account
+ * rather than the filename — the filename is what the user just picked, the
+ * account is what they cannot otherwise verify — and reports duplicates
+ * explicitly so a re-import reads as "nothing new" instead of "0 rows".
+ */
+function wsBundleLine(r: WsBundleFileResult): string {
+  const where = r.accountName ?? r.file
+  if (r.error) return `${where}: ERR: ${r.error}`
+  const parts = [`${r.inserted} row(s)`]
+  if (r.skippedDuplicates > 0) parts.push(`${r.skippedDuplicates} duplicate(s) skipped`)
+  if (r.rowErrors > 0) parts.push(`${r.rowErrors} row error(s)`)
+  if (r.accountCreated) parts.push('account created')
+  return `${where}: ${parts.join(' · ')}`
 }
 
 type MultiUploadResponse = { results: UploadResult[] }
@@ -164,11 +187,21 @@ export function ImportModal({
     if (!open) { setBatch(null); setBatchStatus(null) }
   }, [open])
 
-  function reset() {
+  /**
+   * Clear the staged upload so the drop-zone is ready for the next one.
+   *
+   * `keepFeedback` exists because every success path sets the result banner
+   * and then resets. React batches both updates into a single render, so an
+   * unconditional `setFeedback(null)` here wins and the user sees nothing at
+   * all for an import that actually succeeded. The pdf-bundle path used to
+   * dodge this by hand-rolling its own partial reset; this makes the intent
+   * explicit and available to every mode.
+   */
+  function reset(opts: { keepFeedback?: boolean } = {}) {
     setFiles([])
     setBatchLabel('')
     setOverrideMode(null)
-    setFeedback(null)
+    if (!opts.keepFeedback) setFeedback(null)
     setBatch(null)
     setBatchStatus(null)
     setShowProgressLink(false)
@@ -235,19 +268,16 @@ export function ImportModal({
         const fd = new FormData()
         files.forEach((f) => fd.append('files', f))
         const { results } = await postFormData<{ results: WsBundleFileResult[] }>(WS_BUNDLE_URL, fd)
-        const ok = results.filter((r) => !r.error && !r.skipped).length
+        const ok = results.filter((r) => !r.error).length
         const inserted = results.reduce((s, r) => s + r.inserted, 0)
-        const lines = results
-          .slice(0, 8)
-          .map((r) => `${r.file}: ${r.skipped ? `skipped (${r.reason ?? 'unknown'})` : r.error ? `ERR: ${r.error}` : `${r.inserted} row(s)`}`)
         setFeedback({
           variant: ok === results.length ? 'success' : 'warning',
           title: `WS bundle: ${ok}/${results.length} imported · ${inserted} row(s)`,
-          lines,
+          lines: results.slice(0, 8).map(wsBundleLine),
         })
         if (onAccountsChanged) onAccountsChanged()
         else onCommitted()
-        reset()
+        reset({ keepFeedback: true })
       } else if (mode === 'holdings') {
         const fd = new FormData()
         fd.append('file', files[0])
@@ -267,7 +297,7 @@ export function ImportModal({
           ],
         })
         onCommitted()
-        reset()
+        reset({ keepFeedback: true })
       } else {
         // standard: single or multi CSV/OFX
         const fd = new FormData()
@@ -297,7 +327,7 @@ export function ImportModal({
           })
         }
         onCommitted()
-        reset()
+        reset({ keepFeedback: true })
       }
     } catch (err) {
       setFeedback({
