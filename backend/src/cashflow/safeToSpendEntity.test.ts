@@ -10,7 +10,11 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { sequelize } from '../db';
 import { Account, Entity, Household, User } from '../models';
-import { computeSafeToSpend, getExpectedIncome } from './safeToSpend';
+import {
+  computeSafeToSpend,
+  getExpectedIncome,
+  getIncomeLegs,
+} from './safeToSpend';
 
 let HH = 0;
 let USER = 0;
@@ -68,15 +72,17 @@ async function seedCash(accountId: number, amount: number): Promise<void> {
   await seedTxn(accountId, '2026-01-01', amount, 'Seed');
 }
 
+/** Seed one transaction; returns its id so callers can link against it. */
 async function seedTxn(
   accountId: number,
   date: string,
   amount: number,
   merchant: string,
   txnType: string | null = null,
-): Promise<void> {
+  extra: { linkedTransactionId?: number; currency?: string } = {},
+): Promise<number> {
   const { Transaction } = await import('../models');
-  await Transaction.create({
+  const row = await Transaction.create({
     accountId,
     householdId: HH,
     visibility: 'household',
@@ -86,11 +92,40 @@ async function seedTxn(
     merchantRaw: merchant,
     merchantClean: merchant,
     amount: amount.toFixed(4),
-    currency: 'CAD',
+    currency: extra.currency ?? 'CAD',
     ...(txnType != null ? { txnType } : {}),
+    ...(extra.linkedTransactionId != null
+      ? { linkedTransactionId: extra.linkedTransactionId }
+      : {}),
     sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
     sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
   } as never);
+  return row.id;
+}
+
+/**
+ * Seed a corp -> personal owner draw: the corp-side outflow plus the
+ * personal-side inflow that links back to it. Returns the personal txn id.
+ */
+async function seedOwnerDraw(
+  corpAccountId: number,
+  personalAccountId: number,
+  date: string,
+  amount: number,
+  currency = 'CAD',
+): Promise<number> {
+  const corpSide = await seedTxn(
+    corpAccountId,
+    date,
+    -amount,
+    'Transfer',
+    'transfer',
+    { currency },
+  );
+  return seedTxn(personalAccountId, date, amount, 'Transfer', 'transfer', {
+    linkedTransactionId: corpSide,
+    currency,
+  });
 }
 
 /** A biweekly paycheck stream ending just before asOf 2026-06-20. */
@@ -247,4 +282,116 @@ test('getExpectedIncome ignores income in a different currency', async () => {
 
   const income = await getExpectedIncome(HH, 'USD', '2026-06-20', '2026-07-04', new Set());
   assert.equal(income, 0);
+});
+
+/*
+ * Owner-draw income (#990). An owner-operator's pay is a variable, irregular
+ * corp -> personal distribution tagged `transfer`, which the paycheck detector
+ * excludes outright — so expectedIncome read $0 forever. These lock the
+ * corp-link signal that separates a real draw from an internal shuffle.
+ */
+
+const ASOF = '2026-09-13';
+/** asOf + the 14-day default window. */
+const WINDOW_END = '2026-09-27';
+
+test('a personal inflow linked to a corp-entity txn counts as owner-draw income', async () => {
+  const chequing = await mkAccount('Personal Chequing', PERSONAL);
+  const corpChequing = await mkAccount('Corp Chequing', CORP);
+  await seedOwnerDraw(corpChequing.id, chequing.id, '2026-07-14', 6000);
+
+  const legs = await getIncomeLegs(HH, 'CAD', ASOF, WINDOW_END, new Set([CORP]));
+  // 6000 over a 90d lookback = 66.67/day; x 14d window = 933.33
+  assert.equal(legs.ownerDrawIncome, 933.33);
+  assert.equal(legs.recurringIncome, 0);
+});
+
+test('a transfer linked to another PERSONAL account is an internal shuffle, not income', async () => {
+  const chequing = await mkAccount('Personal Chequing', PERSONAL);
+  const savings = await mkAccount('Personal Savings', PERSONAL, 'savings');
+  const outflow = await seedTxn(savings.id, '2026-07-14', -6000, 'Transfer', 'transfer');
+  await seedTxn(chequing.id, '2026-07-14', 6000, 'Transfer', 'transfer', {
+    linkedTransactionId: outflow,
+  });
+
+  const legs = await getIncomeLegs(HH, 'CAD', ASOF, WINDOW_END, new Set([CORP]));
+  assert.equal(legs.ownerDrawIncome, 0);
+});
+
+test('an UNLINKED transfer inflow is not counted (coverage gap, not income)', async () => {
+  const chequing = await mkAccount('Personal Chequing', PERSONAL);
+  await seedTxn(chequing.id, '2026-07-14', 6000, 'Transfer', 'transfer');
+
+  const legs = await getIncomeLegs(HH, 'CAD', ASOF, WINDOW_END, new Set([CORP]));
+  assert.equal(legs.ownerDrawIncome, 0);
+});
+
+test('owner-draw income is currency-scoped', async () => {
+  const chequing = await mkAccount('Personal Chequing', PERSONAL);
+  const corpChequing = await mkAccount('Corp Chequing', CORP);
+  await seedOwnerDraw(corpChequing.id, chequing.id, '2026-07-14', 6000);
+
+  const legs = await getIncomeLegs(HH, 'USD', ASOF, WINDOW_END, new Set([CORP]));
+  assert.equal(legs.ownerDrawIncome, 0);
+});
+
+test('draws older than the 90-day lookback do not count', async () => {
+  const chequing = await mkAccount('Personal Chequing', PERSONAL);
+  const corpChequing = await mkAccount('Corp Chequing', CORP);
+  await seedOwnerDraw(corpChequing.id, chequing.id, '2026-03-27', 10000);
+
+  const legs = await getIncomeLegs(HH, 'CAD', ASOF, WINDOW_END, new Set([CORP]));
+  assert.equal(legs.ownerDrawIncome, 0);
+});
+
+test('a corp-linked inflow is counted ONCE — as a draw, never also as a paycheck', async () => {
+  // Regular cadence + stable amount: this WOULD qualify as a recurring paycheck
+  // if the corp link were ignored. It must land in exactly one leg.
+  const chequing = await mkAccount('Personal Chequing', PERSONAL);
+  const corpChequing = await mkAccount('Corp Chequing', CORP);
+  for (const d of ['2026-08-16', '2026-08-30', '2026-09-13']) {
+    await seedOwnerDraw(corpChequing.id, chequing.id, d, 2500);
+  }
+
+  const legs = await getIncomeLegs(HH, 'CAD', ASOF, WINDOW_END, new Set([CORP]));
+  assert.equal(legs.recurringIncome, 0);
+  // 7500 over 90d = 83.33/day; x 14d = 1166.67
+  assert.equal(legs.ownerDrawIncome, 1166.67);
+});
+
+test('the two income legs compose: a salaried paycheck AND a corp draw both count', async () => {
+  const chequing = await mkAccount('Personal Chequing', PERSONAL);
+  const corpChequing = await mkAccount('Corp Chequing', CORP);
+  for (const d of ['2026-08-16', '2026-08-30', '2026-09-13']) {
+    await seedTxn(chequing.id, d, 2000, 'ACME PAYROLL');
+  }
+  await seedOwnerDraw(corpChequing.id, chequing.id, '2026-07-14', 6000);
+
+  const legs = await getIncomeLegs(HH, 'CAD', ASOF, WINDOW_END, new Set([CORP]));
+  assert.equal(legs.recurringIncome, 2000); // one biweekly occurrence lands 2026-09-27
+  assert.equal(legs.ownerDrawIncome, 933.33);
+});
+
+test('computeSafeToSpend surfaces both legs and expectedIncome is their sum', async () => {
+  const chequing = await mkAccount('Personal Chequing', PERSONAL);
+  const corpChequing = await mkAccount('Corp Chequing', CORP);
+  await seedCash(chequing.id, 1000);
+  await seedOwnerDraw(corpChequing.id, chequing.id, '2026-07-14', 6000);
+
+  const res = await computeSafeToSpend({
+    userId: USER,
+    householdId: HH,
+    currency: 'CAD',
+    asOfDate: ASOF,
+  });
+
+  assert.equal(res.breakdown.ownerDrawIncome, 933.33);
+  assert.equal(res.breakdown.recurringIncome, 0);
+  assert.equal(res.breakdown.expectedIncome, 933.33);
+  // The July draw already LANDED, so it sits in personal cash (1000 seed +
+  // 6000). The income leg projects the FUTURE draw rate on top — the past
+  // draw and the forward rate are different money, so this is not a
+  // double-count. The corp-side outflow never enters cash at all.
+  assert.equal(res.breakdown.currentCash, 7000);
+  assert.equal(res.value, 7933.33);
 });

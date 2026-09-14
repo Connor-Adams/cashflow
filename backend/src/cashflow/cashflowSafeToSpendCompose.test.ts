@@ -49,16 +49,51 @@ test('composeSafeToSpend: includeCreditCardBalance=false zeroes out CC line', ()
   assert.equal(r.breakdown.expectedCreditCardPayments, 0);
 });
 
-test('composeSafeToSpend: expected income adds back into the value', () => {
-  const r = composeSafeToSpend({ ...baseInput(), expectedIncome: 2500 });
+test('composeSafeToSpend: recurring income adds back into the value', () => {
+  const r = composeSafeToSpend({ ...baseInput(), recurringIncome: 2500 });
   // 3000 + 2500 - 800 - 200 - 300 - 100 = 4100
   assert.equal(r.value, 4100);
   assert.equal(r.breakdown.expectedIncome, 2500);
+  assert.equal(r.breakdown.recurringIncome, 2500);
+  assert.equal(r.breakdown.ownerDrawIncome, 0);
 });
 
-test('composeSafeToSpend: omitted expected income defaults to zero', () => {
+test('composeSafeToSpend: owner-draw income adds back into the value', () => {
+  const r = composeSafeToSpend({ ...baseInput(), ownerDrawIncome: 933.33 });
+  // 3000 + 933.33 - 800 - 200 - 300 - 100 = 2533.33
+  assert.equal(r.value, 2533.33);
+  assert.equal(r.breakdown.expectedIncome, 933.33);
+  assert.equal(r.breakdown.ownerDrawIncome, 933.33);
+  assert.equal(r.breakdown.recurringIncome, 0);
+});
+
+test('composeSafeToSpend: expectedIncome is the sum of both income legs', () => {
+  const r = composeSafeToSpend({
+    ...baseInput(),
+    recurringIncome: 2000,
+    ownerDrawIncome: 500,
+  });
+  assert.equal(r.breakdown.expectedIncome, 2500);
+  assert.equal(r.value, 4100);
+});
+
+test('composeSafeToSpend: omitted income legs default to zero', () => {
   const r = composeSafeToSpend(baseInput());
   assert.equal(r.breakdown.expectedIncome, 0);
+  assert.equal(r.breakdown.recurringIncome, 0);
+  assert.equal(r.breakdown.ownerDrawIncome, 0);
+});
+
+test('composeSafeToSpend: a negative income leg is clamped, never subtracted', () => {
+  const r = composeSafeToSpend({
+    ...baseInput(),
+    recurringIncome: -500,
+    ownerDrawIncome: Number.NaN,
+  });
+  assert.equal(r.breakdown.expectedIncome, 0);
+  assert.equal(r.breakdown.recurringIncome, 0);
+  assert.equal(r.breakdown.ownerDrawIncome, 0);
+  assert.equal(r.value, 1600);
 });
 
 test('composeSafeToSpend: includeGoalContributions=false zeroes out savings line', () => {

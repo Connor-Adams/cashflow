@@ -5,7 +5,7 @@ import { BentoTile } from './BentoTile'
 import { useSafeToSpend } from '@/hooks/useSafeToSpend'
 import { formatMoney } from '@/lib/formatMoney'
 import { payoffVsInvestSentence } from '@/lib/surplusCopy'
-import type { Surplus } from '@/types/api'
+import type { SafeToSpendBreakdown, Surplus } from '@/types/api'
 
 type Props = {
   /**
@@ -22,6 +22,12 @@ type BreakdownRow = {
   amount: number
   sign: '+' | '-'
   note?: string
+  /**
+   * Renders indented under the line above it. Sub-rows explain where a parent
+   * figure came from — they are already counted in it, so they never add to
+   * the total themselves.
+   */
+  sub?: boolean
 }
 
 /**
@@ -63,6 +69,11 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
           sign: '+',
           note: `next ${data.windowDays}d`,
         },
+        // Where that income came from. An owner-operator's pay is a variable
+        // corp → personal draw, not a paycheck, so the two are detected
+        // differently (#990) and worth telling apart. A leg contributing
+        // nothing is omitted rather than shown as a zero.
+        ...incomeSubRows(data.breakdown),
         {
           label: 'Upcoming required expenses',
           amount: data.breakdown.upcomingRequiredExpenses,
@@ -174,7 +185,11 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
               {rows.map((row) => (
                 <li
                   key={row.label}
-                  className="flex items-baseline justify-between gap-2"
+                  className={
+                    row.sub
+                      ? 'ml-2 flex items-baseline justify-between gap-2 border-l border-border pl-2 text-xs'
+                      : 'flex items-baseline justify-between gap-2'
+                  }
                 >
                   <span className="text-muted-foreground">
                     {row.label}
@@ -184,8 +199,14 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
                       </span>
                     ) : null}
                   </span>
-                  <span className="shrink-0 tabular-nums">
-                    {row.sign === '-' ? '−' : '+'}
+                  <span
+                    className={
+                      row.sub
+                        ? 'shrink-0 tabular-nums text-muted-foreground'
+                        : 'shrink-0 tabular-nums'
+                    }
+                  >
+                    {row.sub ? null : row.sign === '-' ? '−' : '+'}
                     {formatMoney(row.amount, data.currency)}
                   </span>
                 </li>
@@ -202,6 +223,26 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
       )}
     </BentoTile>
   )
+}
+
+/**
+ * Sub-lines attributing expected income to its two detectors: recurring
+ * paychecks (#970) and owner draws (#990). Only non-zero legs render — a
+ * salaried user never sees a draw line and an owner-operator never sees a
+ * paycheck line. Both zero means no attribution is worth showing.
+ */
+function incomeSubRows(breakdown: SafeToSpendBreakdown): BreakdownRow[] {
+  const legs: BreakdownRow[] = [
+    { label: 'Recurring income', amount: breakdown.recurringIncome, sign: '+', sub: true },
+    {
+      label: 'Owner draws',
+      amount: breakdown.ownerDrawIncome,
+      sign: '+',
+      sub: true,
+      note: 'from your corp',
+    },
+  ]
+  return legs.filter((row) => row.amount > 0)
 }
 
 /**
