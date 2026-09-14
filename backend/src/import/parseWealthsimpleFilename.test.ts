@@ -128,3 +128,63 @@ test('parseWsCreditCardPdfWsid returns null for non-WS-CC filenames', () => {
   assert.equal(parseWsCreditCardPdfWsid('C13BRX957CAD_2026-06_CREDIT_CARD.csv'), null);
   assert.equal(parseWsCreditCardPdfWsid('RBC_2026-06_VISA.pdf'), null);
 });
+
+/*
+ * Wealthsimple moved the period-end date to the END of the bulk-export
+ * filename (observed 2026-08): it used to sit between the display name and the
+ * `monthly-statement-transactions` anchor, and now trails the WSID. Both
+ * orderings must parse — users have archives in the old shape.
+ */
+
+test('parses the date-suffixed Chequing export WS emits as of 2026-08', () => {
+  const r = parseWealthsimpleFilename(
+    'Chequing-monthly-statement-transactions-WK3DD9X35CAD-2026-08-01.csv',
+  );
+  assert.ok(r);
+  assert.equal(r.wsid, 'WK3DD9X35CAD');
+  assert.equal(r.productHint, 'chequing');
+  assert.equal(r.periodEnd, '2026-08-01');
+  assert.equal(r.isCreditCard, false);
+});
+
+test('parses a date-suffixed Corporate chequing export (space in display name)', () => {
+  const r = parseWealthsimpleFilename(
+    'Corporate chequing-monthly-statement-transactions-WK79NVW07CAD-2026-08-01.csv',
+  );
+  assert.ok(r);
+  assert.equal(r.wsid, 'WK79NVW07CAD');
+  assert.equal(r.productHint, 'corporate_chequing');
+  assert.equal(r.periodEnd, '2026-08-01');
+});
+
+test('the date-suffixed form works for investment products too', () => {
+  const tfsa = parseWealthsimpleFilename(
+    'TFSA-monthly-statement-transactions-HQ6LMLTK8CAD-2026-08-01.csv',
+  );
+  assert.ok(tfsa);
+  assert.equal(tfsa.productHint, 'tfsa');
+  assert.equal(tfsa.wsid, 'HQ6LMLTK8CAD');
+
+  const margin = parseWealthsimpleFilename(
+    'Non-registered-margin-monthly-statement-transactions-HQMARGIN09CAD-2026-08-01.csv',
+  );
+  assert.ok(margin);
+  assert.equal(margin.productHint, 'margin');
+  assert.equal(margin.wsid, 'HQMARGIN09CAD');
+});
+
+test('the legacy date-infix form still parses — old archives must keep working', () => {
+  const r = parseWealthsimpleFilename(
+    'Chequing-2025-01-01-monthly-statement-transactions-WK3DD9X35CAD.csv',
+  );
+  assert.ok(r);
+  assert.equal(r.periodEnd, '2025-01-01');
+  assert.equal(r.wsid, 'WK3DD9X35CAD');
+});
+
+test('rejects a date-suffixed name whose WSID segment is missing', () => {
+  assert.equal(
+    parseWealthsimpleFilename('Chequing-monthly-statement-transactions-2026-08-01.csv'),
+    null,
+  );
+});
