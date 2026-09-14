@@ -5,9 +5,17 @@
  * code. Counting the reversal as an inflow reads as a repayment that never
  * happened, so both legs are excluded from the balance.
  *
- * A cancel with no matching original is deliberately NOT excluded: without its
- * pair we cannot tell a reversal from a real inbound transfer, and dropping it
- * would hide money.
+ * The trailing "code" is just the last run of 5+ alphanumeric characters, so a
+ * plain surname (e.g. `ADCOCK`) can look exactly like a confirmation code. A
+ * cancel is only paired with an original when the code has EXACTLY one
+ * original and EXACTLY one cancel — a strict one-to-one match. Any other
+ * count for a given code (two originals sharing it, two cancels, or a cancel
+ * with no original at all) excludes NOTHING for that code: with more than one
+ * candidate on either side we cannot tell which pairs with which, and a wrong
+ * guess would silently drop a real, never-cancelled transfer from the
+ * balance. This is the same asymmetry the module has always followed — when
+ * the matcher cannot be certain, it declines to hide money — extended from
+ * "no original" to "any ambiguous count".
  */
 
 /** Trailing alphanumeric confirmation code, at least 5 chars. */
@@ -21,8 +29,8 @@ function codeOf(text: string | null, marker: RegExp): string | null {
   return m ? m[1] : null;
 }
 
-const CANCEL = /E-?TRANSFER\s+CANCEL/;
-const ORIGINAL = /E-?TRANSFER\s+(SENT|REQUEST FULFILLED)/;
+const CANCEL = /E-?TRANSFER\s+CANCEL\b/;
+const ORIGINAL = /E-?TRANSFER\s+(SENT|REQUEST FULFILLED)\b/;
 
 export function findCancelledTransferIds(
   rows: Array<{ id: number; merchantText: string | null }>,
@@ -49,9 +57,9 @@ export function findCancelledTransferIds(
   const out = new Set<number>();
   for (const [code, cancelIds] of cancelsByCode) {
     const originalIds = originalsByCode.get(code);
-    if (!originalIds || originalIds.length === 0) continue;
-    for (const id of cancelIds) out.add(id);
-    for (const id of originalIds) out.add(id);
+    if (!originalIds || originalIds.length !== 1 || cancelIds.length !== 1) continue;
+    out.add(cancelIds[0]);
+    out.add(originalIds[0]);
   }
   return out;
 }

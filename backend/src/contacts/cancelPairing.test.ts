@@ -34,11 +34,47 @@ test('unrelated transfers are untouched', () => {
   assert.equal(ids.size, 0);
 });
 
-test('two sends sharing one code both pair with a single cancel', () => {
+test('an ambiguous code with two originals and one cancel excludes nothing', () => {
+  // A trailing surname can collide across unrelated transfers and act as a
+  // pseudo-code. With two originals sharing it, the cancel can't be matched
+  // to either one, so nothing for this code should be excluded.
   const ids = findCancelledTransferIds([
     { id: 9, merchantText: 'E-TRANSFER SENT EVAN LEROSE W8XN3J' },
-    { id: 10, merchantText: 'E-TRANSFER CANCEL EVAN LEROSE W8XN3J' },
-    { id: 11, merchantText: 'E-TRANSFER SENT EVAN LEROSE W8XN3J' },
+    { id: 10, merchantText: 'E-TRANSFER SENT EVAN LEROSE W8XN3J' },
+    { id: 11, merchantText: 'E-TRANSFER CANCEL EVAN LEROSE W8XN3J' },
   ]);
-  assert.deepEqual([...ids].sort((a, b) => a - b), [9, 10, 11]);
+  assert.equal(ids.size, 0, 'an ambiguous pairing must not hide any of these rows');
+});
+
+test('one original with two cancels for the same code excludes nothing', () => {
+  const ids = findCancelledTransferIds([
+    { id: 12, merchantText: 'E-TRANSFER SENT EVAN LEROSE Q7F3ZK' },
+    { id: 13, merchantText: 'E-TRANSFER CANCEL EVAN LEROSE Q7F3ZK' },
+    { id: 14, merchantText: 'E-TRANSFER CANCEL EVAN LEROSE Q7F3ZK' },
+  ]);
+  assert.equal(ids.size, 0, 'an ambiguous pairing must not hide any of these rows');
+});
+
+test('a trailing surname acting as the shared code still pairs when unambiguous', () => {
+  // EVAN ADCOCK: the surname ADCOCK is captured as the "code" here, exactly
+  // like the ambiguous cases above. But with exactly one original and exactly
+  // one cancel sharing it, the pairing is unambiguous and safe to exclude —
+  // pinning that this is deliberate, not accidental.
+  const ids = findCancelledTransferIds([
+    { id: 15, merchantText: 'E-TRANSFER SENT EVAN ADCOCK' },
+    { id: 16, merchantText: 'E-TRANSFER CANCEL EVAN ADCOCK' },
+  ]);
+  assert.deepEqual([...ids].sort((a, b) => a - b), [15, 16]);
+});
+
+test('E-TRANSFER CANCELLATION FEE is not treated as a cancel', () => {
+  const ids = findCancelledTransferIds([
+    { id: 17, merchantText: 'E-TRANSFER SENT EVAN LEROSE DPKGQG' },
+    { id: 18, merchantText: 'E-TRANSFER CANCELLATION FEE DPKGQG' },
+  ]);
+  assert.equal(
+    ids.size,
+    0,
+    'CANCELLATION FEE must not match the CANCEL marker, so no pairing should occur',
+  );
 });

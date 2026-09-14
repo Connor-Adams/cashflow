@@ -684,13 +684,49 @@ test('unrelated transfers are untouched', () => {
   assert.equal(ids.size, 0);
 });
 
-test('two sends sharing one code both pair with a single cancel', () => {
+test('an ambiguous code with two originals and one cancel excludes nothing', () => {
+  // A trailing surname can collide across unrelated transfers and act as a
+  // pseudo-code. With two originals sharing it, the cancel can't be matched
+  // to either one, so nothing for this code should be excluded.
   const ids = findCancelledTransferIds([
     { id: 9, merchantText: 'E-TRANSFER SENT EVAN LEROSE W8XN3J' },
-    { id: 10, merchantText: 'E-TRANSFER CANCEL EVAN LEROSE W8XN3J' },
-    { id: 11, merchantText: 'E-TRANSFER SENT EVAN LEROSE W8XN3J' },
+    { id: 10, merchantText: 'E-TRANSFER SENT EVAN LEROSE W8XN3J' },
+    { id: 11, merchantText: 'E-TRANSFER CANCEL EVAN LEROSE W8XN3J' },
   ]);
-  assert.deepEqual([...ids].sort((a, b) => a - b), [9, 10, 11]);
+  assert.equal(ids.size, 0, 'an ambiguous pairing must not hide any of these rows');
+});
+
+test('one original with two cancels for the same code excludes nothing', () => {
+  const ids = findCancelledTransferIds([
+    { id: 12, merchantText: 'E-TRANSFER SENT EVAN LEROSE Q7F3ZK' },
+    { id: 13, merchantText: 'E-TRANSFER CANCEL EVAN LEROSE Q7F3ZK' },
+    { id: 14, merchantText: 'E-TRANSFER CANCEL EVAN LEROSE Q7F3ZK' },
+  ]);
+  assert.equal(ids.size, 0, 'an ambiguous pairing must not hide any of these rows');
+});
+
+test('a trailing surname acting as the shared code still pairs when unambiguous', () => {
+  // EVAN ADCOCK: the surname ADCOCK is captured as the "code" here, exactly
+  // like the ambiguous cases above. But with exactly one original and exactly
+  // one cancel sharing it, the pairing is unambiguous and safe to exclude —
+  // pinning that this is deliberate, not accidental.
+  const ids = findCancelledTransferIds([
+    { id: 15, merchantText: 'E-TRANSFER SENT EVAN ADCOCK' },
+    { id: 16, merchantText: 'E-TRANSFER CANCEL EVAN ADCOCK' },
+  ]);
+  assert.deepEqual([...ids].sort((a, b) => a - b), [15, 16]);
+});
+
+test('E-TRANSFER CANCELLATION FEE is not treated as a cancel', () => {
+  const ids = findCancelledTransferIds([
+    { id: 17, merchantText: 'E-TRANSFER SENT EVAN LEROSE DPKGQG' },
+    { id: 18, merchantText: 'E-TRANSFER CANCELLATION FEE DPKGQG' },
+  ]);
+  assert.equal(
+    ids.size,
+    0,
+    'CANCELLATION FEE must not match the CANCEL marker, so no pairing should occur',
+  );
 });
 ```
 
@@ -714,9 +750,17 @@ Create `backend/src/contacts/cancelPairing.ts`:
  * code. Counting the reversal as an inflow reads as a repayment that never
  * happened, so both legs are excluded from the balance.
  *
- * A cancel with no matching original is deliberately NOT excluded: without its
- * pair we cannot tell a reversal from a real inbound transfer, and dropping it
- * would hide money.
+ * The trailing "code" is just the last run of 5+ alphanumeric characters, so a
+ * plain surname (e.g. `ADCOCK`) can look exactly like a confirmation code. A
+ * cancel is only paired with an original when the code has EXACTLY one
+ * original and EXACTLY one cancel — a strict one-to-one match. Any other
+ * count for a given code (two originals sharing it, two cancels, or a cancel
+ * with no original at all) excludes NOTHING for that code: with more than one
+ * candidate on either side we cannot tell which pairs with which, and a wrong
+ * guess would silently drop a real, never-cancelled transfer from the
+ * balance. This is the same asymmetry the module has always followed — when
+ * the matcher cannot be certain, it declines to hide money — extended from
+ * "no original" to "any ambiguous count".
  */
 
 /** Trailing alphanumeric confirmation code, at least 5 chars. */
@@ -730,8 +774,8 @@ function codeOf(text: string | null, marker: RegExp): string | null {
   return m ? m[1] : null;
 }
 
-const CANCEL = /E-?TRANSFER\s+CANCEL/;
-const ORIGINAL = /E-?TRANSFER\s+(SENT|REQUEST FULFILLED)/;
+const CANCEL = /E-?TRANSFER\s+CANCEL\b/;
+const ORIGINAL = /E-?TRANSFER\s+(SENT|REQUEST FULFILLED)\b/;
 
 export function findCancelledTransferIds(
   rows: Array<{ id: number; merchantText: string | null }>,
@@ -758,9 +802,9 @@ export function findCancelledTransferIds(
   const out = new Set<number>();
   for (const [code, cancelIds] of cancelsByCode) {
     const originalIds = originalsByCode.get(code);
-    if (!originalIds || originalIds.length === 0) continue;
-    for (const id of cancelIds) out.add(id);
-    for (const id of originalIds) out.add(id);
+    if (!originalIds || originalIds.length !== 1 || cancelIds.length !== 1) continue;
+    out.add(cancelIds[0]);
+    out.add(originalIds[0]);
   }
   return out;
 }
@@ -772,7 +816,7 @@ export function findCancelledTransferIds(
 cd backend && yarn tsx --import ./test/setup.ts --test src/contacts/cancelPairing.test.ts
 ```
 
-Expected: PASS, 5/5.
+Expected: PASS, 8/8.
 
 - [ ] **Step 5: Commit**
 
