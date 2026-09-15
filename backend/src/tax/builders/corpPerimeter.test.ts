@@ -20,6 +20,7 @@ function txn(over: Partial<PerimeterTxn> & { id: number; amount: string }): Peri
     currency: 'CAD',
     date: '2026-03-13',
     txnType: 'transfer',
+    accountType: 'checking',
     linkedTransactionId: null,
     taxTreatmentOverride: null,
     merchant: null,
@@ -74,14 +75,49 @@ test('warns on a perimeter receipt with no counterparty named', () => {
   assert.match(out.warnings[0], /#10/);
 });
 
-test('excludes passive investment income from active business income', () => {
+test('routes bank-account interest to investment income, not active business income', () => {
+  // Corp chequing pays interest monthly. It is passive income, and no
+  // InvestmentActivity row exists for a chequing account, so the transaction
+  // is the only record of it.
+  const rows = [txn({ id: 12, amount: '30.91', txnType: 'interest', merchant: 'Interest received' })];
+  const out = partitionCorpPerimeter(rows, { legalName: LEGAL_NAME, linkTargetIds: new Set() });
+  assert.deepEqual(out.revenue, [], 'not active business income');
+  assert.deepEqual(out.interestIncome.map((r) => r.id), [12]);
+  assert.deepEqual(out.warnings, []);
+});
+
+test('routes bank-account dividends to investment income', () => {
+  const rows = [txn({ id: 11, amount: '77.60', txnType: 'dividend', merchant: 'Patronage dividend' })];
+  const out = partitionCorpPerimeter(rows, { legalName: LEGAL_NAME, linkTargetIds: new Set() });
+  assert.deepEqual(out.revenue, []);
+  assert.deepEqual(out.dividendIncome.map((r) => r.id), [11]);
+});
+
+test('drops passive rows on investment accounts — InvestmentActivity owns those', () => {
+  // A brokerage reports the same distribution twice: once as an
+  // InvestmentActivity row (which carries the security, and therefore the
+  // eligibility) and once as a cash transaction. Counting both doubles it.
   const rows = [
-    txn({ id: 11, amount: '77.60', txnType: 'dividend', merchant: 'XEQT cash dividend' }),
-    txn({ id: 12, amount: '30.91', txnType: 'interest', merchant: 'Interest received' }),
+    txn({ id: 13, amount: '151.23', txnType: 'dividend', accountType: 'investment', merchant: 'XEQT cash dividend distribution' }),
+    txn({ id: 14, amount: '0.01', txnType: 'interest', accountType: 'investment', merchant: 'Stock lending monthly interest payment' }),
   ];
   const out = partitionCorpPerimeter(rows, { legalName: LEGAL_NAME, linkTargetIds: new Set() });
   assert.deepEqual(out.revenue, []);
-  assert.deepEqual(out.warnings, []);
+  assert.deepEqual(out.interestIncome, []);
+  assert.deepEqual(out.dividendIncome, []);
+});
+
+test('a passive row that is an internal transfer leg is still dropped', () => {
+  const rows = [txn({ id: 15, amount: '30.91', txnType: 'interest', linkedTransactionId: 99 })];
+  const out = partitionCorpPerimeter(rows, { legalName: LEGAL_NAME, linkTargetIds: new Set() });
+  assert.deepEqual(out.interestIncome, []);
+});
+
+test('a negative passive row keeps its sign so reversals net off', () => {
+  const rows = [txn({ id: 16, amount: '-2.27', txnType: 'interest', merchant: 'Interest reversal' })];
+  const out = partitionCorpPerimeter(rows, { legalName: LEGAL_NAME, linkTargetIds: new Set() });
+  assert.deepEqual(out.interestIncome.map((r) => r.id), [16], 'nets against interest, not deducted as an expense');
+  assert.deepEqual(out.expenses, []);
 });
 
 test('excludes rows already consumed as distributions or shareholder loans', () => {

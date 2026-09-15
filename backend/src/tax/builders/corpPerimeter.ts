@@ -47,6 +47,13 @@ export interface PerimeterTxn {
   currency: string;
   date: string;
   txnType: string | null;
+  /**
+   * The owning account's type. Investment accounts keep their income in the
+   * InvestmentActivity ledger, which carries the security (and therefore the
+   * dividend eligibility); their cash transactions restate the same
+   * distribution, so passive rows there are dropped to avoid double-counting.
+   */
+  accountType: string | null;
   linkedTransactionId: number | null;
   taxTreatmentOverride: string | null;
   merchant: string | null;
@@ -57,6 +64,15 @@ export interface PerimeterPartition {
   revenue: PerimeterTxn[];
   /** External outgoings that are genuine operating costs. */
   expenses: PerimeterTxn[];
+  /**
+   * Passive interest earned on non-investment accounts — a corp chequing
+   * account paying monthly interest, say. There is no InvestmentActivity row
+   * for such an account, so the transaction is the only record of the income;
+   * before this bucket existed it was counted nowhere at all.
+   */
+  interestIncome: PerimeterTxn[];
+  /** Passive dividends on non-investment accounts. Same reasoning. */
+  dividendIncome: PerimeterTxn[];
   /**
    * Receipts counted as revenue whose external-ness could not be corroborated —
    * see `looksLikeOrphanedArrival`. They ARE included in `revenue`; the warning
@@ -91,8 +107,10 @@ const NON_OPERATING_TREATMENTS = new Set([
 ]);
 
 /**
- * Passive-income row types. These are investment income, not active business
- * income, and the investment side of buildCorpFacts owns them.
+ * Passive-income row types. Never active business income. On an investment
+ * account the InvestmentActivity ledger already reports them; anywhere else
+ * (a chequing account paying monthly interest) the transaction is the only
+ * record, so it is bucketed as investment income instead of being discarded.
  */
 const PASSIVE_TXN_TYPES = new Set(['dividend', 'interest']);
 
@@ -137,6 +155,8 @@ export function partitionCorpPerimeter(
 ): PerimeterPartition {
   const revenue: PerimeterTxn[] = [];
   const expenses: PerimeterTxn[] = [];
+  const interestIncome: PerimeterTxn[] = [];
+  const dividendIncome: PerimeterTxn[] = [];
   const warnings: string[] = [];
 
   for (const t of txns) {
@@ -149,9 +169,17 @@ export function partitionCorpPerimeter(
     }
 
     const amount: Decimal = D(t.amount);
+
+    // Passive income is settled before the sign split so a reversal nets
+    // against the income it reverses rather than posing as an expense.
+    if (t.txnType !== null && PASSIVE_TXN_TYPES.has(t.txnType)) {
+      if (t.accountType === 'investment') continue;
+      if (t.txnType === 'interest') interestIncome.push(t);
+      else dividendIncome.push(t);
+      continue;
+    }
+
     if (amount.greaterThan(0)) {
-      // Passive income is the investment side's business, not ABI's.
-      if (t.txnType !== null && PASSIVE_TXN_TYPES.has(t.txnType)) continue;
       revenue.push(t);
       if (looksLikeOrphanedArrival(t, legalName)) {
         warnings.push(
@@ -180,5 +208,5 @@ export function partitionCorpPerimeter(
     }
   }
 
-  return { revenue, expenses, warnings };
+  return { revenue, expenses, interestIncome, dividendIncome, warnings };
 }

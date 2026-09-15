@@ -56,6 +56,8 @@ export async function buildCorpFacts(
     if (t.linkedTransactionId != null) linkTargetIds.add(t.linkedTransactionId);
   }
 
+  const accountTypeById = new Map(accounts.map((a) => [a.id, a.accountType ?? null]));
+
   const perimeter = partitionCorpPerimeter(
     txns.map((t) => ({
       id: t.id,
@@ -63,6 +65,7 @@ export async function buildCorpFacts(
       currency: t.currency ?? 'CAD',
       date: t.date as unknown as string,
       txnType: (t as unknown as { txnType?: string | null }).txnType ?? null,
+      accountType: accountTypeById.get(t.accountId) ?? null,
       linkedTransactionId: t.linkedTransactionId ?? null,
       taxTreatmentOverride: t.taxTreatmentOverride ?? null,
       merchant: t.merchantClean ?? t.merchantRaw ?? null,
@@ -120,6 +123,23 @@ export async function buildCorpFacts(
         eligibleDividends.push(item);
       }
     }
+  }
+
+  // Passive income earned on accounts the InvestmentActivity ledger does not
+  // cover — a corp chequing account paying monthly interest is the common case.
+  // The perimeter split has already dropped the investment-account rows that
+  // would double the ledger above. Transaction rows carry no security, so a
+  // dividend here takes the same 'eligible' default the activity path uses when
+  // eligibility is unknown.
+  for (const t of perimeter.interestIncome) {
+    const raw = D(t.amount);
+    const { cad } = await toCad(raw, t.currency, t.date);
+    interest.push({ source: `Txn #${t.id} ${t.merchant ?? ''}`.trim(), amount: raw, cadAmount: cad });
+  }
+  for (const t of perimeter.dividendIncome) {
+    const raw = D(t.amount);
+    const { cad } = await toCad(raw, t.currency, t.date);
+    eligibleDividends.push({ source: `Txn #${t.id} ${t.merchant ?? ''}`.trim(), amount: raw, cadAmount: cad });
   }
 
   // Capital gains via ACB (same pattern as personal). ACB is a weighted-average

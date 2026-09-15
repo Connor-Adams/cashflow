@@ -584,3 +584,54 @@ test('business expenses exclude transfers and securities purchases', async () =>
   );
   assert.equal(net.toFixed(2), '9994.00', 'revenue 10000 less the 6.00 fee only');
 });
+
+test('corp chequing interest lands in investment income', async () => {
+  const ctx = await seedPerimeterCorp();
+  // Wealthsimple pays interest on the business chequing balance monthly.
+  // There is no InvestmentActivity row for a chequing account, so before the
+  // perimeter split routed these the income was reported nowhere.
+  for (const [date, amount] of [
+    ['2025-05-01', '2.2700'],
+    ['2025-06-01', '17.7900'],
+    ['2025-07-01', '30.9100'],
+    ['2025-08-01', '27.5300'],
+  ]) {
+    await seedTxn(ctx, ctx.chequing, {
+      date, amount, txnType: 'interest',
+      merchantRaw: 'Interest received', finalBusiness: false,
+    });
+  }
+
+  const facts = await buildCorpFacts(ctx.entity.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+
+  assert.equal(facts.activeBusinessIncome.length, 0, 'interest is passive, not ABI');
+  const interest = facts.investmentIncome.interest.reduce(
+    (acc, i) => acc.plus(i.cadAmount), D(0),
+  );
+  assert.equal(interest.toFixed(2), '78.50');
+});
+
+test('passive transactions on an investment account do not double the ledger', async () => {
+  const ctx = await seedPerimeterCorp();
+  const investing = await Account.create({
+    name: 'Corp Investing', householdId: ctx.household.id, accountType: 'investment',
+    entityId: ctx.entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  // The brokerage restates each distribution as a cash transaction. The
+  // InvestmentActivity ledger is the source of truth there (it carries the
+  // security, and therefore the eligibility), so this row must be ignored.
+  await seedTxn(ctx, investing, {
+    date: '2025-03-31', amount: '151.2300', txnType: 'dividend',
+    merchantRaw: 'XEQT cash dividend distribution', finalBusiness: false,
+  });
+
+  const facts = await buildCorpFacts(ctx.entity.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+
+  assert.deepEqual(facts.investmentIncome.eligibleDividends, []);
+  assert.deepEqual(facts.investmentIncome.nonEligibleDividends, []);
+  assert.deepEqual(facts.investmentIncome.interest, []);
+});
