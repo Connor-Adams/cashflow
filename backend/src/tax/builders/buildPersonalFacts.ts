@@ -257,6 +257,40 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     pushDividend(a, item);
   }
 
+  // Passive income earned on accounts the InvestmentActivity ledger does not
+  // cover — a chequing or savings account paying monthly interest is the common
+  // case. There is no activity row for such an account, so the transaction is
+  // the only record of the income and it was previously reported nowhere.
+  //
+  // Two exclusions, mirroring the corp-side rule in corpPerimeter.ts:
+  //   - investment accounts: the activity ledger already reports the same
+  //     distribution and carries the security (hence the eligibility), so
+  //     counting the cash transaction too would double it;
+  //   - anything outside `taxableAccounts`: earnings inside a TFSA/RRSP/FHSA/
+  //     RDSP never belong on the taxable return. `txns` is keyed on entityId,
+  //     not account, so registered rows ARE in scope here and must be dropped.
+  //
+  // A transaction carries no security, so a dividend sourced this way takes the
+  // same 'eligible' default `pushDividend` applies when eligibility is unknown.
+  const taxableAccountTypeById = new Map(
+    taxableAccounts.map((a) => [a.id, a.accountType ?? null]),
+  );
+  for (const t of txns) {
+    const txnType = (t as unknown as { txnType?: string | null }).txnType ?? null;
+    if (txnType !== 'interest' && txnType !== 'dividend') continue;
+    if (!taxableAccountTypeById.has(t.accountId)) continue;
+    if (taxableAccountTypeById.get(t.accountId) === 'investment') continue;
+    const raw = D(t.amount as unknown as string);
+    const { cad } = await toCad(raw, t.currency ?? 'CAD', t.date as unknown as string);
+    const item: IncomeItem = {
+      source: `Txn #${t.id} ${t.merchantClean ?? t.merchantRaw ?? ''}`.trim(),
+      amount: raw,
+      cadAmount: cad,
+    };
+    if (txnType === 'interest') interestIncome.push(item);
+    else eligibleDividends.push(item);
+  }
+
   // Capital gain events from sells, using the ACB helper.
   //
   // ACB is a weighted-average running balance, so computeAcb needs the FULL
