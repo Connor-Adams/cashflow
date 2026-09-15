@@ -28,6 +28,29 @@ line funded loans to people.** It doesn't. Connor borrows on it for himself too.
 Splitting the whole charge across borrowers silently pushes his own carrying cost onto
 Caelan and Stephen.
 
+## The whole line is lending
+
+Connor has not drawn on the line for himself: every draw either went straight to a
+borrower or staged through Wealthsimple Cash before reaching one. Confirmed by him
+2026-09-15. The one apparent exception, a 2,000 draw on 2025-08-21 that matches both a
+transfer to Stephen and a VFV ETF purchase on the same day, is the transfer — the ETF
+was bought with cash.
+
+**So 100% of the interest belongs to borrowers and none of it is Connor's own carrying
+cost.** This is the fact that makes the method below sound; it is not derivable from
+the ledger and must be revisited if he ever does draw for himself.
+
+The chain cannot be traced end to end from the data. Draws that stage through
+Wealthsimple leave as `Interac e-Transfer® Out` or `Cash sent`, and Wealthsimple
+exports carry no payee, so the trail goes cold at that hop. It does not need to be
+traced: given the premise above, every dollar of interest is attributable regardless of
+route, and the only open question is the split between borrowers.
+
+Total lending (**30,975**) exceeds the line balance (**22,700**), so some lending was
+cash-funded and earns nothing. Rather than guess which, each window's printed interest
+is apportioned across borrowers by their outstanding balance during that window. The
+bound below then becomes an identity: allocations sum to exactly what RBC billed.
+
 ## The method
 
 For each person, for each rate window:
@@ -36,8 +59,8 @@ For each person, for each rate window:
 their interest = their outstanding balance × effective_rate × days_in_window / 365
 ```
 
-Summed across windows. Whatever is left of the statement's applicable interest is
-Connor's own borrowing cost and is charged to nobody.
+Summed across windows, then scaled so the window's allocations total exactly its
+printed applicable interest.
 
 **Simple interest, not compound.** The statement is explicit:
 
@@ -119,9 +142,17 @@ the same shape as `FxRate`. No new primitive.
   the mechanism.
 - **Dated.** A person's balance is measured as of each rate window, not as of today.
   A loan made in April earns nothing for March.
-- **Bounded.** The sum apportioned for a window can never exceed that window's printed
-  applicable interest. If it would, the computation is wrong and must fail loudly
-  rather than over-charge.
+- **Bounded.** A window's allocations never exceed its printed applicable interest. The
+  bound scales DOWN only, so it is a ceiling and not an identity: when the raw
+  balance-based computation overshoots — the normal case, because lending exceeds the
+  line — the shares are scaled to land on the printed figure exactly; when it does not
+  overshoot, the allocations sum to LESS and the difference is a residue attributable to
+  nobody. Usually that is a window in which no lending was outstanding yet. On the real
+  data the residue is material — 981.76 billed against 755.12 allocated, mostly from the
+  eight windows predating any tagged lending — so the page must state the absolute gap
+  ("attributed 755.12 of 981.76 billed"), not only the scaling ratio: a ratio alone lets
+  the charged total read as a complete attribution of what RBC billed. The scaling factor
+  is surfaced too, since a sudden change in it means the lending or the line moved.
 - **Negative balances earn nothing.** You cannot charge interest to someone you owe.
 - **Per-currency.** No FX. A CAD charge is not shared with a USD balance.
 

@@ -45,6 +45,14 @@ test('GET /api/contacts/:id/ledger returns net + tracked + flagged transfers', a
   const loanRow = res.body.transfers.find((t: { id: number }) => t.id === out.id);
   assert.equal(loanRow.isLoan, true);
   assert.equal(loanRow.direction, 'out');
+
+  // The two interest figures are served on every ledger read. With no rate
+  // windows imported they are empty rather than absent or zero-valued, and the
+  // hand-logged claim above stays principal — interest never inflates it.
+  assert.deepEqual(res.body.interestCharged, [], 'no statement, no charged interest');
+  assert.deepEqual(res.body.interestAccrued, [], 'no rate in force, no tail to estimate');
+  assert.deepEqual(res.body.interestWindows, []);
+  assert.equal(res.body.trackedOutstandingByCurrency.CAD, '200.0000');
 });
 
 test('GET /api/contacts/:id/ledger keeps rent-tagged transfers out of the loan balance', async () => {

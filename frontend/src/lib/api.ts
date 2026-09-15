@@ -1,6 +1,7 @@
 import { clientLogger } from './clientLogger'
 import type {
   ContactLedgerResponse,
+  InterestAllocationRunResult,
   CounterpartyRole,
   TransferLinkResult,
   SelfSuggestionsResponse,
@@ -173,6 +174,18 @@ export function setCounterpartyRole(txnId: number, role: CounterpartyRole | null
 }
 export function setContactLoanDefault(id: number, loanDefault: boolean): Promise<unknown> {
   return patchJson(`/api/contacts/${id}`, { loanDefault })
+}
+/**
+ * Recompute the line-of-credit interest allocation for the household.
+ *
+ * Household-wide, not per contact: each rate window's printed interest is
+ * apportioned across every borrower at once, so one person's share cannot be
+ * recomputed on its own. Charged rows are deleted and re-inserted, so re-running
+ * recomputes rather than accumulating. The accrued estimate is never stored and
+ * is therefore untouched — it is recomputed on every ledger read.
+ */
+export function runInterestAllocation(): Promise<InterestAllocationRunResult> {
+  return postJson<InterestAllocationRunResult>('/api/contacts/interest-allocation')
 }
 
 // SimpleFIN Bridge bank connection (issue #790)

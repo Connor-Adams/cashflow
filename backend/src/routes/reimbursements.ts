@@ -20,6 +20,13 @@
  *
  * Scope: transaction visibility via `visibleTransactionWhere`; the claim
  * collection is household-scoped via the denormalised `household_id` column.
+ *
+ * KIND: every read here is `kind='principal'` only. The `reimbursements` table
+ * also holds generated `kind='interest'` rows written by the line-of-credit
+ * interest allocator — they carry `status='expected'` and a past due date, so
+ * without this filter they would list, aggregate and age as if a human had
+ * logged them. That false provenance is the exact failure the interest feature
+ * exists to remove. The contacts routes filter the same way.
  * All routes are authenticated DB work, so the router carries the shared
  * `aiSuggestLimiter` (no-op in test) per CodeQL's rate-limit guidance.
  */
@@ -60,6 +67,7 @@ import {
 } from '../models/Reimbursement';
 import { recomputeTransactionAmounts } from '../import/calculateShares';
 import { validateSplitRequest, computeSplitShares } from '../reimbursements/splitShares';
+import { PRINCIPAL_KIND } from '../contacts/runInterestAllocation';
 
 const router = Router();
 router.use(aiSuggestLimiter);
@@ -438,7 +446,8 @@ router.get('/reimbursements', async (req, res, next) => {
       req.query.today,
       resolveHouseholdToday(currentAuth(req).household),
     );
-    const where: WhereOptions = { ...householdWhere(req) };
+    // Principal only — generated interest rows are not hand-logged claims.
+    const where: WhereOptions = { ...householdWhere(req), kind: PRINCIPAL_KIND };
     const q = req.query;
 
     if (typeof q.status === 'string' && q.status) {
@@ -510,7 +519,9 @@ router.get('/reimbursements/summary', async (req, res, next) => {
     // against its hydrated same-currency repayment transaction so a partial
     // repayment doesn't credit the full claim face value.
     const rows = await Reimbursement.findAll({
-      where: { ...householdWhere(req) },
+      // Principal only: folding allocated interest into the outstanding
+      // aggregate would double-count it against the People page's own tiles.
+      where: { ...householdWhere(req), kind: PRINCIPAL_KIND },
       include: INCLUDE,
     });
     const summary = summarize(rows.map(toRow), today);
@@ -534,6 +545,10 @@ router.get('/reimbursements/overdue', async (req, res, next) => {
     const rows = await Reimbursement.findAll({
       where: {
         ...householdWhere(req),
+        // Principal only. Interest rows are written with status 'expected' and
+        // the rate window's last day as the due date, so every one of them is
+        // already past due and would flood this queue on the first run.
+        kind: PRINCIPAL_KIND,
         [Op.or]: [
           { status: 'expected', dueDate: { [Op.lt]: today } },
           { status: 'overdue' },
@@ -633,8 +648,10 @@ router.delete('/reimbursements/:id', async (req, res, next) => {
       res.status(400).json({ error: 'Invalid id' });
       return;
     }
+    // Principal only — see the KIND note at the top of this file. This route
+    // does not go through `loadOwned`, so it needs the same filter inline.
     const deleted = await Reimbursement.destroy({
-      where: { id, ...householdWhere(req) },
+      where: { id, ...householdWhere(req), kind: PRINCIPAL_KIND },
     });
     if (deleted === 0) {
       res.status(404).json({ error: 'Not found' });
@@ -656,9 +673,11 @@ router.get('/reimbursements/:id/match-candidates', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    const outlay = await Transaction.findByPk(r.transactionId, {
-      attributes: ['id', 'date'],
-    });
+    // `transactionId` is null only on generated `kind='interest'` rows, which
+    // have no outlay to match a repayment against.
+    const outlay = r.transactionId == null
+      ? null
+      : await Transaction.findByPk(r.transactionId, { attributes: ['id', 'date'] });
     if (!outlay) {
       res.json({ data: [], count: 0 });
       return;
@@ -838,8 +857,12 @@ router.post('/reimbursements/:id/unlink-repayment', async (req, res, next) => {
 async function loadOwned(req: Request): Promise<Reimbursement | null> {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return null;
+  // Principal only (see the KIND note at the top of this file): a generated
+  // interest row is not a hand-editable claim, so it must 404 by id exactly
+  // as if it did not exist, not be fetchable/mutable and then silently
+  // discarded on the allocator's next delete-then-insert run.
   return Reimbursement.findOne({
-    where: { id, ...householdWhere(req) },
+    where: { id, ...householdWhere(req), kind: PRINCIPAL_KIND },
     include: INCLUDE,
   });
 }
@@ -858,8 +881,12 @@ async function loadOwnedForUpdate(
 ): Promise<Reimbursement | null> {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return null;
+  // Same principal-only filter as `loadOwned` — see the KIND note at the top
+  // of this file. Mutating an interest row by id is the same bug as reading
+  // one: the edit is real for a moment, then vanishes on the next allocator
+  // run.
   return Reimbursement.findOne({
-    where: { id, ...householdWhere(req) },
+    where: { id, ...householdWhere(req), kind: PRINCIPAL_KIND },
     transaction: t,
     lock: t.LOCK.UPDATE,
   });

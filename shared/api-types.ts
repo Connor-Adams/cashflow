@@ -2010,6 +2010,73 @@ export interface LoanBalance {
   balance: string;
 }
 
+/**
+ * One line-of-credit rate window's contribution to charged interest.
+ *
+ * `scalingFactor` is `allocated / rawTotal`: below 1 when the window's printed
+ * Applicable Interest bound the balance-based accrual down, which is the normal
+ * case because total lending exceeds the line. A sudden change in it means the
+ * lending or the line moved, so it is shown rather than hidden.
+ */
+export interface InterestWindowSummary {
+  rateWindowId: number;
+  fromDate: string;
+  toDate: string;
+  /** Fixed(4) annual percentage, e.g. `8.9400`. */
+  effectiveRate: string;
+  /** Fixed(4). What the statement printed for this window. */
+  applicableInterest: string;
+  /** Fixed(4). Balance-based accrual across all borrowers, before the bound. */
+  rawTotal: string;
+  /** Fixed(4). What was actually allocated. */
+  allocated: string;
+  /** Fixed(6). `1.000000` when the printed figure did not bind. */
+  scalingFactor: string;
+  bound: boolean;
+}
+
+/**
+ * Whether the PERSISTED charged interest still matches what the allocator would
+ * write today.
+ *
+ * Nothing runs the allocator automatically — `POST
+ * /api/contacts/interest-allocation` has one caller, a button. So importing a
+ * statement and not pressing it leaves the persisted figure covering less than
+ * the imported windows do, while the accrued estimate starts from the NEW last
+ * window end: every day in the newly imported window falls into neither figure
+ * and silently disappears. A caption naming the newest statement over a figure
+ * that stops earlier is the "confident number over unsubstantiated data" bug
+ * this page keeps shipping, so the comparison is served rather than inferred.
+ */
+export interface InterestChargedStaleness {
+  /** True when `persistedTotal` and `recomputedTotal` disagree. Show "stale", not a date. */
+  stale: boolean;
+  /** Fixed(4). Household-wide sum of the stored `kind='interest'` rows. */
+  persistedTotal: string;
+  /** Fixed(4). Household-wide sum a fresh allocator run would write right now. */
+  recomputedTotal: string;
+  /**
+   * `YYYY-MM-DD`: the last day the PERSISTED rows cover, from their window end
+   * dates. `null` when nothing is persisted — no coverage may then be claimed.
+   */
+  chargedThrough: string | null;
+  /** `YYYY-MM-DD`: the last day any imported rate window covers. `null` when none. */
+  statementThrough: string | null;
+}
+
+/** Result of `POST /api/contacts/interest-allocation`. */
+export interface InterestAllocationRunResult {
+  /** Rate windows loaded. Zero when no statement has been imported yet. */
+  windows: number;
+  /** Charged rows written, or under `dryRun` that would be. */
+  allocations: number;
+  /** Fixed(4). Charged interest only — never the accrued estimate. */
+  totalCharged: string;
+  windowSummaries: InterestWindowSummary[];
+  dryRun: boolean;
+  elapsedMs: number;
+}
+
 export interface ContactLedgerResponse {
   contactId: number;
   name: string;
@@ -2017,8 +2084,33 @@ export interface ContactLedgerResponse {
   loanDefault: boolean;
   /** Descriptive raw flow. Carries no owed/owe claim. */
   transferNet: TransferNet[];
-  /** The number that means "owes you". */
+  /** The number that means "owes you". Principal only — interest is never folded in. */
   loanBalance: LoanBalance[];
+  /**
+   * Interest apportioned from each rate window's printed Applicable Interest,
+   * through the last statement. Persisted, and traces to a document.
+   * `repaid` is always zero: an interest allocation is not repaid piecemeal.
+   */
+  interestCharged: LoanBalance[];
+  /**
+   * Interest estimated for the days since the last statement, at the rate now in
+   * force. Computed on every read and NEVER stored — it changes daily. Must be
+   * labelled an estimate wherever it is shown.
+   */
+  interestAccrued: LoanBalance[];
+  /**
+   * A FRESH recomputation of every imported rate window, with each one's scaling
+   * factor — NOT a description of `interestCharged`.
+   *
+   * `interestCharged` is read from stored rows; these windows are recomputed on
+   * this request. They agree only while `interestStaleness.stale` is false.
+   * Reading these as "the windows behind interestCharged" is what let the page
+   * caption a stale persisted figure with a statement date it does not cover, so
+   * anything rendered from them must check `interestStaleness` first.
+   */
+  interestWindows: InterestWindowSummary[];
+  /** Whether `interestCharged` still matches what those windows would allocate. */
+  interestStaleness: InterestChargedStaleness;
   trackedOutstandingByCurrency: Record<string, string>;
   transfers: LedgerTransferRow[];
 }
