@@ -123,3 +123,68 @@ test('GET /api/reimbursements/summary excludes allocated interest from the total
   // tiles and must never be folded into the outstanding claim aggregate.
   assert.equal(res.body.outstandingByCurrency.CAD, '6700.0000');
 });
+
+// ----- by-id routes: an interest row is not a hand-editable claim ---------
+//
+// The list/overdue/summary filter above stops a generated row from listing
+// as a claim. But `loadOwned`/`loadOwnedForUpdate` power the by-id routes too,
+// and until now they had no `kind` filter at all — so an interest row could
+// still be fetched and hand-edited by id. The next allocator run deletes and
+// rebuilds every interest row regardless, so that edit would silently vanish
+// with no explanation to the user. An interest row must 404 on these routes,
+// exactly as if it did not exist as a user-editable claim.
+
+test('GET /api/reimbursements/:id 404s for a generated interest row', async () => {
+  const res = await request(app).get(`/api/reimbursements/${interestId}`);
+  assert.equal(res.status, 404);
+});
+
+test('GET /api/reimbursements/:id still returns a hand-logged principal claim', async () => {
+  const res = await request(app).get(`/api/reimbursements/${principalId}`);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.id, principalId);
+});
+
+test('PUT /api/reimbursements/:id 404s for a generated interest row', async () => {
+  const res = await request(app)
+    .put(`/api/reimbursements/${interestId}`)
+    .send({ notes: 'hand edit' });
+  assert.equal(res.status, 404);
+});
+
+test('PUT /api/reimbursements/:id still updates a hand-logged principal claim', async () => {
+  const res = await request(app)
+    .put(`/api/reimbursements/${principalId}`)
+    .send({ notes: 'hand edit' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.notes, 'hand edit');
+});
+
+test('DELETE /api/reimbursements/:id 404s for a generated interest row', async () => {
+  const res = await request(app).delete(`/api/reimbursements/${interestId}`);
+  assert.equal(res.status, 404);
+  // Still there — the request must not have deleted it either.
+  const stillThere = await models.Reimbursement.findByPk(interestId);
+  assert.ok(stillThere, 'an interest row must survive a delete-by-id attempt');
+});
+
+test('DELETE /api/reimbursements/:id still deletes a hand-logged principal claim', async () => {
+  const contact = await models.Contact.create({
+    householdId: household.id,
+    name: 'Delete Me',
+  } as never);
+  const disposable = await models.Reimbursement.create({
+    householdId: household.id,
+    transactionId: null,
+    contactId: contact.id,
+    amount: '10.0000',
+    currency: 'CAD',
+    dueDate: '2026-03-01',
+    status: 'expected',
+    kind: 'principal',
+  } as never);
+  const res = await request(app).delete(`/api/reimbursements/${disposable.id}`);
+  assert.equal(res.status, 204);
+  const gone = await models.Reimbursement.findByPk(disposable.id);
+  assert.equal(gone, null);
+});

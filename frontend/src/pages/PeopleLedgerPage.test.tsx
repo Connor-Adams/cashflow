@@ -117,7 +117,7 @@ describe('PeopleLedgerPage — landing list', () => {
     const metrics = await screen.findByTestId('loan-balance-metrics');
     expect(within(metrics).getByText('CAD 480.00 owed to you')).toBeInTheDocument();
     // The USD leg used to be silently discarded by the CAD-or-first pick.
-    expect(within(metrics).getByText('USD 3570.51 you owe')).toBeInTheDocument();
+    expect(within(metrics).getByText('USD 3,570.51 you owe')).toBeInTheDocument();
   });
 
   it('does not net opposing debts across people into "settled"', async () => {
@@ -513,7 +513,7 @@ describe('PeopleLedgerPage — drill-in', () => {
     );
 
     const summaryCard = await screen.findByTestId('ledger-summary-card');
-    expect(within(summaryCard).getByText('USD 3570.51 you owe')).toBeInTheDocument();
+    expect(within(summaryCard).getByText('USD 3,570.51 you owe')).toBeInTheDocument();
     expect(within(summaryCard).queryByText('Lent vs repaid')).toBeNull();
   });
 
@@ -977,7 +977,7 @@ describe('PeopleLedgerPage — interest on the landing list and headline', () =>
 
     const row = await screen.findByTestId('contact-row-1');
     // The balance cell still reports principal alone.
-    expect(within(row).getByTestId('balance-1')).toHaveTextContent('CAD 6700.00 owed to you');
+    expect(within(row).getByTestId('balance-1')).toHaveTextContent('CAD 6,700.00 owed to you');
     const interest = within(row).getByTestId('interest-1');
     expect(interest).toHaveTextContent('CAD 194.49');
     // Part of that 194.49 is the accrued estimate, so the cell has to say so.
@@ -993,7 +993,7 @@ describe('PeopleLedgerPage — interest on the landing list and headline', () =>
 
     const metrics = await screen.findByTestId('loan-balance-metrics');
     // Principal keeps its own tile, unchanged and uninflated.
-    expect(within(metrics).getByText('CAD 6700.00 owed to you')).toBeInTheDocument();
+    expect(within(metrics).getByText('CAD 6,700.00 owed to you')).toBeInTheDocument();
     // Charged and accrued each get their own — summing them would hide which
     // half moved, the same reason owedToYou and youOwe are separate.
     expect(within(metrics).getByText('Interest charged · CAD')).toBeInTheDocument();

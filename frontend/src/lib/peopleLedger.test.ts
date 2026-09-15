@@ -12,7 +12,7 @@ import {
 describe('formatBalanceLabel', () => {
   it('a positive balance means they owe you', () => {
     expect(formatBalanceLabel({ currency: 'CAD', lent: '3648.0000', repaid: '0.0000', balance: '3648.0000' }))
-      .toBe('CAD 3648.00 owed to you')
+      .toBe('CAD 3,648.00 owed to you')
   })
 
   it('a negative balance means you owe them', () => {

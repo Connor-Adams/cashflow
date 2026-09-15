@@ -57,6 +57,7 @@ import {
   currentRateLabel,
   lastStatementDate,
   summarizeScaling,
+  AMOUNT_FORMAT,
   type OwedBreakdown,
 } from '../lib/peopleLedger'
 import { formatMoney } from '../lib/formatMoney'
@@ -148,13 +149,11 @@ function computeBarSegments(ledger: ContactLedgerResponse | null): BarSegment[] 
  *
  * The code goes in front rather than a locale symbol because this page is
  * multi-currency and never collapses to a primary one — `$174.80` next to
- * `$19.69` would not say whether they are the same currency.
+ * `$19.69` would not say whether they are the same currency. Uses the same
+ * `AMOUNT_FORMAT` as `formatBalanceLabel` so the loan balance and the
+ * interest breakdown — rendered side by side in the contact drill-in — group
+ * thousands the same way instead of drifting.
  */
-const AMOUNT_FORMAT = new Intl.NumberFormat('en-CA', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
-
 function amountLabel(currency: string, value: number): string {
   return `${currency} ${AMOUNT_FORMAT.format(value)}`
 }

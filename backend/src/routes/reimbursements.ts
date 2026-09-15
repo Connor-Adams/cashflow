@@ -648,8 +648,10 @@ router.delete('/reimbursements/:id', async (req, res, next) => {
       res.status(400).json({ error: 'Invalid id' });
       return;
     }
+    // Principal only — see the KIND note at the top of this file. This route
+    // does not go through `loadOwned`, so it needs the same filter inline.
     const deleted = await Reimbursement.destroy({
-      where: { id, ...householdWhere(req) },
+      where: { id, ...householdWhere(req), kind: PRINCIPAL_KIND },
     });
     if (deleted === 0) {
       res.status(404).json({ error: 'Not found' });
@@ -855,8 +857,12 @@ router.post('/reimbursements/:id/unlink-repayment', async (req, res, next) => {
 async function loadOwned(req: Request): Promise<Reimbursement | null> {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return null;
+  // Principal only (see the KIND note at the top of this file): a generated
+  // interest row is not a hand-editable claim, so it must 404 by id exactly
+  // as if it did not exist, not be fetchable/mutable and then silently
+  // discarded on the allocator's next delete-then-insert run.
   return Reimbursement.findOne({
-    where: { id, ...householdWhere(req) },
+    where: { id, ...householdWhere(req), kind: PRINCIPAL_KIND },
     include: INCLUDE,
   });
 }
@@ -875,8 +881,12 @@ async function loadOwnedForUpdate(
 ): Promise<Reimbursement | null> {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return null;
+  // Same principal-only filter as `loadOwned` — see the KIND note at the top
+  // of this file. Mutating an interest row by id is the same bug as reading
+  // one: the edit is real for a moment, then vanishes on the next allocator
+  // run.
   return Reimbursement.findOne({
-    where: { id, ...householdWhere(req) },
+    where: { id, ...householdWhere(req), kind: PRINCIPAL_KIND },
     transaction: t,
     lock: t.LOCK.UPDATE,
   });

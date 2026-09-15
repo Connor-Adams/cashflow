@@ -14,6 +14,17 @@ function parseAmount(raw: string | null | undefined): number | null {
 }
 
 /**
+ * Grouped, 2-decimal money formatting shared by every dollar figure on the
+ * People page: `6,700.00`, not `6700.00`. One instance so a loan balance and
+ * an interest figure rendered side by side (the contact drill-in shows both)
+ * never drift into two different thousands conventions again.
+ */
+export const AMOUNT_FORMAT = new Intl.NumberFormat('en-CA', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
+/**
  * Human label for a signed loan balance. Positive: they owe you.
  *
  * Takes only the two fields it reads so a caller holding an aggregated
@@ -27,7 +38,7 @@ function parseAmount(raw: string | null | undefined): number | null {
 export function formatBalanceLabel(b: Pick<LoanBalance, 'currency' | 'balance'>): string {
   const v = parseAmount(b.balance)
   if (v === null) return `${b.currency} balance unknown`
-  const abs = Math.abs(v).toFixed(2)
+  const abs = AMOUNT_FORMAT.format(Math.abs(v))
   const label = v > 0 ? 'owed to you' : v < 0 ? 'you owe' : 'settled'
   return `${b.currency} ${abs} ${label}`
 }
