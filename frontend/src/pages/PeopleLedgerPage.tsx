@@ -31,6 +31,7 @@ import { useToast } from '@/components/ui/toast'
 import type {
   ContactLedgerResponse,
   CounterpartyRole,
+  InterestWindowSummary,
   SelfSuggestion,
   TransferLinkResult,
 } from '@cashflow/shared'
@@ -46,8 +47,18 @@ import {
   setContactSelf,
   setCounterpartyRole,
   setContactLoanDefault,
+  runInterestAllocation,
 } from '../lib/api'
-import { formatBalanceLabel, formatNetFlowLabel } from '../lib/peopleLedger'
+import {
+  formatBalanceLabel,
+  formatNetFlowLabel,
+  buildOwedBreakdown,
+  formatRateWindows,
+  currentRateLabel,
+  lastStatementDate,
+  summarizeScaling,
+  type OwedBreakdown,
+} from '../lib/peopleLedger'
 import { formatMoney } from '../lib/formatMoney'
 
 // ── Local types ──────────────────────────────────────────────────────────────
@@ -69,6 +80,9 @@ const TRANSFER_COL_COUNT = 6
 
 /** Landing columns: Contact, Loan balance, Raw net flow, Outstanding loans, Flow. */
 const LANDING_COL_COUNT = 5
+
+/** The same, plus the Interest column, which only appears when someone has any. */
+const LANDING_COL_COUNT_WITH_INTEREST = LANDING_COL_COUNT + 1
 
 /** Display names for the role vocabulary. Keyed exhaustively so a new role in
  *  `COUNTERPARTY_ROLES` fails typecheck here rather than rendering a raw slug. */
@@ -127,12 +141,215 @@ function computeBarSegments(ledger: ContactLedgerResponse | null): BarSegment[] 
   return segments
 }
 
+// ── Interest formatting ──────────────────────────────────────────────────────
+
+/**
+ * Grouped, code-prefixed money for the interest breakdown: `CAD 6,700.00`.
+ *
+ * The code goes in front rather than a locale symbol because this page is
+ * multi-currency and never collapses to a primary one — `$174.80` next to
+ * `$19.69` would not say whether they are the same currency.
+ */
+const AMOUNT_FORMAT = new Intl.NumberFormat('en-CA', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
+function amountLabel(currency: string, value: number): string {
+  return `${currency} ${AMOUNT_FORMAT.format(value)}`
+}
+
+/**
+ * Typography for a breakdown row, keyed rather than interpolated: Tailwind's
+ * JIT only sees class names that appear as literal strings in the source.
+ */
+const FIGURE_LABEL_CLASS = {
+  figure: 'text-sm text-muted-foreground',
+  total: 'text-sm font-semibold',
+} as const
+const FIGURE_VALUE_CLASS = {
+  figure: 'text-sm font-medium tabular-nums',
+  total: 'text-base font-semibold tabular-nums',
+} as const
+
+type FigureTone = keyof typeof FIGURE_LABEL_CLASS
+
+/** One line of the breakdown: label, figure, and the caption that sources it. */
+function FigureRow({
+  label,
+  value,
+  caption,
+  tone = 'figure',
+  badge,
+  testId,
+  captionTestId,
+}: {
+  label: string
+  value: string
+  caption: ReactNode
+  tone?: FigureTone
+  /** Rendered beside the figure — used to mark the accrued estimate. */
+  badge?: ReactNode
+  testId: string
+  captionTestId?: string
+}) {
+  return (
+    <div className="py-1" data-testid={testId}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+        <span className={FIGURE_LABEL_CLASS[tone]}>{label}</span>
+        <span className="flex items-center gap-2">
+          {badge}
+          <span className={FIGURE_VALUE_CLASS[tone]}>{value}</span>
+        </span>
+      </div>
+      <div className="mt-0.5 text-xs text-muted-foreground" data-testid={captionTestId}>
+        {caption}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Principal, interest charged and interest accrued — three figures and a total,
+ * never one merged number. See "Two figures, never merged" in
+ * `docs/superpowers/specs/2026-09-15-loc-interest-attribution-design.md`.
+ *
+ * Renders NOTHING for a contact with no line-of-credit interest. Not `CAD 0.00`
+ * — a zero here would read as "we computed this and it came to nothing", which
+ * is a different and false claim from "this person has none".
+ *
+ * There is deliberately no repaid leg and no lent-vs-repaid bar: an interest
+ * allocation's `repaid` is always `0.0000` because it is recomputed wholesale on
+ * the next allocator run rather than paid down, so a bar drawn from it would
+ * assert that none of it had been repaid.
+ */
+function OwedBreakdownCard({
+  rows,
+  windows,
+}: {
+  rows: OwedBreakdown[]
+  windows: InterestWindowSummary[] | undefined
+}) {
+  if (rows.length === 0) return null
+  const rateLine = formatRateWindows(windows)
+  const rate = currentRateLabel(windows)
+  const statementDate = lastStatementDate(windows)
+  const scaling = summarizeScaling(windows)
+
+  return (
+    <div className="mt-4 border-t border-border pt-4" data-testid="owed-breakdown">
+      <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
+        Owed, broken out
+      </div>
+      <div className="flex flex-col gap-4">
+        {rows.map((r) => (
+          <div
+            key={r.currency}
+            className="max-w-lg"
+            data-testid={`owed-breakdown-${r.currency}`}
+          >
+            {/* Principal may be absent while interest is not — the allocator
+                only ever charges a positive balance, so that combination means
+                something has gone wrong upstream. Say "unknown", never 0. */}
+            <FigureRow
+              testId={`owed-principal-${r.currency}`}
+              label="Principal"
+              value={
+                r.principal === null
+                  ? `${r.currency} unknown`
+                  : amountLabel(r.currency, r.principal)
+              }
+              caption="Tagged loans, less what came back."
+            />
+            {r.charged !== null && (
+              <FigureRow
+                testId={`owed-charged-${r.currency}`}
+                captionTestId={`owed-charged-caption-${r.currency}`}
+                label="Interest charged"
+                value={amountLabel(r.currency, r.charged)}
+                caption={
+                  statementDate
+                    ? `Apportioned from the interest RBC actually billed, through the ${statementDate} statement.`
+                    : 'Apportioned from the interest RBC actually billed.'
+                }
+              />
+            )}
+            {r.accrued !== null && (
+              <FigureRow
+                testId={`owed-accrued-${r.currency}`}
+                captionTestId={`owed-accrued-caption-${r.currency}`}
+                label="Interest accrued"
+                value={amountLabel(r.currency, r.accrued)}
+                badge={<Badge variant="outline">estimate</Badge>}
+                caption={
+                  rate
+                    ? `Estimated for the days since that statement, at ${rate}. No document backs this figure — RBC has not billed it.`
+                    : 'Estimated for the days since that statement. No document backs this figure — RBC has not billed it.'
+                }
+              />
+            )}
+            {r.total !== null && (
+              <div className="mt-1 border-t border-border pt-1">
+                <FigureRow
+                  testId={`owed-total-${r.currency}`}
+                  label="Total owed"
+                  tone="total"
+                  value={amountLabel(r.currency, r.total)}
+                  badge={
+                    r.totalIncludesEstimate ? <Badge variant="outline">part estimate</Badge> : undefined
+                  }
+                  caption={
+                    r.totalIncludesEstimate
+                      ? 'Principal plus charged interest plus the accrued estimate — part of this figure is not billed.'
+                      : 'Principal plus charged interest. Every part of it billed.'
+                  }
+                />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {rateLine && (
+        <div
+          className="mt-3 text-xs text-muted-foreground"
+          data-testid="interest-rate-windows"
+        >
+          <span className="font-medium">Rate windows:</span> {rateLine}
+        </div>
+      )}
+
+      {/* The bound is the check, not padding. It binds in most windows because
+          total lending exceeds the line — expected, not a fault — but a sudden
+          change in it means the lending or the line moved, so it is shown. */}
+      {scaling && (
+        <div className="mt-1 text-xs text-muted-foreground" data-testid="interest-scaling">
+          Scaled to the statement in {scaling.bound} of {scaling.active} windows that
+          allocated anything; smallest factor {scaling.minFactor.toFixed(3)}. Lending
+          exceeds the line, so each window&apos;s shares are scaled down to the interest
+          RBC printed for it.
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** What a currency's debts add up to, in each direction. Never netted. */
 interface CurrencyTotals {
   /** Sum of the positive balances — what people owe you. */
   owedToYou: number
   /** Sum of the negative balances, as a positive number — what you owe. */
   youOwe: number
+}
+
+/**
+ * A currency's interest, kept in its two halves. Charged is billed and traces
+ * to a statement; accrued is estimated and traces to nothing. Adding them would
+ * produce a number half of which is invented and no way to tell which half.
+ */
+interface InterestTotals {
+  charged: number
+  accrued: number
 }
 
 /**
@@ -178,15 +395,27 @@ function toMoneyUnits(n: number): number {
  */
 function deriveMetrics(cwl: ContactWithLedger[]): {
   balanceByCurrency: Map<string, CurrencyTotals>
+  interestByCurrency: Map<string, InterestTotals>
   trackedLoansCount: number
 } {
   const balanceByCurrency = new Map<string, CurrencyTotals>()
+  const interestByCurrency = new Map<string, InterestTotals>()
   // Accumulated in whole `MONEY_SCALE` units; converted back exactly at the end.
   const unitsByCurrency = new Map<string, CurrencyTotals>()
+  const interestUnits = new Map<string, InterestTotals>()
   let trackedLoansCount = 0
   const seen = new Set<number>()
   for (const { contact, ledger } of cwl) {
     if (contact.isSelf || contact.isPartner || !ledger) continue
+    // Charged and accrued accumulate separately and are NEVER summed here:
+    // one is billed and one is estimated, and a single "interest" headline
+    // would make the estimate indistinguishable from the fact.
+    for (const r of buildOwedBreakdown(ledger)) {
+      const t = interestUnits.get(r.currency) ?? { charged: 0, accrued: 0 }
+      if (r.charged !== null) t.charged += toMoneyUnits(r.charged)
+      if (r.accrued !== null) t.accrued += toMoneyUnits(r.accrued)
+      interestUnits.set(r.currency, t)
+    }
     for (const b of ledger.loanBalance) {
       const v = Number(b.balance)
       if (!Number.isFinite(v)) continue
@@ -214,7 +443,13 @@ function deriveMetrics(cwl: ContactWithLedger[]): {
       youOwe: t.youOwe / MONEY_SCALE,
     })
   }
-  return { balanceByCurrency, trackedLoansCount }
+  for (const [currency, t] of interestUnits) {
+    interestByCurrency.set(currency, {
+      charged: t.charged / MONEY_SCALE,
+      accrued: t.accrued / MONEY_SCALE,
+    })
+  }
+  return { balanceByCurrency, interestByCurrency, trackedLoansCount }
 }
 
 /** Largest absolute balance a contact carries in any currency; the sort key. */
@@ -464,6 +699,7 @@ export function PeopleLedgerPage() {
   const [linking, setLinking] = useState(false)
   const [savingRole, setSavingRole] = useState<Set<number>>(new Set())
   const [savingDefault, setSavingDefault] = useState(false)
+  const [allocatingInterest, setAllocatingInterest] = useState(false)
 
   // ── Load contacts + per-contact ledgers + self-suggestions ──────────────
 
@@ -661,6 +897,34 @@ export function PeopleLedgerPage() {
     }
   }
 
+  /**
+   * Recompute the charged allocation, then reload everything that shows it.
+   *
+   * Household-wide by construction: each rate window's printed interest is
+   * apportioned across every borrower at once, so the landing list is as stale
+   * afterwards as the open drill-in and both are refetched. The accrued
+   * estimate is not stored and so is not "reallocated" — it is recomputed on
+   * every ledger read regardless, which is why the button says nothing about it.
+   */
+  async function onReallocateInterest() {
+    setAllocatingInterest(true)
+    try {
+      const r = await runInterestAllocation()
+      showToastRef.current({
+        title: `Interest reallocated: ${r.allocations} across ${r.windows} rate windows`,
+        variant: 'success',
+      })
+      await Promise.all([reload(), loadAll()])
+    } catch (e) {
+      showToastRef.current({
+        title: e instanceof Error ? e.message : 'Reallocation failed',
+        variant: 'destructive',
+      })
+    } finally {
+      setAllocatingInterest(false)
+    }
+  }
+
   async function onResolveAmbiguous(txnId: number, contactId: number) {
     try {
       await setTransactionContact(txnId, contactId)
@@ -708,7 +972,17 @@ export function PeopleLedgerPage() {
     contact: c,
     ledger: ledgerMap.get(c.id) ?? null,
   }))
-  const { balanceByCurrency, trackedLoansCount } = deriveMetrics(cwl)
+  const { balanceByCurrency, interestByCurrency, trackedLoansCount } = deriveMetrics(cwl)
+  const interestEntries = [...interestByCurrency.entries()]
+    .filter(([, t]) => t.charged > 0 || t.accrued > 0)
+    .sort(([a], [b]) => a.localeCompare(b))
+  // Per-contact interest for the landing list, and the gate on the column
+  // existing at all: nobody with interest, no column — not a column of zeros.
+  const interestByContact = new Map<number, OwedBreakdown[]>(
+    cwl.map(({ contact, ledger: l }) => [contact.id, buildOwedBreakdown(l)]),
+  )
+  const anyInterest = [...interestByContact.values()].some((rows) => rows.length > 0)
+  const landingColCount = anyInterest ? LANDING_COL_COUNT_WITH_INTEREST : LANDING_COL_COUNT
   // Drop any currency whose two sides both rounded away to zero, so the
   // "Nothing outstanding" fallback below can't be skipped by an empty entry.
   const balanceEntries = [...balanceByCurrency.entries()]
@@ -757,6 +1031,17 @@ export function PeopleLedgerPage() {
             onClick={onPreviewLink}
           >
             Preview link
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="reallocate-interest"
+            disabled={allocatingInterest}
+            title="Recomputes each rate window's share of the interest RBC billed, across every borrower. The accrued estimate is not stored and is recomputed on every read."
+            onClick={onReallocateInterest}
+          >
+            {allocatingInterest ? 'Reallocating…' : 'Reallocate interest'}
           </Button>
           <Button
             type="button"
@@ -843,6 +1128,32 @@ export function PeopleLedgerPage() {
                     return cards
                   })
                 )}
+                {/* Interest keeps its own tiles, and keeps them apart from each
+                    other. Folding interest into the balance would hide which
+                    half of a rising total moved; folding the estimate into the
+                    charged figure would hide that half of it is not billed. */}
+                {interestEntries.flatMap(([currency, t]) => {
+                  const cards = []
+                  if (t.charged > 0) {
+                    cards.push(
+                      <MetricCard
+                        key={`${currency}-interest-charged`}
+                        label={`Interest charged · ${currency}`}
+                        value={amountLabel(currency, t.charged)}
+                      />,
+                    )
+                  }
+                  if (t.accrued > 0) {
+                    cards.push(
+                      <MetricCard
+                        key={`${currency}-interest-accrued`}
+                        label={`Interest accrued (estimate) · ${currency}`}
+                        value={amountLabel(currency, t.accrued)}
+                      />,
+                    )
+                  }
+                  return cards
+                })}
                 <MetricCard
                   label="People"
                   value={realContacts.length}
@@ -897,6 +1208,23 @@ export function PeopleLedgerPage() {
                       </span>
                     </div>
                   </TableHead>
+                  {/* Beside the balance, never inside it. The column only
+                      exists when somebody carries interest — a column of
+                      dashes over a household with no line of credit would
+                      imply a figure that was computed and came to nothing. */}
+                  {anyInterest && (
+                    <TableHead>
+                      <div className="flex flex-col gap-0.5">
+                        <span>Interest</span>
+                        <span
+                          className="text-xs font-normal normal-case text-muted-foreground"
+                          data-testid="interest-column-caption"
+                        >
+                          Line-of-credit interest, charged plus estimated — not part of the balance
+                        </span>
+                      </div>
+                    </TableHead>
+                  )}
                   <TableHead>
                     <div className="flex flex-col gap-0.5">
                       <span>Raw transfer flow</span>
@@ -922,11 +1250,11 @@ export function PeopleLedgerPage() {
               <TableBody>
                 {contactsLoading || ledgersLoading ? (
                   Array.from({ length: 3 }).map((_, i) => (
-                    <SkeletonRow key={`people-skel-${i}`} cols={LANDING_COL_COUNT} />
+                    <SkeletonRow key={`people-skel-${i}`} cols={landingColCount} />
                   ))
                 ) : sortedContacts.length === 0 ? (
                   <EmptyTableRow
-                    colSpan={LANDING_COL_COUNT}
+                    colSpan={landingColCount}
                     title="No contacts yet."
                     description="Add contacts in Settings to start tracking transfers with them."
                   />
@@ -961,6 +1289,34 @@ export function PeopleLedgerPage() {
                             <span className="text-sm text-muted-foreground">No tracked loans</span>
                           )}
                         </TableCell>
+                        {anyInterest && (
+                          <TableCell>
+                            {(() => {
+                              const rows = interestByContact.get(c.id) ?? []
+                              if (rows.length === 0) {
+                                // This contact has none. Not zero — none.
+                                return <span className="text-sm text-muted-foreground">—</span>
+                              }
+                              return (
+                                <div
+                                  className="flex flex-col gap-0.5"
+                                  data-testid={`interest-${c.id}`}
+                                >
+                                  {rows.map((r) => (
+                                    <span key={r.currency} className="text-sm font-medium">
+                                      + {amountLabel(r.currency, (r.charged ?? 0) + (r.accrued ?? 0))}
+                                      {r.accrued !== null && (
+                                        <span className="ml-1 font-normal text-muted-foreground">
+                                          incl. estimate
+                                        </span>
+                                      )}
+                                    </span>
+                                  ))}
+                                </div>
+                              )
+                            })()}
+                          </TableCell>
+                        )}
                         <TableCell data-testid={`net-${c.id}`}>
                           {failedLedgerIds.has(c.id) ? (
                             <span className="text-sm text-muted-foreground">—</span>
@@ -1125,6 +1481,13 @@ export function PeopleLedgerPage() {
                     <LoanBar ledger={ledger} />
                   </div>
                 )}
+                {/* The bar above is principal only, deliberately: an interest
+                    allocation's `repaid` is always zero, so including it would
+                    draw a bar asserting none of it had been repaid. */}
+                <OwedBreakdownCard
+                  rows={buildOwedBreakdown(ledger)}
+                  windows={ledger.interestWindows}
+                />
               </Card>
 
               {/* Transfer table */}

@@ -795,3 +795,228 @@ describe('PeopleLedgerPage — partner exclusion', () => {
     expect(queryByText('Fairness Partner')).toBeNull();
   });
 });
+
+// ── Line-of-credit interest: three figures, never merged ────────────────────
+
+/**
+ * The rate history behind the charged figure, shaped as the ledger serves it.
+ * Two of the three windows were bound — scaled down to the interest RBC
+ * actually printed — which is the normal case because total lending exceeds
+ * the line, and is exactly why the factor has to be visible.
+ */
+const INTEREST_WINDOWS = [
+  {
+    rateWindowId: 1,
+    fromDate: '2025-08-04',
+    toDate: '2025-09-17',
+    effectiveRate: '9.4400',
+    applicableInterest: '38.6300',
+    rawTotal: '92.0000',
+    allocated: '38.6300',
+    scalingFactor: '0.419891',
+    bound: true,
+  },
+  {
+    rateWindowId: 2,
+    fromDate: '2025-09-18',
+    toDate: '2025-10-29',
+    effectiveRate: '9.1900',
+    applicableInterest: '26.3500',
+    rawTotal: '26.3500',
+    allocated: '26.3500',
+    scalingFactor: '1.000000',
+    bound: false,
+  },
+  {
+    rateWindowId: 3,
+    fromDate: '2025-10-30',
+    toDate: '2026-09-03',
+    effectiveRate: '8.9400',
+    applicableInterest: '172.3600',
+    rawTotal: '400.0000',
+    allocated: '172.3600',
+    scalingFactor: '0.430900',
+    bound: true,
+  },
+];
+
+/** Stephen's real shape: 6,700 principal, 174.80 charged, 19.69 accrued. */
+const LEDGER_WITH_INTEREST = {
+  ...MOCK_LEDGER,
+  loanBalance: [{ currency: 'CAD', lent: '6700.0000', repaid: '0.0000', balance: '6700.0000' }],
+  // `repaid` is ALWAYS '0.0000' on an interest row — an allocation is not
+  // repaid piecemeal, it is recomputed wholesale on the next allocator run.
+  interestCharged: [{ currency: 'CAD', lent: '174.8000', repaid: '0.0000', balance: '174.8000' }],
+  interestAccrued: [{ currency: 'CAD', lent: '19.6900', repaid: '0.0000', balance: '19.6900' }],
+  interestWindows: INTEREST_WINDOWS,
+};
+
+const renderDrillIn = () =>
+  render(
+    <MemoryRouter initialEntries={['/planned/people?contact=1']}>
+      <PeopleLedgerPage />
+    </MemoryRouter>,
+  );
+
+describe('PeopleLedgerPage — interest drill-in', () => {
+  beforeEach(() => {
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue(LEDGER_WITH_INTEREST as never);
+  });
+
+  it('shows principal, charged and accrued as three separate figures', async () => {
+    renderDrillIn();
+
+    const block = await screen.findByTestId('owed-breakdown-CAD');
+    expect(within(block).getByTestId('owed-principal-CAD')).toHaveTextContent('CAD 6,700.00');
+    expect(within(block).getByTestId('owed-charged-CAD')).toHaveTextContent('CAD 174.80');
+    expect(within(block).getByTestId('owed-accrued-CAD')).toHaveTextContent('CAD 19.69');
+
+    // The merged number — 6,700 + 174.80 + 19.69 rendered as one unlabelled
+    // "owed" figure with no breakdown — is the thing this page must never do.
+    // The total is allowed only BECAUSE the three components stand above it.
+    expect(within(block).getByTestId('owed-total-CAD')).toHaveTextContent('CAD 6,894.49');
+  });
+
+  it('names the provenance of each interest figure', async () => {
+    renderDrillIn();
+
+    const block = await screen.findByTestId('owed-breakdown-CAD');
+    // Charged traces to a document: the last statement it was billed on.
+    expect(within(block).getByTestId('owed-charged-caption-CAD')).toHaveTextContent('2026-09-03');
+    // Accrued names the rate it was computed at, since there is no document.
+    expect(within(block).getByTestId('owed-accrued-caption-CAD')).toHaveTextContent('8.940%');
+  });
+
+  it('labels the accrued figure an estimate, and says so on any total containing it', async () => {
+    renderDrillIn();
+
+    const block = await screen.findByTestId('owed-breakdown-CAD');
+    expect(within(block).getByTestId('owed-accrued-CAD').textContent ?? '').toMatch(/estimate/i);
+    // A total that silently swallows the estimate is the estimate laundered
+    // into a billed fact — the exact failure this feature exists to remove.
+    expect(within(block).getByTestId('owed-total-CAD').textContent ?? '').toMatch(/estimate/i);
+  });
+
+  it('shows the rate windows so a rate change is visible without leaving the page', async () => {
+    renderDrillIn();
+
+    const windows = await screen.findByTestId('interest-rate-windows');
+    expect(windows).toHaveTextContent('9.440% to 2025-09-17');
+    expect(windows).toHaveTextContent('9.190% to 2025-10-29');
+    expect(windows).toHaveTextContent('8.940% since');
+  });
+
+  it('surfaces the scaling factor rather than hiding the bound windows', async () => {
+    renderDrillIn();
+
+    const scaling = await screen.findByTestId('interest-scaling');
+    // 2 of 3 windows that allocated anything were scaled down to the printed
+    // figure. A sudden change here means the lending or the line moved.
+    expect(scaling).toHaveTextContent('2 of 3');
+    expect(scaling.textContent ?? '').toMatch(/0\.42/);
+  });
+
+  it('draws no repaid leg for interest — an allocation has none', async () => {
+    renderDrillIn();
+
+    const block = await screen.findByTestId('owed-breakdown-CAD');
+    // `repaid` is always '0.0000' on an interest row, so rendering a repaid leg
+    // or a lent-vs-repaid bar would assert that nothing had been repaid.
+    expect(within(block).queryByText(/repaid/i)).toBeNull();
+    expect(within(block).queryByRole('img')).toBeNull();
+  });
+
+  it('shows no interest element at all for a contact with none', async () => {
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue({
+      ...MOCK_LEDGER,
+      interestCharged: [],
+      interestAccrued: [],
+      interestWindows: INTEREST_WINDOWS,
+    } as never);
+
+    renderDrillIn();
+
+    await screen.findByTestId('ledger-summary-card');
+    // Not `CAD 0.00`: a zero would read as "we computed this and it came to
+    // nothing", a different and false claim from "this person has none".
+    expect(screen.queryByTestId('owed-breakdown')).toBeNull();
+    expect(screen.queryByTestId('owed-breakdown-CAD')).toBeNull();
+    expect(screen.queryByTestId('interest-rate-windows')).toBeNull();
+  });
+
+  it('reallocates interest and reloads the ledger', async () => {
+    const runSpy = vi
+      .spyOn(api, 'runInterestAllocation')
+      .mockResolvedValue({ windows: 3, allocations: 6, totalCharged: '174.8000' } as never);
+    const ledgerSpy = vi
+      .spyOn(api, 'getContactLedger')
+      .mockResolvedValue(LEDGER_WITH_INTEREST as never);
+
+    renderDrillIn();
+
+    await screen.findByTestId('owed-breakdown-CAD');
+    const before = ledgerSpy.mock.calls.length;
+    await userEvent.click(screen.getByTestId('reallocate-interest'));
+
+    await waitFor(() => expect(runSpy).toHaveBeenCalled());
+    await waitFor(() => expect(ledgerSpy.mock.calls.length).toBeGreaterThan(before));
+  });
+});
+
+describe('PeopleLedgerPage — interest on the landing list and headline', () => {
+  beforeEach(() => {
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue(LEDGER_WITH_INTEREST as never);
+  });
+
+  it('shows interest beside the balance, not folded into it', async () => {
+    render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const row = await screen.findByTestId('contact-row-1');
+    // The balance cell still reports principal alone.
+    expect(within(row).getByTestId('balance-1')).toHaveTextContent('CAD 6700.00 owed to you');
+    const interest = within(row).getByTestId('interest-1');
+    expect(interest).toHaveTextContent('CAD 194.49');
+    // Part of that 194.49 is the accrued estimate, so the cell has to say so.
+    expect(interest.textContent ?? '').toMatch(/estimate/i);
+  });
+
+  it('keeps principal and interest as separate headline tiles', async () => {
+    render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const metrics = await screen.findByTestId('loan-balance-metrics');
+    // Principal keeps its own tile, unchanged and uninflated.
+    expect(within(metrics).getByText('CAD 6700.00 owed to you')).toBeInTheDocument();
+    // Charged and accrued each get their own — summing them would hide which
+    // half moved, the same reason owedToYou and youOwe are separate.
+    expect(within(metrics).getByText('Interest charged · CAD')).toBeInTheDocument();
+    expect(within(metrics).getByText('Interest accrued (estimate) · CAD')).toBeInTheDocument();
+    expect(within(metrics).getByText('CAD 174.80')).toBeInTheDocument();
+    expect(within(metrics).getByText('CAD 19.69')).toBeInTheDocument();
+  });
+
+  it('shows no interest tile or cell when nobody carries interest', async () => {
+    // MOCK_LEDGER has no interest fields at all — an older server, or a
+    // household whose statements have never been imported. Absent must render
+    // as nothing, never as a confident `CAD 0.00`.
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue(MOCK_LEDGER as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    const metrics = await screen.findByTestId('loan-balance-metrics');
+    expect(within(metrics).queryByText(/Interest charged/)).toBeNull();
+    expect(within(metrics).queryByText(/Interest accrued/)).toBeNull();
+    expect(screen.queryByTestId('interest-1')).toBeNull();
+  });
+});

@@ -20,6 +20,13 @@
  *
  * Scope: transaction visibility via `visibleTransactionWhere`; the claim
  * collection is household-scoped via the denormalised `household_id` column.
+ *
+ * KIND: every read here is `kind='principal'` only. The `reimbursements` table
+ * also holds generated `kind='interest'` rows written by the line-of-credit
+ * interest allocator — they carry `status='expected'` and a past due date, so
+ * without this filter they would list, aggregate and age as if a human had
+ * logged them. That false provenance is the exact failure the interest feature
+ * exists to remove. The contacts routes filter the same way.
  * All routes are authenticated DB work, so the router carries the shared
  * `aiSuggestLimiter` (no-op in test) per CodeQL's rate-limit guidance.
  */
@@ -60,6 +67,7 @@ import {
 } from '../models/Reimbursement';
 import { recomputeTransactionAmounts } from '../import/calculateShares';
 import { validateSplitRequest, computeSplitShares } from '../reimbursements/splitShares';
+import { PRINCIPAL_KIND } from '../contacts/runInterestAllocation';
 
 const router = Router();
 router.use(aiSuggestLimiter);
@@ -438,7 +446,8 @@ router.get('/reimbursements', async (req, res, next) => {
       req.query.today,
       resolveHouseholdToday(currentAuth(req).household),
     );
-    const where: WhereOptions = { ...householdWhere(req) };
+    // Principal only — generated interest rows are not hand-logged claims.
+    const where: WhereOptions = { ...householdWhere(req), kind: PRINCIPAL_KIND };
     const q = req.query;
 
     if (typeof q.status === 'string' && q.status) {
@@ -510,7 +519,9 @@ router.get('/reimbursements/summary', async (req, res, next) => {
     // against its hydrated same-currency repayment transaction so a partial
     // repayment doesn't credit the full claim face value.
     const rows = await Reimbursement.findAll({
-      where: { ...householdWhere(req) },
+      // Principal only: folding allocated interest into the outstanding
+      // aggregate would double-count it against the People page's own tiles.
+      where: { ...householdWhere(req), kind: PRINCIPAL_KIND },
       include: INCLUDE,
     });
     const summary = summarize(rows.map(toRow), today);
@@ -534,6 +545,10 @@ router.get('/reimbursements/overdue', async (req, res, next) => {
     const rows = await Reimbursement.findAll({
       where: {
         ...householdWhere(req),
+        // Principal only. Interest rows are written with status 'expected' and
+        // the rate window's last day as the due date, so every one of them is
+        // already past due and would flood this queue on the first run.
+        kind: PRINCIPAL_KIND,
         [Op.or]: [
           { status: 'expected', dueDate: { [Op.lt]: today } },
           { status: 'overdue' },
