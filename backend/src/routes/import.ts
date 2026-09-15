@@ -12,7 +12,16 @@ import {
   type BundleFileResult,
 } from '../import/runImport';
 import { parseStatementFile } from '../import/parseStatementFile';
-import { consumeStatementPreview } from '../import/statementPreviewStore';
+import {
+  consumeStatementPreview,
+  getStatementPreview,
+} from '../import/statementPreviewStore';
+import {
+  acknowledgementAccepted,
+  blockingParseErrors,
+  unreconciledAcknowledgementDigest,
+  unreconciledStatementError,
+} from '../import/reconciliationGate';
 import { commitStatementImport } from '../import/commitStatementImport';
 import { syncTransactionEntityIds } from '../tax/services/syncTransactionEntityIds';
 import {
@@ -258,6 +267,49 @@ router.post('/commit', async (req, res, next) => {
       res.status(400).json({ error: 'previewToken is required' });
       return;
     }
+    // Peek, don't consume, until the reconciliation gate has had its say.
+    // A refused commit leaves the preview alive so the user can look at the
+    // discrepancy and re-submit the SAME token with the acknowledgement digest
+    // it handed back — a consume-first refusal would force a full re-upload.
+    const peeked = getStatementPreview(previewToken);
+    if (!peeked) {
+      res.status(404).json({ error: 'Preview expired or not found. Preview the file again.' });
+      return;
+    }
+    const blocking = blockingParseErrors(peeked.parseErrors);
+
+    // The override is NOT a client-supplied flag. It is an acknowledgement of
+    // one specific refusal: the digest below is derived server-side from this
+    // preview token plus these blocking errors, is returned only with the 422,
+    // and is the only value that opens the gate. A bare `true`, a truthy
+    // string, a stale digest, or a digest minted for another upload all fail —
+    // so the boolean that actually guards the import is computed from server
+    // state, never read off the request body.
+    let acceptUnreconciled = false;
+    if (blocking.length > 0) {
+      const acknowledgement = unreconciledAcknowledgementDigest(previewToken, blocking);
+      acceptUnreconciled = acknowledgementAccepted(
+        acknowledgement,
+        (req.body as { acceptUnreconciled?: unknown })?.acceptUnreconciled,
+      );
+      if (!acceptUnreconciled) {
+        const err = unreconciledStatementError(peeked.fileName, blocking);
+        logImportEvent('commit_refused_unreconciled', {
+          file: peeked.fileName,
+          accountId: peeked.accountId,
+          blockingErrors: blocking.map((e) => e.message),
+        });
+        res.status(err.status).json({
+          error: err.message,
+          code: err.code,
+          blockingErrors: blocking,
+          previewToken,
+          acknowledgement,
+        });
+        return;
+      }
+    }
+
     const preview = consumeStatementPreview(previewToken);
     if (!preview) {
       res.status(404).json({ error: 'Preview expired or not found. Preview the file again.' });
@@ -272,7 +324,9 @@ router.post('/commit', async (req, res, next) => {
       res.status(401).json({ error: 'Missing household' });
       return;
     }
-    const result = await commitStatementImport(preview, user.id, household.id);
+    const result = await commitStatementImport(preview, user.id, household.id, {
+      acceptUnreconciled,
+    });
     await recordAudit({
       req,
       action: AUDIT_ACTIONS.ImportCommitted,
@@ -289,6 +343,7 @@ router.post('/commit', async (req, res, next) => {
         skippedDuplicates: result.skippedDuplicates,
         rowErrors: result.rowErrors,
         parseErrors: result.parseErrors,
+        acceptedUnreconciled: result.acceptedUnreconciled,
         usedParser: result.usedParser,
         usedProfileId: result.usedProfileId,
       },

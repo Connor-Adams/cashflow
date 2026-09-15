@@ -346,6 +346,12 @@ test('reconciliation gate fires when statement does not reconcile (magnitude mis
     reconErrors.length > 0,
     `Expected a reconciliation parseError, got: ${JSON.stringify(result.parseErrors)}`,
   );
+  // The gate's verdict must carry `blocking: true` — that flag, not the message
+  // text, is what makes commitStatementImport refuse the import.
+  assert.ok(
+    reconErrors.every(e => e.blocking === true),
+    `Reconciliation errors must be blocking, got: ${JSON.stringify(reconErrors)}`,
+  );
 });
 
 // ─── Fix 2: Ambiguity guard for net-zero offsetting pair ─────────────────────

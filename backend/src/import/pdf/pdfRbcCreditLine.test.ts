@@ -260,6 +260,26 @@ test('reconciliation gate fires when credit line statement does not reconcile', 
     reconErrors.length > 0,
     `Expected a reconciliation parseError, got: ${JSON.stringify(result.parseErrors)}`,
   );
+  // The gate's verdict must carry `blocking: true` — that flag, not the message
+  // text, is what makes commitStatementImport refuse the import. This is the
+  // gate that caught the +6,400 payment booked as a -6,400 withdrawal and was
+  // then ignored by the commit path.
+  assert.ok(
+    reconErrors.every(e => e.blocking === true),
+    `Reconciliation errors must be blocking, got: ${JSON.stringify(reconErrors)}`,
+  );
+});
+
+test('an ordinary row-level parse error is NOT blocking', () => {
+  // A clean statement's non-reconciliation errors (e.g. a "gate skipped"
+  // notice, an unreadable row) must never stop an import — only the
+  // arithmetic verdict does.
+  const result = rbcCreditLineParser.parse(CLEAN_RECONCILE_LINES, { defaultCurrency: 'CAD' });
+  assert.equal(
+    result.parseErrors.filter((e) => e.blocking === true).length,
+    0,
+    `A reconciling statement must produce no blocking errors, got: ${JSON.stringify(result.parseErrors)}`,
+  );
 });
 
 test('reconciliation gate passes cleanly for a correct credit line statement', () => {

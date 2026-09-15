@@ -3,6 +3,35 @@ import type { PdfRatePeriod } from './pdf/types';
 
 export type StatementParserId = 'csv' | 'ofx' | 'pdf';
 
+/**
+ * One problem a parser hit while reading a statement.
+ *
+ * `blocking` separates two genuinely different classes of problem:
+ *
+ *  - **Ordinary (`blocking` omitted/false).** One row could not be read — a bad
+ *    date, an undecidable sign, an empty description. The rest of the statement
+ *    is still trustworthy, so the import proceeds and the run is labelled
+ *    `partial`.
+ *  - **Blocking (`blocking: true`).** The statement's OWN arithmetic does not
+ *    add up: the parser recomputed the closing balance from the opening balance
+ *    plus the rows it produced and got a different number than the one printed
+ *    on the page. That is the parser reporting it misread the document — every
+ *    row it emitted is suspect, not just one. The commit path refuses these
+ *    outright (see `assertStatementReconciles` in reconciliationGate.ts).
+ *
+ * This is an explicit field on purpose. The reconciliation gate used to be
+ * discoverable only by matching the phrase "does not reconcile" in `message`;
+ * message strings are prose, not a contract, and a reworded message would
+ * silently disarm the gate.
+ */
+export type StatementParseError = {
+  /** 1-based source row, or -1 for a statement-level (not row-level) problem. */
+  rowIndex: number;
+  message: string;
+  /** True when the error invalidates the whole statement, not just one row. */
+  blocking?: boolean;
+};
+
 export type NormalizedCashTransaction = {
   date: string;
   merchantRaw: string;
@@ -112,7 +141,7 @@ export type StatementPreview = {
   holdings: NormalizedHoldingSnapshot[];
   warnings: string[];
   rowErrors: number;
-  parseErrors: { rowIndex: number; message: string }[];
+  parseErrors: StatementParseError[];
   /**
    * Cross-source dedup strategy. When set, the commit pipeline runs the
    * named matcher BEFORE attempting an insert on each investment activity

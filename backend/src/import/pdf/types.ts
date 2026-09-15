@@ -1,6 +1,7 @@
 import type {
   NormalizedHoldingSnapshot,
   NormalizedInvestmentActivity,
+  StatementParseError,
 } from '../statementTypes';
 import type { TxnType } from '../enrichment/types';
 
@@ -153,7 +154,13 @@ export type PdfParseResult = {
    */
   ratePeriods?: PdfRatePeriod[];
   warnings: string[];
-  parseErrors: { rowIndex: number; message: string }[];
+  /**
+   * Problems hit while reading the statement. Set `blocking: true` on an error
+   * that invalidates the whole document — in practice, a reconciliation gate
+   * whose recomputed closing balance disagrees with the printed one. The commit
+   * path refuses those unless the caller explicitly overrides.
+   */
+  parseErrors: StatementParseError[];
 };
 
 export type PdfParser = {
@@ -178,3 +185,6 @@ export type PdfParser = {
    */
   holdingFingerprint?: 'ws_holding';
 };
+
+/** Re-exported so PDF parsers can type their local parse-error buckets. */
+export type { StatementParseError } from '../statementTypes';
