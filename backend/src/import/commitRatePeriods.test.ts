@@ -331,3 +331,105 @@ test('a database-level rate failure is contained too, not just a thrown helper',
     `expected a rate warning, got ${JSON.stringify(result.warnings)}`,
   );
 });
+
+/**
+ * The regression this block exists for.
+ *
+ * `commitStatementImport` short-circuits on a file-content hash that already
+ * imported rows: a statement that once contributed transactions returns early
+ * with `skippedDuplicates` and never reaches the commit body. Rate capture was
+ * added *inside* that body, so the five Royal Credit Line statements whose
+ * first import had inserted transactions could never be re-imported to pick up
+ * their newly-parsed rate table — a five-month hole in the rate history that no
+ * amount of re-importing could fill.
+ *
+ * Rate capture is idempotent by construction (UNIQUE(account_id, from_date) +
+ * read-then-upsert), so it is safe on an already-imported file and must run on
+ * BOTH paths. The transaction contract of the early return does not change: it
+ * still inserts nothing and still reports every row as a skipped duplicate.
+ */
+async function commitOnce(
+  accountId: number,
+  householdId: number,
+  contentHash: string,
+  ratePeriods?: PdfRatePeriod[],
+) {
+  const preview = makePreview(accountId, householdId, ratePeriods ? { ratePeriods } : {});
+  preview.contentHash = contentHash;
+  return commitStatementImport(preview, null, householdId);
+}
+
+test('an already-imported file still captures rate windows while inserting no transactions', async () => {
+  const { householdId, accountId } = await seedAccount();
+  const contentHash = `hash-shared-${Date.now()}-${Math.random()}`;
+
+  // First import: before rate parsing existed, so no rate table on the preview.
+  const first = await commitOnce(accountId, householdId, contentHash);
+  assert.equal(first.insertedTransactions, 1, 'the original import must land its row');
+  assert.equal(await models.AccountRatePeriod.count({ where: { accountId } }), 0);
+
+  // Re-import of the very same file, now that the parser reads the rate table.
+  const again = await commitOnce(accountId, householdId, contentHash, [
+    ratePeriod({ fromDate: '2025-12-04', toDate: '2026-01-03', applicableInterest: '198.7400' }),
+  ]);
+
+  assert.equal(again.insertedTransactions, 0, 'the dedupe path must insert nothing');
+  assert.equal(
+    await models.Transaction.count({ where: { accountId } }),
+    1,
+    'the dedupe path must not double-write the ledger',
+  );
+  assert.equal(again.skippedDuplicates, 1, 'every row is still reported as a skipped duplicate');
+  assert.ok(
+    again.warnings.some((w) => /already imported/i.test(w)),
+    `the already-imported warning must survive, got ${JSON.stringify(again.warnings)}`,
+  );
+
+  const rows = await models.AccountRatePeriod.findAll({ where: { accountId } });
+  assert.equal(rows.length, 1, `expected the rate window to be captured, got ${rows.length}`);
+  assert.equal(rows[0].fromDate, '2025-12-04');
+  assert.equal(rows[0].toDate, '2026-01-03');
+  assert.equal(rows[0].householdId, householdId);
+  assert.equal(Number(rows[0].applicableInterest), 198.74);
+});
+
+test('re-running an already-imported file again does not duplicate the rate rows', async () => {
+  const { householdId, accountId } = await seedAccount();
+  const contentHash = `hash-idem-${Date.now()}-${Math.random()}`;
+  await commitOnce(accountId, householdId, contentHash);
+
+  const periods = [ratePeriod({ fromDate: '2025-12-04', toDate: '2026-01-03' })];
+  await commitOnce(accountId, householdId, contentHash, periods);
+  await commitOnce(accountId, householdId, contentHash, periods);
+  const third = await commitOnce(accountId, householdId, contentHash, [
+    ratePeriod({ fromDate: '2025-12-04', toDate: '2026-01-04', applicableInterest: '201.0000' }),
+  ]);
+
+  assert.equal(third.insertedTransactions, 0);
+  const rows = await models.AccountRatePeriod.findAll({ where: { accountId } });
+  assert.equal(rows.length, 1, `upsert must hold across re-runs, got ${rows.length} rows`);
+  assert.equal(rows[0].toDate, '2026-01-04', 'the restated window updates in place');
+  assert.equal(Number(rows[0].applicableInterest), 201);
+});
+
+test('a rate failure on the already-imported path warns instead of throwing', async () => {
+  const { householdId, accountId } = await seedAccount();
+  const contentHash = `hash-boom-${Date.now()}-${Math.random()}`;
+  await commitOnce(accountId, householdId, contentHash);
+
+  mock.method(models.AccountRatePeriod, 'findOne', () => {
+    throw new Error('rate table exploded');
+  });
+
+  const again = await commitOnce(accountId, householdId, contentHash, [ratePeriod()]);
+
+  assert.equal(again.insertedTransactions, 0);
+  assert.ok(
+    again.warnings.some((w) => /rate history not saved/i.test(w) && /rate table exploded/.test(w)),
+    `expected a contained rate warning, got ${JSON.stringify(again.warnings)}`,
+  );
+  assert.ok(
+    again.warnings.some((w) => /already imported/i.test(w)),
+    'the already-imported warning must still be there alongside it',
+  );
+});
