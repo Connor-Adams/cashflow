@@ -28,42 +28,39 @@ line funded loans to people.** It doesn't. Connor borrows on it for himself too.
 Splitting the whole charge across borrowers silently pushes his own carrying cost onto
 Caelan and Stephen.
 
-## Only LoC-funded loans bear interest
+## The whole line is lending
 
-Tagged principal is **30,975.00** but the line balance is **22,700.00** — Connor has
-lent more than he has drawn, so some of that lending came from his own cash and costs
-him nothing to carry. Charging every tagged loan at the line's rate therefore
-over-attributes: the computed interest exceeds what RBC actually billed in 7 of 8
-active windows, the cap scales it back, and Connor's own carrying cost falls out at
-0.00 — which is plainly wrong.
+Connor has not drawn on the line for himself: every draw either went straight to a
+borrower or staged through Wealthsimple Cash before reaching one. Confirmed by him
+2026-09-15. The one apparent exception, a 2,000 draw on 2025-08-21 that matches both a
+transfer to Stephen and a VFV ETF purchase on the same day, is the transfer — the ETF
+was bought with cash.
 
-So interest attaches only to lending the line actually funded. Draws are traceable by
-matching a draw to a same-day transfer of the same amount:
+**So 100% of the interest belongs to borrowers and none of it is Connor's own carrying
+cost.** This is the fact that makes the method below sound; it is not derivable from
+the ledger and must be revisited if he ever does draw for himself.
 
-```
-2026-04-16   6,700 -> Stephen   (advance landed in chequing as ONLINE BANKING TRANSFER - 0819)
-2026-05-08   5,000 -> Caelan
-2026-07-24   2,000 -> Caelan
-```
+The chain cannot be traced end to end from the data. Draws that stage through
+Wealthsimple leave as `Interac e-Transfer® Out` or `Cash sent`, and Wealthsimple
+exports carry no payee, so the trail goes cold at that hop. It does not need to be
+traced: given the premise above, every dollar of interest is attributable regardless of
+route, and the only open question is the split between borrowers.
 
-13,700 of the 30,975 is LoC-funded. The remaining ~9,000 of the line is Connor's own
-borrowing and carries its own cost, which is now non-zero and correct.
-
-A loan records **which draw funded it** — `transactions.funded_by_transaction_id`, a
-self-referencing provenance field — rather than a boolean, so the attribution stays
-checkable against the statement.
+Total lending (**30,975**) exceeds the line balance (**22,700**), so some lending was
+cash-funded and earns nothing. Rather than guess which, each window's printed interest
+is apportioned across borrowers by their outstanding balance during that window. The
+bound below then becomes an identity: allocations sum to exactly what RBC billed.
 
 ## The method
 
-Applied only to loans carrying a funding link. For each such person, for each rate
-window:
+For each person, for each rate window:
 
 ```
 their interest = their outstanding balance × effective_rate × days_in_window / 365
 ```
 
-Summed across windows. Whatever is left of the statement's applicable interest is
-Connor's own borrowing cost and is charged to nobody.
+Summed across windows, then scaled so the window's allocations total exactly its
+printed applicable interest.
 
 **Simple interest, not compound.** The statement is explicit:
 
@@ -145,11 +142,10 @@ the same shape as `FxRate`. No new primitive.
   the mechanism.
 - **Dated.** A person's balance is measured as of each rate window, not as of today.
   A loan made in April earns nothing for March.
-- **Bounded.** The sum apportioned for a window can never exceed that window's printed
-  applicable interest. If it would, allocations scale down proportionally. Once the
-  basis is restricted to LoC-funded loans the bound should rarely bind; a window where
-  it does bind is a signal that a funding link is wrong, and the scaling factor must be
-  surfaced rather than hidden.
+- **Bounded.** A window's allocations sum to exactly its printed applicable interest —
+  never more. Because lending exceeds the line, the raw computation normally overshoots
+  and is scaled down; that is expected, not a fault. The scaling factor should still be
+  surfaced, since a sudden change in it means the lending or the line moved.
 - **Negative balances earn nothing.** You cannot charge interest to someone you owe.
 - **Per-currency.** No FX. A CAD charge is not shared with a USD balance.
 
