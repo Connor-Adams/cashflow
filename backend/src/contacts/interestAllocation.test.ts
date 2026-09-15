@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { allocateWindowInterest } from './interestAllocation';
+import { allocateWindowInterest, accrueSinceLastWindow } from './interestAllocation';
 
 const w = (
   id: number,
@@ -330,5 +330,184 @@ test('re-running over the same inputs is byte-identical', () => {
   assert.deepEqual(
     allocateWindowInterest(windows, rows, 'CAD'),
     allocateWindowInterest(windows, [...rows].reverse(), 'CAD'),
+  );
+});
+
+// --- accrueSinceLastWindow -------------------------------------------------
+
+test('accrues from the day after lastWindowEnd through asOf inclusive, uncapped', () => {
+  // Sep 4..Sep 10 inclusive is 7 days. 6700 x 8.94% x 7/365 = 11.48729 -> 11.49.
+  const out = accrueSinceLastWindow({
+    lastWindowEnd: '2026-09-03',
+    asOf: '2026-09-10',
+    currentRate: '8.9400',
+    rows: [loan(4, '2026-04-15', -6700)],
+    currency: 'CAD',
+  });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].contactId, 4);
+  assert.equal(out[0].rateWindowId, null);
+  assert.equal(out[0].currency, 'CAD');
+  assert.equal(Number(out[0].amount).toFixed(2), '11.49');
+});
+
+test('asOf equal to lastWindowEnd yields nothing', () => {
+  assert.deepEqual(
+    accrueSinceLastWindow({
+      lastWindowEnd: '2026-09-03',
+      asOf: '2026-09-03',
+      currentRate: '8.9400',
+      rows: [loan(4, '2026-04-15', -6700)],
+      currency: 'CAD',
+    }),
+    [],
+  );
+});
+
+test('asOf before lastWindowEnd yields nothing (never negative days)', () => {
+  assert.deepEqual(
+    accrueSinceLastWindow({
+      lastWindowEnd: '2026-09-03',
+      asOf: '2026-08-15',
+      currentRate: '8.9400',
+      rows: [loan(4, '2026-04-15', -6700)],
+      currency: 'CAD',
+    }),
+    [],
+  );
+});
+
+test('the two accrual windows never double-count the statement boundary day', () => {
+  // Task 1's window ends 2026-09-03 inclusive (a loan landing on it earns one
+  // day there). The tail must start on 2026-09-04, not 2026-09-03, or that day
+  // is counted twice across the two figures.
+  const charged = allocateWindowInterest(
+    [w(9, '2026-08-04', '2026-09-03', '8.9400', '172.3600')],
+    [loan(4, '2026-01-01', -6700)],
+    'CAD',
+  );
+  const accrued = accrueSinceLastWindow({
+    lastWindowEnd: '2026-09-03',
+    asOf: '2026-09-04',
+    currentRate: '8.9400',
+    rows: [loan(4, '2026-01-01', -6700)],
+    currency: 'CAD',
+  });
+  // Charged covers Aug 4..Sep 3 (31 days); accrued covers exactly Sep 4 (1 day).
+  assert.equal(Number(charged[0].amount).toFixed(2), '50.87');
+  assert.equal(Number(accrued[0].amount).toFixed(2), '1.64');
+});
+
+test('a loan made after lastWindowEnd earns only its remaining days', () => {
+  // Tail window is Sep 4..Sep 10 (7 days); the loan lands Sep 6, so only Sep
+  // 6..Sep 10 (5 days) earns. 6700 x 8.94% x 5/365 = 8.20521 -> 8.21.
+  const out = accrueSinceLastWindow({
+    lastWindowEnd: '2026-09-03',
+    asOf: '2026-09-10',
+    currentRate: '8.9400',
+    rows: [loan(4, '2026-09-06', -6700)],
+    currency: 'CAD',
+  });
+  assert.equal(Number(out[0].amount).toFixed(2), '8.21');
+});
+
+test('a repayment reduces the earning balance from its own date on', () => {
+  // 6700 for Sep 4..Sep 5 (2 days), then 3000 for Sep 6..Sep 10 (5 days).
+  // 6700 x 8.94% x 2/365 = 3.28208
+  // 3000 x 8.94% x 5/365 = 3.67397
+  //                       = 6.95605 -> 6.96
+  const out = accrueSinceLastWindow({
+    lastWindowEnd: '2026-09-03',
+    asOf: '2026-09-10',
+    currentRate: '8.9400',
+    rows: [loan(4, '2026-04-15', -6700), { ...loan(4, '2026-09-06', 3700), counterpartyRole: 'repayment' }],
+    currency: 'CAD',
+  });
+  assert.equal(Number(out[0].amount).toFixed(2), '6.96');
+});
+
+test('a non-debt role never accrues', () => {
+  assert.deepEqual(
+    accrueSinceLastWindow({
+      lastWindowEnd: '2026-09-03',
+      asOf: '2026-09-10',
+      currentRate: '8.9400',
+      rows: [{ ...loan(4, '2026-04-15', -6700), counterpartyRole: 'purchase' }],
+      currency: 'CAD',
+    }),
+    [],
+  );
+});
+
+test('a negative balance never accrues', () => {
+  assert.deepEqual(
+    accrueSinceLastWindow({
+      lastWindowEnd: '2026-09-03',
+      asOf: '2026-09-10',
+      currentRate: '8.9400',
+      rows: [{ ...loan(4, '2026-04-15', 500), counterpartyRole: 'repayment' }],
+      currency: 'CAD',
+    }),
+    [],
+  );
+});
+
+test('no upper bound applies: a large balance is not capped', () => {
+  // Nothing has been billed for this period, so unlike allocateWindowInterest
+  // there is no printed figure to scale down to.
+  // 100000 x 8.94% x 7/365 = 171.4521 -> 171.45
+  const out = accrueSinceLastWindow({
+    lastWindowEnd: '2026-09-03',
+    asOf: '2026-09-10',
+    currentRate: '8.9400',
+    rows: [loan(4, '2026-01-01', -100000)],
+    currency: 'CAD',
+  });
+  assert.equal(Number(out[0].amount).toFixed(2), '171.45');
+});
+
+test('accrueSinceLastWindow: rates arriving as numbers (SQLite) behave identically to strings (Postgres)', () => {
+  const asStr = accrueSinceLastWindow({
+    lastWindowEnd: '2026-09-03',
+    asOf: '2026-09-10',
+    currentRate: '8.9400',
+    rows: [loan(4, '2026-04-15', -6700)],
+    currency: 'CAD',
+  });
+  const asNum = accrueSinceLastWindow({
+    lastWindowEnd: '2026-09-03',
+    asOf: '2026-09-10',
+    currentRate: 8.94,
+    rows: [loan(4, '2026-04-15', -6700)],
+    currency: 'CAD',
+  });
+  assert.deepEqual(asStr, asNum);
+});
+
+test('accrueSinceLastWindow: a different currency is not accrued', () => {
+  assert.deepEqual(
+    accrueSinceLastWindow({
+      lastWindowEnd: '2026-09-03',
+      asOf: '2026-09-10',
+      currentRate: '8.9400',
+      rows: [{ ...loan(4, '2026-04-15', -6700), currency: 'USD' }],
+      currency: 'CAD',
+    }),
+    [],
+  );
+});
+
+test('accrueSinceLastWindow: re-running over the same inputs is byte-identical', () => {
+  const args = {
+    lastWindowEnd: '2026-09-03',
+    asOf: '2026-09-10',
+    currentRate: '8.9400',
+    rows: [loan(4, '2026-01-01', -6700), loan(1, '2026-01-01', -24275)],
+    currency: 'CAD',
+  };
+  assert.deepEqual(accrueSinceLastWindow(args), accrueSinceLastWindow(args));
+  assert.deepEqual(
+    accrueSinceLastWindow(args),
+    accrueSinceLastWindow({ ...args, rows: [...args.rows].reverse() }),
   );
 });

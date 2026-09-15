@@ -53,7 +53,8 @@ export interface LedgerRow {
 }
 
 export interface InterestAllocation {
-  rateWindowId: number;
+  /** `null` for the unbilled tail from `accrueSinceLastWindow` — no statement window backs it. */
+  rateWindowId: number | null;
   contactId: number;
   currency: string;
   /** Fixed(4), matching `LoanBalance`. */
@@ -114,26 +115,18 @@ interface Delta {
 }
 
 /**
- * Interest allocated per (rate window, contact), bounded by each window's printed
- * applicable interest.
+ * Fold the ledger into per-contact, date-ordered balance deltas.
  *
- * Only rows in `currency` participate — no FX, same as the rest of the ledger.
- * Only positive balances earn: you cannot charge interest to someone you owe, and
- * one overpaid contact must not subsidise another by contributing a negative.
- *
- * Output is sorted by (rateWindowId, contactId) and zero-amount pairs are dropped,
- * so a re-run over unchanged inputs is byte-identical and the persistence layer's
- * delete-then-write stays idempotent.
+ * Shared by `allocateWindowInterest` and `accrueSinceLastWindow` so the charged
+ * and accrued figures agree about what counts as a loan: the role resolution is
+ * `resolveLedgerRole`, not a local re-derivation, and if this drifted from
+ * `computeLoanBalance` the principal and the interest on the same contact would
+ * disagree about what a loan is.
  */
-export function allocateWindowInterest(
-  windows: RateWindow[],
+function buildDeltasByContact(
   rows: LedgerRow[],
   currency: string,
-): InterestAllocation[] {
-  // Fold the ledger into per-contact, date-ordered balance deltas once. The role
-  // resolution is `resolveLedgerRole`, not a local re-derivation: if this drifted
-  // from `computeLoanBalance`, the interest and the principal shown on the same
-  // contact would disagree about what counts as a loan.
+): { deltasByContact: Map<number, Delta[]>; contactIds: number[] } {
   const deltasByContact = new Map<number, Delta[]>();
   for (const row of rows) {
     if (row.currency !== currency) continue;
@@ -155,6 +148,27 @@ export function allocateWindowInterest(
   for (const list of deltasByContact.values()) list.sort((a, b) => a.day - b.day);
 
   const contactIds = [...deltasByContact.keys()].sort((a, b) => a - b);
+  return { deltasByContact, contactIds };
+}
+
+/**
+ * Interest allocated per (rate window, contact), bounded by each window's printed
+ * applicable interest.
+ *
+ * Only rows in `currency` participate — no FX, same as the rest of the ledger.
+ * Only positive balances earn: you cannot charge interest to someone you owe, and
+ * one overpaid contact must not subsidise another by contributing a negative.
+ *
+ * Output is sorted by (rateWindowId, contactId) and zero-amount pairs are dropped,
+ * so a re-run over unchanged inputs is byte-identical and the persistence layer's
+ * delete-then-write stays idempotent.
+ */
+export function allocateWindowInterest(
+  windows: RateWindow[],
+  rows: LedgerRow[],
+  currency: string,
+): InterestAllocation[] {
+  const { deltasByContact, contactIds } = buildDeltasByContact(rows, currency);
   const out: InterestAllocation[] = [];
 
   for (const window of [...windows].sort((a, b) => a.id - b.id)) {
@@ -195,6 +209,56 @@ export function allocateWindowInterest(
     }
   }
 
+  return out;
+}
+
+/**
+ * Estimate interest accrued since the last billed window, at the current rate.
+ *
+ * `allocateWindowInterest` stops at the last statement — RBC has told us what it
+ * billed there. Nothing has been billed for the days since, so this is the one
+ * figure on the page not backed by a document; it must be labelled an estimate
+ * wherever it is shown (see "Two figures, never merged" in the design doc).
+ *
+ * The tail runs from the day *after* `lastWindowEnd` through `asOf` inclusive —
+ * `lastWindowEnd` itself already earned its day in the billed window, so
+ * starting the count there would double-count it. `asOf` on or before
+ * `lastWindowEnd` means there is no tail yet: empty, never negative days.
+ *
+ * Unlike `allocateWindowInterest`, there is no upper bound to scale to — nothing
+ * has been billed for this period, so there is nothing to scale against. Balance
+ * resolution goes through the same `buildDeltasByContact` (and so the same
+ * `resolveLedgerRole`) as the charged figure, so the two never disagree about
+ * what counts as a loan.
+ */
+export function accrueSinceLastWindow(args: {
+  lastWindowEnd: string;
+  asOf: string;
+  currentRate: string | number;
+  rows: LedgerRow[];
+  currency: string;
+}): InterestAllocation[] {
+  const { lastWindowEnd, asOf, currentRate, rows, currency } = args;
+
+  const lastWindowEndDay = toEpochDay(lastWindowEnd);
+  const asOfDay = toEpochDay(asOf);
+  if (Number.isNaN(lastWindowEndDay) || Number.isNaN(asOfDay)) return [];
+
+  const firstDay = lastWindowEndDay + 1;
+  const lastDay = asOfDay;
+  if (lastDay < firstDay) return [];
+
+  const rateUnits = BigInt(Math.round(Number(currentRate) * SCALE));
+  if (rateUnits <= 0n) return [];
+
+  const { deltasByContact, contactIds } = buildDeltasByContact(rows, currency);
+
+  const out: InterestAllocation[] = [];
+  for (const contactId of contactIds) {
+    const units = accrueWindow(deltasByContact.get(contactId) ?? [], firstDay, lastDay, rateUnits);
+    if (units <= 0n) continue;
+    out.push({ rateWindowId: null, contactId, currency, amount: formatUnits(units) });
+  }
   return out;
 }
 
