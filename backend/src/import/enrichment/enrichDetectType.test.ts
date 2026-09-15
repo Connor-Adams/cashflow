@@ -842,3 +842,27 @@ test('refund: a reversed card bill payment is still a refund', () => {
   });
   assert.equal(out[0].fields.txnType, 'refund');
 });
+
+// Bank-account interest credits. Wealthsimple pays these monthly and words
+// them "Interest earned" / "Interest received (executed at ...)" — neither of
+// which matched the old pattern list, so they imported as txn_type 'unknown'
+// and the corp T2 taxed them as ACTIVE BUSINESS INCOME at the small-business
+// rate instead of as passive investment income. (Prod txn #12243, 2026-08-01,
+// $27.53 on Wealthsimple Corporate Chequing.)
+test('interest: bank account interest earned', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Interest earned',
+    merchantClean: 'Interest earned',
+    amount: 27.53,
+  });
+  assert.equal(out[0].fields.txnType, 'interest');
+});
+
+test('interest: bank account interest received', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Interest received (executed at 2026-07-01)',
+    merchantClean: 'Interest received (executed at 2026-07-01)',
+    amount: 30.91,
+  });
+  assert.equal(out[0].fields.txnType, 'interest');
+});
