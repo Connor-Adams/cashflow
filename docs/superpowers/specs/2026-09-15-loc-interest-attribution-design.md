@@ -28,9 +28,35 @@ line funded loans to people.** It doesn't. Connor borrows on it for himself too.
 Splitting the whole charge across borrowers silently pushes his own carrying cost onto
 Caelan and Stephen.
 
+## Only LoC-funded loans bear interest
+
+Tagged principal is **30,975.00** but the line balance is **22,700.00** — Connor has
+lent more than he has drawn, so some of that lending came from his own cash and costs
+him nothing to carry. Charging every tagged loan at the line's rate therefore
+over-attributes: the computed interest exceeds what RBC actually billed in 7 of 8
+active windows, the cap scales it back, and Connor's own carrying cost falls out at
+0.00 — which is plainly wrong.
+
+So interest attaches only to lending the line actually funded. Draws are traceable by
+matching a draw to a same-day transfer of the same amount:
+
+```
+2026-04-16   6,700 -> Stephen   (advance landed in chequing as ONLINE BANKING TRANSFER - 0819)
+2026-05-08   5,000 -> Caelan
+2026-07-24   2,000 -> Caelan
+```
+
+13,700 of the 30,975 is LoC-funded. The remaining ~9,000 of the line is Connor's own
+borrowing and carries its own cost, which is now non-zero and correct.
+
+A loan records **which draw funded it** — `transactions.funded_by_transaction_id`, a
+self-referencing provenance field — rather than a boolean, so the attribution stays
+checkable against the statement.
+
 ## The method
 
-For each person, for each rate window:
+Applied only to loans carrying a funding link. For each such person, for each rate
+window:
 
 ```
 their interest = their outstanding balance × effective_rate × days_in_window / 365
@@ -120,8 +146,10 @@ the same shape as `FxRate`. No new primitive.
 - **Dated.** A person's balance is measured as of each rate window, not as of today.
   A loan made in April earns nothing for March.
 - **Bounded.** The sum apportioned for a window can never exceed that window's printed
-  applicable interest. If it would, the computation is wrong and must fail loudly
-  rather than over-charge.
+  applicable interest. If it would, allocations scale down proportionally. Once the
+  basis is restricted to LoC-funded loans the bound should rarely bind; a window where
+  it does bind is a signal that a funding link is wrong, and the scaling factor must be
+  surfaced rather than hidden.
 - **Negative balances earn nothing.** You cannot charge interest to someone you owe.
 - **Per-currency.** No FX. A CAD charge is not shared with a USD balance.
 
