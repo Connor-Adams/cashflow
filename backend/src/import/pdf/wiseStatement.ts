@@ -30,12 +30,26 @@ import { parseLongDate, parseMoney } from './dateHelpers';
  *   Section:      starts at "<CCY> on <date> [GMT-04:00]    <amt> <CCY>"
  *   Columns:      Description | Incoming | Outgoing | Amount (running balance)
  *
- * Each transaction occupies THREE consecutive body lines:
+ * TWO body layouts are in circulation and both are supported.
+ *
+ * Newer statements (seen 2026-09) put the numeric columns ON the description
+ * line, so a transaction is TWO lines:
+ *   1. "<description>   <signed amount>   <running balance>"
+ *   2. "<date> | Transaction: <TXNID> [| Reference: <ref>]"
+ *
+ * Older statements broke the columns onto a line of their own, making it THREE:
  *   1. description (e.g. "Sent money to CDG Labs Inc.")
  *   2. numeric pair "<signed amount>   <running balance>" — first token is the
  *      signed amount (Outgoing values print negative, Incoming positive)
  *   3. "<date>   [Card ending in NNNN   <Holder>   ]Transaction: <TXNID>
  *      [Reference: <ref>]" — card rows interpose card metadata before the ID
+ *
+ * In both cases the LAST number is the running balance and the one before it is
+ * the signed amount. Columns are separated by RUNS of spaces while money inside
+ * the description ("Converted 10,499.28 USD to 14,522.37 CAD") is single-spaced,
+ * which is what lets `splitTrailingColumns` tell them apart. A long reference
+ * can wrap onto its own line after the column-bearing line, so description
+ * fragments are joined, not overwritten.
  *
  * Page breaks can split a 3-line block across pages — the walker treats lines
  * as a flat stream and ignores page footers (`ref:... N / N`).
@@ -203,6 +217,42 @@ function extractAmountFromMoneyLine(text: string): number | null {
   return Number.isFinite(signed) ? signed : null;
 }
 
+/**
+ * Split a body line into its description text and the Incoming/Outgoing/Amount
+ * columns Wise prints at the end of it.
+ *
+ * Newer statements merge the numeric columns onto the description line:
+ *
+ *   "Sent money to CDG Labs Inc.   -14,522.37   0.00"
+ *   "Converted 10,499.28 USD to 14,522.37 CAD   14,522.37   14,522.37"
+ *
+ * Columns are separated from the description (and from each other) by RUNS of
+ * spaces, while money inside the description text — "Converted 10,499.28 USD" —
+ * is single-spaced, so splitting on 2+ spaces keeps the two apart. Trailing
+ * money tokens are then peeled off the end.
+ *
+ * The LAST column is the running balance; the amount is the column immediately
+ * before it. Only two of the three labelled columns are ever printed on the
+ * statements seen so far (the empty one is dropped), so a line with fewer than
+ * two trailing money tokens is treated as having no columns at all rather than
+ * guessing which one it is.
+ */
+export function splitTrailingColumns(
+  text: string,
+): { description: string; amount: number | null } {
+  const tokens = text.trim().split(/\s{2,}/).map((t) => t.trim()).filter(Boolean);
+  const trailing: string[] = [];
+  // Never consume the final non-money token — a line that is ALL money is the
+  // older layout's standalone amount line, handled by `isAllMoneyLine`.
+  while (tokens.length > 1 && MONEY_TOKEN_RE.test(tokens[tokens.length - 1])) {
+    trailing.unshift(tokens.pop() as string);
+  }
+  const description = tokens.join(' ');
+  if (trailing.length < 2) return { description: description || text.trim(), amount: null };
+  const signed = parseMoney(trailing[trailing.length - 2]);
+  return { description, amount: Number.isFinite(signed) ? signed : null };
+}
+
 function extractAmountFromInline(
   txnLineText: string,
   txnLineMatch: RegExpExecArray,
@@ -223,6 +273,8 @@ export function parseWiseStatementBody(
 
   let pendingDescription: string | null = null;
   let pendingAmountLine: string | null = null;
+  // Amount lifted off the description line itself (newer two-line layout).
+  let pendingInlineAmount: number | null = null;
 
   for (let i = startIdx; i < lines.length; i++) {
     const text = lines[i].text.trim();
@@ -240,11 +292,15 @@ export function parseWiseStatementBody(
         parseErrors.push({ rowIndex: i + 1, message: `Bad txn date: ${dateIdMatch[1]}` });
         pendingDescription = null;
         pendingAmountLine = null;
+        pendingInlineAmount = null;
         continue;
       }
       let amount: number | null = null;
       if (pendingAmountLine) {
         amount = extractAmountFromMoneyLine(pendingAmountLine);
+      }
+      if (amount == null) {
+        amount = pendingInlineAmount;
       }
       if (amount == null) {
         amount = extractAmountFromInline(text, dateIdMatch);
@@ -256,12 +312,14 @@ export function parseWiseStatementBody(
         });
         pendingDescription = null;
         pendingAmountLine = null;
+        pendingInlineAmount = null;
         continue;
       }
       const description = pendingDescription ?? sourceReference;
       rows.push({ date: isoDate, description, amount, sourceReference });
       pendingDescription = null;
       pendingAmountLine = null;
+      pendingInlineAmount = null;
       continue;
     }
 
@@ -271,7 +329,13 @@ export function parseWiseStatementBody(
     }
 
     if (isLikelyDescription(text)) {
-      pendingDescription = text;
+      const { description, amount } = splitTrailingColumns(text);
+      if (amount !== null) pendingInlineAmount = amount;
+      if (description) {
+        // A long reference can wrap onto its own line AFTER the line carrying
+        // the columns, so fragments are joined rather than overwritten.
+        pendingDescription = pendingDescription ? `${pendingDescription} ${description}` : description;
+      }
       continue;
     }
   }
