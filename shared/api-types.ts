@@ -754,9 +754,12 @@ export type StatementPreview = {
   /**
    * `blocking: true` means the statement's own arithmetic did not add up — the
    * parser misread the document, not just one row. `POST /api/import/commit`
-   * refuses such a preview with 422 `statement_unreconciled` unless the request
-   * carries `acceptUnreconciled: true`; the preview token stays valid so the
-   * same token can be re-submitted with the override.
+   * refuses such a preview with 422 `statement_unreconciled`. The refusal body
+   * carries an `acknowledgement` digest derived server-side from the preview
+   * token and these blocking errors; the preview token stays valid, and the
+   * same token re-submitted with `acceptUnreconciled: "<acknowledgement>"`
+   * imports anyway. A bare `true`, or a digest from another preview, is
+   * refused — the override acknowledges one specific discrepancy.
    */
   parseErrors: { rowIndex: number; message: string; blocking?: boolean }[]
   duplicateCounts: {

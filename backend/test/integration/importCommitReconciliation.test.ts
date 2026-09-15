@@ -8,9 +8,12 @@
  *  - a preview carrying a blocking parse error is refused with 422 and the
  *    preview token STAYS VALID, so the user can look at the discrepancy and
  *    re-submit rather than re-upload;
- *  - re-submitting that same token with `acceptUnreconciled: true` imports and
- *    stamps `accepted_unreconciled` on the import_histories row;
- *  - a string-y `"true"` does not count as the override (strict boolean only);
+ *  - the refusal hands back an `acknowledgement` digest, and re-submitting that
+ *    same token WITH that digest imports and stamps `accepted_unreconciled` on
+ *    the import_histories row;
+ *  - a bare `true`, a string-y `"true"`, a garbage digest, and a digest minted
+ *    for a different preview are all refused and insert nothing — the override
+ *    acknowledges one specific discrepancy, it is not a blanket flag;
  *  - an ordinary, non-blocking parse error commits as it always has.
  */
 import { after, before, test } from 'node:test';
@@ -108,26 +111,57 @@ test('commit is refused with 422 when the statement does not reconcile, and noth
   assert.equal(res.body.code, 'statement_unreconciled');
   assert.equal(res.body.blockingErrors.length, 1);
   assert.match(String(res.body.error), /does not reconcile/);
+  // The refusal is what mints the override: you cannot acknowledge a
+  // discrepancy you have not been shown.
+  const acknowledgement = String(res.body.acknowledgement ?? '');
+  assert.match(acknowledgement, /^[0-9a-f]{32}$/);
 
   assert.equal(await models.Transaction.count({ where: { accountId } }), 0);
   assert.equal(await models.ImportHistory.count({ where: { accountId } }), 0);
 
-  // A "true"-looking string is not the override.
-  const stringy = await authed
+  // A digest minted for a DIFFERENT preview must not open this one.
+  const otherToken = seedPreview({
+    accountId,
+    householdId,
+    parseErrors: [{ rowIndex: -1, message: RECON_MESSAGE, blocking: true }],
+  });
+  const otherRefusal = await authed
     .post('/api/import/commit')
-    .send({ previewToken: token, acceptUnreconciled: 'true' });
-  assert.equal(stringy.status, 422, JSON.stringify(stringy.body));
+    .send({ previewToken: otherToken });
+  assert.equal(otherRefusal.status, 422, JSON.stringify(otherRefusal.body));
+  const foreignAcknowledgement = String(otherRefusal.body.acknowledgement ?? '');
+  assert.notEqual(foreignAcknowledgement, acknowledgement);
 
-  // The preview survived both refusals — same token still commits below.
+  // Nothing but the exact digest for THIS refusal gets through.
+  for (const override of [true, 'true', 'yes', 1, foreignAcknowledgement, 'f'.repeat(32)]) {
+    const refused = await authed
+      .post('/api/import/commit')
+      .send({ previewToken: token, acceptUnreconciled: override });
+    assert.equal(
+      refused.status,
+      422,
+      `override ${JSON.stringify(override)}: ${JSON.stringify(refused.body)}`,
+    );
+    assert.equal(refused.body.code, 'statement_unreconciled');
+  }
+  assert.equal(await models.Transaction.count({ where: { accountId } }), 0);
+  assert.equal(await models.ImportHistory.count({ where: { accountId } }), 0);
+
+  // The preview survived every refusal — same token, with its own digest.
   const accepted = await authed
     .post('/api/import/commit')
-    .send({ previewToken: token, acceptUnreconciled: true });
+    .send({ previewToken: token, acceptUnreconciled: acknowledgement });
   assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
   assert.equal(accepted.body.insertedTransactions, 1);
   assert.equal(accepted.body.acceptedUnreconciled, true);
 
   const history = await models.ImportHistory.findOne({ where: { accountId } });
   assert.ok(history, 'ImportHistory row written for the overridden import');
+  assert.equal(
+    await models.ImportHistory.count({ where: { accountId } }),
+    1,
+    'only the acknowledged commit wrote history',
+  );
   assert.equal(history.acceptedUnreconciled, true);
   assert.equal(history.status, 'partial');
   assert.match(String(history.errorMessage), /acceptUnreconciled/);
