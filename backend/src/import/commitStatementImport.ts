@@ -284,6 +284,66 @@ async function persistRatePeriods(
   }
 }
 
+/**
+ * Persist the statement's rate windows, contained so a failure can never cost
+ * the import.
+ *
+ * Called from BOTH commit paths, and that is the whole point. The
+ * already-imported short-circuit above returns before the commit body runs, so
+ * rate capture living only in the commit body meant a statement that had once
+ * contributed transactions could never be re-imported to pick up a
+ * newly-supported field. Fourteen Royal Credit Line statements were re-imported
+ * to backfill the rate table; the five whose first import had inserted rows
+ * silently captured nothing, leaving a five-month hole (2025-12-04 → 2026-05-04,
+ * $198.74 of interest) that no further re-import could fill.
+ *
+ * Running this on an already-imported file is safe and correct:
+ * `persistRatePeriods` reads-then-upserts against UNIQUE(account_id, from_date),
+ * so it is idempotent by construction. The dedupe it bypasses is a
+ * *transaction-level* dedupe, and the transaction contract of the early return
+ * is unchanged — nothing is inserted into the ledger on that path.
+ *
+ * `parent` is the ledger transaction on the commit path, where the writes must
+ * run in a SAVEPOINT (same Postgres-safety rationale as createHolding — an
+ * error inside an open transaction otherwise aborts it and every later query
+ * returns "current transaction is aborted"). On the already-imported path there
+ * is no surrounding transaction, so pass null and the writes get their own.
+ *
+ * Failures are appended to `preview.warnings`, which both return paths spread
+ * into the commit result.
+ */
+async function captureRatePeriods(
+  preview: StatementPreview,
+  account: Account,
+  parent: SequelizeTransaction | null,
+): Promise<void> {
+  const periods = preview.ratePeriods;
+  if (!periods || periods.length === 0) return;
+  if (account.householdId == null) {
+    // account_rate_periods.household_id is NOT NULL, and a rate window with no
+    // household could not be scoped or erased. Skip loudly.
+    preview.warnings.push(
+      `Statement rate history not saved: account ${account.id} has no household.`,
+    );
+    return;
+  }
+  const householdId = account.householdId;
+  try {
+    await sequelize.transaction(
+      parent ? { transaction: parent } : {},
+      async (sp) => {
+        await persistRatePeriods(periods, account, householdId, sp);
+      },
+    );
+  } catch (e) {
+    preview.warnings.push(
+      `Statement rate history not saved (${periods.length} window(s)): ${
+        e instanceof Error ? e.message : String(e)
+      }. The rest of the import was unaffected.`,
+    );
+  }
+}
+
 export type CommitStatementImportOptions = {
   /**
    * Import the statement even though its reconciliation gate failed — i.e.
@@ -353,6 +413,13 @@ export async function commitStatementImport(
     },
   });
   if (prior && (prior.rowCount ?? 0) > 0) {
+    // Transactions are what this short-circuit exists to suppress, and it
+    // still suppresses every one of them. Rate windows are not transactions:
+    // they are idempotent reference data keyed by UNIQUE(account_id,
+    // from_date), and re-importing a file is the ONLY way to pick up a field
+    // the parser did not understand the first time round. Capturing them here
+    // is what makes a re-import able to backfill at all.
+    await captureRatePeriods(preview, account, null);
     return {
       file: preview.fileName,
       batchLabel: preview.importBatch,
@@ -702,35 +769,10 @@ export async function commitStatementImport(
 
     // Rate-history capture (RBC Royal Credit Line). Transactions are the
     // reason to import a statement; the rate table is a bonus that feeds the
-    // interest allocator. So this NEVER fails the import: the writes run
-    // inside a SAVEPOINT (same Postgres-safety rationale as createHolding —
-    // an error inside an open transaction otherwise aborts it and every
-    // later query returns "current transaction is aborted"), and any failure
-    // is downgraded to a warning on the commit result while the surrounding
-    // transaction goes on to commit the ledger.
-    if (preview.ratePeriods && preview.ratePeriods.length > 0) {
-      const periods = preview.ratePeriods;
-      if (account.householdId == null) {
-        // account_rate_periods.household_id is NOT NULL, and a rate window
-        // with no household could not be scoped or erased. Skip loudly.
-        preview.warnings.push(
-          `Statement rate history not saved: account ${account.id} has no household.`,
-        );
-      } else {
-        const householdId = account.householdId;
-        try {
-          await sequelize.transaction({ transaction: t }, async (sp) => {
-            await persistRatePeriods(periods, account, householdId, sp);
-          });
-        } catch (e) {
-          preview.warnings.push(
-            `Statement rate history not saved (${periods.length} window(s)): ${
-              e instanceof Error ? e.message : String(e)
-            }. Transactions were imported normally.`,
-          );
-        }
-      }
-    }
+    // interest allocator, so this never fails the import — see
+    // captureRatePeriods. Threaded with `t` so the windows land in the same
+    // transaction as the ledger they were read off.
+    await captureRatePeriods(preview, account, t);
 
     const inserted =
       insertedTransactions + insertedInvestmentActivities + insertedHoldings;
