@@ -1,6 +1,7 @@
 import {
   Model,
   DataTypes,
+  Op,
   type Sequelize,
   type ModelAttributes,
   InferAttributes,
@@ -43,7 +44,12 @@ export class Reimbursement extends Model<
 > {
   declare id: CreationOptional<number>;
   declare householdId: number;
-  declare transactionId: number;
+  /**
+   * The outlay this claim expects back. Null ONLY for `kind='interest'` rows:
+   * allocated line-of-credit interest is owed for a *period*, not for a single
+   * outlay, and pointing at an arbitrary loan row would invent provenance.
+   */
+  declare transactionId: number | null;
   /** Structured party (Contact in same household); null when free-text. */
   declare contactId: number | null;
   /** Free-text party label; null when a Contact is referenced. */
@@ -70,6 +76,13 @@ export class Reimbursement extends Model<
   declare kind: CreationOptional<string>;
   /** The LOAN INTEREST transaction this interest row was apportioned from. */
   declare sourceTransactionId: CreationOptional<number | null>;
+  /**
+   * The `account_rate_periods` window this interest row was apportioned from.
+   * This — not `sourceTransactionId` — is what the allocator keys on: the rate
+   * and the printed Applicable Interest both live on the window, and a statement
+   * period can print two windows when prime moves mid-cycle. Null for principal.
+   */
+  declare sourceRatePeriodId: CreationOptional<number | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -86,7 +99,7 @@ export function initReimbursement(sequelize: Sequelize): typeof Reimbursement {
       transactionId: {
         type: DataTypes.INTEGER,
         field: 'transaction_id',
-        allowNull: false,
+        allowNull: true,
       },
       contactId: {
         type: DataTypes.INTEGER,
@@ -151,6 +164,11 @@ export function initReimbursement(sequelize: Sequelize): typeof Reimbursement {
         field: 'source_transaction_id',
         allowNull: true,
       },
+      sourceRatePeriodId: {
+        type: DataTypes.INTEGER,
+        field: 'source_rate_period_id',
+        allowNull: true,
+      },
     } as ModelAttributes<Reimbursement>,
     {
       sequelize,
@@ -158,6 +176,14 @@ export function initReimbursement(sequelize: Sequelize): typeof Reimbursement {
       tableName: 'reimbursements',
       underscored: true,
       timestamps: true,
+      indexes: [
+        {
+          unique: true,
+          fields: ['source_rate_period_id', 'contact_id'],
+          name: 'idx_reimbursements_interest_rate_period',
+          where: { source_rate_period_id: { [Op.ne]: null } },
+        },
+      ],
     },
   );
   return Reimbursement;

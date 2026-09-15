@@ -168,8 +168,45 @@ export function allocateWindowInterest(
   rows: LedgerRow[],
   currency: string,
 ): InterestAllocation[] {
+  return allocateWindowInterestDetailed(windows, rows, currency).allocations;
+}
+
+/**
+ * What each window contributed, and whether its printed interest bound it.
+ *
+ * On real data the bound binds in 7 of 8 active windows: total lending (30,975)
+ * exceeds the line balance (22,700), so some lending was cash-funded and the raw
+ * balance-based accrual overshoots what RBC billed. That is expected. But a
+ * *change* in the factor means the lending or the line moved, so it is reported
+ * rather than silently applied — the caller and the page can see it.
+ */
+export interface WindowAllocationSummary {
+  rateWindowId: number;
+  fromDate: string;
+  toDate: string;
+  /** Fixed(4) annual percentage, e.g. `8.9400`. */
+  effectiveRate: string;
+  /** Fixed(4). The window's printed Applicable Interest — the bound. */
+  applicableInterest: string;
+  /** Fixed(4). Balance-based accrual across all borrowers, before the bound. */
+  rawTotal: string;
+  /** Fixed(4). What was actually allocated: `min(rawTotal, applicableInterest)`. */
+  allocated: string;
+  /** `allocated / rawTotal`, fixed(6). `1.000000` when the bound did not bind. */
+  scalingFactor: string;
+  /** True when the printed figure scaled the allocation down. */
+  bound: boolean;
+}
+
+/** `allocateWindowInterest` plus the per-window diagnostics. Same arithmetic. */
+export function allocateWindowInterestDetailed(
+  windows: RateWindow[],
+  rows: LedgerRow[],
+  currency: string,
+): { allocations: InterestAllocation[]; windows: WindowAllocationSummary[] } {
   const { deltasByContact, contactIds } = buildDeltasByContact(rows, currency);
   const out: InterestAllocation[] = [];
+  const summaries: WindowAllocationSummary[] = [];
 
   for (const window of [...windows].sort((a, b) => a.id - b.id)) {
     const firstDay = toEpochDay(window.fromDate);
@@ -189,17 +226,37 @@ export function allocateWindowInterest(
       raw.push({ contactId, units });
       rawTotal += units;
     }
-    if (rawTotal <= 0n) continue;
+
+    const summary: WindowAllocationSummary = {
+      rateWindowId: window.id,
+      fromDate: String(window.fromDate).slice(0, 10),
+      toDate: String(window.toDate).slice(0, 10),
+      effectiveRate: formatUnits(rateUnits),
+      applicableInterest: formatUnits(capUnits),
+      rawTotal: formatUnits(rawTotal),
+      allocated: formatUnits(0n),
+      scalingFactor: '1.000000',
+      bound: false,
+    };
+
+    if (rawTotal <= 0n) {
+      // A window predating every loan allocates nothing. Still reported: a window
+      // that silently vanished would be indistinguishable from one never imported.
+      summaries.push(summary);
+      continue;
+    }
 
     // The bound is the check, not padding: the sum for a window can never exceed
     // what RBC actually billed for it. A wrong rate, a double-counted balance or
     // a day-count off by one all show up here as an overshoot. Scaling keeps the
     // page honest; the overshoot itself is what a caller should be alarmed by.
-    const final =
-      rawTotal <= capUnits ? raw.map((r) => r.units) : scaleDownTo(raw.map((r) => r.units), rawTotal, capUnits);
+    const bound = rawTotal > capUnits;
+    const final = bound ? scaleDownTo(raw.map((r) => r.units), rawTotal, capUnits) : raw.map((r) => r.units);
 
+    let allocated = 0n;
     for (let i = 0; i < raw.length; i += 1) {
       if (final[i] <= 0n) continue;
+      allocated += final[i];
       out.push({
         rateWindowId: window.id,
         contactId: raw[i].contactId,
@@ -207,9 +264,21 @@ export function allocateWindowInterest(
         amount: formatUnits(final[i]),
       });
     }
+
+    summary.allocated = formatUnits(allocated);
+    summary.bound = bound;
+    summary.scalingFactor = formatRatio(allocated, rawTotal);
+    summaries.push(summary);
   }
 
-  return out;
+  return { allocations: out, windows: summaries };
+}
+
+/** `numerator / denominator` as a fixed(6) string, straight from the BigInts. */
+function formatRatio(numerator: bigint, denominator: bigint): string {
+  if (denominator <= 0n) return '1.000000';
+  const scaled = divRound(numerator * 1_000_000n, denominator);
+  return `${scaled / 1_000_000n}.${(scaled % 1_000_000n).toString().padStart(6, '0')}`;
 }
 
 /**

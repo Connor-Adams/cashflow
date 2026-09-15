@@ -2010,6 +2010,44 @@ export interface LoanBalance {
   balance: string;
 }
 
+/**
+ * One line-of-credit rate window's contribution to charged interest.
+ *
+ * `scalingFactor` is `allocated / rawTotal`: below 1 when the window's printed
+ * Applicable Interest bound the balance-based accrual down, which is the normal
+ * case because total lending exceeds the line. A sudden change in it means the
+ * lending or the line moved, so it is shown rather than hidden.
+ */
+export interface InterestWindowSummary {
+  rateWindowId: number;
+  fromDate: string;
+  toDate: string;
+  /** Fixed(4) annual percentage, e.g. `8.9400`. */
+  effectiveRate: string;
+  /** Fixed(4). What the statement printed for this window. */
+  applicableInterest: string;
+  /** Fixed(4). Balance-based accrual across all borrowers, before the bound. */
+  rawTotal: string;
+  /** Fixed(4). What was actually allocated. */
+  allocated: string;
+  /** Fixed(6). `1.000000` when the printed figure did not bind. */
+  scalingFactor: string;
+  bound: boolean;
+}
+
+/** Result of `POST /api/contacts/interest-allocation`. */
+export interface InterestAllocationRunResult {
+  /** Rate windows loaded. Zero when no statement has been imported yet. */
+  windows: number;
+  /** Charged rows written, or under `dryRun` that would be. */
+  allocations: number;
+  /** Fixed(4). Charged interest only — never the accrued estimate. */
+  totalCharged: string;
+  windowSummaries: InterestWindowSummary[];
+  dryRun: boolean;
+  elapsedMs: number;
+}
+
 export interface ContactLedgerResponse {
   contactId: number;
   name: string;
@@ -2017,8 +2055,22 @@ export interface ContactLedgerResponse {
   loanDefault: boolean;
   /** Descriptive raw flow. Carries no owed/owe claim. */
   transferNet: TransferNet[];
-  /** The number that means "owes you". */
+  /** The number that means "owes you". Principal only — interest is never folded in. */
   loanBalance: LoanBalance[];
+  /**
+   * Interest apportioned from each rate window's printed Applicable Interest,
+   * through the last statement. Persisted, and traces to a document.
+   * `repaid` is always zero: an interest allocation is not repaid piecemeal.
+   */
+  interestCharged: LoanBalance[];
+  /**
+   * Interest estimated for the days since the last statement, at the rate now in
+   * force. Computed on every read and NEVER stored — it changes daily. Must be
+   * labelled an estimate wherever it is shown.
+   */
+  interestAccrued: LoanBalance[];
+  /** The rate windows behind `interestCharged`, with each one's scaling factor. */
+  interestWindows: InterestWindowSummary[];
   trackedOutstandingByCurrency: Record<string, string>;
   transfers: LedgerTransferRow[];
 }

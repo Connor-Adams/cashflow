@@ -656,9 +656,11 @@ router.get('/reimbursements/:id/match-candidates', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    const outlay = await Transaction.findByPk(r.transactionId, {
-      attributes: ['id', 'date'],
-    });
+    // `transactionId` is null only on generated `kind='interest'` rows, which
+    // have no outlay to match a repayment against.
+    const outlay = r.transactionId == null
+      ? null
+      : await Transaction.findByPk(r.transactionId, { attributes: ['id', 'date'] });
     if (!outlay) {
       res.json({ data: [], count: 0 });
       return;
