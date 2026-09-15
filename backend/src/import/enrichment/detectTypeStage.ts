@@ -132,7 +132,13 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
     type: 'transfer',
     re: /\bConverted\s+[\d.,]+\s+[A-Z]{3}\s+to\s+[\d.,]+\s+[A-Z]{3}\b/i,
   },
-  { type: 'interest', re: /\b(interest charge|interest on|finance charge|stock lending monthly interest)\b/i },
+  // "interest earned"/"interest received" are how banks word a credit-interest
+  // payout (Wealthsimple pays chequing interest monthly this way). Without them
+  // the row imports as 'unknown' and the corp T2 counts it as active business
+  // income instead of passive investment income — a different tax rate.
+  // "interest paid" is deliberately NOT here: on a loan or mortgage that is an
+  // expense, and typing it 'interest' would net it against investment income.
+  { type: 'interest', re: /\b(interest charge|interest on|finance charge|stock lending monthly interest|interest earned|interest received)\b/i },
   { type: 'reward', re: /\b(cash ?back|reward|points redemption)\b/i, requireSign: 'positive' },
 ];
 
