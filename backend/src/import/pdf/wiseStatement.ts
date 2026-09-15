@@ -3,6 +3,7 @@ import type {
   PdfParseResult,
   PdfParser,
   PdfStatementHeader,
+  StatementParseError,
 } from './types';
 import { normalizeMerchant } from '../normalizeMerchant';
 import { parseLongDate, parseMoney } from './dateHelpers';
@@ -186,7 +187,7 @@ type WiseRow = {
   sourceReference: string;
 };
 
-type ParseErrors = { rowIndex: number; message: string }[];
+type ParseErrors = StatementParseError[];
 
 function findBodyStart(lines: PdfLine[]): number {
   for (let i = 0; i < lines.length; i++) {

@@ -1,4 +1,4 @@
-import type { PdfLine, PdfParser, PdfParseResult, PdfRatePeriod, PdfStatementHeader } from './types';
+import type { PdfLine, PdfParser, PdfParseResult, PdfRatePeriod, PdfStatementHeader, StatementParseError } from './types';
 import { normalizeMerchant } from '../normalizeMerchant';
 import { dayMonthToIso, parseLongDate, parseMoney, type Period } from './dateHelpers';
 
@@ -219,8 +219,8 @@ export function parseRbcCreditLineActivity(
   lines: PdfLine[],
   period: Period,
   openingPrincipal: number,
-): { rows: CreditLineRow[]; parseErrors: { rowIndex: number; message: string }[] } {
-  const parseErrors: { rowIndex: number; message: string }[] = [];
+): { rows: CreditLineRow[]; parseErrors: StatementParseError[] } {
+  const parseErrors: StatementParseError[] = [];
 
   // Activity section: between "Details of your account activity" and
   // "Your LoanProtector insurance coverage summary" or "Rate History".
@@ -587,6 +587,13 @@ export const rbcCreditLineParser: PdfParser = {
     // ── Reconciliation gate ─────────────────────────────────────────────────
     // Reconcile principal balance: opening + Σ(principal-change amounts) ≈ closing.
     // Interest/fee rows (isPrincipalChange=false) are excluded from the principal sum.
+    //
+    // A mismatch is marked `blocking: true`: it is not one bad row, it is the
+    // parser reporting that it misread the document, so commitStatementImport
+    // refuses the import outright. This gate is the one that caught the +6,400
+    // payment booked as a -6,400 withdrawal — and was then ignored, which is
+    // exactly what `blocking` exists to prevent. A missing closing balance only
+    // means the gate could not run; that stays a plain parse error.
     if (closingPrincipal === null) {
       parseErrors.push({
         rowIndex: -1,
@@ -607,6 +614,7 @@ export const rbcCreditLineParser: PdfParser = {
       if (Math.abs(recomputed2 - closingPrincipal) > 0.015) {
         parseErrors.push({
           rowIndex: -1,
+          blocking: true,
           message: `statement does not reconcile: opening ${openingPrincipal} - principal changes ${principalDelta.toFixed(2)} = ${recomputed2.toFixed(2)}, expected closing ${closingPrincipal}`,
         });
       }

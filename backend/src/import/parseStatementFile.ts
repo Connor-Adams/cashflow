@@ -26,6 +26,7 @@ import type {
   NormalizedHoldingSnapshot,
   NormalizedInvestmentActivity,
   NormalizedSecurity,
+  StatementParseError,
   StatementPreview,
 } from './statementTypes';
 
@@ -103,12 +104,12 @@ function parseInvestmentCsv(
   investmentActivities: NormalizedInvestmentActivity[];
   holdings: NormalizedHoldingSnapshot[];
   warnings: string[];
-  parseErrors: { rowIndex: number; message: string }[];
+  parseErrors: StatementParseError[];
 } {
   const investmentActivities: NormalizedInvestmentActivity[] = [];
   const holdings: NormalizedHoldingSnapshot[] = [];
   const warnings: string[] = [];
-  const parseErrors: { rowIndex: number; message: string }[] = [];
+  const parseErrors: StatementParseError[] = [];
 
   records.forEach((row, index) => {
     const rowIndex = index + 1;
@@ -511,7 +512,7 @@ export async function parseStatementFile(opts: {
     holdings: [] as NormalizedHoldingSnapshot[],
     warnings: [] as string[],
     rowErrors: 0,
-    parseErrors: [] as { rowIndex: number; message: string }[],
+    parseErrors: [] as StatementParseError[],
     overrideBusiness: opts.overrideBusiness === true ? true : undefined,
     duplicateCounts: {
       transactions: 0,

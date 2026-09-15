@@ -751,7 +751,14 @@ export type StatementPreview = {
   }>
   warnings: string[]
   rowErrors: number
-  parseErrors: { rowIndex: number; message: string }[]
+  /**
+   * `blocking: true` means the statement's own arithmetic did not add up — the
+   * parser misread the document, not just one row. `POST /api/import/commit`
+   * refuses such a preview with 422 `statement_unreconciled` unless the request
+   * carries `acceptUnreconciled: true`; the preview token stays valid so the
+   * same token can be re-submitted with the override.
+   */
+  parseErrors: { rowIndex: number; message: string; blocking?: boolean }[]
   duplicateCounts: {
     transactions: number
     investmentActivities: number

@@ -31,6 +31,7 @@ import {
   type WsProductHint,
 } from './parseWealthsimpleFilename';
 import { parseStatementFile } from './parseStatementFile';
+import type { StatementParseError } from './statementTypes';
 import {
   commitStatementImport,
   findOrCreateSecurity,
@@ -79,7 +80,7 @@ import { applyCreditCardStatementSummary } from '../cards/applyStatementSummary'
 export const PARSE_ERRORS_MAX = 50;
 
 export function appendParseError(
-  bucket: { rowIndex: number; message: string }[],
+  bucket: StatementParseError[],
   rowIndex: number,
   message: string
 ): void {
@@ -386,7 +387,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   let inserted = 0;
   let skippedDup = 0;
   let rowErrors = 0;
-  const parseErrors: { rowIndex: number; message: string }[] = [];
+  const parseErrors: StatementParseError[] = [];
   // Stage 8 deferral: rows that completed phase 1 still flagged for review accumulate
   // here, then a single AI batch (or per-row fallback) enhances them after commit.
   const coldRows: ColdRow[] = [];
@@ -773,7 +774,7 @@ export type BundleFileResult = {
   insertedInvestmentActivities: number;
   skippedDuplicates: number;
   rowErrors: number;
-  parseErrors: { rowIndex: number; message: string }[];
+  parseErrors: StatementParseError[];
   warnings: string[];
   error?: string;
 };
@@ -967,7 +968,7 @@ export type PdfBundleFileResult = {
   insertedHoldings: number;
   skippedDuplicates: number;
   rowErrors: number;
-  parseErrors: { rowIndex: number; message: string }[];
+  parseErrors: StatementParseError[];
   warnings: string[];
   error?: string;
 };

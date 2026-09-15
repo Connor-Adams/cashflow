@@ -37,6 +37,14 @@ export class ImportHistory extends Model<
   declare skippedDuplicateCount: CreationOptional<number | null>;
   /** Rows that failed parsing/mapping during import (#231). */
   declare rowErrorsCount: CreationOptional<number | null>;
+  /**
+   * True when this batch was committed over a failed reconciliation gate —
+   * i.e. the parser reported that the statement's own arithmetic did not add
+   * up and a caller passed `acceptUnreconciled: true` anyway. The audit trail
+   * for a deliberate override; `errorMessage` carries the gate's verdict.
+   * False on every normal import.
+   */
+  declare acceptedUnreconciled: CreationOptional<boolean>;
   /** When this batch was rolled back (#233). NULL on healthy batches. */
   declare rolledBackAt: CreationOptional<Date | null>;
   /** Actor who executed the rollback (#233). NULL on healthy batches. */
@@ -124,6 +132,12 @@ export function initImportHistory(sequelize: Sequelize): typeof ImportHistory {
         type: DataTypes.INTEGER,
         field: 'row_errors_count',
         allowNull: true,
+      },
+      acceptedUnreconciled: {
+        type: DataTypes.BOOLEAN,
+        field: 'accepted_unreconciled',
+        allowNull: false,
+        defaultValue: false,
       },
       rolledBackAt: {
         type: DataTypes.DATE,

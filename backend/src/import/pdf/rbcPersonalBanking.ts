@@ -1,4 +1,4 @@
-import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader } from './types';
+import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader, StatementParseError } from './types';
 import { normalizeMerchant } from '../normalizeMerchant';
 import { dayMonthToIso, parseLongDate, parseMoney, type Period } from './dateHelpers';
 
@@ -227,8 +227,8 @@ type PendingRow = {
 export function parseRbcPersonalBankingActivity(
   lines: PdfLine[],
   period: Period,
-): { rows: Array<{ date: string; description: string; amount: number }>; parseErrors: { rowIndex: number; message: string }[] } {
-  const parseErrors: { rowIndex: number; message: string }[] = [];
+): { rows: Array<{ date: string; description: string; amount: number }>; parseErrors: StatementParseError[] } {
+  const parseErrors: StatementParseError[] = [];
 
   // Extract opening balance before slicing the activity section.
   const openingBalance = extractOpeningBalance(lines);
@@ -442,6 +442,11 @@ export const rbcPersonalBankingParser: PdfParser = {
 
     // ── Reconciliation gate ─────────────────────────────────────────────────
     // Verify: opening + Σsigned ≈ closing. Wrong signs/amounts must not be silent.
+    //
+    // A mismatch is marked `blocking: true`: it is not one bad row, it is the
+    // parser reporting that it misread the document, so commitStatementImport
+    // refuses the import outright. A missing closing balance only means the
+    // gate could not run — that stays a plain (non-blocking) parse error.
     if (closingBalance === null) {
       parseErrors.push({
         rowIndex: -1,
@@ -453,6 +458,7 @@ export const rbcPersonalBankingParser: PdfParser = {
       if (Math.abs(recomputed - closingBalance) > 0.015) {
         parseErrors.push({
           rowIndex: -1,
+          blocking: true,
           message:
             `statement does not reconcile: opening ${openingBalance} + sum ${sumSigned.toFixed(2)} = ${recomputed.toFixed(2)}, expected closing ${closingBalance}`,
         });

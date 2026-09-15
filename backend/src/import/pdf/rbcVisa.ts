@@ -1,4 +1,4 @@
-import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader } from './types';
+import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader, StatementParseError } from './types';
 import { normalizeMerchant } from '../normalizeMerchant';
 import { MONTHS_SHORT, parseLongDate, parseMoney, toIso, type Period } from './dateHelpers';
 
@@ -116,9 +116,9 @@ type VisaRow = { date: string; description: string; amount: number };
 export function parseRbcVisaActivity(
   lines: PdfLine[],
   period: Period,
-): { rows: VisaRow[]; parseErrors: { rowIndex: number; message: string }[] } {
+): { rows: VisaRow[]; parseErrors: StatementParseError[] } {
   const rows: VisaRow[] = [];
-  const parseErrors: { rowIndex: number; message: string }[] = [];
+  const parseErrors: StatementParseError[] = [];
 
   // Activity section starts after "ACTIVITY DESCRIPTION" header line and ends
   // at "TOTAL ACCOUNT BALANCE" or "INTEREST RATE CHART".

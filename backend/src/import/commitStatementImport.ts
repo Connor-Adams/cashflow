@@ -27,6 +27,7 @@ import {
   serializeFlags,
 } from './computeImportConfidence';
 import { extractCounterparty } from './extractCounterparty';
+import { assertStatementReconciles } from './reconciliationGate';
 import { resolveCounterpartyContact } from '../contacts/findOrCreateContact';
 import type { AccountType } from '@cashflow/shared';
 import {
@@ -283,10 +284,26 @@ async function persistRatePeriods(
   }
 }
 
+export type CommitStatementImportOptions = {
+  /**
+   * Import the statement even though its reconciliation gate failed — i.e.
+   * the parser could not make the statement's own arithmetic agree and every
+   * row it produced is suspect.
+   *
+   * OFF by default and deliberately awkward: it must be passed explicitly at
+   * every call site, and every use is stamped on the resulting ImportHistory
+   * row (`acceptedUnreconciled`) together with the gate's verdict. Only the
+   * interactive commit route surfaces it, and only when the caller re-submits
+   * after seeing the refusal.
+   */
+  acceptUnreconciled?: boolean;
+};
+
 export async function commitStatementImport(
   preview: StatementPreview,
   userId: number | null,
-  householdId: number | null
+  householdId: number | null,
+  options: CommitStatementImportOptions = {}
 ): Promise<{
   file: string;
   batchLabel: string;
@@ -297,11 +314,27 @@ export async function commitStatementImport(
   skippedDuplicates: number;
   rowErrors: number;
   parseErrors: StatementPreview['parseErrors'];
+  /**
+   * True when this run imported over a failed reconciliation gate. False on
+   * every ordinary import — including one where `acceptUnreconciled` was
+   * passed but the statement reconciled fine and the override was never used.
+   */
+  acceptedUnreconciled: boolean;
   warnings: string[];
   usedParser: StatementPreview['usedParser'];
   usedProfileId?: string;
   profileInferred?: boolean;
 }> {
+  // Reconciliation gate FIRST — before the account lookup, before the
+  // already-imported short-circuit, before any write. A statement whose
+  // arithmetic does not add up must leave no trace at all: no transactions,
+  // no ImportHistory row. See reconciliationGate.ts for why.
+  const overriddenBlockingErrors = assertStatementReconciles(
+    { fileName: preview.fileName, parseErrors: preview.parseErrors },
+    options.acceptUnreconciled === true,
+  );
+  const acceptedUnreconciled = overriddenBlockingErrors.length > 0;
+
   const startedAt = new Date();
   const account = await Account.findOne({
     where: {
@@ -333,6 +366,7 @@ export async function commitStatementImport(
         preview.holdings.length,
       rowErrors: preview.rowErrors,
       parseErrors: preview.parseErrors,
+      acceptedUnreconciled,
       warnings: [
         ...preview.warnings,
         'This file content was already imported successfully.',
@@ -700,23 +734,40 @@ export async function commitStatementImport(
 
     const inserted =
       insertedTransactions + insertedInvestmentActivities + insertedHoldings;
+    const baseStatus =
+      preview.rowErrors > 0 && inserted === 0
+        ? 'failed'
+        : preview.rowErrors > 0
+          ? 'partial'
+          : 'success';
+    // A batch imported over a failed reconciliation gate is never "success":
+    // the numbers in it are known-suspect, so it reads as `partial` even when
+    // every individual row parsed cleanly. `partial` (not `failed`) because the
+    // rows really were written and the already-imported short-circuit above
+    // must still recognise this content hash on a re-commit.
+    const historyStatus =
+      acceptedUnreconciled && baseStatus === 'success' ? 'partial' : baseStatus;
+    const errorParts: string[] = [];
+    if (preview.rowErrors > 0) {
+      errorParts.push(`${preview.rowErrors} row(s) could not be parsed`);
+    }
+    if (acceptedUnreconciled) {
+      errorParts.push(
+        `imported with acceptUnreconciled override despite ` +
+          `${overriddenBlockingErrors.length} reconciliation failure(s): ` +
+          overriddenBlockingErrors.map((e) => e.message).join('; '),
+      );
+    }
     await ImportHistory.create(
       {
         fileName: preview.fileName,
         filePathSafe: preview.fileName,
         contentHash: preview.contentHash,
         batchLabel: preview.importBatch,
-        status:
-          preview.rowErrors > 0 && inserted === 0
-            ? 'failed'
-            : preview.rowErrors > 0
-              ? 'partial'
-              : 'success',
+        status: historyStatus,
         rowCount: inserted,
-        errorMessage:
-          preview.rowErrors > 0
-            ? `${preview.rowErrors} row(s) could not be parsed`
-            : null,
+        errorMessage: errorParts.length > 0 ? errorParts.join(' | ') : null,
+        acceptedUnreconciled,
         startedAt,
         finishedAt: new Date(),
         householdId: account.householdId,
@@ -744,6 +795,7 @@ export async function commitStatementImport(
     skippedDuplicates,
     rowErrors: preview.rowErrors,
     parseErrors: preview.parseErrors,
+    acceptedUnreconciled,
     warnings: preview.warnings,
     usedParser: preview.usedParser,
     usedProfileId: preview.usedProfileId,
