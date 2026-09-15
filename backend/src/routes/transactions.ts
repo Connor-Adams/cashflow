@@ -28,6 +28,7 @@ import {
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
 import { COUNTERPARTY_ROLES, isCounterpartyRole } from '../contacts/counterpartyRole';
+import { markInterestAllocationPending } from '../contacts/interestAllocationCoordinator';
 import {
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,
@@ -426,6 +427,37 @@ function scheduleMemoryFanoutIfNeeded(
   });
 }
 
+/**
+ * Keys whose value decides how much of the line-of-credit interest a person is
+ * carrying, and therefore how the billed interest is apportioned.
+ *
+ * `loadLedgerRows` selects the ledger by `counterpartyContactId` and weights it
+ * by `counterpartyRole`, so moving a transaction to a different person is as
+ * much a retag as changing its role. Everything else on a transaction — notes,
+ * category, split — moves no balance the allocation reads.
+ */
+const LENDING_KEYS = ['counterpartyRole', 'counterpartyContactId'] as const;
+
+/**
+ * Queue a reallocation when a patch retagged lending.
+ *
+ * Called only AFTER the patch has committed — a rejected patch changed no
+ * balance — and always queued, never run: Connor retags loans in bursts, and a
+ * dozen PATCHes must not mean a dozen full household recomputations inside
+ * request handlers. The coordinator collapses the burst into one run. It cannot
+ * throw, so a broken allocator can never make a retag look like it failed.
+ */
+function scheduleInterestReallocationIfNeeded(
+  req: import('express').Request,
+  patch: Record<string, unknown>,
+): void {
+  if (!LENDING_KEYS.some((k) => Object.prototype.hasOwnProperty.call(patch, k))) return;
+  markInterestAllocationPending({
+    householdId: currentAuth(req).household.id,
+    source: 'counterparty-retag',
+  });
+}
+
 const PATCHABLE_KEYS = [
   'categoryOverride',
   'categoryOverrideId',
@@ -756,6 +788,7 @@ router.post('/bulk-patch', async (req, res, next) => {
     // Fire memory-fanout AFTER the outer commit so we never schedule a
     // re-enrich for a transaction whose patch was rolled back.
     for (const { snap, txn } of fanoutTargets) scheduleMemoryFanoutIfNeeded(snap, txn);
+    scheduleInterestReallocationIfNeeded(req, patch);
 
     logTransactionEvent('bulk_patch_completed', {
       count: ids.length,
@@ -848,6 +881,7 @@ router.post('/bulk-patch-filter', async (req, res, next) => {
         }),
     );
     for (const { snap, txn } of fanoutTargets) scheduleMemoryFanoutIfNeeded(snap, txn);
+    scheduleInterestReallocationIfNeeded(req, patch);
 
     logTransactionEvent('bulk_patch_filter_completed', {
       updated: updatedIds.length,
@@ -1308,6 +1342,7 @@ router.patch('/:id', async (req, res, next) => {
         }),
     );
     scheduleMemoryFanoutIfNeeded(memSnap, txn);
+    scheduleInterestReallocationIfNeeded(req, b);
     if (hasAiSuggestion) {
       await markTransactionSuggestionOutcome(req, aiSuggestionId, txn);
     }
