@@ -262,8 +262,7 @@ router.post(
 
 router.post('/commit', async (req, res, next) => {
   try {
-    const body = req.body as { previewToken?: string; acceptUnreconciled?: unknown };
-    const previewToken = String(body?.previewToken ?? '').trim();
+    const previewToken = String((req.body as { previewToken?: string })?.previewToken ?? '').trim();
     if (!previewToken) {
       res.status(400).json({ error: 'previewToken is required' });
       return;
@@ -289,7 +288,10 @@ router.post('/commit', async (req, res, next) => {
     let acceptUnreconciled = false;
     if (blocking.length > 0) {
       const acknowledgement = unreconciledAcknowledgementDigest(previewToken, blocking);
-      acceptUnreconciled = acknowledgementAccepted(acknowledgement, body?.acceptUnreconciled);
+      acceptUnreconciled = acknowledgementAccepted(
+        acknowledgement,
+        (req.body as { acceptUnreconciled?: unknown })?.acceptUnreconciled,
+      );
       if (!acceptUnreconciled) {
         const err = unreconciledStatementError(peeked.fileName, blocking);
         logImportEvent('commit_refused_unreconciled', {
