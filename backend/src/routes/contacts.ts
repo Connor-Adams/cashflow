@@ -26,6 +26,7 @@ import {
   INTEREST_KIND,
   PRINCIPAL_KIND,
 } from '../contacts/runInterestAllocation';
+import { markInterestAllocationPending } from '../contacts/interestAllocationCoordinator';
 import type { ContactLedgerResponse, LoanBalance } from '@cashflow/shared';
 
 /**
@@ -303,7 +304,19 @@ router.patch('/:id', async (req, res, next) => {
       }
       row.set('loanDefault', parsed);
     }
+    const loanDefaultChanged = b.loanDefault !== undefined && row.changed('loanDefault');
     await row.save();
+    // `loanDefault` decides whether untagged transfers count as lending, so it
+    // moves every balance the interest allocation is weighted by. Queued after
+    // the save (a rejected patch changed nothing) and never run inline: the
+    // coordinator collapses a burst of toggles into one recomputation, and it
+    // cannot throw, so a broken allocator cannot fail this PATCH.
+    if (loanDefaultChanged) {
+      markInterestAllocationPending({
+        householdId: currentAuth(req).household.id,
+        source: 'loan-default-toggle',
+      });
+    }
     res.json(row);
   } catch (e) {
     next(e);

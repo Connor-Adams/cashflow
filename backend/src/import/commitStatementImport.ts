@@ -29,6 +29,7 @@ import {
 import { extractCounterparty } from './extractCounterparty';
 import { assertStatementReconciles } from './reconciliationGate';
 import { resolveCounterpartyContact } from '../contacts/findOrCreateContact';
+import { markInterestAllocationPending } from '../contacts/interestAllocationCoordinator';
 import type { AccountType } from '@cashflow/shared';
 import {
   enrichmentRecurringMinSupport,
@@ -247,7 +248,8 @@ async function persistRatePeriods(
   account: Account,
   householdId: number,
   t: SequelizeTransaction,
-): Promise<void> {
+): Promise<number> {
+  let written = 0;
   for (const p of periods) {
     const existing = await AccountRatePeriod.findOne({
       where: { accountId: account.id, fromDate: p.fromDate },
@@ -265,6 +267,7 @@ async function persistRatePeriods(
         transaction: t,
         fields: ['toDate', 'primeRate', 'premium', 'effectiveRate', 'applicableInterest'],
       });
+      written += 1;
     } else {
       await AccountRatePeriod.create(
         {
@@ -280,8 +283,10 @@ async function persistRatePeriods(
         },
         { transaction: t },
       );
+      written += 1;
     }
   }
+  return written;
 }
 
 /**
@@ -311,29 +316,34 @@ async function persistRatePeriods(
  *
  * Failures are appended to `preview.warnings`, which both return paths spread
  * into the commit result.
+ *
+ * Returns the number of windows written or updated. New billed interest is the
+ * primary input to the line-of-credit interest allocation, so a non-zero count
+ * is what tells the caller to queue a reallocation — a count of zero must not,
+ * or every statement import would recompute a household for nothing. The
+ * caller marks AFTER its transaction commits: windows rolled back with the
+ * ledger are windows the allocator must not be told about.
  */
 async function captureRatePeriods(
   preview: StatementPreview,
   account: Account,
   parent: SequelizeTransaction | null,
-): Promise<void> {
+): Promise<number> {
   const periods = preview.ratePeriods;
-  if (!periods || periods.length === 0) return;
+  if (!periods || periods.length === 0) return 0;
   if (account.householdId == null) {
     // account_rate_periods.household_id is NOT NULL, and a rate window with no
     // household could not be scoped or erased. Skip loudly.
     preview.warnings.push(
       `Statement rate history not saved: account ${account.id} has no household.`,
     );
-    return;
+    return 0;
   }
   const householdId = account.householdId;
   try {
-    await sequelize.transaction(
+    return await sequelize.transaction(
       parent ? { transaction: parent } : {},
-      async (sp) => {
-        await persistRatePeriods(periods, account, householdId, sp);
-      },
+      async (sp) => persistRatePeriods(periods, account, householdId, sp),
     );
   } catch (e) {
     preview.warnings.push(
@@ -341,6 +351,7 @@ async function captureRatePeriods(
         e instanceof Error ? e.message : String(e)
       }. The rest of the import was unaffected.`,
     );
+    return 0;
   }
 }
 
@@ -419,7 +430,15 @@ export async function commitStatementImport(
     // from_date), and re-importing a file is the ONLY way to pick up a field
     // the parser did not understand the first time round. Capturing them here
     // is what makes a re-import able to backfill at all.
-    await captureRatePeriods(preview, account, null);
+    // No surrounding transaction on this path, so the windows are already
+    // durable by the time this returns and the trigger can fire immediately.
+    const reimportedWindows = await captureRatePeriods(preview, account, null);
+    if (reimportedWindows > 0 && account.householdId != null) {
+      markInterestAllocationPending({
+        householdId: account.householdId,
+        source: 'statement-import',
+      });
+    }
     return {
       file: preview.fileName,
       batchLabel: preview.importBatch,
@@ -453,6 +472,7 @@ export async function commitStatementImport(
   let insertedInvestmentActivities = 0;
   let insertedHoldings = 0;
   let skippedDuplicates = 0;
+  let ratePeriodsWritten = 0;
 
   await sequelize.transaction(async (t) => {
     for (const row of preview.transactions) {
@@ -772,7 +792,7 @@ export async function commitStatementImport(
     // interest allocator, so this never fails the import — see
     // captureRatePeriods. Threaded with `t` so the windows land in the same
     // transaction as the ledger they were read off.
-    await captureRatePeriods(preview, account, t);
+    ratePeriodsWritten = await captureRatePeriods(preview, account, t);
 
     const inserted =
       insertedTransactions + insertedInvestmentActivities + insertedHoldings;
@@ -825,6 +845,19 @@ export async function commitStatementImport(
       { transaction: t }
     );
   });
+
+  // AFTER the commit, deliberately. Windows written inside a transaction that
+  // then rolled back are windows the allocator must never be told about, and
+  // a reallocation firing against a half-open transaction would read the
+  // ledger mid-write. Queued, never run inline: an import must not pay for a
+  // household recomputation, and it must not fail if one is impossible —
+  // markInterestAllocationPending cannot throw.
+  if (ratePeriodsWritten > 0 && account.householdId != null) {
+    markInterestAllocationPending({
+      householdId: account.householdId,
+      source: 'statement-import',
+    });
+  }
 
   return {
     file: preview.fileName,
