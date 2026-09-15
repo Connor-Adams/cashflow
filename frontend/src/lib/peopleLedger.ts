@@ -50,7 +50,7 @@ export function formatBalanceLabel(b: Pick<LoanBalance, 'currency' | 'balance'>)
 export function formatNetFlowLabel(n: TransferNet): string {
   const v = parseAmount(n.net)
   if (v === null) return `${n.currency} flow unknown`
-  const abs = Math.abs(v).toFixed(2)
+  const abs = AMOUNT_FORMAT.format(Math.abs(v))
   const label = v >= 0 ? 'net out' : 'net in'
   return `${n.currency} ${abs} ${label}`
 }
@@ -215,22 +215,42 @@ export interface ScalingSummary {
   bound: number
   /** The smallest scaling factor across active windows, e.g. 0.42. */
   minFactor: number
+  /**
+   * Every window's printed Applicable Interest, summed — what RBC actually
+   * billed. Counts the inapplicable windows too: they were billed, whether or
+   * not anybody could be charged for them.
+   */
+  billed: number
+  /**
+   * What was actually attributed to people, summed the same way. Never above
+   * `billed`; the difference is attributed to nobody.
+   */
+  attributed: number
 }
 
 export function summarizeScaling(
-  windows: Array<{ allocated: string; scalingFactor: string; bound: boolean }> | undefined,
+  windows:
+    | Array<{ applicableInterest?: string; allocated: string; scalingFactor: string; bound: boolean }>
+    | undefined,
 ): ScalingSummary | null {
   let active = 0
   let bound = 0
   let minFactor = Number.POSITIVE_INFINITY
+  let billed = 0
+  let attributed = 0
   for (const w of windows ?? []) {
+    // The billed/attributed totals span EVERY window, not just the active ones.
+    // Excluding a window that allocated nothing would hide exactly the residue
+    // these two numbers exist to expose.
+    billed += parseAmount(w.applicableInterest) ?? 0
     const allocated = parseAmount(w.allocated)
     if (allocated === null || Math.abs(allocated) < INTEREST_EPSILON) continue
+    attributed += allocated
     active += 1
     if (w.bound) bound += 1
     const factor = parseAmount(w.scalingFactor)
     if (factor !== null && factor < minFactor) minFactor = factor
   }
   if (active === 0 || !Number.isFinite(minFactor)) return null
-  return { active, bound, minFactor }
+  return { active, bound, minFactor, billed, attributed }
 }

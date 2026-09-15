@@ -288,7 +288,7 @@ describe('PeopleLedgerPage — landing list', () => {
     );
 
     const contactRow = await screen.findByTestId('contact-row-1');
-    expect(within(contactRow).getByText('CAD 43634.85 net out')).toBeInTheDocument();
+    expect(within(contactRow).getByText('CAD 43,634.85 net out')).toBeInTheDocument();
     // 43k of raw flow, zero debt: nothing on this row may say "owed" or "owe".
     expect(contactRow.textContent).not.toMatch(/owed|you owe/i);
 
@@ -849,6 +849,14 @@ const LEDGER_WITH_INTEREST = {
   interestCharged: [{ currency: 'CAD', lent: '174.8000', repaid: '0.0000', balance: '174.8000' }],
   interestAccrued: [{ currency: 'CAD', lent: '19.6900', repaid: '0.0000', balance: '19.6900' }],
   interestWindows: INTEREST_WINDOWS,
+  // Freshly allocated: the stored rows match what a recomputation would write.
+  interestStaleness: {
+    stale: false,
+    persistedTotal: '237.3400',
+    recomputedTotal: '237.3400',
+    chargedThrough: '2026-09-03',
+    statementThrough: '2026-09-03',
+  },
 };
 
 const renderDrillIn = () =>
@@ -944,6 +952,108 @@ describe('PeopleLedgerPage — interest drill-in', () => {
     expect(screen.queryByTestId('interest-rate-windows')).toBeNull();
   });
 
+  /**
+   * Nothing runs the allocator automatically. Import a statement, don't press
+   * the button, and the stored figure stops earlier than the live rate windows
+   * do — so a caption naming the newest statement asserts coverage the number
+   * does not have, and the days in the unallocated window fall into neither
+   * charged nor accrued.
+   */
+  it('says the charged figure is stale instead of naming a statement it does not cover', async () => {
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue({
+      ...LEDGER_WITH_INTEREST,
+      interestStaleness: {
+        stale: true,
+        persistedTotal: '174.8000',
+        recomputedTotal: '237.3400',
+        chargedThrough: '2025-10-29',
+        statementThrough: '2026-09-03',
+      },
+    } as never);
+
+    renderDrillIn();
+
+    const block = await screen.findByTestId('owed-breakdown-CAD');
+    const caption = within(block).getByTestId('owed-charged-caption-CAD');
+    // The newest statement is NOT what this figure covers, so it may not be
+    // offered as the figure's through-date.
+    expect(caption.textContent ?? '').toMatch(/stale/i);
+    expect(caption).not.toHaveTextContent('through the 2026-09-03 statement');
+    // What it does cover is fair to state.
+    expect(caption).toHaveTextContent('2025-10-29');
+
+    // And the page says what to do about it.
+    const notice = await screen.findByTestId('interest-stale');
+    expect(notice.textContent ?? '').toMatch(/reallocate/i);
+  });
+
+  /**
+   * The scaling ratio describes a FRESH recomputation, not the stored rows. On
+   * a stale ledger it is a summary of allocations that were never persisted, so
+   * it may not be presented as a description of the figure above it.
+   */
+  it('does not describe a stale charged figure with the fresh scaling summary', async () => {
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue({
+      ...LEDGER_WITH_INTEREST,
+      interestStaleness: {
+        stale: true,
+        persistedTotal: '174.8000',
+        recomputedTotal: '237.3400',
+        chargedThrough: '2025-10-29',
+        statementThrough: '2026-09-03',
+      },
+    } as never);
+
+    renderDrillIn();
+
+    const scaling = await screen.findByTestId('interest-scaling');
+    expect(scaling.textContent ?? '').toMatch(/not yet saved|would|recomputation/i);
+  });
+
+  /**
+   * The bound only scales DOWN. An unbound window leaves a residue attributed
+   * to nobody, and the ratio alone hid it: `Interest charged · CAD 755.12` read
+   * as a complete attribution while 23% of the billed interest was unaccounted
+   * for.
+   */
+  it('names the gap between what RBC billed and what was attributed', async () => {
+    vi.spyOn(api, 'getContactLedger').mockResolvedValue({
+      ...LEDGER_WITH_INTEREST,
+      interestWindows: [
+        // Predates every loan: billed, nobody to attribute it to.
+        {
+          rateWindowId: 1,
+          fromDate: '2025-01-01',
+          toDate: '2025-01-31',
+          effectiveRate: '9.4400',
+          applicableInterest: '226.6400',
+          rawTotal: '0.0000',
+          allocated: '0.0000',
+          scalingFactor: '1.000000',
+          bound: false,
+        },
+        {
+          rateWindowId: 2,
+          fromDate: '2025-08-04',
+          toDate: '2026-09-03',
+          effectiveRate: '8.9400',
+          applicableInterest: '755.1200',
+          rawTotal: '2000.0000',
+          allocated: '755.1200',
+          scalingFactor: '0.377560',
+          bound: true,
+        },
+      ],
+    } as never);
+
+    renderDrillIn();
+
+    const gap = await screen.findByTestId('interest-attribution-gap');
+    expect(gap).toHaveTextContent('755.12');
+    expect(gap).toHaveTextContent('981.76');
+    expect(gap).toHaveTextContent('226.64');
+  });
+
   it('reallocates interest and reloads the ledger', async () => {
     const runSpy = vi
       .spyOn(api, 'runInterestAllocation')
@@ -1000,6 +1110,38 @@ describe('PeopleLedgerPage — interest on the landing list and headline', () =>
     expect(within(metrics).getByText('Interest accrued (estimate) · CAD')).toBeInTheDocument();
     expect(within(metrics).getByText('CAD 174.80')).toBeInTheDocument();
     expect(within(metrics).getByText('CAD 19.69')).toBeInTheDocument();
+  });
+
+  /**
+   * A failed fetch leaves the contact out of the ledger map, so the breakdown
+   * comes back empty and the cell rendered `—` under the comment "This contact
+   * has none. Not zero — none." For a row that failed to load that comment is
+   * false: nothing is known about this contact's interest. The Balance cell two
+   * columns left already says "Couldn't load"; this one must too.
+   */
+  it('says interest could not be loaded rather than claiming there is none', async () => {
+    vi.spyOn(api, 'getJson').mockResolvedValue([
+      MOCK_CONTACT,
+      { id: 2, name: 'Stephen', isSelf: false },
+    ] as never);
+    vi.spyOn(api, 'getContactLedger').mockImplementation((async (id: number) =>
+      id === 1 ? LEDGER_WITH_INTEREST : Promise.reject(new Error('boom'))) as never);
+
+    render(
+      <MemoryRouter initialEntries={['/planned/people']}>
+        <PeopleLedgerPage />
+      </MemoryRouter>,
+    );
+
+    // The loaded row still shows its interest, so the column is rendered.
+    const loaded = await screen.findByTestId('contact-row-1');
+    expect(within(loaded).getByTestId('interest-1')).toHaveTextContent('CAD 194.49');
+
+    const failed = await screen.findByTestId('contact-row-2');
+    const cell = within(failed).getByTestId('interest-cell-2');
+    await waitFor(() => expect(cell).toHaveTextContent("Couldn't load"));
+    // An em dash here would claim this contact has no interest. It is unknown.
+    expect(cell.textContent ?? '').not.toMatch(/^\s*—\s*$/);
   });
 
   it('shows no interest tile or cell when nobody carries interest', async () => {

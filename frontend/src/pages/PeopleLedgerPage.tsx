@@ -31,6 +31,7 @@ import { useToast } from '@/components/ui/toast'
 import type {
   ContactLedgerResponse,
   CounterpartyRole,
+  InterestChargedStaleness,
   InterestWindowSummary,
   SelfSuggestion,
   TransferLinkResult,
@@ -221,19 +222,51 @@ function FigureRow({
  * allocation's `repaid` is always `0.0000` because it is recomputed wholesale on
  * the next allocator run rather than paid down, so a bar drawn from it would
  * assert that none of it had been repaid.
+ *
+ * `rows.charged` comes from the STORED allocation; `windows` is a fresh
+ * recomputation the same request happened to run. Nothing runs the allocator
+ * automatically, so after a statement import the two disagree until someone
+ * presses Reallocate — and captioning the stored figure with the live windows'
+ * last date asserts coverage it does not have. `staleness` is the server's
+ * comparison of the two, and every claim drawn from `windows` is gated on it.
  */
 function OwedBreakdownCard({
   rows,
   windows,
+  staleness,
 }: {
   rows: OwedBreakdown[]
   windows: InterestWindowSummary[] | undefined
+  staleness: InterestChargedStaleness | undefined
 }) {
   if (rows.length === 0) return null
   const rateLine = formatRateWindows(windows)
   const rate = currentRateLabel(windows)
-  const statementDate = lastStatementDate(windows)
   const scaling = summarizeScaling(windows)
+  const stale = staleness?.stale === true
+  // What the STORED figure covers — never the newest window, which it may not
+  // reach. An older server sends neither; then no through-date is claimed.
+  const chargedThrough = staleness?.chargedThrough ?? null
+  const statementThrough = staleness?.statementThrough ?? lastStatementDate(windows)
+  const chargedCaption = stale
+    ? [
+        'Stale — press Reallocate.',
+        chargedThrough
+          ? `This is the last saved allocation, covering through ${chargedThrough}.`
+          : 'This is the last saved allocation.',
+        statementThrough
+          ? `Statements are imported through ${statementThrough}; the days since are in neither figure below.`
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
+    : chargedThrough
+      ? `Apportioned from the interest RBC actually billed, through the ${chargedThrough} statement.`
+      : 'Apportioned from the interest RBC actually billed.'
+  // The gap only exists when a window's printed interest did NOT bind: the
+  // scaling is one-directional, so allocations can fall short of the billed
+  // figure and the difference is attributed to nobody.
+  const unattributed = scaling ? scaling.billed - scaling.attributed : 0
 
   return (
     <div className="mt-4 border-t border-border pt-4" data-testid="owed-breakdown">
@@ -266,11 +299,8 @@ function OwedBreakdownCard({
                 captionTestId={`owed-charged-caption-${r.currency}`}
                 label="Interest charged"
                 value={amountLabel(r.currency, r.charged)}
-                caption={
-                  statementDate
-                    ? `Apportioned from the interest RBC actually billed, through the ${statementDate} statement.`
-                    : 'Apportioned from the interest RBC actually billed.'
-                }
+                badge={stale ? <Badge variant="outline">stale</Badge> : undefined}
+                caption={chargedCaption}
               />
             )}
             {r.accrued !== null && (
@@ -281,9 +311,12 @@ function OwedBreakdownCard({
                 value={amountLabel(r.currency, r.accrued)}
                 badge={<Badge variant="outline">estimate</Badge>}
                 caption={
-                  rate
-                    ? `Estimated for the days since that statement, at ${rate}. No document backs this figure — RBC has not billed it.`
-                    : 'Estimated for the days since that statement. No document backs this figure — RBC has not billed it.'
+                  // Named explicitly, not "that statement": this tail starts
+                  // after the LAST IMPORTED window, which on a stale ledger is
+                  // not where the charged figure above stopped.
+                  `Estimated for the days since ${statementThrough ? `the ${statementThrough} statement` : 'the last statement'}${
+                    rate ? `, at ${rate}` : ''
+                  }. No document backs this figure — RBC has not billed it.`
                 }
               />
             )}
@@ -298,9 +331,11 @@ function OwedBreakdownCard({
                     r.totalIncludesEstimate ? <Badge variant="outline">part estimate</Badge> : undefined
                   }
                   caption={
-                    r.totalIncludesEstimate
-                      ? 'Principal plus charged interest plus the accrued estimate — part of this figure is not billed.'
-                      : 'Principal plus charged interest. Every part of it billed.'
+                    stale
+                      ? 'Principal plus the last saved interest allocation. That allocation is stale, so this total is incomplete.'
+                      : r.totalIncludesEstimate
+                        ? 'Principal plus charged interest plus the accrued estimate — part of this figure is not billed.'
+                        : 'Principal plus charged interest. Every part of it billed.'
                   }
                 />
               </div>
@@ -308,6 +343,20 @@ function OwedBreakdownCard({
           </div>
         ))}
       </div>
+
+      {/* Nothing reallocates on import, so this is a normal state, not an
+          error. It says what is out of date and what to press — never a
+          confident figure over a period the stored rows do not cover. */}
+      {stale && (
+        <div className="mt-3 text-xs text-muted-foreground" data-testid="interest-stale">
+          <span className="font-medium">Interest allocation is stale.</span>{' '}
+          {staleness?.persistedTotal && staleness?.recomputedTotal
+            ? `Saved ${staleness.persistedTotal}, a recomputation now gives ${staleness.recomputedTotal}.`
+            : 'The saved allocation no longer matches the ledger.'}{' '}
+          Press Reallocate interest to bring it up to date; until then the figures
+          above cover less than the imported statements do.
+        </div>
+      )}
 
       {rateLine && (
         <div
@@ -320,13 +369,28 @@ function OwedBreakdownCard({
 
       {/* The bound is the check, not padding. It binds in most windows because
           total lending exceeds the line — expected, not a fault — but a sudden
-          change in it means the lending or the line moved, so it is shown. */}
+          change in it means the lending or the line moved, so it is shown.
+          These numbers describe the FRESH recomputation, so on a stale ledger
+          they are said to be what a reallocation WOULD do, not what is stored. */}
       {scaling && (
         <div className="mt-1 text-xs text-muted-foreground" data-testid="interest-scaling">
-          Scaled to the statement in {scaling.bound} of {scaling.active} windows that
-          allocated anything; smallest factor {scaling.minFactor.toFixed(3)}. Lending
-          exceeds the line, so each window&apos;s shares are scaled down to the interest
-          RBC printed for it.
+          {stale ? 'A recomputation, not yet saved: scaled' : 'Scaled'} to the statement in{' '}
+          {scaling.bound} of {scaling.active} windows that allocated anything; smallest
+          factor {scaling.minFactor.toFixed(3)}. Lending exceeds the line, so each
+          window&apos;s shares are scaled down to the interest RBC printed for it.
+        </div>
+      )}
+
+      {/* The bound only scales DOWN. When it does not bind, the window's
+          allocations fall short of the printed figure and the residue belongs to
+          nobody — 23% of the billed interest on the real data, which the ratio
+          alone hid behind a confident "Interest charged" total. */}
+      {scaling && unattributed > 0.005 && (
+        <div className="mt-1 text-xs text-muted-foreground" data-testid="interest-attribution-gap">
+          Attributed {AMOUNT_FORMAT.format(scaling.attributed)} of the{' '}
+          {AMOUNT_FORMAT.format(scaling.billed)} RBC billed across every rate window;{' '}
+          {AMOUNT_FORMAT.format(unattributed)} is attributed to nobody — mostly windows
+          that predate any tagged lending.
         </div>
       )}
     </div>
@@ -1289,8 +1353,20 @@ export function PeopleLedgerPage() {
                           )}
                         </TableCell>
                         {anyInterest && (
-                          <TableCell>
+                          <TableCell data-testid={`interest-cell-${c.id}`}>
                             {(() => {
+                              // A failed fetch leaves this contact out of the
+                              // ledger map, so the breakdown comes back empty —
+                              // indistinguishable from "has none" unless the
+                              // failure is checked FIRST, exactly as the Balance
+                              // cell two columns left does.
+                              if (failedLedgerIds.has(c.id)) {
+                                return (
+                                  <span className="text-sm text-muted-foreground">
+                                    Couldn&apos;t load
+                                  </span>
+                                )
+                              }
                               const rows = interestByContact.get(c.id) ?? []
                               if (rows.length === 0) {
                                 // This contact has none. Not zero — none.
@@ -1486,6 +1562,7 @@ export function PeopleLedgerPage() {
                 <OwedBreakdownCard
                   rows={buildOwedBreakdown(ledger)}
                   windows={ledger.interestWindows}
+                  staleness={ledger.interestStaleness}
                 />
               </Card>
 

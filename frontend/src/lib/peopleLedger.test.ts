@@ -52,9 +52,27 @@ describe('formatBalanceLabel', () => {
 describe('formatNetFlowLabel', () => {
   it('net flow carries no owed or owe claim', () => {
     expect(formatNetFlowLabel({ currency: 'CAD', sent: '117506.17', received: '73871.32', net: '43634.85' }))
-      .toBe('CAD 43634.85 net out')
+      .toBe('CAD 43,634.85 net out')
     expect(formatNetFlowLabel({ currency: 'CAD', sent: '0.00', received: '8425.00', net: '-8425.00' }))
-      .toBe('CAD 8425.00 net in')
+      .toBe('CAD 8,425.00 net in')
+  })
+
+  /**
+   * The balance and the net sit in the same table row. Grouping one and not the
+   * other put `CAD 30,975.00 owed to you` directly beside `CAD 30975.00 net
+   * out`, which is the drift AMOUNT_FORMAT's own doc comment says it exists to
+   * prevent.
+   */
+  it('groups thousands the same way the balance beside it does', () => {
+    const net = formatNetFlowLabel({ currency: 'CAD', sent: '0', received: '0', net: '30975.00' })
+    const balance = formatBalanceLabel({ currency: 'CAD', balance: '30975.0000' })
+    expect(net).toBe('CAD 30,975.00 net out')
+    expect(balance).toBe('CAD 30,975.00 owed to you')
+  })
+
+  it('an unreadable net is unknown, never zero flow', () => {
+    expect(formatNetFlowLabel({ currency: 'CAD', sent: '0', received: '0', net: 'nope' }))
+      .toBe('CAD flow unknown')
   })
 })
 
@@ -64,11 +82,17 @@ const w = (
   fromDate: string,
   toDate: string,
   effectiveRate: string,
-  extra: Partial<{ allocated: string; scalingFactor: string; bound: boolean }> = {},
+  extra: Partial<{
+    applicableInterest: string
+    allocated: string
+    scalingFactor: string
+    bound: boolean
+  }> = {},
 ) => ({
   fromDate,
   toDate,
   effectiveRate,
+  applicableInterest: '10.0000',
   allocated: '10.0000',
   scalingFactor: '1.000000',
   bound: false,
@@ -166,7 +190,27 @@ describe('summarizeScaling', () => {
       w('2025-09-18', '2025-10-29', '9.1900'),
       w('2025-10-30', '2026-09-03', '8.9400', { scalingFactor: '0.430900', bound: true }),
     ])
-    expect(s).toEqual({ active: 3, bound: 2, minFactor: 0.419891 })
+    expect(s).toEqual({ active: 3, bound: 2, minFactor: 0.419891, billed: 40, attributed: 30 })
+  })
+
+  /**
+   * The bound only scales DOWN. When a window's printed interest does not bind,
+   * its allocations sum to less than the printed figure and the difference is
+   * attributed to nobody — on the real data 981.76 billed against 755.12
+   * allocated, mostly from windows predating any tagged lending. The ratio alone
+   * hid that, so the absolute totals are reported too.
+   */
+  it('reports the billed total alongside what was actually attributed', () => {
+    const s = summarizeScaling([
+      // Predates every loan: billed, but nobody to attribute it to.
+      w('2025-01-01', '2025-01-31', '9.4400', { applicableInterest: '226.6400', allocated: '0.0000' }),
+      w('2025-08-04', '2025-09-17', '9.4400', { applicableInterest: '400.0000', allocated: '400.0000', bound: true }),
+      w('2025-09-18', '2025-10-29', '9.1900', { applicableInterest: '355.1200', allocated: '355.1200', bound: true }),
+    ])
+    expect(s?.billed).toBeCloseTo(981.76, 4)
+    expect(s?.attributed).toBeCloseTo(755.12, 4)
+    // The gap the page must not swallow.
+    expect((s?.billed ?? 0) - (s?.attributed ?? 0)).toBeCloseTo(226.64, 4)
   })
 
   it('is null when nothing was allocated, so nothing is rendered', () => {

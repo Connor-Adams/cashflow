@@ -240,3 +240,66 @@ test('a household with no rate windows allocates nothing and does not throw', as
   assert.equal(res.body.allocations, 0);
   assert.equal(res.body.totalCharged, '0.0000');
 });
+
+/**
+ * The charged figure is the PERSISTED rows; `interestWindows` is a fresh
+ * recomputation served on the same read. Nothing runs the allocator
+ * automatically, so the moment a statement is imported and nobody presses
+ * Reallocate the two diverge — and the page used to caption the persisted
+ * figure with the live windows' last statement date, asserting coverage it did
+ * not have. The response now carries the comparison so the UI can say "stale"
+ * instead of naming a statement the figure does not cover.
+ */
+test('the ledger reports the charged figure stale when nothing has been allocated yet', async () => {
+  const res = await getLedger(stephenId);
+  assert.equal(res.status, 200);
+  const s = res.body.interestStaleness;
+  assert.ok(s, 'the ledger carries a staleness signal for the charged figure');
+  assert.equal(s.stale, true, 'no persisted rows, but a recomputation would write some');
+  assert.equal(s.persistedTotal, '0.0000');
+  assert.equal(s.recomputedTotal, '172.3600');
+  assert.equal(s.chargedThrough, null, 'nothing is covered, so no coverage date may be claimed');
+  assert.equal(s.statementThrough, '2026-09-03');
+});
+
+test('a fresh allocation is not stale and its coverage reaches the last statement', async () => {
+  await postAllocation();
+  const res = await getLedger(stephenId);
+  const s = res.body.interestStaleness;
+  assert.equal(s.stale, false);
+  assert.equal(s.persistedTotal, '172.3600');
+  assert.equal(s.recomputedTotal, '172.3600');
+  assert.equal(s.chargedThrough, '2026-09-03');
+  assert.equal(s.statementThrough, '2026-09-03');
+});
+
+/**
+ * The reported bug, end to end: import a statement, do not press the button.
+ * The persisted figure stops at the old statement while the live windows reach
+ * the new one, and every day in the new window falls into neither charged nor
+ * accrued.
+ */
+test('importing a statement without reallocating goes stale and lags the coverage date', async () => {
+  await postAllocation();
+  const extra = await models.AccountRatePeriod.create({
+    householdId: household.id,
+    accountId: locAccountId,
+    fromDate: '2026-09-04',
+    toDate: '2026-09-11',
+    effectiveRate: '8.9400',
+    applicableInterest: '60.0000',
+  } as never);
+  try {
+    const res = await getLedger(stephenId);
+    const s = res.body.interestStaleness;
+    assert.equal(s.stale, true, 'a newly imported window nobody allocated is stale');
+    assert.equal(s.chargedThrough, '2026-09-03', 'what the persisted rows actually cover');
+    assert.equal(s.statementThrough, '2026-09-11', 'what has been imported');
+    assert.ok(
+      Number(s.recomputedTotal) > Number(s.persistedTotal),
+      `recomputed ${s.recomputedTotal} should exceed persisted ${s.persistedTotal}`,
+    );
+  } finally {
+    await extra.destroy({ force: true });
+  }
+});

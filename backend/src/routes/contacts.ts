@@ -49,6 +49,22 @@ function toInterestBalances(rows: Array<{ currency: string; amount: string | num
   });
 }
 
+/**
+ * The latest `YYYY-MM-DD` in a list, or `null` when there is none.
+ *
+ * `null` in, `null` out: an absent date is not "the beginning of time", and a
+ * coverage claim built on a blank is exactly what this ledger must never make.
+ * Plain string comparison is correct for zero-padded ISO dates.
+ */
+function latestDate(dates: Array<string | null | undefined>): string | null {
+  let latest: string | null = null;
+  for (const d of dates) {
+    if (typeof d !== 'string' || d === '') continue;
+    if (latest === null || d > latest) latest = d;
+  }
+  return latest;
+}
+
 const router = Router();
 
 router.get('/', async (req, res, next) => {
@@ -422,7 +438,39 @@ router.get('/:id/ledger', async (req, res, next) => {
     const interestAccrued = toInterestBalances(
       estimateAccrued(interestCtx, today).filter((a) => a.contactId === id),
     );
-    const interestWindows = computeCharged(interestCtx).windows;
+    const recomputed = computeCharged(interestCtx);
+    const interestWindows = recomputed.windows;
+
+    // `interestCharged` above is the PERSISTED rows; `interestWindows` is this
+    // fresh recomputation. Nothing runs the allocator automatically, so after a
+    // statement import the two disagree until someone presses the button — and a
+    // caption drawn from the live windows would then name a statement the stored
+    // figure does not cover. `computeCharged` is already being called, so the
+    // comparison costs nothing and is served rather than left to the UI to guess.
+    const householdInterestRows = await Reimbursement.findAll({
+      where: { ...householdWhere(req), kind: INTEREST_KIND },
+      attributes: ['amount', 'dueDate'],
+    });
+    const persistedTotal = sumFixed4(householdInterestRows.map((r) => r.amount));
+    const recomputedTotal = sumFixed4(recomputed.allocations.map((a) => a.amount));
+    // A persisted row's `dueDate` is its window's last day (see
+    // runInterestAllocation), so the latest one is what the stored figure covers.
+    const chargedThrough = latestDate(
+      householdInterestRows.map((r) => (r.dueDate == null ? null : String(r.dueDate).slice(0, 10))),
+    );
+    const statementThrough = latestDate(
+      interestCtx.accounts.flatMap((a) => a.windows.map((w) => w.toDate)),
+    );
+    const interestStaleness: ContactLedgerResponse['interestStaleness'] = {
+      // Totals, not dates: a newly imported window that allocates nothing leaves
+      // the stored figure genuinely complete, and flagging it stale would cry
+      // wolf. Any window that WOULD allocate moves the total.
+      stale: persistedTotal !== recomputedTotal,
+      persistedTotal,
+      recomputedTotal,
+      chargedThrough,
+      statementThrough,
+    };
 
     res.json({
       contactId: contact.id,
@@ -433,6 +481,7 @@ router.get('/:id/ledger', async (req, res, next) => {
       interestCharged,
       interestAccrued,
       interestWindows,
+      interestStaleness,
       trackedOutstandingByCurrency: summary.outstandingByCurrency,
       transfers,
     } satisfies ContactLedgerResponse);

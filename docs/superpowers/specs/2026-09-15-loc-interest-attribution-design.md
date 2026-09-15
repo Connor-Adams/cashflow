@@ -142,10 +142,17 @@ the same shape as `FxRate`. No new primitive.
   the mechanism.
 - **Dated.** A person's balance is measured as of each rate window, not as of today.
   A loan made in April earns nothing for March.
-- **Bounded.** A window's allocations sum to exactly its printed applicable interest —
-  never more. Because lending exceeds the line, the raw computation normally overshoots
-  and is scaled down; that is expected, not a fault. The scaling factor should still be
-  surfaced, since a sudden change in it means the lending or the line moved.
+- **Bounded.** A window's allocations never exceed its printed applicable interest. The
+  bound scales DOWN only, so it is a ceiling and not an identity: when the raw
+  balance-based computation overshoots — the normal case, because lending exceeds the
+  line — the shares are scaled to land on the printed figure exactly; when it does not
+  overshoot, the allocations sum to LESS and the difference is a residue attributable to
+  nobody. Usually that is a window in which no lending was outstanding yet. On the real
+  data the residue is material — 981.76 billed against 755.12 allocated, mostly from the
+  eight windows predating any tagged lending — so the page must state the absolute gap
+  ("attributed 755.12 of 981.76 billed"), not only the scaling ratio: a ratio alone lets
+  the charged total read as a complete attribution of what RBC billed. The scaling factor
+  is surfaced too, since a sudden change in it means the lending or the line moved.
 - **Negative balances earn nothing.** You cannot charge interest to someone you owe.
 - **Per-currency.** No FX. A CAD charge is not shared with a USD balance.
 
