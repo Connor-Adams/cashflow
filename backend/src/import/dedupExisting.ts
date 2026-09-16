@@ -145,6 +145,37 @@ export async function findExistingForDedup(args: {
   incomingMerchantRaw?: string;
 }): Promise<DedupOutcome> {
   const incomingRef = normalizeRef(args.sourceReference);
+
+  // Tier 0 — bank-issued reference. A provider's own transaction id identifies
+  // a row more reliably than anything we parse out of its description, and the
+  // identity fingerprint hashes `merchantRaw`: any change to a parser's text
+  // output (a fixed line wrap, a new normalisation rule, a reworded memo) gives
+  // every previously imported row a "new" fingerprint, so the tiers below find
+  // no candidates at all and a re-import inserts duplicates.
+  //
+  // Scoped to the account, because one reference legitimately appears on both
+  // sides of an FX conversion (Wise prints the same BALANCE-* id on the USD and
+  // CAD statements). The amount must agree too, so a provider that recycles an
+  // id across genuinely distinct charges cannot collapse them.
+  if (incomingRef != null) {
+    const refMatches = await Transaction.findAll({
+      where: { accountId: args.accountId, sourceReference: incomingRef },
+      transaction: args.t,
+    });
+    const byRef = refMatches.find(
+      (row) => args.incomingAmount == null || Number(row.amount) === args.incomingAmount,
+    );
+    if (byRef) {
+      if (byRef.status === 'pending' && args.incomingStatus === 'posted') {
+        return promotePending(byRef, incomingRef, args.t, {
+          sourceIdentityFingerprint: args.sourceIdentityFingerprint,
+          date: args.incomingDate,
+        });
+      }
+      return { kind: 'duplicate', existingId: byRef.id };
+    }
+  }
+
   const candidates = await Transaction.findAll({
     where: {
       accountId: args.accountId,
