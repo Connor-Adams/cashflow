@@ -259,7 +259,10 @@ router.post('/', async (req, res, next) => {
   }
 });
 
-router.patch('/:id', async (req, res, next) => {
+// Rate-limited because a `loanDefault` flip here marks the household for
+// interest reallocation, so an unthrottled caller could drive repeated
+// household-wide recomputations from a single field toggle.
+router.patch('/:id', apiWriteLimiter, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     const row = await Contact.findOne({ where: { id, ...householdWhere(req) } });
