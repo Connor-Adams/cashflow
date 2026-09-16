@@ -27,6 +27,7 @@ import './jobs/definitions/auditBufferTrim';
 import './jobs/definitions/pdfImportProcess';
 import './jobs/definitions/simplefinSync';
 import './jobs/definitions/gmailReceiptScan';
+import './jobs/definitions/interestAllocation';
 import { startAllJobs } from './jobs';
 
 const uploadDir = env.csvUploadDir;

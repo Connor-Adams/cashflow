@@ -37,6 +37,8 @@ export type EnvConfig = {
   subscriptionPriceDetectCron: string;
   insightDetectorsEnabled: boolean;
   insightDetectorsCron: string;
+  interestAllocationEnabled: boolean;
+  interestAllocationCron: string;
 };
 
 export function parsePort(raw: string | undefined): number {
@@ -194,6 +196,17 @@ export function loadEnvConfig(
   // subscription price hikes are already recorded when detectRecurringIncrease
   // builds its skip-set.
   const insightDetectorsCron = e.INSIGHT_DETECTORS_CRON?.trim() || '0 5 * * *';
+  const interestAllocationEnabled = parseInterestAllocationEnabled(
+    e.INTEREST_ALLOCATION_ENABLED,
+    nodeEnv,
+  );
+  // Every 5 minutes, and it is a SAFETY NET, not the mechanism: the triggers
+  // (statement import, loan retag) drain within seconds via
+  // contacts/interestAllocationCoordinator. This tick exists to collect work
+  // that a drain left queued — a household mid-run, or a pass that lost the
+  // advisory lock to another instance. An empty queue costs one no-op handler
+  // call and zero queries, which is why it can afford to be this frequent.
+  const interestAllocationCron = e.INTEREST_ALLOCATION_CRON?.trim() || '*/5 * * * *';
 
   return {
     csvUploadDir,
@@ -227,7 +240,25 @@ export function loadEnvConfig(
     subscriptionPriceDetectCron,
     insightDetectorsEnabled,
     insightDetectorsCron,
+    interestAllocationEnabled,
+    interestAllocationCron,
   };
+}
+
+/**
+ * Line-of-credit interest reallocation. Default OFF in test so the queue never
+ * drains behind a test's back; ON in dev/prod, where the whole point is that
+ * nobody has to press the button.
+ */
+export function parseInterestAllocationEnabled(
+  raw: string | undefined,
+  nodeEnv: string,
+): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
+  if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
+  if (nodeEnv === 'test') return false;
+  return true;
 }
 
 export function parseWeeklyDigestEnabled(
@@ -415,6 +446,18 @@ export const subscriptionPriceDetectEnabled = resolved.subscriptionPriceDetectEn
 export const subscriptionPriceDetectCron = resolved.subscriptionPriceDetectCron;
 export const insightDetectorsEnabled = resolved.insightDetectorsEnabled;
 export const insightDetectorsCron = resolved.insightDetectorsCron;
+export const interestAllocationEnabled = resolved.interestAllocationEnabled;
+export const interestAllocationCron = resolved.interestAllocationCron;
+/**
+ * Trailing window a reallocation trigger waits before draining, so a burst of
+ * loan retags costs one recomputation rather than one each. Five seconds: long
+ * enough to swallow a burst of clicks, short enough that the People page is
+ * correct by the time anyone navigates to it.
+ */
+export const interestAllocationDebounceMs = parseIntEnv(
+  'INTEREST_ALLOCATION_DEBOUNCE_MS',
+  5_000,
+);
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
