@@ -51,12 +51,19 @@ function emptyResult(): InterestAllocationResult {
  * Park the queue between tests: a long window means nothing self-drains behind
  * a test's back, and the stub runner means a stray drain can never reach the
  * database (this file deliberately has none).
+ *
+ * `enabled: true` is required, not decoration. Unit tests run under
+ * `NODE_ENV=test`, where `interestAllocationEnabled` is false and marking is a
+ * total no-op — which is the whole point of the gate. Every test below that
+ * exercises marking therefore has to opt back in; the two that pin the disabled
+ * behaviour opt out again explicitly.
  */
 beforeEach(() => {
   _resetInterestAllocationCoordinatorForTest();
   _setInterestAllocationCoordinatorForTest({
     debounceMs: 60_000,
     runner: async () => emptyResult(),
+    enabled: true,
   });
 });
 
@@ -238,4 +245,96 @@ test('markInterestAllocationPending never throws, whatever it is handed', () => 
   });
   assert.equal(isInterestAllocationPending(Number.NaN), false);
   assert.equal(isInterestAllocationPending(0), false);
+});
+
+// ---------------------------------------------------------------------------
+// The enabled gate. This is the CI hang, pinned.
+//
+// `interestAllocationEnabled` is false under NODE_ENV=test and whenever
+// INTEREST_ALLOCATION_ENABLED is set falsy, but for one release the flag was
+// read ONLY by the job definition's `enabledDefault` — a file that only
+// server.ts imports. The coordinator itself never consulted it, so in a unit
+// worker every statement commit and every loan retag armed a real five-second
+// timer whose fallback path ran the REAL allocator against the worker's
+// per-PID SQLite database. Locally the file finished first and the unref'd
+// timer died with the process; on a slower CI runner it fired, and
+// `backend-test-shard (3)` ran for four hours.
+//
+// These two tests are the reason that cannot come back, and neither depends on
+// timing to prove it: the first asserts on the queue itself, which is empty
+// because marking refused, not because a timer happened not to fire yet.
+// ---------------------------------------------------------------------------
+
+test('marking while disabled queues nothing, arms nothing, and drains nothing', async () => {
+  let runs = 0;
+  _resetInterestAllocationCoordinatorForTest();
+  _setInterestAllocationCoordinatorForTest({
+    enabled: false,
+    // Zero window: were anything armed at all, it would fire on the next tick
+    // and this test would see it. Nothing is armed, so nothing does.
+    debounceMs: 0,
+    runner: async () => {
+      runs += 1;
+      return emptyResult();
+    },
+  });
+
+  markInterestAllocationPending({ householdId: HH, source: 'statement-import' });
+  markInterestAllocationPending({ householdId: OTHER_HH, source: 'counterparty-retag' });
+
+  assert.equal(
+    isInterestAllocationPending(HH),
+    false,
+    'a disabled feature must be inert, not merely quiet — nothing may queue',
+  );
+  assert.equal(isInterestAllocationPending(OTHER_HH), false);
+
+  // Resolves immediately when nothing is queued, armed, or draining. If marking
+  // had armed a window this would have to wait for it.
+  await waitForInterestAllocationDrain();
+  assert.equal(runs, 0, 'the allocator must not run — this is the four-hour hang');
+
+  // And the queue stayed empty, so a later deliberate drain has nothing stored
+  // up to suddenly execute.
+  const result = await drainPendingInterestAllocations();
+  assert.equal(runs, 0);
+  assert.equal(result.households, 0);
+  assert.equal(result.pendingRemaining, 0);
+});
+
+test('the gate defaults to OFF in a unit-test worker, with no override at all', () => {
+  // The real CI condition, not a simulation of it: no `enabled` override, so
+  // the coordinator falls through to config/env's `interestAllocationEnabled`,
+  // which is false because test/setup.ts sets NODE_ENV=test before anything
+  // loads. If this ever fails, either the env gate or the --import hook has
+  // regressed and the hang is live again.
+  _resetInterestAllocationCoordinatorForTest();
+
+  markInterestAllocationPending({ householdId: HH, source: 'statement-import' });
+
+  assert.equal(
+    isInterestAllocationPending(HH),
+    false,
+    'NODE_ENV=test must switch the automatic allocator off without any test seam',
+  );
+});
+
+test('drainPendingInterestAllocations stays callable while disabled', async () => {
+  // The gate covers MARKING only. The job handler's body and any test that
+  // wants to exercise the allocator deliberately must still work.
+  let runs = 0;
+  _resetInterestAllocationCoordinatorForTest();
+  _setInterestAllocationCoordinatorForTest({
+    enabled: false,
+    debounceMs: 60_000,
+    runner: async () => {
+      runs += 1;
+      return emptyResult();
+    },
+  });
+
+  const result = await drainPendingInterestAllocations();
+  assert.equal(result.households, 0, 'an empty queue drains to nothing, disabled or not');
+  assert.equal(result.failed, 0);
+  assert.equal(runs, 0);
 });

@@ -42,6 +42,11 @@ let userId: number;
 function parkQueue(): void {
   _resetInterestAllocationCoordinatorForTest();
   _setInterestAllocationCoordinatorForTest({
+    // Unit tests run under NODE_ENV=test, where interestAllocationEnabled is
+    // false and marking is a no-op. These tests are about what the triggers do
+    // when the feature IS on, so they opt in; the disabled case has its own
+    // test at the bottom of this file.
+    enabled: true,
     debounceMs: 60_000,
     runner: async () => ({
       windows: 0,
@@ -190,6 +195,7 @@ test('a failing reallocation does not fail the PATCH', async () => {
   let attempted = 0;
   _resetInterestAllocationCoordinatorForTest();
   _setInterestAllocationCoordinatorForTest({
+    enabled: true,
     debounceMs: 0,
     runner: async () => {
       attempted += 1;
@@ -210,6 +216,7 @@ test('a burst of retags collapses into one recomputation', async () => {
   let runs = 0;
   _resetInterestAllocationCoordinatorForTest();
   _setInterestAllocationCoordinatorForTest({
+    enabled: true,
     // Comfortably longer than six sequential supertest round-trips: the point
     // is that everything landing inside one window costs one run, not that the
     // window is any particular length.
@@ -242,4 +249,54 @@ test('the manual endpoint still forces a synchronous run', async () => {
   assert.equal(res.status, 200, 'the force-refresh button is kept, not replaced');
   assert.equal(res.body.dryRun, true);
   assert.equal(typeof res.body.totalCharged, 'string');
+});
+
+test('with the feature disabled a retag queues nothing — through the real route', async () => {
+  // The unit-level version of this lives in interestAllocationCoordinator.test.ts.
+  // This one goes through the actual PATCH handler, because the handler is what
+  // fires in CI: a worker running this file with INTEREST_ALLOCATION_ENABLED off
+  // (which NODE_ENV=test makes the default) must not arm anything.
+  _resetInterestAllocationCoordinatorForTest();
+  _setInterestAllocationCoordinatorForTest({
+    enabled: false,
+    debounceMs: 0,
+    runner: async () => {
+      throw new Error('the allocator must never be reached while disabled');
+    },
+  });
+
+  const res = await patchTransaction({ counterpartyRole: 'loan' });
+  await waitForInterestAllocationDrain();
+
+  assert.equal(res.status, 200, 'the retag itself is unaffected by the feature flag');
+  const fresh = await models.Transaction.findByPk(txnId);
+  assert.equal(fresh?.counterpartyRole, 'loan');
+  assert.equal(
+    isInterestAllocationPending(household.id),
+    false,
+    'nothing queued means nothing armed — the four-hour shard-3 hang cannot recur',
+  );
+});
+
+test('the manual endpoint still runs even with the feature disabled', async () => {
+  // Disabled switches the AUTOMATIC trigger off. It must not disable the
+  // button: the endpoint calls runInterestAllocation directly and never goes
+  // near the coordinator's queue.
+  _resetInterestAllocationCoordinatorForTest();
+  _setInterestAllocationCoordinatorForTest({
+    enabled: false,
+    debounceMs: 0,
+    runner: async () => {
+      throw new Error('the manual endpoint must not route through the queue');
+    },
+  });
+
+  const res = await request(app)
+    .post('/api/contacts/interest-allocation')
+    .send({ dryRun: true });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.dryRun, true);
+  assert.equal(typeof res.body.totalCharged, 'string');
+  assert.equal(isInterestAllocationPending(household.id), false);
 });

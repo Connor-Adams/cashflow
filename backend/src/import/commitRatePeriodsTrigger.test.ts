@@ -37,6 +37,11 @@ let commitStatementImport: typeof import('./commitStatementImport.js').commitSta
 function parkQueue(): void {
   _resetInterestAllocationCoordinatorForTest();
   _setInterestAllocationCoordinatorForTest({
+    // Unit tests run under NODE_ENV=test, where interestAllocationEnabled is
+    // false and marking is a deliberate no-op (that gate is what stopped this
+    // very file's sibling from hanging CI for four hours). These tests are
+    // about the trigger firing when the feature IS on, so they opt in.
+    enabled: true,
     debounceMs: 60_000,
     runner: async () => ({
       windows: 0,
@@ -213,6 +218,7 @@ test('a reallocation that throws does not fail the import', async () => {
   let attempted = 0;
   _resetInterestAllocationCoordinatorForTest();
   _setInterestAllocationCoordinatorForTest({
+    enabled: true,
     debounceMs: 0,
     runner: async () => {
       attempted += 1;
@@ -238,5 +244,40 @@ test('a reallocation that throws does not fail the import', async () => {
     result.warnings.filter((w) => /rate history not saved/i.test(w)),
     [],
     'a failed reallocation is not a rate-capture failure and must not be reported as one',
+  );
+});
+
+test('a statement commit queues nothing while the feature is disabled', async () => {
+  // This is precisely the CI condition. `backend-test-shard (3)` ran for four
+  // hours because a commit here armed a five-second trailing window that fired
+  // mid-suite and ran the real allocator against the worker's SQLite file. The
+  // commit still writes its rate window; it just does not arm anything.
+  const { householdId, accountId } = await seedAccount();
+  _resetInterestAllocationCoordinatorForTest();
+  _setInterestAllocationCoordinatorForTest({
+    enabled: false,
+    debounceMs: 0,
+    runner: async () => {
+      throw new Error('the allocator must never be reached while disabled');
+    },
+  });
+
+  const result = await commitStatementImport(
+    makePreview(accountId, householdId, { ratePeriods: [ratePeriod()] }),
+    null,
+    householdId,
+  );
+  await waitForInterestAllocationDrain();
+
+  assert.equal(result.insertedTransactions, 1, 'the import itself is unaffected');
+  assert.equal(
+    await models.AccountRatePeriod.count({ where: { accountId } }),
+    1,
+    'rate windows are reference data and are captured regardless of the flag',
+  );
+  assert.equal(
+    isInterestAllocationPending(householdId),
+    false,
+    'nothing queued means nothing armed — no timer can outlive this worker',
   );
 });

@@ -3,7 +3,7 @@ import { Account, Contact, Reimbursement, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
 import { resolveHouseholdToday } from '../time/householdToday';
-import { apiReadLimiter } from './apiRateLimit';
+import { apiReadLimiter, apiWriteLimiter } from './apiRateLimit';
 import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
 import {
   summarizeOpenForContact,
@@ -512,8 +512,15 @@ router.get('/:id/ledger', async (req, res, next) => {
  * MOUNT ORDER: this literal path sits above nothing that would shadow it (there
  * is no `POST /:id`), but it is declared beside the other literal routes so a
  * future `POST /:id` cannot silently capture it.
+ *
+ * RATE LIMIT: `apiWriteLimiter`, not `apiReadLimiter`. One call loads every
+ * rate window and every contact-linked transaction in the household and then
+ * delete-and-reinserts the charged rows — by far the most expensive thing this
+ * router does, and the only handler in it that writes. CodeQL flagged the
+ * unlimited version as `js/missing-rate-limiting` (high). The limiter skips
+ * under `NODE_ENV=test`, so suites that hammer it stay deterministic.
  */
-router.post('/interest-allocation', async (req, res, next) => {
+router.post('/interest-allocation', apiWriteLimiter, async (req, res, next) => {
   try {
     const { household } = currentAuth(req);
     const b = (req.body || {}) as Record<string, unknown>;

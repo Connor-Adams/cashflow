@@ -43,6 +43,16 @@
  * Outside a server (unit tests, CLI scripts) the job is not registered and the
  * timer drains directly, so a trigger is never silently swallowed.
  *
+ * ## The enabled flag gates marking, not draining
+ *
+ * `interestAllocationEnabled` (off under `NODE_ENV=test`, or when
+ * `INTEREST_ALLOCATION_ENABLED` is falsy) is checked in
+ * `markInterestAllocationPending`. When off, marking is a total no-op: nothing
+ * queues, so nothing arms and no later drain has work to do. Draining stays
+ * unconditional so the job and tests can still run the allocator on purpose,
+ * and `POST /api/contacts/interest-allocation` never touches this queue at all
+ * — a disabled feature still reallocates when a human presses the button.
+ *
  * ## What this deliberately does not do
  *
  * A failed allocation is **not** re-queued. The ledger's `interestStaleness`
@@ -50,7 +60,7 @@
  * persistent failure forever. The failure is logged and lands in the job run.
  */
 import { logger } from '../observability/logger';
-import { interestAllocationDebounceMs } from '../config/env';
+import { interestAllocationDebounceMs, interestAllocationEnabled } from '../config/env';
 import {
   runInterestAllocation,
   isInterestAllocationRunning,
@@ -71,6 +81,7 @@ let draining = false;
 let runnerOverride: InterestRunner | null = null;
 let inFlightOverride: InFlightCheck | null = null;
 let debounceMsOverride: number | null = null;
+let enabledOverride: boolean | null = null;
 
 function runner(): InterestRunner {
   return runnerOverride ?? ((opts) => runInterestAllocation(opts));
@@ -80,6 +91,29 @@ function inFlight(): InFlightCheck {
 }
 function windowMs(): number {
   return debounceMsOverride ?? interestAllocationDebounceMs;
+}
+
+/**
+ * Whether the *automatic* side of interest allocation is switched on.
+ *
+ * `interestAllocationEnabled` is false under `NODE_ENV=test` and whenever
+ * `INTEREST_ALLOCATION_ENABLED` is set falsy. Until this gate existed the flag
+ * was consulted ONLY by `jobs/definitions/interestAllocation.ts`, as the job's
+ * `enabledDefault` — which left the coordinator itself fully live in unit
+ * tests. Anything that committed a statement or retagged a loan armed the
+ * five-second trailing window, and because no server had registered a flush
+ * hook the window's fallback ran the REAL allocator against that worker's
+ * per-PID SQLite file, frequently while the suite was already tearing the
+ * database down. That is what hung `backend-test-shard (3)` for four hours.
+ *
+ * This gate covers marking only. `drainPendingInterestAllocations` stays
+ * callable directly so the job and tests can still exercise the allocator
+ * deliberately, and the manual `POST /api/contacts/interest-allocation`
+ * endpoint bypasses the coordinator entirely — a disabled feature still
+ * reallocates when a human presses the button.
+ */
+function enabled(): boolean {
+  return enabledOverride ?? interestAllocationEnabled;
 }
 
 export interface InterestAllocationDrainResult {
@@ -108,6 +142,11 @@ export interface InterestAllocationTrigger {
  */
 export function markInterestAllocationPending(trigger: InterestAllocationTrigger): void {
   try {
+    // Disabled means INERT, not merely quiet. Gating lower down (at
+    // `armWindow`) would still let the pending set grow, and the next
+    // deliberate `drainPendingInterestAllocations()` — the cron safety net, a
+    // test — would then suddenly run every household that had accumulated.
+    if (!enabled()) return;
     const householdId = trigger?.householdId;
     if (!Number.isInteger(householdId) || householdId <= 0) return;
     const source = trigger.source || 'unknown';
@@ -260,6 +299,12 @@ export interface InterestAllocationCoordinatorOverrides {
   runner?: InterestRunner | null;
   isRunning?: InFlightCheck | null;
   debounceMs?: number | null;
+  /**
+   * Force the enabled gate on or off. Unit tests run under `NODE_ENV=test`,
+   * where `interestAllocationEnabled` is false, so a test that exercises the
+   * marking path must opt in explicitly.
+   */
+  enabled?: boolean | null;
 }
 
 /** Test-only seam. Mirrors `_setBackfillRunnerForTest` in backfillCoordinator. */
@@ -269,6 +314,7 @@ export function _setInterestAllocationCoordinatorForTest(
   if ('runner' in o) runnerOverride = o.runner ?? null;
   if ('isRunning' in o) inFlightOverride = o.isRunning ?? null;
   if ('debounceMs' in o) debounceMsOverride = o.debounceMs ?? null;
+  if ('enabled' in o) enabledOverride = o.enabled ?? null;
 }
 
 /** Test-only. Clears the queue, the armed window, and every override. */
@@ -280,5 +326,6 @@ export function _resetInterestAllocationCoordinatorForTest(): void {
   runnerOverride = null;
   inFlightOverride = null;
   debounceMsOverride = null;
+  enabledOverride = null;
   flushHook = null;
 }

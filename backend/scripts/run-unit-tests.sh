@@ -65,8 +65,30 @@ if [ -n "${TEST_SHARD:-}" ]; then
   SHARD_FLAG="--test-shard=$TEST_SHARD"
 fi
 
-# Word-splitting on $FILES (and $SHARD_FLAG) is intentional.
+# PER-TEST TIMEOUT — a hung test must fail, not burn a CI runner.
+#
+# `backend-test-shard (3)` once ran for FOUR HOURS on a PR before anyone killed
+# it: the interest-allocation coordinator's trailing timer fired mid-test and
+# took the worker's SQLite file with it. With no timeout node:test simply waits,
+# and GitHub's 6h job ceiling is the only backstop. With one, the offending test
+# is cancelled and NAMED in the output, which is the difference between a
+# five-minute diagnosis and a four-hour one.
+#
+# 120s was measured, not guessed. The slowest legitimate unit test on this suite
+# is `commitStatementImport.test.ts`'s "intra-file: two identical lots two days
+# apart" at ~23s locally; the next two are ~13s and ~12s, and everything else is
+# under 3s. 120s is ~5x the slowest, which leaves ample room for a CI runner
+# being several times slower than a dev laptop while still catching a hang
+# inside two minutes.
+#
+# Scope, honestly: --test-timeout cancels a test that is STILL RUNNING. It does
+# not watchdog a worker that wedges after its last assertion — node:test has no
+# flag for that — so it is a backstop for in-test hangs, not a replacement for
+# fixing whatever armed the timer.
+TEST_TIMEOUT_FLAG="--test-timeout=${TEST_TIMEOUT_MS:-120000}"
+
+# Word-splitting on $FILES (and the flags) is intentional.
 # setup.ts gives each worker a per-PID SQLite temp DB; without --import here
 # parallel workers corrupt each other.
 # shellcheck disable=SC2086
-exec "$TSX" --import ./test/setup.ts --test $SHARD_FLAG $FILES
+exec "$TSX" --import ./test/setup.ts --test $TEST_TIMEOUT_FLAG $SHARD_FLAG $FILES
