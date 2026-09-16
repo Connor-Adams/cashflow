@@ -181,3 +181,15 @@ test('an inbound transfer from a named external payer is still revenue', () => {
   assert.deepEqual(out.revenue.map((r) => r.id), [22]);
   assert.deepEqual(out.warnings, []);
 });
+
+test('a passive row tagged not_income is dropped, not bucketed as investment income', () => {
+  // Card cash-back posts on the corp chequing ledger worded as interest. It is
+  // a rebate on the purchase, not investment income, so tagging it not_income
+  // must keep it out of AAII (where it would feed the SBD grind).
+  const rows = [
+    txn({ id: 23, amount: '27.53', txnType: 'interest', taxTreatmentOverride: 'not_income', merchant: 'Interest earned' }),
+  ];
+  const out = partitionCorpPerimeter(rows, { legalName: LEGAL_NAME, linkTargetIds: new Set() });
+  assert.deepEqual(out.interestIncome, []);
+  assert.deepEqual(out.revenue, []);
+});

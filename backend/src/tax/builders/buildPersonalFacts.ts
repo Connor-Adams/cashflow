@@ -275,9 +275,17 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   const taxableAccountTypeById = new Map(
     taxableAccounts.map((a) => [a.id, a.accountType ?? null]),
   );
+  // Treatments that mean "this credit is not income", matching the routing the
+  // main transaction loop above already applies. `not_income` is how card
+  // cash-back is tagged: Wealthsimple posts its rewards on the chequing ledger
+  // worded "Interest earned", but a purchase rebate is not taxable income.
+  const NOT_INCOME_TREATMENTS = new Set(['not_income', 'loan_advance', 'loan_repayment']);
   for (const t of txns) {
     const txnType = (t as unknown as { txnType?: string | null }).txnType ?? null;
     if (txnType !== 'interest' && txnType !== 'dividend') continue;
+    if (t.taxTreatmentOverride !== null && NOT_INCOME_TREATMENTS.has(t.taxTreatmentOverride)) {
+      continue;
+    }
     if (!taxableAccountTypeById.has(t.accountId)) continue;
     if (taxableAccountTypeById.get(t.accountId) === 'investment') continue;
     const raw = D(t.amount as unknown as string);
