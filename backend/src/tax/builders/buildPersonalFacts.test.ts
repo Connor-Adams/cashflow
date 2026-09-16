@@ -964,3 +964,39 @@ test('a dividend paid into a bank account defaults to eligible', async () => {
   assert.equal(facts.eligibleDividends[0].cadAmount.toFixed(2), '40.00');
   assert.deepEqual(facts.nonEligibleDividends, []);
 });
+
+test('a bank credit tagged not_income stays off the return', async () => {
+  // Wealthsimple labels its card cash-back "Interest earned" on the chequing
+  // ledger. Card rewards are a rebate on the purchase price, not income, so the
+  // row is tagged not_income and must not reach line 12100 despite its type.
+  const ctx = await seedPassiveEntity();
+  const chequing = await ctx.mkAccount('Chequing', 'checking', 'n_a');
+  await seedPassiveTxn(ctx, chequing, {
+    date: '2024-09-01', amount: '6.2700', txnType: 'interest',
+    taxTreatmentOverride: 'not_income',
+  });
+  // A genuine interest credit alongside it still counts.
+  await seedPassiveTxn(ctx, chequing, {
+    date: '2024-09-02', amount: '10.0000', txnType: 'interest',
+    merchantRaw: 'Interest received',
+  });
+
+  const facts = await buildPersonalFacts(ctx.entity.id, 2024);
+  const total = facts.interestIncome.reduce((a, i) => a.plus(i.cadAmount), D(0));
+  assert.equal(total.toFixed(2), '10.00');
+});
+
+test('shareholder-loan and non-income treatments never become bank dividends', async () => {
+  const ctx = await seedPassiveEntity();
+  const chequing = await ctx.mkAccount('Chequing', 'checking', 'n_a');
+  for (const tt of ['not_income', 'loan_advance', 'loan_repayment']) {
+    await seedPassiveTxn(ctx, chequing, {
+      date: '2024-09-01', amount: '25.0000', txnType: 'dividend',
+      taxTreatmentOverride: tt,
+    });
+  }
+
+  const facts = await buildPersonalFacts(ctx.entity.id, 2024);
+  assert.deepEqual(facts.eligibleDividends, []);
+  assert.deepEqual(facts.nonEligibleDividends, []);
+});
