@@ -193,3 +193,18 @@ test('a passive row tagged not_income is dropped, not bucketed as investment inc
   assert.deepEqual(out.interestIncome, []);
   assert.deepEqual(out.revenue, []);
 });
+
+test('an expense reimbursement is neither corp revenue nor a corp expense', () => {
+  // Repaying the owner returns money they already spent. The underlying
+  // purchase is what the corp deducts; deducting the repayment too would
+  // double it.
+  // txnType is deliberately NOT 'transfer' here — otherwise the outbound-
+  // transfer rule would exclude it and the test would pass without the
+  // treatment doing any work.
+  const rows = [
+    txn({ id: 24, amount: '-1782.12', txnType: 'purchase', taxTreatmentOverride: 'expense_reimbursement', merchant: 'Reimbursement to owner' }),
+  ];
+  const out = partitionCorpPerimeter(rows, { legalName: LEGAL_NAME, linkTargetIds: new Set() });
+  assert.deepEqual(out.expenses, []);
+  assert.deepEqual(out.revenue, []);
+});

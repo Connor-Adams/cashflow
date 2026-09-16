@@ -1000,3 +1000,22 @@ test('shareholder-loan and non-income treatments never become bank dividends', a
   assert.deepEqual(facts.eligibleDividends, []);
   assert.deepEqual(facts.nonEligibleDividends, []);
 });
+
+test('an expense reimbursement is not personal income', async () => {
+  const ctx = await seedPassiveEntity();
+  const chequing = await ctx.mkAccount('Chequing', 'checking', 'n_a');
+  // finalBusiness is deliberately true: the last branch of the treatment chain
+  // routes any business-flagged positive row to self-employment income, so
+  // without an explicit non-income branch a reimbursement lands there.
+  await seedPassiveTxn(ctx, chequing, {
+    date: '2024-06-01', amount: '1782.1200', txnType: 'transfer',
+    taxTreatmentOverride: 'expense_reimbursement', finalBusiness: true,
+    merchantRaw: 'Transfer in from CDG Labs Inc.',
+  });
+
+  const facts = await buildPersonalFacts(ctx.entity.id, 2024);
+  assert.deepEqual(facts.employmentIncome, []);
+  assert.deepEqual(facts.eligibleDividends, []);
+  assert.deepEqual(facts.nonEligibleDividends, []);
+  assert.deepEqual(facts.selfEmploymentIncome, []);
+});

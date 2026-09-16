@@ -526,6 +526,11 @@ export const TAX_TREATMENTS = [
   'loan_advance',
   'loan_repayment',
   'not_income',
+  // The corp repaying an owner for a business cost they fronted on a personal
+  // card. Not income to the owner (it returns money they already spent) and not
+  // an expense to the corp at the moment of repayment — the underlying purchase
+  // is what gets deducted, so deducting the transfer as well would double it.
+  'expense_reimbursement',
   'rental_income',
   'rental_expense',
   'pension_income',

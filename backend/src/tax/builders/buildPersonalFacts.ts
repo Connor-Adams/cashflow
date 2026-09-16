@@ -153,8 +153,14 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     else if (treatment === 'eligible_dividend') eligibleDividends.push(item);
     else if (treatment === 'non_eligible_dividend') nonEligibleDividends.push(item);
     else if (treatment === 'donations') donations.push(item);
-    else if (treatment === 'loan_advance' || treatment === 'loan_repayment' || treatment === 'not_income') {
-      // classified as non-income for the personal T1 — intentionally skipped
+    else if (
+      treatment === 'loan_advance' || treatment === 'loan_repayment'
+      || treatment === 'not_income' || treatment === 'expense_reimbursement'
+    ) {
+      // classified as non-income for the personal T1 — intentionally skipped.
+      // `expense_reimbursement` MUST be listed here rather than left to fall
+      // through: the final branch routes any business-flagged positive row to
+      // self-employment income, and a reimbursement is exactly that shape.
     }
     else if (treatment === 'rrsp_contribution') {
       rrspContribs.push({ source: item.source, amount: cad.abs(), date: t.date as unknown as string });
@@ -279,7 +285,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   // main transaction loop above already applies. `not_income` is how card
   // cash-back is tagged: Wealthsimple posts its rewards on the chequing ledger
   // worded "Interest earned", but a purchase rebate is not taxable income.
-  const NOT_INCOME_TREATMENTS = new Set(['not_income', 'loan_advance', 'loan_repayment']);
+  const NOT_INCOME_TREATMENTS = new Set([
+    'not_income', 'loan_advance', 'loan_repayment', 'expense_reimbursement',
+  ]);
   for (const t of txns) {
     const txnType = (t as unknown as { txnType?: string | null }).txnType ?? null;
     if (txnType !== 'interest' && txnType !== 'dividend') continue;
