@@ -21,6 +21,13 @@ import type {
   IncomeItem,
 } from '../engine/types';
 
+/** Shift a 'YYYY-MM-DD' date by whole days, staying in UTC. */
+function shiftDays(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 export async function buildCorpFacts(
   entityId: number,
   fiscalYear: CorpFiscalYear,
@@ -58,6 +65,28 @@ export async function buildCorpFacts(
 
   const accountTypeById = new Map(accounts.map((a) => [a.id, a.accountType ?? null]));
 
+  // Cash moving between a bank account and the corp's own brokerage is recorded
+  // on the brokerage side as an InvestmentActivity row, never as a transaction,
+  // so `linkedTransactionId` (an FK into transactions) can never reach it. Feed
+  // those movements to the perimeter split so such a transfer is recognised as
+  // internal instead of being reported as unexplained. Widened past the fiscal
+  // year by the same few days the matcher tolerates, so a transfer initiated in
+  // late December and settled in January still finds its far side.
+  const cashMoves = accountIds.length
+    ? await InvestmentActivity.findAll({
+      where: {
+        accountId: accountIds,
+        activityType: ['transfer_in', 'transfer_out', 'deposit', 'withdrawal'],
+        tradeDate: { [Op.between]: [shiftDays(startDate, -3), shiftDays(endDate, 3)] },
+      },
+    })
+    : [];
+  const internalCashMoves = cashMoves.map((a) => ({
+    date: a.tradeDate as unknown as string,
+    amount: String(a.amount ?? 0),
+    currency: (a as unknown as { currency?: string }).currency ?? 'CAD',
+  }));
+
   const perimeter = partitionCorpPerimeter(
     txns.map((t) => ({
       id: t.id,
@@ -70,7 +99,7 @@ export async function buildCorpFacts(
       taxTreatmentOverride: t.taxTreatmentOverride ?? null,
       merchant: t.merchantClean ?? t.merchantRaw ?? null,
     })),
-    { legalName: entity.legalName ?? '', linkTargetIds },
+    { legalName: entity.legalName ?? '', linkTargetIds, internalCashMoves },
   );
 
   // Revenue and expenses both land in activeBusinessIncome; expenses keep their

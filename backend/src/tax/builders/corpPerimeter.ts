@@ -81,6 +81,18 @@ export interface PerimeterPartition {
   warnings: string[];
 }
 
+/**
+ * A cash movement recorded in the brokerage ledger rather than as a
+ * transaction: `transfer_in` / `transfer_out` on an investment account. Signed
+ * from the brokerage's point of view, so a deposit is positive.
+ */
+export interface InternalCashMove {
+  date: string;
+  /** Signed, in the investment account's own currency. */
+  amount: string;
+  currency: string;
+}
+
 export interface PerimeterOptions {
   /** The entity's legal name, used to spot money "received from itself". */
   legalName: string;
@@ -89,6 +101,17 @@ export interface PerimeterOptions {
    * at via `linkedTransactionId`. Built from the entity's full history.
    */
   linkTargetIds: ReadonlySet<number>;
+  /**
+   * Cash movements on the entity's investment accounts.
+   *
+   * `linkedTransactionId` is a foreign key into transactions, so a transfer
+   * between a bank account and a brokerage can NEVER be linked — the far side
+   * is an InvestmentActivity row. The money is tracked, just in the other
+   * ledger, so a transfer that matches one of these is internal and needs no
+   * warning. Matching is greedy and 1:1, so one deposit cannot explain two
+   * transfers.
+   */
+  internalCashMoves?: readonly InternalCashMove[];
 }
 
 /**
@@ -125,6 +148,14 @@ const PASSIVE_TXN_TYPES = new Set(['dividend', 'interest']);
  */
 const ANONYMOUS_MERCHANTS = new Set(['deposit', 'transfer', 'credit', 'payment']);
 
+/** Days a bank transfer and its brokerage settlement may legitimately differ by. */
+const CASH_MOVE_WINDOW_DAYS = 3;
+
+function daysApart(a: string, b: string): number {
+  const ms = new Date(`${a}T00:00:00Z`).getTime() - new Date(`${b}T00:00:00Z`).getTime();
+  return Math.abs(Math.round(ms / 86400000));
+}
+
 /** Lowercase, strip punctuation, collapse whitespace. */
 function normalize(value: string): string {
   return value
@@ -156,8 +187,24 @@ export function looksLikeOrphanedArrival(txn: PerimeterTxn, legalName: string): 
 
 export function partitionCorpPerimeter(
   txns: readonly PerimeterTxn[],
-  { legalName, linkTargetIds }: PerimeterOptions,
+  { legalName, linkTargetIds, internalCashMoves = [] }: PerimeterOptions,
 ): PerimeterPartition {
+  // Greedy 1:1 — a movement, once used to explain a transfer, cannot explain
+  // another. Matched on the OPPOSITE sign: cash leaving the bank arrives at the
+  // brokerage as a positive deposit.
+  const unclaimedMoves = internalCashMoves.map((m) => ({ move: m, claimed: false }));
+  const claimMatchingCashMove = (t: PerimeterTxn, amount: Decimal): boolean => {
+    const entry = unclaimedMoves.find(
+      (candidate) =>
+        !candidate.claimed
+        && candidate.move.currency === t.currency
+        && D(candidate.move.amount).plus(amount).isZero()
+        && daysApart(candidate.move.date, t.date) <= CASH_MOVE_WINDOW_DAYS,
+    );
+    if (!entry) return false;
+    entry.claimed = true;
+    return true;
+  };
   const revenue: PerimeterTxn[] = [];
   const expenses: PerimeterTxn[] = [];
   const interestIncome: PerimeterTxn[] = [];
@@ -185,6 +232,8 @@ export function partitionCorpPerimeter(
     }
 
     if (amount.greaterThan(0)) {
+      // Cash returning from the brokerage is the corp's own money, not a payer.
+      if (claimMatchingCashMove(t, amount)) continue;
       revenue.push(t);
       if (looksLikeOrphanedArrival(t, legalName)) {
         warnings.push(
@@ -202,6 +251,9 @@ export function partitionCorpPerimeter(
       // Inbound transfers are NOT symmetric: Wise labels genuine customer
       // payments `transfer`, so those still count as revenue above.
       if (t.txnType === 'transfer') {
+        // The far side is in the brokerage ledger — accounted for, so there is
+        // nothing to flag.
+        if (claimMatchingCashMove(t, amount)) continue;
         warnings.push(
           `Txn #${t.id} (${t.date}, ${amount.toFixed(2)} ${t.currency}) was NOT deducted as a `
           + 'business expense: it is an outbound transfer whose matching leg is not imported, '

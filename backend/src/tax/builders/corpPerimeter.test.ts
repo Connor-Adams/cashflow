@@ -208,3 +208,102 @@ test('an expense reimbursement is neither corp revenue nor a corp expense', () =
   assert.deepEqual(out.expenses, []);
   assert.deepEqual(out.revenue, []);
 });
+
+// --- transfers whose far side is a brokerage cash movement ---
+//
+// `linked_transaction_id` is a foreign key into transactions, so a transfer
+// between a bank account and a brokerage can never be linked: the far side is
+// an InvestmentActivity row, not a Transaction. The money IS tracked, just in
+// the other ledger — so match against it rather than treating the transfer as
+// unexplained.
+
+test('an outbound transfer matching a brokerage transfer_in is internal, silently', () => {
+  const rows = [
+    txn({
+      id: 30, amount: '-10000.00', date: '2026-07-06',
+      merchant: 'Tax-free money transfer out of the account',
+    }),
+  ];
+  const out = partitionCorpPerimeter(rows, {
+    legalName: LEGAL_NAME,
+    linkTargetIds: new Set(),
+    internalCashMoves: [{ date: '2026-07-06', amount: '10000.00', currency: 'CAD' }],
+  });
+  assert.deepEqual(out.expenses, []);
+  assert.deepEqual(out.warnings, [], 'the far side is accounted for — nothing to warn about');
+});
+
+test('an outbound transfer with no brokerage counterpart still warns', () => {
+  const rows = [
+    txn({ id: 31, amount: '-14500.00', date: '2026-09-01', merchant: 'Investment WS Investments' }),
+  ];
+  const out = partitionCorpPerimeter(rows, {
+    legalName: LEGAL_NAME,
+    linkTargetIds: new Set(),
+    internalCashMoves: [{ date: '2026-07-06', amount: '10000.00', currency: 'CAD' }],
+  });
+  assert.equal(out.warnings.length, 1);
+  assert.match(out.warnings[0], /#31/);
+});
+
+test('an inbound row matching a brokerage transfer_out is not revenue', () => {
+  // Money coming back out of the brokerage is the corp's own cash returning,
+  // not a customer paying.
+  const rows = [
+    txn({ id: 32, amount: '15000.00', date: '2026-01-10', merchant: 'Deposit' }),
+  ];
+  const out = partitionCorpPerimeter(rows, {
+    legalName: LEGAL_NAME,
+    linkTargetIds: new Set(),
+    internalCashMoves: [{ date: '2026-01-10', amount: '-15000.00', currency: 'CAD' }],
+  });
+  assert.deepEqual(out.revenue, []);
+  assert.deepEqual(out.warnings, []);
+});
+
+test('one brokerage movement explains only one transfer', () => {
+  const rows = [
+    txn({ id: 33, amount: '-7000.00', date: '2026-03-02', merchant: 'Investment WS Investments' }),
+    txn({ id: 34, amount: '-7000.00', date: '2026-03-02', merchant: 'Investment WS Investments' }),
+  ];
+  const out = partitionCorpPerimeter(rows, {
+    legalName: LEGAL_NAME,
+    linkTargetIds: new Set(),
+    internalCashMoves: [{ date: '2026-03-02', amount: '7000.00', currency: 'CAD' }],
+  });
+  assert.equal(out.warnings.length, 1, 'the second transfer is still unexplained');
+});
+
+test('settlement drift of a few days still matches, a month apart does not', () => {
+  const near = partitionCorpPerimeter(
+    [txn({ id: 35, amount: '-7000.00', date: '2026-03-02', merchant: 'Investment WS Investments' })],
+    {
+      legalName: LEGAL_NAME,
+      linkTargetIds: new Set(),
+      internalCashMoves: [{ date: '2026-03-04', amount: '7000.00', currency: 'CAD' }],
+    },
+  );
+  assert.deepEqual(near.warnings, []);
+
+  const far = partitionCorpPerimeter(
+    [txn({ id: 36, amount: '-7000.00', date: '2026-03-02', merchant: 'Investment WS Investments' })],
+    {
+      legalName: LEGAL_NAME,
+      linkTargetIds: new Set(),
+      internalCashMoves: [{ date: '2026-04-02', amount: '7000.00', currency: 'CAD' }],
+    },
+  );
+  assert.equal(far.warnings.length, 1);
+});
+
+test('a brokerage movement in another currency does not match', () => {
+  const out = partitionCorpPerimeter(
+    [txn({ id: 37, amount: '-7000.00', currency: 'USD', date: '2026-03-02', merchant: 'Transfer out' })],
+    {
+      legalName: LEGAL_NAME,
+      linkTargetIds: new Set(),
+      internalCashMoves: [{ date: '2026-03-02', amount: '7000.00', currency: 'CAD' }],
+    },
+  );
+  assert.equal(out.warnings.length, 1);
+});
