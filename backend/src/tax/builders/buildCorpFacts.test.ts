@@ -774,3 +774,30 @@ test('with two corps in the household the owner-paid pass is skipped, and says s
     `expected a multi-corp warning, got ${JSON.stringify(facts.factWarnings)}`,
   );
 });
+
+test('a transfer to the corp brokerage is not flagged as unexplained', async () => {
+  // The far side of a bank→brokerage transfer is an InvestmentActivity row, so
+  // linked_transaction_id (an FK into transactions) can never point at it. The
+  // money is tracked, just in the other ledger.
+  const ctx = await seedPerimeterCorp();
+  const investing = await Account.create({
+    name: 'Corp Investing', householdId: ctx.household.id, accountType: 'investment',
+    entityId: ctx.entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  await seedTxn(ctx, ctx.chequing, {
+    date: '2025-07-06', amount: '-10000.0000', txnType: 'transfer',
+    merchantRaw: 'Tax-free money transfer out of the account', finalBusiness: true,
+  });
+  await InvestmentActivity.create({
+    accountId: investing.id, activityType: 'transfer_in',
+    tradeDate: '2025-07-06', amount: '10000.0000', currency: 'CAD',
+    description: 'Transfer in', importBatch: 'test-perimeter',
+    sourceRowFingerprint: 'fp-cashmove-1',
+  } as never);
+
+  const facts = await buildCorpFacts(ctx.entity.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+
+  assert.deepEqual(facts.factWarnings ?? [], []);
+});
