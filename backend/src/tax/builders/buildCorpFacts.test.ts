@@ -635,3 +635,142 @@ test('passive transactions on an investment account do not double the ledger', a
   assert.deepEqual(facts.investmentIncome.nonEligibleDividends, []);
   assert.deepEqual(facts.investmentIncome.interest, []);
 });
+
+// --- business expenses fronted on a personal card ---
+//
+// Connor pays hosting/AI/internet on a personal Amex and the corp reimburses
+// him. The cost is the corp's, but the transaction lives on a personal account,
+// so buildCorpFacts (which queries corp-entity rows) never saw it — the corp
+// deducted $30 for 2026 while the real costs sat on the personal card. The
+// reimbursement transfer itself is NOT the deduction; the purchase is.
+
+async function seedOwnerExpenseHousehold() {
+  const household = await Household.create({ name: 'Owner Expense HH' });
+  const corp = await Entity.create({
+    householdId: household.id, kind: 'corp', legalName: 'CDG LABS INC.',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const personal = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'Personal',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const corpChequing = await Account.create({
+    name: 'Corp Chequing', householdId: household.id, accountType: 'checking',
+    entityId: corp.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  const personalCard = await Account.create({
+    name: 'Amex Reserve', householdId: household.id, accountType: 'credit_card',
+    entityId: personal.id, taxStatus: 'n_a', defaultCurrency: 'CAD',
+  } as never);
+  return { household, corp, personal, corpChequing, personalCard };
+}
+
+let oeFp = 0;
+async function seedOwnerTxn(
+  household: { id: number }, entityId: number, account: { id: number },
+  over: Record<string, unknown>,
+) {
+  oeFp += 1;
+  const merchantRaw = String(over.merchantRaw ?? 'VENDOR');
+  return Transaction.create({
+    accountId: account.id, householdId: household.id, entityId,
+    currency: 'CAD', importBatch: 'test-owner-expense',
+    merchantClean: merchantRaw,
+    sourceRowFingerprint: `fp-oe-${oeFp}`,
+    sourceIdentityFingerprint: `sif-oe-${oeFp}`,
+    ...over,
+    merchantRaw,
+  } as never);
+}
+
+test('business spend on a personal card is deducted by the corp', async () => {
+  const ctx = await seedOwnerExpenseHousehold();
+  await seedOwnerTxn(ctx.household, ctx.corp.id, ctx.corpChequing, {
+    date: '2025-04-01', amount: '10000.0000', txnType: 'income',
+    merchantRaw: 'ACME CORP invoice',
+  });
+  await seedOwnerTxn(ctx.household, ctx.personal.id, ctx.personalCard, {
+    date: '2025-05-02', amount: '-1758.3100', finalBusiness: true,
+    finalCategory: 'Internet', merchantRaw: 'BELL CANADA',
+  });
+  await seedOwnerTxn(ctx.household, ctx.personal.id, ctx.personalCard, {
+    date: '2025-06-02', amount: '-740.5300', finalBusiness: true,
+    finalCategory: 'Ai', merchantRaw: 'ANTHROPIC',
+  });
+
+  const facts = await buildCorpFacts(ctx.corp.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+
+  const net = facts.activeBusinessIncome.reduce((a, i) => a.plus(i.cadAmount), D(0));
+  assert.equal(net.toFixed(2), '7501.16', '10000 revenue less 2498.84 of owner-paid costs');
+  assert.ok(
+    (facts.factWarnings ?? []).some((w) => /personal/i.test(w) && /2498\.84/.test(w)),
+    `expected a warning naming the owner-paid total, got ${JSON.stringify(facts.factWarnings)}`,
+  );
+});
+
+test('personal spend not flagged business is left alone', async () => {
+  const ctx = await seedOwnerExpenseHousehold();
+  await seedOwnerTxn(ctx.household, ctx.personal.id, ctx.personalCard, {
+    date: '2025-05-02', amount: '-250.0000', finalBusiness: false,
+    merchantRaw: 'GROCERIES',
+  });
+
+  const facts = await buildCorpFacts(ctx.corp.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+  assert.deepEqual(facts.activeBusinessIncome, []);
+});
+
+test('a business-flagged personal INFLOW is not negative corp revenue', async () => {
+  // A refund or a reimbursement landing back on the card is not a cost.
+  const ctx = await seedOwnerExpenseHousehold();
+  await seedOwnerTxn(ctx.household, ctx.personal.id, ctx.personalCard, {
+    date: '2025-05-02', amount: '500.0000', finalBusiness: true,
+    merchantRaw: 'REFUND',
+  });
+
+  const facts = await buildCorpFacts(ctx.corp.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+  assert.deepEqual(facts.activeBusinessIncome, []);
+});
+
+test('card payments and transfers flagged business are not costs', async () => {
+  const ctx = await seedOwnerExpenseHousehold();
+  for (const txnType of ['payment', 'transfer', 'investment']) {
+    await seedOwnerTxn(ctx.household, ctx.personal.id, ctx.personalCard, {
+      date: '2025-05-02', amount: '-900.0000', finalBusiness: true, txnType,
+      merchantRaw: `${txnType} row`,
+    });
+  }
+
+  const facts = await buildCorpFacts(ctx.corp.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+  assert.deepEqual(facts.activeBusinessIncome, []);
+});
+
+test('with two corps in the household the owner-paid pass is skipped, and says so', async () => {
+  // Nothing in the data says WHICH corp a personal business expense belongs to,
+  // and guessing would let the same dollar be deducted on two returns.
+  const ctx = await seedOwnerExpenseHousehold();
+  await Entity.create({
+    householdId: ctx.household.id, kind: 'corp', legalName: 'Second Co.',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  await seedOwnerTxn(ctx.household, ctx.personal.id, ctx.personalCard, {
+    date: '2025-05-02', amount: '-1758.3100', finalBusiness: true,
+    merchantRaw: 'BELL CANADA',
+  });
+
+  const facts = await buildCorpFacts(ctx.corp.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+  assert.deepEqual(facts.activeBusinessIncome, [], 'not attributed to either corp');
+  assert.ok(
+    (facts.factWarnings ?? []).some((w) => /more than one corporation/i.test(w)),
+    `expected a multi-corp warning, got ${JSON.stringify(facts.factWarnings)}`,
+  );
+});

@@ -290,6 +290,73 @@ export async function buildCorpFacts(
     }
   }
 
+  // Business costs the owner fronted on a PERSONAL account. The expense is the
+  // corporation's, but the transaction sits on a personal card, so the
+  // corp-entity query above never sees it and the cost goes undeducted.
+  //
+  // The reimbursement transfer that repays the owner is NOT the deduction — the
+  // purchase is. `expense_reimbursement` exists to keep that transfer out of
+  // both returns (see corpPerimeter's NON_OPERATING_TREATMENTS), so the dollar
+  // is counted exactly once, here.
+  //
+  // Only attempted when the household has ONE corporation: nothing in the data
+  // says which corp a personal business expense belongs to, and guessing would
+  // let the same dollar be deducted on two returns.
+  const ownerPaidWarnings: string[] = [];
+  const corpsInHousehold = await Entity.findAll({
+    where: { householdId: entity.householdId, kind: 'corp' },
+  });
+  if (corpsInHousehold.length > 1) {
+    ownerPaidWarnings.push(
+      `Household has more than one corporation (${corpsInHousehold.length}), so business `
+      + 'expenses paid on personal accounts were NOT attributed to this return. Move them '
+      + 'onto the corporation that incurred them, or record them on a corporate account.',
+    );
+  } else {
+    const personalEntities = await Entity.findAll({
+      where: { householdId: entity.householdId, kind: 'personal' },
+    });
+    const personalEntityIds = personalEntities.map((e) => e.id);
+    const ownerPaid = personalEntityIds.length
+      ? await Transaction.findAll({
+        where: {
+          entityId: personalEntityIds,
+          date: { [Op.between]: [startDate, endDate] },
+          finalBusiness: true,
+        },
+      })
+      : [];
+    let ownerPaidTotal = D(0);
+    let ownerPaidCount = 0;
+    for (const t of ownerPaid) {
+      const raw = D(t.amount as unknown as string);
+      // Inflows are refunds or the reimbursement itself, not costs.
+      if (!raw.lessThan(0)) continue;
+      const txnType = (t as unknown as { txnType?: string | null }).txnType ?? null;
+      // Moving money is not spending it; buying securities is capital.
+      if (txnType === 'payment' || txnType === 'transfer' || txnType === 'investment') continue;
+      // A row already classified as something else (a donation, an RRSP
+      // contribution, a shareholder-loan leg) is not a corporate cost.
+      if (t.taxTreatmentOverride != null && t.taxTreatmentOverride !== 'none') continue;
+      const { cad } = await toCad(raw, t.currency ?? 'CAD', t.date as unknown as string);
+      activeBusinessIncome.push({
+        source: `Txn #${t.id} ${t.merchantClean ?? t.merchantRaw ?? ''} (owner-paid)`.trim(),
+        amount: raw,
+        cadAmount: cad,
+      });
+      ownerPaidTotal = ownerPaidTotal.plus(cad.abs());
+      ownerPaidCount += 1;
+    }
+    if (ownerPaidCount > 0) {
+      ownerPaidWarnings.push(
+        `Deducted ${ownerPaidTotal.toFixed(2)} CAD across ${ownerPaidCount} business-flagged `
+        + 'transaction(s) paid on personal accounts. These rest on the finalBusiness flag being '
+        + 'correct — review them before filing, and make sure the reimbursement transfers that '
+        + "repay them are tagged 'expense_reimbursement' so the same cost is not counted twice.",
+      );
+    }
+  }
+
   return {
     fiscalYear,
     jurisdiction: 'CA-ON',
@@ -304,6 +371,6 @@ export async function buildCorpFacts(
     dividendsPaid,
     salaryPaid,
     carryforwards,
-    factWarnings: perimeter.warnings,
+    factWarnings: [...perimeter.warnings, ...ownerPaidWarnings],
   };
 }

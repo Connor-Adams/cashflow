@@ -104,6 +104,11 @@ const NON_OPERATING_TREATMENTS = new Set([
   'loan_advance',
   'loan_repayment',
   'not_income',
+  // Repaying the owner for a cost they fronted returns money already spent.
+  // The underlying purchase is what the corp deducts (see the personal-card
+  // expense pass in buildCorpFacts); deducting the repayment too would double
+  // the same dollar.
+  'expense_reimbursement',
 ]);
 
 /**
