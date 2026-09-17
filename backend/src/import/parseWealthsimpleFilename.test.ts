@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseWealthsimpleFilename, parseWsCreditCardPdfWsid } from './parseWealthsimpleFilename';
+import {
+  parseWealthsimpleFilename,
+  parseWsCreditCardPdfWsid,
+  parseWsPdfWsid,
+} from './parseWealthsimpleFilename';
 
 test('parses Chequing monthly statement', () => {
   const r = parseWealthsimpleFilename(
@@ -187,4 +191,40 @@ test('rejects a date-suffixed name whose WSID segment is missing', () => {
     parseWealthsimpleFilename('Chequing-monthly-statement-transactions-2026-08-01.csv'),
     null,
   );
+});
+
+// Wealthsimple's 2026 statement downloads use a new PDF naming convention:
+//   <WSID>_<identity|corporation>-<opaque token>_<YYYY-MM>_v_<n>.pdf
+// The WSID is the ONLY stable account key in the file — the bodies print an
+// internal account number (chequing) or a card last-4 (credit card), neither of
+// which matches what the CSV path keyed accounts on. Without it a corporate
+// statement resolves by product name onto the same-named personal account.
+test('parseWsPdfWsid: 2026 personal statement', () => {
+  assert.equal(
+    parseWsPdfWsid('C13BRX957CAD_identity-IMlH6n7fSIzHINZ6PE0f7oAgqns_2026-09_v_0.pdf'),
+    'C13BRX957CAD',
+  );
+});
+
+test('parseWsPdfWsid: 2026 corporate statement', () => {
+  assert.equal(
+    parseWsPdfWsid('HQ8H0GZ07CAD_corporation-008TfQtMUtWe_2026-08_v_0.pdf'),
+    'HQ8H0GZ07CAD',
+  );
+});
+
+test('parseWsPdfWsid: tolerates a browser duplicate-download suffix', () => {
+  assert.equal(
+    parseWsPdfWsid('WK79NVW07CAD_identity-IMlH6n7fSIzHINZ6PE0f7oAgqns_2026-08_v_0 (1).pdf'),
+    'WK79NVW07CAD',
+  );
+});
+
+test('parseWsPdfWsid: still reads the older credit-card convention', () => {
+  assert.equal(parseWsPdfWsid('C13BRX957CAD_2026-06_CREDIT_CARD.pdf'), 'C13BRX957CAD');
+});
+
+test('parseWsPdfWsid: returns null for anything else', () => {
+  assert.equal(parseWsPdfWsid('statement_125041570_CAD_2026-05-01_2026-09-15.pdf'), null);
+  assert.equal(parseWsPdfWsid('Chequing Statement-4881 2026-05-05.pdf'), null);
 });

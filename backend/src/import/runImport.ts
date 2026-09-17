@@ -27,7 +27,7 @@ import { inferCsvDateOrdering, mapCsvRow } from './mapRow';
 import { parseStatementFilename } from './parseStatementFilename';
 import {
   parseWealthsimpleFilename,
-  parseWsCreditCardPdfWsid,
+  parseWsPdfWsid,
   type WsProductHint,
 } from './parseWealthsimpleFilename';
 import { parseStatementFile } from './parseStatementFile';
@@ -1115,13 +1115,16 @@ export async function resolvePdfAccountFromHeader(
   const entity = await resolveEntityForHolder(header.accountHolder, householdId);
   const overrideBusiness = entity?.kind === 'corp';
 
-  // Stable match key. WS credit-card statement bodies print only the card last-4
-  // (header.accountSuffix), which is neither unique across cards nor the key the
-  // WS CSV path uses — so it forked a new account every time the existing one was
-  // renamed or carried a different short_code. The WS account id (WSID) lives in
-  // the PDF filename (`<WSID>_YYYY-MM_CREDIT_CARD.pdf`); prefer it when present.
-  const wsCardWsid = fileName ? parseWsCreditCardPdfWsid(fileName) : null;
-  const matchKey = wsCardWsid ?? header.accountSuffix;
+  // Stable match key. Wealthsimple statement BODIES print only a weak key — the
+  // card last-4 on a credit card, an internal account number on chequing —
+  // neither of which is unique across products nor the key the WS CSV path used,
+  // so resolving on them forked a new account whenever the existing one was
+  // renamed or carried a different short_code. Worse, a CORPORATE statement and
+  // the same-named personal account share a product label, so the name fallback
+  // could merge them. The stable WS account id (WSID) lives in the PDF filename
+  // for every WS product; prefer it whenever it is there.
+  const wsWsid = fileName ? parseWsPdfWsid(fileName) : null;
+  const matchKey = wsWsid ?? header.accountSuffix;
 
   // First try to find account by shortCode (exact match on the stable key).
   let account = await Account.findOne({
