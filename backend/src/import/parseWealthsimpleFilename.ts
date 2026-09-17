@@ -97,6 +97,33 @@ const CREDIT_CARD_PDF_RE = /(?:^|[\\/])([A-Za-z0-9]+)_\d{4}-\d{2}_CREDIT_CARD\.p
  * Returns null if the name does not follow the WS CC PDF convention — callers
  * fall back to the body last-4 in that case.
  */
+// Wealthsimple's 2026 statement downloads name every product the same way:
+// `<WSID>_<identity|corporation>-<opaque token>_<YYYY-MM>_v_<n>.pdf`, e.g.
+// `HQ8H0GZ07CAD_corporation-008TfQtMUtWe_2026-08_v_0.pdf`. A trailing
+// " (1)" from a repeated browser download is tolerated.
+//
+// Note the owner segment is NOT a reliable corp/personal signal — an
+// `identity-…` file has been observed for a Business chequing account. The
+// WSID is what matters; the statement body names the holder.
+const STATEMENT_PDF_RE =
+  /(?:^|[\/])([A-Za-z0-9]+)_(?:identity|corporation)-[A-Za-z0-9]+_\d{4}-\d{2}_v_\d+(?:\s*\(\d+\))?\.pdf$/i;
+
+/**
+ * Extract the stable Wealthsimple account id (WSID) from any WS statement PDF
+ * filename — the 2026 convention above, or the older
+ * `<WSID>_<YYYY-MM>_CREDIT_CARD.pdf`.
+ *
+ * This is the only stable account key those files carry: the chequing body
+ * prints an internal account number and the credit-card body prints a card
+ * last-4, neither of which is what the CSV import path keyed accounts on.
+ * Returns null when the name follows neither convention.
+ */
+export function parseWsPdfWsid(name: string): string | null {
+  const modern = STATEMENT_PDF_RE.exec(name);
+  if (modern) return modern[1];
+  return parseWsCreditCardPdfWsid(name);
+}
+
 export function parseWsCreditCardPdfWsid(name: string): string | null {
   const m = CREDIT_CARD_PDF_RE.exec(name);
   return m ? m[1] : null;
