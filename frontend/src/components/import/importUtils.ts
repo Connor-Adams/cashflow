@@ -1,6 +1,6 @@
 import type { AlertVariant } from '@connor-adams/designsystem'
 
-type DetectedMode = 'standard' | 'ws-bundle' | 'holdings' | 'pdf-bundle'
+type DetectedMode = 'standard' | 'ws-bundle' | 'holdings' | 'activity-statement' | 'pdf-bundle'
 
 type UploadResult = {
   file?: string
@@ -40,8 +40,16 @@ function isWealthsimpleExport(name: string): boolean {
   )
 }
 
+// Wealthsimple's Custom Activity Statement is ONE pdf covering EVERY account.
+// It must not reach the pdf-bundle importer, which resolves one account per
+// file and would file every section against whichever account matched first.
+const WS_ACTIVITY_STATEMENT_RE = /^ACTIVITY_STATEMENT[_-]/i
+
 export function detectMode(files: File[]): DetectedMode {
   if (files.length === 0) return 'standard'
+  if (files.length === 1 && WS_ACTIVITY_STATEMENT_RE.test(files[0].name)) {
+    return 'activity-statement'
+  }
   const allPdf = files.every((f) => f.name.toLowerCase().endsWith('.pdf'))
   if (allPdf) return 'pdf-bundle'
   const allCsv = files.every((f) => f.name.toLowerCase().endsWith('.csv'))

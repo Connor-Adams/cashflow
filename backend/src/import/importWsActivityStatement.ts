@@ -3,6 +3,7 @@ import path from 'node:path';
 import { Account } from '../models';
 import { commitStatementImport } from './commitStatementImport';
 import { parseWsActivityStatement } from './pdf/wsActivityStatement';
+import type { PdfLine } from './pdf/types';
 import type { StatementPreview } from './statementTypes';
 
 /**
@@ -18,6 +19,9 @@ import type { StatementPreview } from './statementTypes';
  * heading. An unmatched WSID is reported rather than auto-created, for the
  * same reason as holdings: an account conjured without entity, tax status or
  * currency silently collects rows that then compute wrong.
+ *
+ * Takes already-extracted PDF lines rather than a buffer: the route owns the
+ * IO, this owns the splitting and committing.
  */
 
 export interface WsActivityAccountResult {
@@ -36,20 +40,16 @@ export interface WsActivityImportResult {
 }
 
 export async function importWsActivityStatement(opts: {
-  buffer: Buffer;
+  lines: PdfLine[];
   fileName: string;
+  /** Hash of the uploaded bytes, used to scope each account's preview. */
+  contentHash: string;
   householdId: number;
   userId: number;
 }): Promise<WsActivityImportResult> {
   const file = path.basename(opts.fileName || 'activity-statement.pdf').replace(/[\\/]/g, '');
-
-  /* eslint-disable @typescript-eslint/no-require-imports */
-  const { extractPdfLines } = require('./pdf/extractLines');
-  /* eslint-enable @typescript-eslint/no-require-imports */
-  const lines = await extractPdfLines(opts.buffer);
-  const parsed = parseWsActivityStatement(lines);
-
-  const contentHash = crypto.createHash('sha256').update(opts.buffer).digest('hex');
+  const parsed = parseWsActivityStatement(opts.lines);
+  const { contentHash } = opts;
   const importBatch = `${file.replace(/\.pdf$/i, '')} activity`;
 
   const accounts: WsActivityAccountResult[] = [];
