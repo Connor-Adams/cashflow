@@ -27,7 +27,7 @@ on:
         type: choice
         options: [frontend, backend]
       tag:
-        description: Tag to publish (must not be "main")
+        description: Tag to publish
         required: true
         type: string
       vite_api_base:
@@ -165,7 +165,13 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
-  # Manual, non-production builds. Never runs on push; never publishes :main.
+  # Manual builds. Never runs on push.
+  #
+  # This can publish any tag, `main` included. An earlier version refused the
+  # production tags, which bought nothing — dispatching already requires repo
+  # write access — while making it impossible to correct `:main` after a
+  # build-arg change, since the content-hash skip means a changed secret does
+  # not trigger a rebuild on its own.
   dispatch:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -173,12 +179,6 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Refuse to publish the production tag
-        if: inputs.tag == 'main' || inputs.tag == 'production'
-        run: |
-          echo "::error::This path must not publish '${{ inputs.tag }}'. Push to main instead."
-          exit 1
-
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
