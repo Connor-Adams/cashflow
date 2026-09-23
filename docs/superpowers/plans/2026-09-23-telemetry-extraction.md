@@ -1146,6 +1146,30 @@ Expected per store: destination `du` within a few percent of source `du`.
 
 Grafana carries `grafana.db`, which owns the service-account token. After starting grafana, the entrypoint re-derives the admin password from `GF_SECURITY_ADMIN_PASSWORD`, so the env var set in Task 8 governs — not whatever the migrated database held.
 
+- [ ] **Step 5b: Reconcile the Grafana folder rename against the migrated database**
+
+Task 6 changed dashboard provisioning from a fixed `folder: Cashflow` provider to `foldersFromFilesStructure`, which derives the folder name from the directory — so the folder is now `cashflow`, lowercase. The migrated `grafana.db` still contains the original `Cashflow` folder with the eight dashboards in it.
+
+Expected behaviour, and what to check:
+
+- **The dashboards should move, not duplicate.** Grafana's file provisioner matches dashboards by `uid` and updates them in place regardless of provider or folder. The JSON files are a verbatim copy carrying the same uids as the live ones, so they should be repointed at the new folder. Confirm the dashboard count is **8, not 16**:
+
+```bash
+curl -s -u admin:<password> 'https://grafana.rainbot.win/api/search?type=dash-db' | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d), sorted({x.get("folderTitle","(root)") for x in d}))'
+```
+
+Expected: `8 ['cashflow']`. A count of 16, or a folder set containing both `Cashflow` and `cashflow`, means the uid matching did not take — stop and investigate before going further.
+
+- **The old `Cashflow` folder probably survives as an empty orphan.** Grafana does not document whether changing the provider cleans up the previous folder object. List folders and delete the empty one if present:
+
+```bash
+curl -s -u admin:<password> https://grafana.rainbot.win/api/folders | python3 -c 'import sys,json; [print(f["uid"], repr(f["title"])) for f in json.load(sys.stdin)]'
+```
+
+- **Folder-scoped permissions do not carry across the rename.** If any were set on `Cashflow`, they are not inherited by `cashflow` and must be reapplied. Check before deleting the old folder, since deleting it discards that information.
+
+Dashboard URLs are uid-based and unaffected. Bookmarked *folder* URLs will 404.
+
 - [ ] **Step 6: Confirm the tempo persistence canary survived**
 
 ```bash
