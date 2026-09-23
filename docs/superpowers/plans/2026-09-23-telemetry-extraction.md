@@ -21,6 +21,7 @@
 - Box SSH is `root@192.168.2.88` with key auth. No other user works.
 - **Never use `docker run --rm` on the box** — the `--rm` flag trips a file-deletion guard. Use `docker exec` into existing containers, or `docker run` without `--rm` plus an explicit cleanup.
 - Secrets are never passed as CLI arguments (they land in shell history) and never echoed.
+- **There is no local Docker daemon on Connor's machine.** Every verification that needs to build or run a container happens in CI (GitHub Actions runners provide Docker) or on the box over SSH. No task may instruct anyone to run `docker` locally. This is why config validation and the Grafana boot probes live in the `validate` CI job rather than as one-off local commands — which also makes them a permanent regression gate instead of a step someone ran once.
 
 ---
 
@@ -57,23 +58,21 @@ cd ~/Developer/telemetry && mkdir -p services && for svc in loki tempo prometheu
 
 Expected: `services/grafana/provisioning/dashboards/cashflow/` holds the eight dashboard JSON files, and each service has a `Dockerfile`.
 
-- [ ] **Step 3: Verify every config still parses**
+- [ ] **Step 3: Verify the copy is byte-identical to the source**
 
-This is the failing-test equivalent for config: run the real binaries against the copied files.
-
-```bash
-cd ~/Developer/telemetry && docker run --name tmcheck-prom -v "$PWD/services/prometheus:/cfg" prom/prometheus:v2.55.1 promtool check config /cfg/prometheus.yml; docker logs tmcheck-prom; docker container rm tmcheck-prom
-```
-
-Expected: `SUCCESS: /cfg/prometheus.yml is valid prometheus config file syntax`.
+There is no local Docker, so config validation does not run here — it is built as a CI job in Task 2 and runs against this same content on the first push. What this step verifies instead is the thing Task 1 actually claims: that the copy changed nothing.
 
 ```bash
-cd ~/Developer/telemetry && docker run --name tmcheck-otel -v "$PWD/services/otel-collector:/cfg" otel/opentelemetry-collector-contrib:0.110.0 validate --config=/cfg/config.yaml; docker logs tmcheck-otel; docker container rm tmcheck-otel
+diff -rq /Users/connoradams/Developer/cashflow/.claude/worktrees/dokploy-migration-setup-d3a529/infra ~/Developer/telemetry/services
 ```
 
-Expected: exit 0, no output.
+Expected: no output. Any output means a file was altered, added or dropped during the copy, which defeats the purpose of a verbatim import.
 
-`PUBLIC_FRONTEND_ORIGIN`, `LOKI_HOST` and `TEMPO_HOST` are unset here, so this validates structure only. Full env-substituted validation happens at deploy time in Task 9.
+```bash
+ls ~/Developer/telemetry/services/grafana/provisioning/dashboards/cashflow/ | wc -l
+```
+
+Expected: `8`.
 
 - [ ] **Step 4: Write the README**
 
@@ -131,11 +130,103 @@ Cashflow's `build-images.yml` uses a content-hash skip system (`scripts/service-
 **Files:**
 - Create: `~/Developer/telemetry/.github/workflows/build-images.yml`
 
+This task also carries **all container-based verification for the repo**, because there is no local Docker. A `validate` job gates the build: if a config stops parsing, or Grafana stops provisioning its datasources, dashboards or alert rules, no image is published. Tasks 3 through 6 rely on this job instead of running containers locally.
+
 **Interfaces:**
 - Consumes: `services/<name>/Dockerfile` from Task 1.
 - Produces: `ghcr.io/connor-adams/telemetry-{loki,tempo,prometheus,otel-collector,grafana}:main`, consumed by Task 7.
+- Produces: `scripts/validate-stack.sh`, the single entry point for container-based verification, re-used by Tasks 3-6 and runnable on the box over SSH if CI is ever unavailable.
 
-- [ ] **Step 1: Write the workflow**
+- [ ] **Step 1: Write the validation script**
+
+Create `~/Developer/telemetry/scripts/validate-stack.sh`. It runs where Docker exists — a CI runner, or the box — and is the only place container-based checks live.
+
+```bash
+#!/usr/bin/env bash
+# Container-based verification for the whole stack. Runs in CI; can also be run
+# on the box. There is no local Docker on Connor's machine, so this is the only
+# place these checks execute.
+#
+# Verifies:
+#   1. the otel-collector config parses
+#   2. the prometheus entrypoint renders its template and the result is valid
+#   3. grafana boots and provisions 3 datasources, 8 dashboards in a cashflow
+#      folder, and the 3 observability-stack alert rules
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+PROBE_PW="probe-only-not-a-real-password"
+fail() { echo "FAIL: $1" >&2; exit 1; }
+
+echo "==> otel-collector config parses"
+docker run --rm -v "$PWD/services/otel-collector:/cfg" \
+  otel/opentelemetry-collector-contrib:0.110.0 validate --config=/cfg/config.yaml \
+  || fail "otel-collector config did not validate"
+
+echo "==> prometheus config parses"
+docker run --rm -v "$PWD/services/prometheus:/cfg" \
+  prom/prometheus:v2.55.1 promtool check config /cfg/prometheus.yml \
+  || fail "prometheus config did not validate"
+
+echo "==> grafana boots and provisions"
+docker build -q -t telemetry-grafana-ci services/grafana >/dev/null
+docker run -d --rm --name telemetry-grafana-ci-probe \
+  -e GF_SECURITY_ADMIN_PASSWORD="$PROBE_PW" \
+  -e LOKI_URL=http://probe-loki:3100 \
+  -e TEMPO_URL=http://probe-tempo:3200 \
+  -e PROM_URL=http://probe-prom:9090 \
+  -p 3999:3000 telemetry-grafana-ci >/dev/null
+
+for _ in $(seq 1 30); do
+  curl -sf -u "admin:$PROBE_PW" http://localhost:3999/api/health >/dev/null && break
+  sleep 2
+done
+
+api() { curl -sf -u "admin:$PROBE_PW" "http://localhost:3999$1"; }
+
+# Only uids are asserted here. At this point in the plan the urls are still the
+# hardcoded railway.internal ones; Task 4 env-templates them and tightens this
+# check to assert the urls come from the environment.
+api /api/datasources | python3 -c '
+import sys, json
+ds = {d["uid"] for d in json.load(sys.stdin)}
+want = {"loki", "tempo", "prometheus"}
+assert ds == want, f"datasource uids wrong: got {sorted(ds)}, want {sorted(want)}"
+print("  datasource uids OK:", sorted(ds))
+' || fail "datasource provisioning wrong"
+
+# Count only. Task 6 tightens this to assert they are foldered under cashflow,
+# once the provider config has been checked.
+api '/api/search?type=dash-db' | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+assert len(d) == 8, f"expected 8 dashboards, got {len(d)}"
+print("  dashboards OK:", len(d), "in", sorted({x.get("folderTitle", "(root)") for x in d}))
+' || fail "dashboard provisioning wrong"
+
+api /api/v1/provisioning/alert-rules | python3 -c '
+import sys, json
+titles = {r["title"] for r in json.load(sys.stdin)}
+want = {"OtelCollectorScrapeDown", "TempoExportFailing", "LokiExportFailing"}
+missing = want - titles
+assert not missing, f"missing alert rules: {missing}"
+print("  alert rules OK:", sorted(want))
+' || fail "alert rule provisioning wrong"
+
+docker stop telemetry-grafana-ci-probe >/dev/null
+
+echo "==> all checks passed"
+```
+
+Make it executable:
+
+```bash
+cd ~/Developer/telemetry && chmod +x scripts/validate-stack.sh
+```
+
+Note this script does use `docker run --rm`. That is fine — it runs on a CI runner, not on Connor's machine or the box, where the deletion guard applies.
+
+- [ ] **Step 2: Write the workflow**
 
 Create `~/Developer/telemetry/.github/workflows/build-images.yml`:
 
@@ -148,6 +239,7 @@ on:
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
+  pull_request:
   workflow_dispatch:
 
 concurrency:
@@ -155,7 +247,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # There is no local Docker on Connor's machine, so this job is where every
+  # container-based check runs. It gates the build: a config that stops parsing
+  # or a Grafana that stops provisioning publishes no image.
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Task 3 adds a step here to run services/prometheus/entrypoint.test.sh
+      # once that entrypoint exists.
+      - name: Validate configs and Grafana provisioning
+        run: ./scripts/validate-stack.sh
+
   build:
+    needs: validate
+    # Only publish from main; pull_request runs validate only.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -401,23 +511,42 @@ USER nobody
 ENTRYPOINT ["/entrypoint.sh"]
 ```
 
-- [ ] **Step 6: Verify the image builds and renders**
+- [ ] **Step 6: Move the prometheus check in CI from static config to rendered template**
+
+`services/prometheus/prometheus.yml` no longer exists, so the check written in Task 2 would now fail on a missing file. Replace that section of `scripts/validate-stack.sh` — the block under `echo "==> prometheus config parses"` — with one that builds the image, renders the template, and validates the result:
 
 ```bash
-cd ~/Developer/telemetry/services/prometheus && docker build -t telemetry-prometheus-local . && docker run --name tmrender -e OTEL_COLLECTOR_HOST=probe-host telemetry-prometheus-local --render-only; docker logs tmrender; docker container rm tmrender
+echo "==> prometheus renders its template and the result is valid"
+docker build -q -t telemetry-prometheus-ci services/prometheus >/dev/null
+docker run --rm -e OTEL_COLLECTOR_HOST=probe-host \
+  --entrypoint /bin/sh telemetry-prometheus-ci -c \
+  'TEMPLATE=/etc/prometheus/prometheus.yml.tmpl OUTPUT=/tmp/p.yml /entrypoint.sh --render-only \
+     && grep -q "probe-host:9464" /tmp/p.yml \
+     && grep -q "probe-host:8888" /tmp/p.yml \
+     && promtool check config /tmp/p.yml' \
+  || fail "prometheus template did not render into a valid config"
 ```
 
-Expected: `[entrypoint] rendered /etc/prometheus/prometheus.yml with OTEL_COLLECTOR_HOST=probe-host`, exit 0.
+Also add the entrypoint unit test to `.github/workflows/build-images.yml`, in the `validate` job immediately before the `Validate configs and Grafana provisioning` step (replacing the placeholder comment left there in Task 2):
 
-If `apk` is unavailable because the base image is not Alpine-based, substitute the correct package manager and re-run this step before committing.
+```yaml
+      - name: Run the prometheus entrypoint unit test
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
+          cd services/prometheus && ./entrypoint.test.sh
+```
 
-- [ ] **Step 7: Verify the rendered config is valid Prometheus syntax**
+- [ ] **Step 7: Push and confirm CI proves the rendering works**
+
+There is no local Docker, so the image build and render are verified by the `validate` job. Commit (Step 8), push, then:
 
 ```bash
-docker run --name tmcheck -e OTEL_COLLECTOR_HOST=probe-host --entrypoint /bin/sh telemetry-prometheus-local -c 'TEMPLATE=/etc/prometheus/prometheus.yml.tmpl OUTPUT=/tmp/p.yml /entrypoint.sh --render-only && promtool check config /tmp/p.yml'; docker logs tmcheck; docker container rm tmcheck
+cd ~/Developer/telemetry && gh run watch "$(gh run list --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
 ```
 
-Expected: `SUCCESS: /tmp/p.yml is valid prometheus config file syntax`.
+Expected: exits 0. In the `validate` job log, `entrypoint.test.sh` prints `PASS` and the validate script prints `prometheus renders its template and the result is valid`.
+
+If the build fails because `apk` is unavailable — the base image not being Alpine — substitute the correct package manager in the Dockerfile and push again. That failure surfaces here rather than locally.
 
 - [ ] **Step 8: Commit**
 
@@ -476,21 +605,31 @@ cd ~/Developer/telemetry/services/grafana/provisioning/datasources && grep -n 'u
 
 Expected: exactly `uid: loki`, `uid: tempo`, `uid: prometheus`, plus the cross-references (`datasourceUid: tempo` in Loki's derived fields, `datasourceUid: 'loki'` in Tempo's `tracesToLogsV2`). All eight dashboards resolve datasources by these uids; if any changed, revert and redo.
 
-- [ ] **Step 3: Verify Grafana boots and provisions against the env vars**
+- [ ] **Step 3: Tighten the CI datasource assertion to prove env expansion**
+
+Task 2's check asserts uids only, because the urls were still hardcoded then. Now that they come from the environment, replace that block in `scripts/validate-stack.sh` — the one under the comment about Task 4 tightening it — with an assertion on the urls the probe env supplies:
 
 ```bash
-cd ~/Developer/telemetry/services/grafana && docker build -t telemetry-grafana-local . && docker run -d --name tmgraf -e GF_SECURITY_ADMIN_PASSWORD=probe-only-not-a-real-password -e LOKI_URL=http://probe-loki:3100 -e TEMPO_URL=http://probe-tempo:3200 -e PROM_URL=http://probe-prom:9090 -p 3999:3000 telemetry-grafana-local && sleep 15 && curl -s -u admin:probe-only-not-a-real-password http://localhost:3999/api/datasources | python3 -m json.tool | grep -E '"(uid|url|name)"'
+api /api/datasources | python3 -c '
+import sys, json
+ds = {d["uid"]: d["url"] for d in json.load(sys.stdin)}
+want = {"loki": "http://probe-loki:3100",
+        "tempo": "http://probe-tempo:3200",
+        "prometheus": "http://probe-prom:9090"}
+assert ds == want, f"datasources wrong: got {ds}, want {want}"
+print("  datasources OK:", sorted(ds))
+' || fail "datasource provisioning wrong"
 ```
 
-Expected: three datasources named Loki/Tempo/Prometheus with uids `loki`/`tempo`/`prometheus` and urls `http://probe-loki:3100`, `http://probe-tempo:3200`, `http://probe-prom:9090` — proving `$VAR` expansion works.
+This fails if `$VAR` expansion silently does not happen — the urls would come back as the literal strings `$LOKI_URL` and so on, which is precisely the failure worth catching.
 
-- [ ] **Step 4: Confirm the dashboards loaded, then tear the probe down**
+- [ ] **Step 4: Push and confirm CI proves the expansion**
 
 ```bash
-curl -s -u admin:probe-only-not-a-real-password 'http://localhost:3999/api/search?type=dash-db' | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d),"dashboards"); [print(" ",x["title"]) for x in d]'; docker stop tmgraf; docker container rm tmgraf
+cd ~/Developer/telemetry && gh run watch "$(gh run list --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
 ```
 
-Expected: 8 dashboards listed.
+Expected: exits 0, and the `validate` job log prints `datasources OK: ['loki', 'prometheus', 'tempo']` and `dashboards OK: 8`.
 
 - [ ] **Step 5: Commit**
 
@@ -548,13 +687,17 @@ cd ~/Developer/telemetry && grep -rn 'cashflow-otel-collector' . && echo "STALE 
 
 Expected: `clean`.
 
-- [ ] **Step 4: Confirm Grafana still parses the alerting provisioning**
+- [ ] **Step 4: Push and confirm CI still parses the alerting provisioning**
+
+The `validate` job already asserts the three alert rules provision by title, so a rename that breaks the YAML fails CI without any new check. Commit (Step 5), push, then:
 
 ```bash
-cd ~/Developer/telemetry/services/grafana && docker build -t telemetry-grafana-local . && docker run -d --name tmalert -e GF_SECURITY_ADMIN_PASSWORD=probe-only-not-a-real-password -e LOKI_URL=http://probe-loki:3100 -e TEMPO_URL=http://probe-tempo:3200 -e PROM_URL=http://probe-prom:9090 -p 3999:3000 telemetry-grafana-local && sleep 15 && curl -s -u admin:probe-only-not-a-real-password http://localhost:3999/api/v1/provisioning/alert-rules | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d),"alert rules"); [print(" ",r["title"]) for r in d]'; docker stop tmalert; docker container rm tmalert
+cd ~/Developer/telemetry && gh run watch "$(gh run list --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
 ```
 
-Expected: the list includes `OtelCollectorScrapeDown`, `TempoExportFailing`, `LokiExportFailing`.
+Expected: exits 0, and the `validate` job log prints `alert rules OK: ['LokiExportFailing', 'OtelCollectorScrapeDown', 'TempoExportFailing']`.
+
+Note what this does and does not prove: it confirms the rules still load, not that the renamed job label matches real data. Only Task 11 Step 6, against live metrics, can confirm that.
 
 - [ ] **Step 5: Commit**
 
@@ -604,13 +747,30 @@ providers:
       foldersFromFilesStructure: true
 ```
 
-- [ ] **Step 3: Verify the folder appears**
+- [ ] **Step 3: Tighten the CI dashboard assertion to require the folder**
+
+Task 2's check counts dashboards only. Now assert they are actually foldered. Replace that block in `scripts/validate-stack.sh` — the one under the comment about Task 6 tightening it — with:
 
 ```bash
-cd ~/Developer/telemetry/services/grafana && docker build -t telemetry-grafana-local . && docker run -d --name tmfold -e GF_SECURITY_ADMIN_PASSWORD=probe-only-not-a-real-password -e LOKI_URL=http://probe-loki:3100 -e TEMPO_URL=http://probe-tempo:3200 -e PROM_URL=http://probe-prom:9090 -p 3999:3000 telemetry-grafana-local && sleep 15 && curl -s -u admin:probe-only-not-a-real-password 'http://localhost:3999/api/search?type=dash-db' | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d),"dashboards"); print(sorted({x.get("folderTitle","(root)") for x in d}))'; docker stop tmfold; docker container rm tmfold
+api '/api/search?type=dash-db' | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+assert len(d) == 8, f"expected 8 dashboards, got {len(d)}"
+folders = {x.get("folderTitle", "(root)") for x in d}
+assert folders == {"cashflow"}, f"expected all dashboards in a cashflow folder, got {folders}"
+print("  dashboards OK: 8 in", folders)
+' || fail "dashboard foldering wrong"
 ```
 
-Expected: 8 dashboards and the folder set printing `['cashflow']` — not `['(root)']`.
+This is the check that would have caught the dashboards landing at the root, which is the actual failure mode when `foldersFromFilesStructure` is missing or `path` points at the wrong directory.
+
+- [ ] **Step 3b: Push and confirm CI proves the foldering**
+
+```bash
+cd ~/Developer/telemetry && gh run watch "$(gh run list --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
+```
+
+Expected: exits 0, and the `validate` job log prints `dashboards OK: 8 in {'cashflow'}`.
 
 - [ ] **Step 4: Commit**
 
