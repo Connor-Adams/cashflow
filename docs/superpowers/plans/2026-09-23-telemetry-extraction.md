@@ -851,6 +851,18 @@ Write the output into `~/Developer/telemetry/docs/dokploy-appnames.md`, with a h
 
 For each service, set the docker provider to `ghcr.io/connor-adams/telemetry-<svc>:main` via `application.saveDockerProvider` (or the v0.30.7 equivalent), passing the `applicationId` from Step 3.
 
+All five images are confirmed published: `telemetry-{loki,tempo,prometheus,otel-collector,grafana}`.
+
+- [ ] **Step 4b: Set the otel-collector's custom start command**
+
+The collector image's default `CMD` loads only the base config. The Postgres metrics overlay needs a second `--config` flag, so the otel-collector Application must override the command with:
+
+```
+--config=/etc/otel-collector-config.yaml --config=/etc/otel-collector-pg-config.yaml
+```
+
+Skip this and Postgres engine metrics vanish silently — no error is logged anywhere, and the only symptom is empty panels. No other Application needs a command override.
+
 - [ ] **Step 5: Add the persistent mounts**
 
 Four Applications need a volume; the collector is stateless and gets none.
@@ -908,10 +920,36 @@ Substitute the real appNames from `docs/dokploy-appnames.md`:
 | loki | *(none)* |
 | tempo | *(none)* |
 | prometheus | `OTEL_COLLECTOR_HOST=telemetry-otel-collector-xxxxxx` |
-| otel-collector | `LOKI_HOST=telemetry-loki-xxxxxx`, `TEMPO_HOST=telemetry-tempo-xxxxxx`, `PUBLIC_FRONTEND_ORIGIN=<cashflow frontend origin>` |
+| otel-collector | `LOKI_HOST=telemetry-loki-xxxxxx`, `TEMPO_HOST=telemetry-tempo-xxxxxx`, `PUBLIC_FRONTEND_ORIGIN=<cashflow frontend origin>`, plus the four `PG_METRICS_*` vars below |
 | grafana | `LOKI_URL=http://telemetry-loki-xxxxxx:3100`, `TEMPO_URL=http://telemetry-tempo-xxxxxx:3200`, `PROM_URL=http://telemetry-prometheus-xxxxxx:9090`, `GF_SECURITY_ADMIN_USER=admin`, `GF_SECURITY_ADMIN_PASSWORD=<strong password>` |
 
-`GF_SECURITY_ADMIN_USER` is **not optional**, despite `grafana.ini` reading `admin_user = ${GF_SECURITY_ADMIN_USER:-admin}`. Grafana's env expansion supports `${VAR}` only — it has no bash-style `:-` fallback — so leaving it unset seeds an **empty-string** admin username and locks you out of the admin account entirely. This was discovered in CI during Task 2. It has been masked on Railway because `infra/docker-compose.yml` sets the variable explicitly.
+### The Postgres metrics overlay — easy to lose silently
+
+The collector image carries a **second config** that its default `CMD` does not load. `services/otel-collector/config.postgres.yaml` adds a `postgresql` receiver for Postgres engine metrics, and the Dockerfile copies it to `/etc/otel-collector-pg-config.yaml`. On Railway it is activated by a **Custom Start Command**:
+
+```
+--config=/etc/otel-collector-config.yaml --config=/etc/otel-collector-pg-config.yaml
+```
+
+That start command is Railway *service* configuration and lives nowhere in the repo, so moving the image alone drops every Postgres metric with **no error in any log**. The Dokploy otel-collector Application must set the equivalent custom command in Task 7, and these four variables here:
+
+| Variable | Value |
+|---|---|
+| `PG_METRICS_ENDPOINT` | `host:port` — cashflow's Postgres appName in the Cashflow project, e.g. `cashflow-database-xxxxxx:5432` |
+| `PG_METRICS_USERNAME` | the monitoring role |
+| `PG_METRICS_PASSWORD` | that role's password (set via `setkey`, pasted in the UI, never a CLI argument) |
+| `PG_METRICS_DATABASE` | the database to scrape |
+
+Two behaviours documented in that file worth preserving:
+
+- The collector **deep-merges** multiple `--config` files with maps merged but **sequences replaced**. That is why the overlay restates `service.pipelines.metrics.receivers` as the full `[otlp, postgresql]` rather than appending. Anyone editing either file must keep that in mind.
+- `resource_to_telemetry_conversion` is deliberately **off**. Turning it on to get per-table Postgres metrics would also relabel the app's `cashflow_*` series and break existing alerts and dashboards.
+
+Note the overlay's original rationale — "local runs SQLite so there is no Postgres to scrape" — is obsolete twice over: cashflow is Postgres-only in practice, and this extraction drops local observability entirely. Folding it into the base config is a reasonable later simplification, but not during a migration where versions and behaviour are held constant.
+
+### Grafana admin credentials
+
+`GF_SECURITY_ADMIN_USER` is **not optional**, despite `grafana.ini` originally reading `admin_user = ${GF_SECURITY_ADMIN_USER:-admin}`. Grafana's env expansion supports `${VAR}` only — it has no bash-style `:-` fallback — so leaving it unset seeds an **empty-string** admin username and locks you out of the admin account entirely. This was discovered in CI during Task 2. It has been masked on Railway because `infra/docker-compose.yml` sets the variable explicitly.
 
 The shape difference is a real source of mistakes: `OTEL_COLLECTOR_HOST`, `LOKI_HOST` and `TEMPO_HOST` are **bare hostnames** (the collector config and prometheus template supply scheme and port), while `LOKI_URL`/`TEMPO_URL`/`PROM_URL` are **full URLs**.
 
