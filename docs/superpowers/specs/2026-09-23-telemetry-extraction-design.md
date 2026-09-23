@@ -136,7 +136,10 @@ preserved — `cashflow-otel-collector` (:9464, app metrics) and
 `cashflow-otel-collector-self` (:8888, collector self-telemetry) — because the
 `OtelCollectorScrapeDown`, `TempoExportFailing` and `LokiExportFailing` alert
 rules have no data without them. Job names lose their `cashflow-` prefix, since
-the collector is now shared; the three alert rules are updated to match.
+the collector is now shared. This is a low-risk rename: those names describe the
+*collector*, not any application, and application identity travels separately
+(see Multi-tenancy). The only reference to update is
+`alerting/observability-stack.yaml:169`.
 
 ### Dokploy topology — Telemetry project
 
@@ -160,10 +163,42 @@ ingress instead, and that is a design change, not a config tweak.
 
 ### Multi-tenancy
 
-One shared collector for all deployments. Tenants are separated by label, not by
-instance: cashflow already emits `LOKI_SERVICE_NAME=cashflow-backend`. Dashboards
-are foldered per tenant. Prometheus gains scrape targets per tenant as they
-arrive.
+**One shared collector. Tenant identity already works and needs no new
+mechanism.** Each emitter sets the OTel resource attribute `service.name`
+(cashflow: `backend/src/observability/otlpDestination.ts:133` and
+`logger.ts:73` → `cashflow-backend`), and it propagates to all three signals
+without collector involvement:
+
+| Signal | Label carrying tenant identity |
+|---|---|
+| Logs | Loki `service_name` (resource attrs normalise dots to underscores) |
+| Traces | `service.name`, first-class in Tempo |
+| Metrics | Prometheus `exported_job` |
+
+Verified live against production Prometheus:
+`cashflow_up{exported_job="cashflow-backend", instance="otel-collector.railway.internal:9464", job="cashflow-otel-collector"}`.
+
+Note the two `job`-ish labels are unrelated. `job` names **the collector that
+Prometheus scraped**; `exported_job` names **the application that emitted**.
+Prometheus renames the emitter's `job` to `exported_job` because it collides
+with the scrape job label. Renaming the scrape job therefore has no effect on
+application identity.
+
+A new tenant needs nothing built. Rainbot setting `service.name=rainbot-raincloud`
+gets `exported_job="rainbot-raincloud"` and Loki `service_name="rainbot-raincloud"`
+automatically.
+
+**Improvement taken during the move:** set `honor_labels: true` on the scrape
+config so the emitter's own `job` wins and the label reads `job="cashflow-backend"`
+rather than the accidental `exported_job`. Safe here for two reasons —
+`exported_job` appears zero times across all eight dashboards and the alert
+rules, and `up{job="cashflow-otel-collector"}` is synthesised by Prometheus
+rather than exposed by the target, so `honor_labels` cannot affect it and the
+`OtelCollectorScrapeDown` alert keeps evaluating.
+
+Multiple collectors would only be warranted for isolation, never for naming:
+preventing a tenant from spoofing another's `service.name`, per-tenant
+ingestion limits, or blast-radius separation. None apply yet.
 
 Rainbot is winston-based with no OpenTelemetry dependency, so its eventual path
 in is a Loki push, not OTLP. That work is out of scope here; this design only
