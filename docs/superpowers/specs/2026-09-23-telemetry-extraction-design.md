@@ -37,7 +37,7 @@ Both cashflow and the telemetry stack are moving to the Dokploy box
 | Deploy unit | **Five Dokploy Applications** from GHCR images | Exactly the shape rainbot proved on this box. Cross-project reach uses the already-working `appName` DNS path, with no Compose external-network question to resolve. |
 | Local dev observability | **Dropped** | `infra/` was also the local stack. It goes away; local debugging is stdout. Telemetry becomes a deployed-environments-only concern. |
 | Historical data | **Migrate all four stores** | 4.4 GB total against 199 GB free. Cheap enough that losing query continuity across the cutover date is not worth it. |
-| Grafana volume | Copy as-is, no prune | Preserves the service-account token, alert state and annotation history. 2 GB is noise on this disk. |
+| Grafana volume | Copy as-is, no prune | Preserves the service-account token, alert state and annotation history. Measured at 14.6 MB — Railway's 2 GB figure was a high-water mark, so there was never a trade-off here. |
 | Grafana hostname | `grafana.rainbot.win` | The tunnel and DNS are already proven on that zone. Revisit if a neutral zone appears. |
 
 ### Accepted cost of the Applications shape
@@ -58,12 +58,18 @@ Measured 2026-09-23, not assumed.
 **All four stores are filesystem-backed**, so migration is a directory copy, not
 a store conversion:
 
-| Railway volume | Mount path | Size |
-|---|---|---|
-| grafana-volume | `/var/lib/grafana` | 2005 MB |
-| tempo-volume | `/var/tempo` | 889 MB |
-| prometheus-volume | `/prometheus` | 856 MB |
-| loki-volume | `/loki` | 645 MB |
+| Railway volume | Mount path | Reported | Actual (`du`) |
+|---|---|---|---|
+| prometheus-volume | `/prometheus` | 856 MB | **672.7 MB** |
+| tempo-volume | `/var/tempo` | 889 MB | **597.1 MB** |
+| loki-volume | `/loki` | 645 MB | **63.3 MB** |
+| grafana-volume | `/var/lib/grafana` | 2005 MB | **14.6 MB** (`grafana.db` 1.6 MB) |
+| | | 4.4 GB | **≈1.3 GB** |
+
+`railway volume list` reports a high-water mark, not live usage — off by up to
+10× (grafana). Sizes above were measured directly with `du` inside each running
+container on 2026-09-23. The grafana volume being 14.6 MB rather than 2 GB is
+why no prune is worth considering.
 
 Loki is tsdb schema **v13** from `2026-01-01`, retention 720h, compactor
 retention enabled. Tempo is local backend, `block_retention` 168h. Grafana's
@@ -156,10 +162,20 @@ never a friendly name. The concrete appNames are unknown until the Applications
 are created, so env wiring is a post-create step.
 
 Cashflow, in its own Dokploy project, reaches the collector across the project
-boundary on the same host-wide `dokploy-network`. Verify this cross-project
-resolution with a live DNS check before repointing emitters; if it fails, the
-collector is the single service that would need a tunnel-fronted authenticated
-ingress instead, and that is a design change, not a config tweak.
+boundary on the same host-wide `dokploy-network`. **Proven 2026-09-23, not
+assumed:** `dokploy-network` is an `attachable=true` swarm overlay carrying every
+project's containers at once — Infra's cloudflared, all of Rainbot's services,
+traefik and dokploy itself. Resolving across the boundary works, verified with a
+negative control:
+
+| From | Resolve | Result |
+|---|---|---|
+| `rainbot-redis-8nav0c` (Rainbot) | `infra-cloudflared-v6kums` (Infra) | `10.0.1.133` |
+| `rainbot-redis-8nav0c` (Rainbot) | `rainbot-raincloud-24kw6t` (Rainbot) | `10.0.1.8` |
+| `rainbot-redis-8nav0c` (Rainbot) | `telemetry-does-not-exist-yet` | `rc=2` |
+
+Dokploy projects are a UI grouping, not a network boundary. The tunnel-fronted
+authenticated-ingress contingency is therefore dropped.
 
 ### Multi-tenancy
 
@@ -206,22 +222,29 @@ commits to not blocking it.
 
 ## Migration
 
-Four stores, ~4.4 GB total. Small enough to stream `tar` straight through the
-local machine — Railway → Mac → box — with no R2 or other object-store staging,
-and 199 G of headroom at the destination.
+Four stores, ≈1.3 GB total. Streamed `tar` straight through the local machine —
+Railway → Mac → box — with no R2 or other object-store staging, against 199 G of
+headroom at the destination.
 
 Per store, in order: stop the Railway writer → stream `tar` from the Railway
 volume to the corresponding `<appName>-data` volume on the box → verify file
 counts and sizes → start the box service.
 
-**Unverified mechanism.** Getting bytes *out* of a Railway volume is the one
-step not yet proven. `railway volume list` reads metadata only; extraction needs
-either `railway ssh` into the service or a one-off command container with the
-volume attached. Establish which works — on the smallest store, loki at 645 MB —
-before committing to the full sequence. If neither works, the fallback is a
-temporary sidecar service that pushes each volume to R2 (credentials already
-present as `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`), which the rainbot
-migration proved as a Railway egress path.
+**Egress mechanism — proven 2026-09-23.** `railway ssh --service <svc> '<cmd>'`
+executes non-interactively against the running container, and each volume is
+readable from inside it. Probed on loki:
+
+```
+$ railway ssh --service loki "sh -c 'ls /loki; du -sh /loki; which tar'"
+chunks  compactor  index  index_cache  lost+found  rules  wal
+63.3M   /loki
+/busybox/tar
+```
+
+`tar` is present in the images (busybox), so each store streams out as
+`railway ssh --service <svc> 'tar -C <path> -cf - .'` piped into
+`ssh root@192.168.2.88 'tar -C <dest> -xf -'`. No R2 sidecar is needed; that
+fallback is dropped from the plan.
 
 Sequencing follows the lesson from the rainbot cutover, where workers were
 deployed before their orchestrator was healthy, exhausted a finite retry budget,
