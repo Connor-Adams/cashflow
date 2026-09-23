@@ -571,9 +571,28 @@ Unlike Prometheus, Grafana expands `$VAR` in provisioning YAML natively, so no e
 
 **Files:**
 - Modify: `~/Developer/telemetry/services/grafana/provisioning/datasources/datasources.yaml`
+- Modify: `~/Developer/telemetry/services/grafana/grafana.ini`
 
 **Interfaces:**
 - Produces: the grafana image now requires `LOKI_URL`, `TEMPO_URL`, `PROM_URL` — **full URLs** including scheme and port. Consumed by Task 8.
+
+- [ ] **Step 0: Fix the dead fallback syntax in grafana.ini**
+
+Task 2's CI work surfaced a latent bug inherited from cashflow. `grafana.ini` reads:
+
+```ini
+admin_user = ${GF_SECURITY_ADMIN_USER:-admin}
+```
+
+Grafana expands config env vars with Go's `os.ExpandEnv`, which treats the entire brace body as a variable name and has no bash-style `:-default` parsing. So this looks up a variable literally named `GF_SECURITY_ADMIN_USER:-admin`, finds nothing, and silently resolves to an **empty string** — leaving no usable admin username. It has been masked on Railway only because `infra/docker-compose.yml` sets the variable explicitly.
+
+Replace that line with the honest form:
+
+```ini
+admin_user = ${GF_SECURITY_ADMIN_USER}
+```
+
+The fallback was never real, so removing it loses nothing and stops the config lying about its own behaviour. Task 8's env table requires `GF_SECURITY_ADMIN_USER=admin` explicitly, and the CI probe in `scripts/validate-stack.sh` already sets it — so the requirement is enforced in both places rather than silently assumed.
 
 - [ ] **Step 1: Replace the three hardcoded urls**
 
@@ -890,7 +909,9 @@ Substitute the real appNames from `docs/dokploy-appnames.md`:
 | tempo | *(none)* |
 | prometheus | `OTEL_COLLECTOR_HOST=telemetry-otel-collector-xxxxxx` |
 | otel-collector | `LOKI_HOST=telemetry-loki-xxxxxx`, `TEMPO_HOST=telemetry-tempo-xxxxxx`, `PUBLIC_FRONTEND_ORIGIN=<cashflow frontend origin>` |
-| grafana | `LOKI_URL=http://telemetry-loki-xxxxxx:3100`, `TEMPO_URL=http://telemetry-tempo-xxxxxx:3200`, `PROM_URL=http://telemetry-prometheus-xxxxxx:9090`, `GF_SECURITY_ADMIN_PASSWORD=<strong password>` |
+| grafana | `LOKI_URL=http://telemetry-loki-xxxxxx:3100`, `TEMPO_URL=http://telemetry-tempo-xxxxxx:3200`, `PROM_URL=http://telemetry-prometheus-xxxxxx:9090`, `GF_SECURITY_ADMIN_USER=admin`, `GF_SECURITY_ADMIN_PASSWORD=<strong password>` |
+
+`GF_SECURITY_ADMIN_USER` is **not optional**, despite `grafana.ini` reading `admin_user = ${GF_SECURITY_ADMIN_USER:-admin}`. Grafana's env expansion supports `${VAR}` only — it has no bash-style `:-` fallback — so leaving it unset seeds an **empty-string** admin username and locks you out of the admin account entirely. This was discovered in CI during Task 2. It has been masked on Railway because `infra/docker-compose.yml` sets the variable explicitly.
 
 The shape difference is a real source of mistakes: `OTEL_COLLECTOR_HOST`, `LOKI_HOST` and `TEMPO_HOST` are **bare hostnames** (the collector config and prometheus template supply scheme and port), while `LOKI_URL`/`TEMPO_URL`/`PROM_URL` are **full URLs**.
 
