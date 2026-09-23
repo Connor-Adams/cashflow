@@ -15,6 +15,7 @@
     "frontend/src/extension/content.ts",
     "frontend/src/extension/options.ts",
     "frontend/public/sw.js",
+    "frontend/public/runtime-config.js",
     "frontend/src/**/*.test.{ts,tsx}",
     "frontend/test/**/*.test.{ts,tsx}",
     "packages/ui/src/index.ts",
@@ -29,7 +30,8 @@
     "**/build/**",
     "**/coverage/**",
     "**/.next/**",
-    "packages/ui/src/styles/build.css"
+    "packages/ui/src/styles/build.css",
+    "frontend/index.html"
   ],
   "ignoreDependencies": [
     "@aws-sdk/client-s3",
@@ -40,16 +42,56 @@
   ],
   "ignoreExportsUsedInFile": true,
   "usedClassMembers": [
-    { "extends": "Model", "members": ["*"] },
-    { "implements": "SpanProcessor", "members": ["*"] }
+    {
+      "extends": "Model",
+      "members": [
+        "*"
+      ]
+    },
+    {
+      "implements": "SpanProcessor",
+      "members": [
+        "*"
+      ]
+    }
   ],
   "ignoreExports": [
-    { "file": "backend/src/fx/reportingNormalization.ts", "exports": ["FxRateUsed"] },
-    { "file": "backend/src/networth/unifyToCad.ts", "exports": ["FxRateUsed"] },
-    { "file": "backend/src/models/Label.ts", "exports": ["Label"] },
-    { "file": "frontend/src/components/ui/label.tsx", "exports": ["Label"] },
-    { "file": "backend/src/models/VaultDocument.ts", "exports": ["VaultEncryptionAlgorithm"] },
-    { "file": "backend/src/storage/vaultStorage.ts", "exports": ["VaultEncryptionAlgorithm"] }
+    {
+      "file": "backend/src/fx/reportingNormalization.ts",
+      "exports": [
+        "FxRateUsed"
+      ]
+    },
+    {
+      "file": "backend/src/networth/unifyToCad.ts",
+      "exports": [
+        "FxRateUsed"
+      ]
+    },
+    {
+      "file": "backend/src/models/Label.ts",
+      "exports": [
+        "Label"
+      ]
+    },
+    {
+      "file": "frontend/src/components/ui/label.tsx",
+      "exports": [
+        "Label"
+      ]
+    },
+    {
+      "file": "backend/src/models/VaultDocument.ts",
+      "exports": [
+        "VaultEncryptionAlgorithm"
+      ]
+    },
+    {
+      "file": "backend/src/storage/vaultStorage.ts",
+      "exports": [
+        "VaultEncryptionAlgorithm"
+      ]
+    }
   ],
   "rules": {
     "unused-files": "error",
