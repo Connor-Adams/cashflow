@@ -1,3 +1,4 @@
+import { apiBase } from '../../../../lib/runtimeConfig'
 import { useState } from 'react'
 import { Button } from '@connor-adams/designsystem'
 import { Icon } from '@connor-adams/designsystem'
@@ -58,7 +59,7 @@ export function EnrichmentBackfillCard({ onComplete }: Props) {
     if (Number.isFinite(limit) && limit > 0) body.limit = Math.floor(limit)
 
     try {
-      const base = import.meta.env.VITE_API_BASE ?? ''
+      const base = apiBase()
       const res = await fetch(`${base}/api/transactions/enrichment/backfill?stream=1`, {
         method: 'POST',
         credentials: 'include',

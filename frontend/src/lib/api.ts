@@ -1,3 +1,4 @@
+import { apiBase } from './runtimeConfig'
 import { clientLogger } from './clientLogger'
 import type {
   ContactLedgerResponse,
@@ -15,7 +16,7 @@ import type {
   SplitTransactionResponse,
 } from '@cashflow/shared'
 
-const base = import.meta.env.VITE_API_BASE ?? ''
+const base = apiBase()
 
 export class ApiError extends Error {
   readonly status: number

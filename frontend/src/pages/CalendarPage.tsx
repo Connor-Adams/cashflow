@@ -1,3 +1,4 @@
+import { apiBase } from '../lib/runtimeConfig'
 /**
  * Financial calendar — month view + list view + 14-day summary.
  *
@@ -96,7 +97,7 @@ async function putPlannedEvent(
   id: number,
   body: PlannedEventPatch,
 ): Promise<PlannedEvent> {
-  const base = import.meta.env.VITE_API_BASE ?? ''
+  const base = apiBase()
   const res = await fetch(`${base}/api/planned-events/${id}`, {
     method: 'PUT',
     credentials: 'include',

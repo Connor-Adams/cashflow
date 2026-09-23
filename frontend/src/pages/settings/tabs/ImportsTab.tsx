@@ -1,3 +1,4 @@
+import { apiBase } from '../../../lib/runtimeConfig'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@connor-adams/designsystem'
 import { Icon } from '@connor-adams/designsystem'
@@ -82,7 +83,7 @@ type PurchaseHistoryCsvResult = {
 async function postFormDataFile<T>(endpoint: string, file: File): Promise<T> {
   const fd = new FormData()
   fd.append('file', file)
-  const base = import.meta.env.VITE_API_BASE ?? ''
+  const base = apiBase()
   const res = await fetch(`${base}${endpoint}`, {
     method: 'POST',
     credentials: 'include',

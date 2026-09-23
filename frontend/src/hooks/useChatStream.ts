@@ -1,7 +1,8 @@
+import { apiBase } from '../lib/runtimeConfig'
 import { useCallback, useRef, useState } from 'react'
 import type { ChatStreamEvent } from '@cashflow/shared'
 
-const base = import.meta.env.VITE_API_BASE ?? ''
+const base = apiBase()
 
 export type { ChatStreamEvent }
 
