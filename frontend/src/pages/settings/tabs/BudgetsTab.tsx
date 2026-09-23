@@ -1,3 +1,4 @@
+import { apiBase } from '../../../lib/runtimeConfig'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { CategoryIcon } from '../../../components/CategoryIcon'
@@ -173,7 +174,7 @@ const PERIOD_OPTIONS: Array<{ value: BudgetPeriod; label: string }> = [
  * error-handling contract of the shared helpers.
  */
 async function putBudget(id: number, body: BudgetInput): Promise<Budget> {
-  const base = import.meta.env.VITE_API_BASE ?? ''
+  const base = apiBase()
   const res = await fetch(`${base}/api/budgets/${id}`, {
     method: 'PUT',
     credentials: 'include',

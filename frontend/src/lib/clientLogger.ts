@@ -1,6 +1,7 @@
+import { apiBase } from './runtimeConfig'
 import type { ClientLogLevel, ClientLogPayload } from '@cashflow/shared'
 
-const base = import.meta.env.VITE_API_BASE ?? ''
+const base = apiBase()
 const endpoint = `${base}/api/client-logs`
 
 function toMessage(error: unknown): string | undefined {
