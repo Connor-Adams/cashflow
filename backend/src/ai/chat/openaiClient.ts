@@ -59,7 +59,7 @@ export async function* streamChat(args: StreamChatArgs): AsyncGenerator<StreamEv
     return;
   }
   const fetchFn = args.fetchImpl ?? fetch;
-  const res = await fetchFn('https://api.openai.com/v1/chat/completions', {
+  const res = await fetchFn(`${cfg.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
