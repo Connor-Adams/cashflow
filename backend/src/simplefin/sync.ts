@@ -65,6 +65,29 @@ export function resolveAccountId(
   return linksBySimplefinId.get(remote.id) ?? null;
 }
 
+/**
+ * Why a run that resolved nothing must fail rather than report success.
+ *
+ * A sync whose links all fail to resolve produces an empty `runs` array, so the
+ * job's `errors = runs.filter(r => r.status === 'error').length` is trivially 0.
+ * Combined with `accountRuns=0` that is indistinguishable from "no new
+ * transactions", which is a perfectly normal quiet day — so nothing alerts.
+ *
+ * That is exactly how the 20260628000001 migration's placeholder links (account
+ * NAME written into `simplefin_account_id`) went unnoticed for three months:
+ * status stayed `connected`, `lastSyncedAt` advanced daily, and zero rows were
+ * ever imported.
+ *
+ * Partial resolution is deliberately NOT a failure: one stale link should not
+ * hold back the sync window for the accounts that did resolve.
+ */
+export function resolutionFailureReason(
+  linkCount: number,
+  resolvedCount: number,
+): 'links_unresolved' | null {
+  return linkCount > 0 && resolvedCount === 0 ? 'links_unresolved' : null;
+}
+
 /** Convert SimpleFIN posted epoch seconds to a YYYY-MM-DD (UTC) date. */
 export function postedToDate(posted: number): string {
   return new Date(posted * 1000).toISOString().slice(0, 10);
@@ -192,6 +215,7 @@ export async function syncIntegration(
         });
 
   const runs: SimplefinSyncAccountRun[] = [];
+  let resolvedCount = 0;
   for (const remote of remoteAccounts) {
     const accountId = resolveAccountId(remote, linksBySimplefinId);
     if (accountId == null) {
@@ -210,6 +234,7 @@ export async function syncIntegration(
       );
       continue;
     }
+    resolvedCount += 1;
     const currency = (remote.currency || account.defaultCurrency || 'CAD').toUpperCase();
     const normalized = remote.transactions.map((tx) =>
       mapSimplefinTransaction(tx, accountId, currency),
@@ -240,6 +265,27 @@ export async function syncIntegration(
       skippedDuplicate: result.skippedDuplicates,
       status: 'connected',
     });
+  }
+
+  const failure = resolutionFailureReason(links.length, resolvedCount);
+  if (failure) {
+    // Deliberately do NOT advance lastSyncedAt: sliding the window forward past
+    // data we never imported would make the gap permanent.
+    integration.set({ status: 'error', statusReason: failure });
+    await integration.save();
+    logger.error(
+      {
+        integrationId: integration.id,
+        links: links.length,
+        remoteAccounts: remoteAccounts.length,
+      },
+      'simplefin_sync_links_unresolved',
+    );
+    throw new SimplefinError(
+      'sync_failed',
+      `None of ${links.length} linked accounts matched a SimpleFIN account id. ` +
+        'Re-link the accounts so the links store real remote ids.',
+    );
   }
 
   integration.set({ status: 'connected', statusReason: null, lastSyncedAt: now });
