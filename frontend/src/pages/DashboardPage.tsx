@@ -18,6 +18,7 @@ import { TopGrowersTile } from '@/components/dashboard/TopGrowersTile'
 import { NetWorthTile } from '@/components/dashboard/NetWorthTile'
 import { SafeToSpendTile } from '@/components/dashboard/SafeToSpendTile'
 import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMonthTile'
+import { CashflowSankeyTile } from '@/components/dashboard/CashflowSankeyTile'
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { ReceiptCoverageTile } from '@/components/dashboard/ReceiptCoverageTile'
 import { EmailedReceiptsTile } from '@/components/dashboard/EmailedReceiptsTile'
@@ -1171,6 +1172,15 @@ export function DashboardPage() {
             }
           />
         )}
+
+        {/* The full money chain for the range selected above — income into
+            draws, categories and surplus. Same chart as /reports/cashflow,
+            which the tile links through to for filters and drill-down. */}
+        <CashflowSankeyTile
+          currency={currency}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+        />
 
         <BentoTile
           span={6}

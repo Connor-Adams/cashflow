@@ -57,6 +57,20 @@ vi.mock('@/lib/api', () => ({
         categoryTree: [],
       })
     }
+    if (path.startsWith('/api/summary/sankey')) {
+      return Promise.resolve({
+        currency: 'CAD',
+        totalIncome: 0,
+        totalSpend: 0,
+        surplus: 0,
+        balanced: true,
+        transactionCount: 0,
+        nodes: [],
+        links: [],
+        availableCurrencies: ['CAD'],
+        dateRange: { from: null, to: null },
+      })
+    }
     if (path.startsWith('/api/summary/monthly')) {
       return Promise.resolve({ points: [] })
     }
@@ -128,6 +142,15 @@ describe('DashboardPage (characterization)', () => {
     expect(
       await screen.findByText(/net spend by category/i),
     ).toBeInTheDocument()
+  })
+
+  // 2026-09-27 full-chain spec, section 4: the Sankey lives on the homepage
+  // and links through to the full page.
+  it('renders the Cashflow Sankey tile with a link through to the full page', async () => {
+    await renderPage()
+    expect(await screen.findByText(/where the money went/i)).toBeInTheDocument()
+    const link = await screen.findByRole('link', { name: /full chart/i })
+    expect(link).toHaveAttribute('href', '/reports/cashflow')
   })
 
   it('renders skeletons while loading', async () => {

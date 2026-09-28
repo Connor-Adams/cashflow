@@ -89,12 +89,24 @@ describe('Sidebar rail (PR 0)', () => {
     }
   })
 
-  it('drops Cashflow/Currency/Partner folded into Reports tabs (PR 4)', () => {
+  it('drops Currency/Partner folded into Reports tabs (PR 4)', () => {
     renderSidebar()
-    for (const name of ['Cashflow', 'Currency', 'Partner']) {
+    for (const name of ['Currency', 'Partner']) {
       expect(screen.queryByRole('link', { name })).not.toBeInTheDocument()
     }
     expect(screen.getByRole('link', { name: 'Reports' })).toBeInTheDocument()
+  })
+
+  // Cashflow is promoted back to the rail per the 2026-09-27 full-chain spec:
+  // it is a destination in its own right, not just another Reports tab. Same
+  // shape as Tax (/scenarios/tax) and People (/planned/people) — a tab that
+  // also earns a rail entry.
+  it('links Cashflow in the rail at its Reports sub-route', () => {
+    renderSidebar()
+    const insightsHeader = screen.getByRole('button', { name: /Insights & rules/ })
+    const insightsSection = insightsHeader.closest('.sidebar__section') as HTMLElement
+    const link = within(insightsSection).getByRole('link', { name: 'Cashflow' })
+    expect(link).toHaveAttribute('href', '/reports/cashflow')
   })
 
   it('folds Review into the Inbox tabs (PR 5)', () => {

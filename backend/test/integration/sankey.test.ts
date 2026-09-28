@@ -159,7 +159,16 @@ async function createTxn(
     autoCategory: null,
     categoryOverride: null,
     finalCategory: options.finalCategory ?? null,
-    finalCategoryId: options.finalCategoryId ?? null,
+    // Set ONLY when the caller supplied one. Transaction's beforeSave hook
+    // (reconcileCategoryField) is id-authoritative: if `finalCategoryId` is
+    // marked changed — which an explicit `null` on create does — the id wins
+    // and the string mirror is derived from it, so passing `null` here would
+    // silently wipe a `finalCategory` set by name and land the row in
+    // "Uncategorized". Omitting the key leaves it unchanged, letting the
+    // legacy resolve-by-name branch run.
+    ...(options.finalCategoryId != null
+      ? { finalCategoryId: options.finalCategoryId }
+      : {}),
     autoBusiness: null,
     businessOverride: options.finalBusiness ?? null,
     finalBusiness: options.finalBusiness ?? false,

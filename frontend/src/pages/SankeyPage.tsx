@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Rectangle, ResponsiveContainer, Sankey, Tooltip } from 'recharts'
+import { useCallback, useEffect, useState } from 'react'
 import { Alert } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { Card, CardContent, CardHeader, CardTitle } from '@connor-adams/designsystem'
 import { Dialog } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
+import { SankeyChart } from '@/components/SankeyChart'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatCard } from '@connor-adams/designsystem'
 import {
@@ -23,29 +23,10 @@ import { useSessionState } from '../lib/useSessionState'
 import type {
   SankeyDrilldownResponse,
   SankeyDrilldownTransaction,
-  SankeyNode as SankeyNodeType,
   SankeyResponse,
 } from '../types/api'
 
 const DEFAULT_CURRENCY = 'CAD'
-
-/**
- * Color lookup keyed by the backend `kind`. Tailwind v4 JIT requires
- * literal class names (lookup tables, not concatenation), so we map
- * directly here. SVG fills come from the same swatches the dashboard's
- * recharts components use so the Sankey feels like the rest of the app.
- */
-const NODE_COLORS: Record<SankeyNodeType['kind'], string> = {
-  income: 'var(--chart-income)',
-  category: 'var(--chart-category)',
-  business: 'var(--chart-business-alt)',
-  savings: 'var(--chart-savings)',
-  uncategorized: 'var(--chart-uncategorized)',
-  // The two chain waypoints added by the full-chain rebuild. Fallbacks keep
-  // them visible on themes that don't define the semantic token yet.
-  draws: 'var(--chart-draws, var(--chart-4))',
-  surplus: 'var(--chart-surplus, var(--chart-2))',
-}
 
 /**
  * UTC midnight of the user's local calendar day — used as the anchor for
@@ -127,17 +108,6 @@ export function SankeyPage() {
     [setDateFrom, setDateTo],
   )
 
-  // Recharts mutates its `data` prop during layout; pass a deep clone so
-  // React's reconciliation doesn't observe in-place mutations as upstream
-  // state churn.
-  const sankeyData = useMemo(() => {
-    if (!data || data.nodes.length === 0) return null
-    return {
-      nodes: data.nodes.map((n) => ({ ...n })),
-      links: data.links.map((l) => ({ ...l })),
-    }
-  }, [data])
-
   // Open the drill-down dialog for the clicked link. Source/target are
   // node indices into the chart's node array.
   const onLinkClick = useCallback(
@@ -178,11 +148,12 @@ export function SankeyPage() {
     setDrillErr(null)
   }, [])
 
-  const headlineNodes = useMemo(() => data?.nodes ?? [], [data])
   const showEmpty =
     !loading &&
     !err &&
-    (sankeyData === null || (data?.totalIncome === 0 && data?.totalSpend === 0))
+    (data === null ||
+      data.nodes.length === 0 ||
+      (data.totalIncome === 0 && data.totalSpend === 0))
 
   return (
     <div className="page">
@@ -253,38 +224,12 @@ export function SankeyPage() {
               title="No flows for this filter"
               description="Try a wider date range or pick a different currency. The chart needs at least one income or category-tagged transaction to draw."
             />
-          ) : sankeyData ? (
-            <div style={{ width: '100%', height: 520 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <Sankey
-                  data={sankeyData}
-                  nodePadding={28}
-                  nodeWidth={14}
-                  iterations={64}
-                  node={(props) => (
-                    <SankeyNode
-                      {...props}
-                      kinds={headlineNodes.map((n) => n.kind)}
-                    />
-                  )}
-                  link={(props) => (
-                    <SankeyLinkPath
-                      {...props}
-                      onLinkClick={onLinkClick}
-                    />
-                  )}
-                >
-                  <Tooltip
-                    formatter={(value) => {
-                      const n = typeof value === 'number' ? value : Number(value)
-                      return Number.isFinite(n)
-                        ? formatMoney(n, currency)
-                        : String(value)
-                    }}
-                  />
-                </Sankey>
-              </ResponsiveContainer>
-            </div>
+          ) : data ? (
+            <SankeyChart
+              data={data}
+              currency={currency}
+              onLinkClick={onLinkClick}
+            />
           ) : null}
         </CardContent>
       </Card>
@@ -367,128 +312,4 @@ export function SankeyPage() {
       ) : null}
     </div>
   )
-}
-
-// ---- Custom node renderer ---------------------------------------------
-
-type NodeRendererProps = {
-  x: number
-  y: number
-  width: number
-  height: number
-  index: number
-  payload: { name?: string; value?: number }
-  kinds: SankeyNodeType['kind'][]
-}
-
-function SankeyNode({
-  x,
-  y,
-  width,
-  height,
-  index,
-  payload,
-  kinds,
-}: NodeRendererProps) {
-  const kind = kinds[index] ?? 'category'
-  const fill = NODE_COLORS[kind] ?? NODE_COLORS.category
-  const labelOnRight = index === 0
-  const labelX = labelOnRight ? x + width + 8 : x - 8
-  const textAnchor = labelOnRight ? 'start' : 'end'
-  const labelY = y + height / 2
-  return (
-    <g>
-      <Rectangle
-        x={x}
-        y={y}
-        width={width}
-        height={height}
-        fill={fill}
-        fillOpacity={0.95}
-        stroke="var(--chart-link-stroke)"
-        strokeOpacity={0.2}
-      />
-      <text
-        textAnchor={textAnchor}
-        x={labelX}
-        y={labelY}
-        dy="0.35em"
-        fontSize={12}
-        className="fill-foreground"
-      >
-        {payload.name}
-      </text>
-    </g>
-  )
-}
-
-// ---- Custom link renderer ---------------------------------------------
-
-type LinkRendererProps = {
-  sourceX: number
-  targetX: number
-  sourceY: number
-  targetY: number
-  sourceControlX: number
-  targetControlX: number
-  linkWidth: number
-  index: number
-  payload: {
-    source: number | { name?: string; sourceLinks?: unknown[]; targetLinks?: unknown[] }
-    target: number | { name?: string; sourceLinks?: unknown[]; targetLinks?: unknown[] }
-    value: number
-  }
-  onLinkClick: (source: number, target: number) => void
-}
-
-/**
- * Custom link renderer that:
- *   - Draws the recharts-default bezier path
- *   - Routes onClick → opens the drill-down dialog
- *
- * Recharts mutates link.source/target into node objects after layout;
- * we recover the indices from the rendered payload via the order the
- * nodes appear in the chart. Because the parent passes the same node
- * array we control, source/target start as numbers and stay accessible
- * via `.payload` keys 'index' on the recovered objects in newer recharts.
- * We fall back to recovering by scanning the nodes array via `name`.
- */
-function SankeyLinkPath({
-  sourceX,
-  targetX,
-  sourceY,
-  targetY,
-  sourceControlX,
-  targetControlX,
-  linkWidth,
-  payload,
-  onLinkClick,
-}: LinkRendererProps) {
-  const d = `M${sourceX},${sourceY}C${sourceControlX},${sourceY} ${targetControlX},${targetY} ${targetX},${targetY}`
-  const handleClick = () => {
-    const source = resolveLinkEnd(payload.source)
-    const target = resolveLinkEnd(payload.target)
-    if (source == null || target == null) return
-    onLinkClick(source, target)
-  }
-  return (
-    <path
-      d={d}
-      fill="none"
-      stroke="var(--chart-category)"
-      strokeOpacity={0.35}
-      strokeWidth={linkWidth}
-      onClick={handleClick}
-      style={{ cursor: 'pointer' }}
-      data-testid="sankey-link"
-    />
-  )
-}
-
-function resolveLinkEnd(
-  end: number | { index?: number; name?: string },
-): number | null {
-  if (typeof end === 'number') return end
-  if (end && typeof end.index === 'number') return end.index
-  return null
 }
