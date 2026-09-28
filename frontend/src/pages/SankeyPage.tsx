@@ -41,6 +41,10 @@ const NODE_COLORS: Record<SankeyNodeType['kind'], string> = {
   business: 'var(--chart-business-alt)',
   savings: 'var(--chart-savings)',
   uncategorized: 'var(--chart-uncategorized)',
+  // The two chain waypoints added by the full-chain rebuild. Fallbacks keep
+  // them visible on themes that don't define the semantic token yet.
+  draws: 'var(--chart-draws, var(--chart-4))',
+  surplus: 'var(--chart-surplus, var(--chart-2))',
 }
 
 /**
@@ -205,7 +209,7 @@ export function SankeyPage() {
         </Alert>
       ) : null}
 
-      <section className="mt-4 grid gap-3 sm:grid-cols-3">
+      <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Total income"
           value={data ? formatMoney(data.totalIncome, currency) : '—'}
@@ -220,6 +224,15 @@ export function SankeyPage() {
           label="Total spend"
           value={data ? formatMoney(data.totalSpend, currency) : '—'}
           hint="Sum of category outflows after refund netting. Excludes transfers, investments, and dividends."
+        />
+        <StatCard
+          label="Surplus"
+          value={data ? formatMoney(data.surplus, currency) : '—'}
+          hint={
+            data && !data.balanced
+              ? 'Spend exceeds the income we can see for this range — some inflows are still unclassified, so the chart cannot close.'
+              : 'Income that was not spent. Drawn as a terminal node so the chart balances.'
+          }
         />
         <StatCard
           label="Transactions"

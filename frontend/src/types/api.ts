@@ -656,6 +656,10 @@ export type SankeyNodeKind =
   | 'business'
   | 'savings'
   | 'uncategorized'
+  /** The owner-draws waypoint between corporate revenue and personal spend. */
+  | 'draws'
+  /** Terminal node carrying income that was not spent. */
+  | 'surplus'
 
 export type SankeyNode = {
   name: string
@@ -673,6 +677,14 @@ export type SankeyResponse = {
   currency: string | null
   totalIncome: number
   totalSpend: number
+  /** totalIncome - totalSpend. Negative when spend exceeds observed income. */
+  surplus: number
+  /**
+   * True when the chart closes: inflow = outflow + surplus. False means
+   * observed spend exceeds observed income — a classification gap worth
+   * surfacing rather than hiding.
+   */
+  balanced: boolean
   transactionCount: number
   nodes: SankeyNode[]
   links: SankeyLink[]

@@ -1,23 +1,41 @@
 /**
  * Unit tests for the pure aggregateSankey helper.
  *
- * Covers the AC bullets from issue #224:
+ * The aggregator draws the full money chain:
+ *
+ *   Income ─┬→ Corporate expenses
+ *           └→ Owner draws ─┬→ top-level categories → subcategories → …
+ *                           └→ Surplus
+ *
+ * Covered here:
  *  - Flow totals match underlying transaction summaries (income, category
- *    netSpend, business spend separation, refund/reward netting).
- *  - Internal transfers handled without double counting (transfer /
- *    investment / dividend txnType all dropped pre-bucketing).
- *  - Empty states clear when data insufficient (no rows or only
- *    money-movement → empty nodes + zero totals).
- *  - Currency filter is respected at the aggregator level.
- *  - Top-N category cap collapses surplus into "Other categories" so the
- *    Sankey stays readable without distorting totals.
+ *    netSpend, corporate spend separation, refund/reward netting).
+ *  - The chart BALANCES: inflow = outflow + surplus, and every intermediate
+ *    node's inflow equals its outflow.
+ *  - Adaptive depth: a parent splits into children only when its share of
+ *    total spend clears `splitShare`; below that it draws as one node
+ *    carrying its whole subtree total (nothing is dropped by not splitting).
+ *  - A parent with BOTH own spend and children keeps both without double
+ *    counting (the remainder draws as a "(other)" child).
+ *  - Drill-down survives depth: edgeMap resolves subcategory and
+ *    sub-subcategory edges, not only top-level ones.
+ *  - Internal transfers / investment purchases / dividend reinvestments are
+ *    still dropped before bucketing (isNonCategorical).
+ *  - Empty states, currency scoping, top-N tail collapse.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import type { CategoryTree } from '../categories/rollup';
 import {
   aggregateSankey,
   resolveCategoryLabel,
   lookupEdgeTxnIds,
+  CORPORATE_LABEL,
+  DRAWS_LABEL,
+  INCOME_LABEL,
+  SURPLUS_LABEL,
+  OTHER_CATEGORIES_LABEL,
+  type SankeyResult,
   type SankeyTxnRow,
 } from './aggregateSankey';
 
@@ -27,6 +45,7 @@ function row(overrides: Partial<SankeyTxnRow> & { id: number }): SankeyTxnRow {
     date: overrides.date ?? '2026-03-15',
     currency: overrides.currency ?? 'CAD',
     finalCategory: overrides.finalCategory ?? null,
+    finalCategoryId: overrides.finalCategoryId ?? null,
     finalBusiness: overrides.finalBusiness ?? false,
     merchantRaw: overrides.merchantRaw ?? 'Test merchant',
     merchantClean: overrides.merchantClean ?? overrides.merchantRaw ?? 'Test merchant',
@@ -34,6 +53,89 @@ function row(overrides: Partial<SankeyTxnRow> & { id: number }): SankeyTxnRow {
     txnType: overrides.txnType ?? 'purchase',
     accountType: overrides.accountType ?? 'credit',
   };
+}
+
+/**
+ * Build a CategoryTree from `[id, name, parentId]` triples — the same shape
+ * `loadCategoryTree` produces, without touching the DB.
+ */
+function tree(defs: Array<[number, string, number | null]>): CategoryTree {
+  const parentById = new Map<number, number | null>();
+  const nameById = new Map<number, string>();
+  for (const [id, name, parentId] of defs) {
+    parentById.set(id, parentId);
+    nameById.set(id, name);
+  }
+  const depthById = new Map<number, number>();
+  const pathById = new Map<number, string>();
+  const resolve = (id: number): { depth: number; path: string } => {
+    const cached = pathById.get(id);
+    if (cached != null) return { depth: depthById.get(id)!, path: cached };
+    const parent = parentById.get(id) ?? null;
+    const name = nameById.get(id) ?? '';
+    if (parent == null || !parentById.has(parent)) {
+      depthById.set(id, 0);
+      pathById.set(id, name);
+      return { depth: 0, path: name };
+    }
+    const up = resolve(parent);
+    depthById.set(id, up.depth + 1);
+    pathById.set(id, `${up.path} / ${name}`);
+    return { depth: up.depth + 1, path: `${up.path} / ${name}` };
+  };
+  for (const id of parentById.keys()) resolve(id);
+  return { parentById, nameById, depthById, pathById };
+}
+
+const nameOf = (r: SankeyResult, idx: number): string => r.nodes[idx]?.name ?? '';
+const idxOf = (r: SankeyResult, name: string): number =>
+  r.nodes.findIndex((n) => n.name === name);
+const linkValue = (r: SankeyResult, from: string, to: string): number | undefined =>
+  r.links.find(
+    (l) => nameOf(r, l.source) === from && nameOf(r, l.target) === to,
+  )?.value;
+const edgeIds = (r: SankeyResult, from: string, to: string): number[] | null => {
+  const link = r.links.find(
+    (l) => nameOf(r, l.source) === from && nameOf(r, l.target) === to,
+  );
+  if (!link) return null;
+  return lookupEdgeTxnIds(r, link.source, link.target);
+};
+
+/**
+ * Structural invariants every result must satisfy. Asserted by most tests —
+ * a Sankey whose node in/out sums disagree is silently losing money.
+ */
+function assertStructurallySound(r: SankeyResult): void {
+  const inSum = new Map<number, number>();
+  const outSum = new Map<number, number>();
+  for (const l of r.links) {
+    assert.ok(l.value > 0, 'no zero/negative-width links');
+    assert.ok(l.source >= 0 && l.source < r.nodes.length, 'source in range');
+    assert.ok(l.target >= 0 && l.target < r.nodes.length, 'target in range');
+    assert.notEqual(l.source, l.target, 'no self links');
+    inSum.set(l.target, (inSum.get(l.target) ?? 0) + l.value);
+    outSum.set(l.source, (outSum.get(l.source) ?? 0) + l.value);
+  }
+  for (let i = 0; i < r.nodes.length; i += 1) {
+    const inflow = inSum.get(i) ?? 0;
+    const outflow = outSum.get(i) ?? 0;
+    if (i === 0) {
+      assert.equal(inflow, 0, 'the income node has no inbound link');
+      continue;
+    }
+    assert.ok(inflow > 0, `node ${i} (${nameOf(r, i)}) is not orphaned`);
+    if (outflow > 0) {
+      // Intermediate node: everything in flows back out — no leakage, no
+      // invention. Compared in cents to tolerate float division at the
+      // fromUnits boundary.
+      assert.equal(
+        Math.round(inflow * 100),
+        Math.round(outflow * 100),
+        `node ${i} (${nameOf(r, i)}) conserves value`,
+      );
+    }
+  }
 }
 
 // ---- resolveCategoryLabel ----------------------------------------------
@@ -55,6 +157,8 @@ test('aggregateSankey: empty input → empty nodes + zero totals', () => {
   const result = aggregateSankey([], 'CAD');
   assert.equal(result.totalIncome, 0);
   assert.equal(result.totalSpend, 0);
+  assert.equal(result.surplus, 0);
+  assert.equal(result.balanced, true);
   assert.equal(result.transactionCount, 0);
   assert.deepEqual(result.nodes, []);
   assert.deepEqual(result.links, []);
@@ -68,9 +172,6 @@ test('aggregateSankey: only transfers → empty (no double counting)', () => {
     row({ id: 4, amount: '1000.00', txnType: 'dividend' }),
   ];
   const result = aggregateSankey(rows, 'CAD');
-  // AC: internal transfers handled without double counting. They should
-  // produce no nodes and no spend/income — the dashboard headline also
-  // excludes them, so the Sankey reconciles by also excluding them.
   assert.equal(result.totalIncome, 0);
   assert.equal(result.totalSpend, 0);
   assert.equal(result.transactionCount, 0); // isNonCategorical drops before counting
@@ -79,14 +180,92 @@ test('aggregateSankey: only transfers → empty (no double counting)', () => {
 });
 
 test('aggregateSankey: only an investment-account negative row is dropped', () => {
-  // Belt-and-suspenders: brokerage purchase, txnType missing, but account
-  // type investment → still dropped (matches dashboard behavior).
   const rows: SankeyTxnRow[] = [
     row({ id: 1, amount: '-2500.00', accountType: 'investment', txnType: null }),
   ];
   const result = aggregateSankey(rows, 'CAD');
   assert.equal(result.totalSpend, 0);
   assert.deepEqual(result.nodes, []);
+});
+
+// ---- The chain: Income → corporate / draws → categories → surplus ------
+
+test('aggregateSankey: draws the full corporate-to-personal chain', () => {
+  const rows: SankeyTxnRow[] = [
+    row({ id: 1, amount: '10000.00', txnType: 'income', merchantRaw: 'CDG LABS' }),
+    row({ id: 2, amount: '-400.00', finalCategory: 'Hosting', finalBusiness: true }),
+    row({ id: 3, amount: '-600.00', finalCategory: 'Groceries' }),
+    row({ id: 4, amount: '-1000.00', finalCategory: 'Rent' }),
+  ];
+  const result = aggregateSankey(rows, 'CAD');
+  assertStructurallySound(result);
+
+  assert.equal(nameOf(result, 0), INCOME_LABEL);
+  assert.equal(result.nodes[0].kind, 'income');
+  const corp = result.nodes[idxOf(result, CORPORATE_LABEL)];
+  assert.equal(corp.kind, 'business');
+  const draws = result.nodes[idxOf(result, DRAWS_LABEL)];
+  assert.equal(draws.kind, 'draws');
+  const surplus = result.nodes[idxOf(result, SURPLUS_LABEL)];
+  assert.equal(surplus.kind, 'surplus');
+
+  // Corporate expenses hang off Income directly — they never pass through draws.
+  assert.equal(linkValue(result, INCOME_LABEL, CORPORATE_LABEL), 400);
+  // Draws carry everything else: personal spend + surplus.
+  assert.equal(linkValue(result, INCOME_LABEL, DRAWS_LABEL), 10000 - 400);
+  assert.equal(linkValue(result, DRAWS_LABEL, 'Rent'), 1000);
+  assert.equal(linkValue(result, DRAWS_LABEL, 'Groceries'), 600);
+  assert.equal(linkValue(result, DRAWS_LABEL, SURPLUS_LABEL), 10000 - 400 - 1600);
+
+  assert.equal(result.totalIncome, 10000);
+  assert.equal(result.totalSpend, 2000);
+  assert.equal(result.surplus, 8000);
+  assert.equal(result.balanced, true);
+});
+
+test('aggregateSankey: the chart balances — inflow = outflow + surplus', () => {
+  const rows: SankeyTxnRow[] = [
+    row({ id: 1, amount: '4200.55', txnType: 'income' }),
+    row({ id: 2, amount: '-123.45', finalCategory: 'Groceries' }),
+    row({ id: 3, amount: '-67.89', finalCategory: 'Transport' }),
+    row({ id: 4, amount: '-19.99', finalCategory: null }),
+    row({ id: 5, amount: '-250.01', finalCategory: 'Accounting', finalBusiness: true }),
+    // Money movement — must not tilt the balance.
+    row({ id: 6, amount: '-9000.00', txnType: 'transfer' }),
+  ];
+  const result = aggregateSankey(rows, 'CAD');
+  assertStructurallySound(result);
+
+  const outOfIncome = result.links
+    .filter((l) => l.source === 0)
+    .reduce((s, l) => s + l.value, 0);
+  assert.equal(
+    Math.round(outOfIncome * 100),
+    Math.round(result.totalIncome * 100),
+    'everything in flows back out',
+  );
+  assert.equal(
+    Math.round((result.totalSpend + result.surplus) * 100),
+    Math.round(result.totalIncome * 100),
+  );
+  assert.equal(result.balanced, true);
+});
+
+test('aggregateSankey: spend exceeding income surfaces as unbalanced, not a fudge node', () => {
+  const rows: SankeyTxnRow[] = [
+    row({ id: 1, amount: '500.00', txnType: 'income' }),
+    row({ id: 2, amount: '-800.00', finalCategory: 'Rent' }),
+  ];
+  const result = aggregateSankey(rows, 'CAD');
+  assertStructurallySound(result);
+  assert.equal(result.totalIncome, 500);
+  assert.equal(result.totalSpend, 800);
+  assert.equal(result.surplus, -300);
+  assert.equal(result.balanced, false);
+  // No surplus node, and no invented inflow to paper over the gap.
+  assert.equal(idxOf(result, SURPLUS_LABEL), -1);
+  const names = result.nodes.map((n) => n.name);
+  assert.deepEqual(names, [INCOME_LABEL, DRAWS_LABEL, 'Rent']);
 });
 
 // ---- Currency scoping --------------------------------------------------
@@ -97,80 +276,70 @@ test('aggregateSankey: filters by currency', () => {
     row({ id: 2, amount: '-50.00', currency: 'USD', finalCategory: 'Groceries' }),
     row({ id: 3, amount: '300.00', currency: 'CAD', txnType: 'income' }),
   ];
-  const cadResult = aggregateSankey(rows, 'CAD');
-  assert.equal(cadResult.currency, 'CAD');
-  assert.equal(cadResult.totalIncome, 300);
-  assert.equal(cadResult.totalSpend, 100);
-  // Income node + Groceries sink
-  assert.equal(cadResult.nodes.length, 2);
-  assert.equal(cadResult.nodes[0].name, 'Income');
-  assert.equal(cadResult.nodes[1].name, 'Groceries');
+  const cad = aggregateSankey(rows, 'CAD');
+  assert.equal(cad.currency, 'CAD');
+  assert.equal(cad.totalIncome, 300);
+  assert.equal(cad.totalSpend, 100);
+  assert.equal(cad.surplus, 200);
 
-  const usdResult = aggregateSankey(rows, 'USD');
-  assert.equal(usdResult.totalIncome, 0);
-  assert.equal(usdResult.totalSpend, 50);
-  // Even with no income, an income source node is rendered so the chart
-  // can render the spend-only flow.
-  assert.equal(usdResult.nodes[0].name, 'Income');
+  const usd = aggregateSankey(rows, 'USD');
+  assert.equal(usd.totalIncome, 0);
+  assert.equal(usd.totalSpend, 50);
+  assert.equal(usd.balanced, false);
+  assert.equal(nameOf(usd, 0), INCOME_LABEL);
+  assert.ok(idxOf(usd, 'Groceries') > 0);
 });
 
-// ---- Category bucketing ------------------------------------------------
+// ---- Category bucketing (flat, no tree) --------------------------------
 
-test('aggregateSankey: groups spend by finalCategory', () => {
+test('aggregateSankey: groups spend by finalCategory, ranked desc', () => {
   const rows: SankeyTxnRow[] = [
     row({ id: 1, amount: '-30.00', finalCategory: 'Groceries' }),
     row({ id: 2, amount: '-25.00', finalCategory: 'Groceries' }),
     row({ id: 3, amount: '-100.00', finalCategory: 'Rent' }),
     row({ id: 4, amount: '-20.00', finalCategory: null }),
-    // Income source
     row({ id: 5, amount: '2000.00', txnType: 'income' }),
   ];
   const result = aggregateSankey(rows, 'CAD');
-  // Spend buckets ranked: Rent 100, Groceries 55, Uncategorized 20.
-  assert.equal(result.totalIncome, 2000);
+  assertStructurallySound(result);
   assert.equal(result.totalSpend, 100 + 55 + 20);
-  assert.equal(result.nodes[0].name, 'Income');
-  assert.equal(result.nodes[1].name, 'Rent');
-  assert.equal(result.nodes[2].name, 'Groceries');
-  assert.equal(result.nodes[3].name, 'Uncategorized');
-  // Each non-source node has a link from source 0 with the bucket's netSpend.
-  assert.equal(result.links.length, 3);
-  assert.equal(result.links[0].source, 0);
-  assert.equal(result.links[0].target, 1);
-  assert.equal(result.links[0].value, 100);
-  assert.equal(result.links[1].target, 2);
-  assert.equal(result.links[1].value, 55);
-  assert.equal(result.links[2].target, 3);
-  assert.equal(result.links[2].value, 20);
+  // Ranked by subtree total descending under Owner draws.
+  const drawsIdx = idxOf(result, DRAWS_LABEL);
+  const categoryTargets = result.links
+    .filter((l) => l.source === drawsIdx && nameOf(result, l.target) !== SURPLUS_LABEL)
+    .map((l) => nameOf(result, l.target));
+  assert.deepEqual(categoryTargets, ['Rent', 'Groceries', 'Uncategorized']);
+  assert.equal(linkValue(result, DRAWS_LABEL, 'Groceries'), 55);
+  const uncategorized = result.nodes[idxOf(result, 'Uncategorized')];
+  assert.equal(uncategorized.kind, 'uncategorized');
 });
 
-test('aggregateSankey: business spend gets its own sink', () => {
+test('aggregateSankey: corporate spend is separated from the same personal category', () => {
   const rows: SankeyTxnRow[] = [
     row({ id: 1, amount: '-200.00', finalCategory: 'Software', finalBusiness: true }),
     row({ id: 2, amount: '-50.00', finalCategory: 'Software', finalBusiness: false }),
     row({ id: 3, amount: '5000.00', txnType: 'income' }),
   ];
   const result = aggregateSankey(rows, 'CAD');
-  // Personal Software spend goes to Software category; business Software
-  // goes to "Business spending" — they don't co-mingle so the user can
-  // see deductible vs. personal at a glance.
-  const labels = result.nodes.map((n) => n.name);
-  assert.ok(labels.includes('Software'));
-  assert.ok(labels.includes('Business spending'));
-  // The business node carries `kind: 'business'`.
-  const businessNode = result.nodes.find((n) => n.name === 'Business spending');
-  assert.equal(businessNode?.kind, 'business');
-  // Totals: 250 spend across the two sinks.
+  assertStructurallySound(result);
+  assert.equal(linkValue(result, INCOME_LABEL, CORPORATE_LABEL), 200);
+  assert.equal(linkValue(result, DRAWS_LABEL, 'Software'), 50);
   assert.equal(result.totalSpend, 250);
+  assert.deepEqual(edgeIds(result, INCOME_LABEL, CORPORATE_LABEL), [1]);
 });
 
-test('aggregateSankey: Uncategorized node carries kind=uncategorized', () => {
+test('aggregateSankey: corporate expenses appear even when tiny next to personal spend', () => {
+  // Production shape: $2,878 corporate against $133,079 personal. Omitting the
+  // corporate side silently inflates what looks available.
   const rows: SankeyTxnRow[] = [
-    row({ id: 1, amount: '-15.00', finalCategory: null }),
+    row({ id: 1, amount: '140000.00', txnType: 'income' }),
+    row({ id: 2, amount: '-2878.00', finalCategory: 'Hosting', finalBusiness: true }),
+    row({ id: 3, amount: '-133079.00', finalCategory: 'Household' }),
   ];
   const result = aggregateSankey(rows, 'CAD');
-  const node = result.nodes.find((n) => n.name === 'Uncategorized');
-  assert.equal(node?.kind, 'uncategorized');
+  assertStructurallySound(result);
+  assert.equal(linkValue(result, INCOME_LABEL, CORPORATE_LABEL), 2878);
+  assert.equal(result.surplus, 140000 - 2878 - 133079);
 });
 
 // ---- Refund / reward netting -------------------------------------------
@@ -178,40 +347,30 @@ test('aggregateSankey: Uncategorized node carries kind=uncategorized', () => {
 test('aggregateSankey: refund row reduces its category netSpend', () => {
   const rows: SankeyTxnRow[] = [
     row({ id: 1, amount: '-100.00', finalCategory: 'Groceries' }),
-    // Refund offsets the category spend (same semantics as
-    // aggregateDashboard.categoryReports.netSpend).
     row({ id: 2, amount: '25.00', finalCategory: 'Groceries', txnType: 'refund' }),
     row({ id: 3, amount: '1000.00', txnType: 'income' }),
   ];
   const result = aggregateSankey(rows, 'CAD');
-  // Net Groceries = 100 - 25 = 75.
-  const groceries = result.nodes.find((n) => n.name === 'Groceries');
-  assert.ok(groceries);
-  const link = result.links.find((l) => l.target === result.nodes.indexOf(groceries));
-  assert.equal(link?.value, 75);
+  assert.equal(linkValue(result, DRAWS_LABEL, 'Groceries'), 75);
   assert.equal(result.totalSpend, 75);
 });
 
 test('aggregateSankey: a refund that fully offsets spend drops the category', () => {
-  // If netSpend ≤ 0 the category sink would render as a zero-width link,
-  // which is visual noise. The aggregator drops it; the txns still live
-  // in the underlying data, just not in the Sankey shape.
   const rows: SankeyTxnRow[] = [
     row({ id: 1, amount: '-50.00', finalCategory: 'Returns' }),
     row({ id: 2, amount: '50.00', finalCategory: 'Returns', txnType: 'refund' }),
     row({ id: 3, amount: '500.00', txnType: 'income' }),
   ];
   const result = aggregateSankey(rows, 'CAD');
-  const labels = result.nodes.map((n) => n.name);
-  assert.ok(!labels.includes('Returns'));
+  assertStructurallySound(result);
+  assert.equal(idxOf(result, 'Returns'), -1);
   assert.equal(result.totalSpend, 0);
+  assert.equal(result.surplus, 500);
 });
 
 test('aggregateSankey: statement payment positives are excluded from category & income', () => {
   const rows: SankeyTxnRow[] = [
     row({ id: 1, amount: '-200.00', finalCategory: 'Groceries' }),
-    // Statement payment landing positive — must not be income, must not
-    // net Groceries. Same as classifyPositiveAmount === 'payment'.
     row({
       id: 2,
       amount: '200.00',
@@ -222,34 +381,247 @@ test('aggregateSankey: statement payment positives are excluded from category & 
     row({ id: 3, amount: '1000.00', txnType: 'income' }),
   ];
   const result = aggregateSankey(rows, 'CAD');
-  // Groceries netSpend stays 200 — payment is filtered.
-  const groceries = result.nodes.find((n) => n.name === 'Groceries');
-  const link = result.links.find(
-    (l) => l.target === result.nodes.indexOf(groceries!),
-  );
-  assert.equal(link?.value, 200);
-  // Income is just the explicit income row, not the payment positive.
+  assert.equal(linkValue(result, DRAWS_LABEL, 'Groceries'), 200);
   assert.equal(result.totalIncome, 1000);
 });
 
-// ---- Income source classification --------------------------------------
+// ---- Adaptive depth ----------------------------------------------------
 
-test('aggregateSankey: income txnType becomes the Income source', () => {
+const HOUSEHOLD_TREE = tree([
+  [1, 'Household', null],
+  [2, 'Rent', 1],
+  [3, 'Groceries', 1],
+  [4, 'Healthcare', null],
+  [5, 'Diabetes', 4],
+  [6, 'Dentist', 4],
+]);
+
+test('aggregateSankey: a large parent splits into its children', () => {
   const rows: SankeyTxnRow[] = [
-    row({ id: 1, amount: '5000.00', txnType: 'income', merchantRaw: 'EMPLOYER' }),
-    row({ id: 2, amount: '500.00', txnType: 'income', merchantRaw: 'EMPLOYER' }),
-    row({ id: 3, amount: '-200.00', finalCategory: 'Groceries' }),
+    row({ id: 1, amount: '-2000.00', finalCategory: 'Rent', finalCategoryId: 2 }),
+    row({ id: 2, amount: '-1000.00', finalCategory: 'Groceries', finalCategoryId: 3 }),
+    row({ id: 3, amount: '5000.00', txnType: 'income' }),
   ];
-  const result = aggregateSankey(rows, 'CAD');
-  assert.equal(result.totalIncome, 5500);
-  assert.equal(result.nodes[0].name, 'Income');
-  assert.equal(result.nodes[0].kind, 'income');
+  const result = aggregateSankey(rows, 'CAD', { categoryTree: HOUSEHOLD_TREE });
+  assertStructurallySound(result);
+  // Household is 100% of spend → splits.
+  assert.equal(linkValue(result, DRAWS_LABEL, 'Household'), 3000);
+  assert.equal(linkValue(result, 'Household', 'Rent'), 2000);
+  assert.equal(linkValue(result, 'Household', 'Groceries'), 1000);
+  // Owner draws never link straight to a subcategory.
+  assert.equal(linkValue(result, DRAWS_LABEL, 'Rent'), undefined);
 });
 
-// ---- Top-N category cap ------------------------------------------------
+test('aggregateSankey: a small parent stays whole and keeps its full subtree total', () => {
+  const rows: SankeyTxnRow[] = [
+    // Household is 97% of spend; Healthcare is 3% — below the 5% default.
+    row({ id: 1, amount: '-97000.00', finalCategory: 'Rent', finalCategoryId: 2 }),
+    row({ id: 2, amount: '-2000.00', finalCategory: 'Diabetes', finalCategoryId: 5 }),
+    row({ id: 3, amount: '-1000.00', finalCategory: 'Dentist', finalCategoryId: 6 }),
+    row({ id: 4, amount: '200000.00', txnType: 'income' }),
+  ];
+  const result = aggregateSankey(rows, 'CAD', { categoryTree: HOUSEHOLD_TREE });
+  assertStructurallySound(result);
+  // Collapsed: one Healthcare node carrying Diabetes + Dentist.
+  assert.equal(linkValue(result, DRAWS_LABEL, 'Healthcare'), 3000);
+  assert.equal(idxOf(result, 'Diabetes'), -1);
+  assert.equal(idxOf(result, 'Dentist'), -1);
+  // Not splitting never means dropping value.
+  assert.equal(result.totalSpend, 100000);
+  // …and the collapsed edge still resolves to every contributing row.
+  assert.deepEqual(edgeIds(result, DRAWS_LABEL, 'Healthcare')?.slice().sort(), [2, 3]);
+});
 
-test('aggregateSankey: surplus categories collapse into "Other categories"', () => {
-  // Build 15 categories descending by spend; cap at 5.
+test('aggregateSankey: splitShare is a parameter, not a buried constant', () => {
+  const rows: SankeyTxnRow[] = [
+    row({ id: 1, amount: '-97000.00', finalCategory: 'Rent', finalCategoryId: 2 }),
+    row({ id: 2, amount: '-2000.00', finalCategory: 'Diabetes', finalCategoryId: 5 }),
+    row({ id: 3, amount: '-1000.00', finalCategory: 'Dentist', finalCategoryId: 6 }),
+  ];
+  // Lower the bar to 1% and Healthcare (3%) splits; raise it to 99% and even
+  // Household stops splitting.
+  const deep = aggregateSankey(rows, 'CAD', {
+    categoryTree: HOUSEHOLD_TREE,
+    splitShare: 0.01,
+    minNodeShare: 0,
+  });
+  assertStructurallySound(deep);
+  assert.equal(linkValue(deep, 'Healthcare', 'Diabetes'), 2000);
+  assert.equal(linkValue(deep, 'Healthcare', 'Dentist'), 1000);
+
+  const shallow = aggregateSankey(rows, 'CAD', {
+    categoryTree: HOUSEHOLD_TREE,
+    splitShare: 0.99,
+  });
+  assertStructurallySound(shallow);
+  assert.equal(linkValue(shallow, DRAWS_LABEL, 'Household'), 97000);
+  assert.equal(idxOf(shallow, 'Rent'), -1);
+});
+
+test('aggregateSankey: a parent with own spend AND children keeps both, without double counting', () => {
+  const rows: SankeyTxnRow[] = [
+    // Household charged directly…
+    row({ id: 1, amount: '-4000.00', finalCategory: 'Household', finalCategoryId: 1 }),
+    // …as well as through its children.
+    row({ id: 2, amount: '-3000.00', finalCategory: 'Rent', finalCategoryId: 2 }),
+    row({ id: 3, amount: '-3000.00', finalCategory: 'Groceries', finalCategoryId: 3 }),
+    row({ id: 4, amount: '20000.00', txnType: 'income' }),
+  ];
+  const result = aggregateSankey(rows, 'CAD', { categoryTree: HOUSEHOLD_TREE });
+  assertStructurallySound(result);
+  assert.equal(linkValue(result, DRAWS_LABEL, 'Household'), 10000);
+  assert.equal(linkValue(result, 'Household', 'Rent'), 3000);
+  assert.equal(linkValue(result, 'Household', 'Groceries'), 3000);
+  // The parent's own charge draws as its own terminal node — the subtree total
+  // is the sum of the split, never the parent counted twice.
+  assert.equal(linkValue(result, 'Household', 'Household (other)'), 4000);
+  assert.equal(result.totalSpend, 10000);
+  assert.deepEqual(edgeIds(result, 'Household', 'Household (other)'), [1]);
+});
+
+test('aggregateSankey: hairline children fold into the parent remainder', () => {
+  const rows: SankeyTxnRow[] = [
+    row({ id: 1, amount: '-5000.00', finalCategory: 'Rent', finalCategoryId: 2 }),
+    // 0.2% of spend each — too thin to draw; they must not vanish either.
+    row({ id: 2, amount: '-10.00', finalCategory: 'Groceries', finalCategoryId: 3 }),
+    row({ id: 3, amount: '-10.00', finalCategory: 'Household', finalCategoryId: 1 }),
+  ];
+  const result = aggregateSankey(rows, 'CAD', { categoryTree: HOUSEHOLD_TREE });
+  assertStructurallySound(result);
+  assert.equal(idxOf(result, 'Groceries'), -1);
+  assert.equal(linkValue(result, 'Household', 'Household (other)'), 20);
+  assert.equal(result.totalSpend, 5020);
+  // Drill-down on the remainder returns the folded children's rows too.
+  assert.deepEqual(edgeIds(result, 'Household', 'Household (other)')?.slice().sort(), [2, 3]);
+});
+
+test('aggregateSankey: a lone folded child keeps its own name rather than becoming "(other)"', () => {
+  const rows: SankeyTxnRow[] = [
+    row({ id: 1, amount: '-5000.00', finalCategory: 'Rent', finalCategoryId: 2 }),
+    row({ id: 2, amount: '-10.00', finalCategory: 'Groceries', finalCategoryId: 3 }),
+  ];
+  const result = aggregateSankey(rows, 'CAD', { categoryTree: HOUSEHOLD_TREE });
+  assertStructurallySound(result);
+  // Household has no own spend and only one thin child — relabelling it
+  // "Household (other)" would hide which category it was.
+  assert.equal(linkValue(result, 'Household', 'Groceries'), 10);
+  assert.equal(idxOf(result, 'Household (other)'), -1);
+});
+
+// ---- Three-deep chains (production shape) ------------------------------
+
+const PROD_TREE = tree([
+  [1, 'Household', null],
+  [2, 'Rent', 1],
+  [3, 'Eating Out', 1],
+  [4, 'Groceries', 1],
+  [5, 'Clothing', 1],
+  [6, 'Snowboarding Gear', 5],
+  [10, 'Hobbies', null],
+  [11, 'Golf', 10],
+  [12, 'Clublink', 11],
+  [13, 'Racing', 10],
+  [14, 'Games', 10],
+  [20, 'Amazon', null],
+  [21, 'Healthcare', null],
+  [22, 'Diabetes', 21],
+  [23, 'Dentist', 21],
+]);
+
+function prodRows(): SankeyTxnRow[] {
+  const spend: Array<[number, number, string, number]> = [
+    // id, amount, label, categoryId
+    [101, -20313, 'Rent', 2],
+    [102, -15024, 'Eating Out', 3],
+    [103, -13763, 'Groceries', 4],
+    [104, -1122, 'Clothing', 5],
+    [105, -6616, 'Household', 1],
+    [201, -34308, 'Clublink', 12],
+    [202, -4938, 'Golf', 11],
+    [203, -2131, 'Racing', 13],
+    [204, -599, 'Games', 14],
+    [301, -14580, 'Amazon', 20],
+    [401, -3997, 'Diabetes', 22],
+    [402, -693, 'Dentist', 23],
+  ];
+  const rows: SankeyTxnRow[] = spend.map(([id, amount, label, categoryId]) =>
+    row({ id, amount: String(amount), finalCategory: label, finalCategoryId: categoryId }),
+  );
+  rows.push(
+    row({ id: 900, amount: '-2878.00', finalCategory: 'Hosting', finalBusiness: true }),
+    row({ id: 901, amount: '132734.00', txnType: 'income', merchantRaw: 'CDG LABS' }),
+    // Money movement dwarfs everything and must stay out.
+    row({ id: 902, amount: '-493174.00', txnType: 'transfer' }),
+  );
+  return rows;
+}
+
+test('aggregateSankey: production shape renders three levels and stays readable', () => {
+  const result = aggregateSankey(prodRows(), 'CAD', { categoryTree: PROD_TREE });
+  assertStructurallySound(result);
+
+  // Three deep where the money is: Hobbies → Golf → Clublink.
+  assert.equal(linkValue(result, DRAWS_LABEL, 'Hobbies'), 34308 + 4938 + 2131 + 599);
+  assert.equal(linkValue(result, 'Hobbies', 'Golf'), 34308 + 4938);
+  assert.equal(linkValue(result, 'Golf', 'Clublink'), 34308);
+  assert.equal(linkValue(result, 'Golf', 'Golf (other)'), 4938);
+
+  // Household splits; its thin children fold into the remainder.
+  assert.equal(linkValue(result, DRAWS_LABEL, 'Household'), 20313 + 15024 + 13763 + 1122 + 6616);
+  assert.equal(linkValue(result, 'Household', 'Rent'), 20313);
+  assert.equal(idxOf(result, 'Snowboarding Gear'), -1);
+
+  // Leaves stay leaves; the small parent stays whole.
+  assert.equal(linkValue(result, DRAWS_LABEL, 'Amazon'), 14580);
+  assert.equal(linkValue(result, DRAWS_LABEL, 'Healthcare'), 3997 + 693);
+  assert.equal(idxOf(result, 'Diabetes'), -1);
+
+  // Transfers excluded; corporate present; the chart balances.
+  const personal = 56838 + 41976 + 14580 + 4690;
+  assert.equal(result.totalSpend, personal + 2878);
+  assert.equal(linkValue(result, INCOME_LABEL, CORPORATE_LABEL), 2878);
+  assert.equal(result.balanced, true);
+
+  // Readable: ~20 nodes, not the ~40 a full render would produce.
+  assert.ok(
+    result.nodes.length <= 24,
+    `expected a readable node count, got ${result.nodes.length}`,
+  );
+});
+
+test('aggregateSankey: drill-down survives depth (subcategory + sub-subcategory edges)', () => {
+  const result = aggregateSankey(prodRows(), 'CAD', { categoryTree: PROD_TREE });
+  // Depth 3 edge.
+  assert.deepEqual(edgeIds(result, 'Golf', 'Clublink'), [201]);
+  // Depth 2 edge carries the whole subtree beneath it.
+  assert.deepEqual(edgeIds(result, 'Hobbies', 'Golf')?.slice().sort((a, b) => a - b), [201, 202]);
+  // Depth 1 edge likewise.
+  assert.deepEqual(
+    edgeIds(result, DRAWS_LABEL, 'Hobbies')?.slice().sort((a, b) => a - b),
+    [201, 202, 203, 204],
+  );
+  // A collapsed parent resolves to its hidden children.
+  assert.deepEqual(
+    edgeIds(result, DRAWS_LABEL, 'Healthcare')?.slice().sort((a, b) => a - b),
+    [401, 402],
+  );
+  // Unknown edge → null.
+  assert.equal(lookupEdgeTxnIds(result, 0, 999), null);
+});
+
+test('aggregateSankey: spendByCategoryId reports DIRECT spend per category id', () => {
+  const result = aggregateSankey(prodRows(), 'CAD', { categoryTree: PROD_TREE });
+  // Direct, not rolled up: Hobbies itself was never charged.
+  assert.equal(result.spendByCategoryId.get(11), 4938); // Golf, own
+  assert.equal(result.spendByCategoryId.get(12), 34308); // Clublink
+  assert.equal(result.spendByCategoryId.get(10), undefined); // Hobbies, no direct
+  // Collapsed subcategories still report — the rollup must not lose them.
+  assert.equal(result.spendByCategoryId.get(22), 3997); // Diabetes
+});
+
+// ---- Top-N tail collapse ----------------------------------------------
+
+test('aggregateSankey: surplus top-level categories collapse into "Other categories"', () => {
   const rows: SankeyTxnRow[] = [];
   for (let i = 0; i < 15; i += 1) {
     rows.push(
@@ -261,32 +633,21 @@ test('aggregateSankey: surplus categories collapse into "Other categories"', () 
     );
   }
   const result = aggregateSankey(rows, 'CAD', { topCategories: 5 });
-  // Expect 6 non-source sinks: top 5 named + one "Other categories".
-  const sinkNames = result.nodes.slice(1).map((n) => n.name);
-  assert.equal(sinkNames.length, 6);
-  assert.ok(sinkNames.includes('Other categories'));
-  // Totals reconcile: sum of all 15 negative amounts.
+  assertStructurallySound(result);
+  const drawsIdx = idxOf(result, DRAWS_LABEL);
+  const targets = result.links
+    .filter((l) => l.source === drawsIdx)
+    .map((l) => nameOf(result, l.target));
+  assert.equal(targets.length, 6); // 5 named + the tail
+  assert.ok(targets.includes(OTHER_CATEGORIES_LABEL));
   const expectedTotal = rows.reduce((sum, r) => sum + Math.abs(Number(r.amount)), 0);
   assert.equal(result.totalSpend, expectedTotal);
+  // The tail keeps its rows for drill-down.
+  const tailIds = edgeIds(result, DRAWS_LABEL, OTHER_CATEGORIES_LABEL);
+  assert.equal(tailIds?.length, 10);
 });
 
-// ---- Edge map / drill-down --------------------------------------------
-
-test('aggregateSankey: edgeMap resolves link → contributing txn IDs', () => {
-  const rows: SankeyTxnRow[] = [
-    row({ id: 101, amount: '-30.00', finalCategory: 'Groceries' }),
-    row({ id: 102, amount: '-25.00', finalCategory: 'Groceries' }),
-    row({ id: 201, amount: '-100.00', finalCategory: 'Rent' }),
-  ];
-  const result = aggregateSankey(rows, 'CAD');
-  // Rent sits at index 1 (largest), Groceries at index 2.
-  const rentTxns = lookupEdgeTxnIds(result, 0, 1);
-  assert.deepEqual(rentTxns, [201]);
-  const groceriesTxns = lookupEdgeTxnIds(result, 0, 2);
-  assert.deepEqual(groceriesTxns?.sort(), [101, 102]);
-  // Unknown edge returns null.
-  assert.equal(lookupEdgeTxnIds(result, 0, 99), null);
-});
+// ---- Edge map / income source -----------------------------------------
 
 test('aggregateSankey: income-source bucket carries its own edgeMap key', () => {
   const rows: SankeyTxnRow[] = [
@@ -295,17 +656,12 @@ test('aggregateSankey: income-source bucket carries its own edgeMap key', () => 
     row({ id: 20, amount: '-50.00', finalCategory: 'Groceries' }),
   ];
   const result = aggregateSankey(rows, 'CAD');
-  const incomeTxns = result.edgeMap.get('income-source');
-  assert.deepEqual(incomeTxns?.sort(), [10, 11]);
+  assert.deepEqual(result.edgeMap.get('income-source')?.slice().sort(), [10, 11]);
+  // The Income → Owner draws edge drills into the income that funded it.
+  assert.deepEqual(edgeIds(result, INCOME_LABEL, DRAWS_LABEL)?.slice().sort(), [10, 11]);
 });
 
-// ---- Reconciliation with dashboard semantics ---------------------------
-
-test('aggregateSankey: totalSpend reconciles with dashboard netSpend for mixed ledger', () => {
-  // Recreates a small dashboard slice: 100 spend, 25 refund net to 75; an
-  // investment buy and a transfer that must NOT contribute. Income from
-  // employer = 1000. After non-spend filter the dashboard's per-category
-  // netSpend for "Groceries" is 75 — the Sankey value should match.
+test('aggregateSankey: totalSpend reconciles with dashboard netSpend for a mixed ledger', () => {
   const rows: SankeyTxnRow[] = [
     row({ id: 1, amount: '-100.00', finalCategory: 'Groceries' }),
     row({ id: 2, amount: '25.00', finalCategory: 'Groceries', txnType: 'refund' }),
@@ -315,29 +671,13 @@ test('aggregateSankey: totalSpend reconciles with dashboard netSpend for mixed l
     row({ id: 6, amount: '1000.00', txnType: 'income' }),
   ];
   const result = aggregateSankey(rows, 'CAD');
-  // Single sink: Groceries with net 75.
-  assert.equal(result.nodes.length, 2); // Income + Groceries
-  assert.equal(result.nodes[1].name, 'Groceries');
+  assertStructurallySound(result);
   assert.equal(result.totalSpend, 75);
   assert.equal(result.totalIncome, 1000);
-});
-
-test('aggregateSankey: links arrays match sink count', () => {
-  // Invariant: every non-source node has exactly one inbound link from
-  // the Income source (link.source=0). recharts requires this — orphan
-  // nodes break rendering.
-  const rows: SankeyTxnRow[] = [
-    row({ id: 1, amount: '-30.00', finalCategory: 'A' }),
-    row({ id: 2, amount: '-30.00', finalCategory: 'B' }),
-    row({ id: 3, amount: '-30.00', finalCategory: 'C' }),
-    row({ id: 4, amount: '900.00', txnType: 'income' }),
-  ];
-  const result = aggregateSankey(rows, 'CAD');
-  const sinkCount = result.nodes.length - 1; // minus Income source
-  assert.equal(result.links.length, sinkCount);
-  for (const link of result.links) {
-    assert.equal(link.source, 0);
-    assert.ok(link.target >= 1 && link.target < result.nodes.length);
-    assert.ok(link.value > 0);
-  }
+  assert.deepEqual(result.nodes.map((n) => n.name), [
+    INCOME_LABEL,
+    DRAWS_LABEL,
+    SURPLUS_LABEL,
+    'Groceries',
+  ]);
 });

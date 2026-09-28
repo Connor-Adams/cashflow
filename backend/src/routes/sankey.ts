@@ -5,13 +5,19 @@
  *
  *   GET /api/summary/sankey
  *     Query: currency (required ISO 4217), dateFrom, dateTo, topCategories
- *     Returns: { currency, totalIncome, totalSpend, transactionCount,
- *                nodes, links, availableCurrencies, dateRange }
+ *     Returns: { currency, totalIncome, totalSpend, surplus, balanced,
+ *                transactionCount, nodes, links, availableCurrencies,
+ *                dateRange, categoryTree }
  *
- *     Aggregates the household's visible transactions for one currency
- *     into a recharts-friendly Sankey shape: a single "Income" source
- *     fans out to category sinks (plus a "Business spending" sink and
- *     a collapsing "Other categories" sink when the cap is exceeded).
+ *     Aggregates the household's visible transactions for one currency into a
+ *     recharts-friendly Sankey shape carrying the full money chain:
+ *     Income → {Corporate expenses, Owner draws} → categories →
+ *     subcategories, with Surplus as a terminal node so the chart balances.
+ *     Depth follows share of spend (see aggregateSankey); the top-level tail
+ *     collapses into "Other categories" beyond `topCategories`.
+ *
+ *     `balanced: false` means observed spend exceeds observed income — a
+ *     classification gap the page should surface, not hide.
  *
  *   GET /api/summary/sankey/source-transactions
  *     Query: source (node index), target (node index), currency, dateFrom,
@@ -22,7 +28,10 @@
  *     Re-runs the aggregation, then resolves the (source, target) edge to
  *     the contributing transaction IDs, and fetches the rows so the
  *     drill-down dialog can show the user exactly which rows flowed
- *     through the clicked segment.
+ *     through the clicked segment. Works at every depth: an edge into a
+ *     collapsed parent returns its whole hidden subtree's rows. The replay
+ *     must use the SAME options as the chart request (currency, dates,
+ *     topCategories) or the indices will not line up.
  *
  * Reads only — no rate limiter needed (matches the existing
  * /api/summary/dashboard, /api/partner/fairness, /api/tax/reserve/summary
@@ -34,9 +43,14 @@ import { Op, type WhereOptions } from 'sequelize';
 import { Account, Transaction } from '../models';
 import { visibleAccountWhere, visibleTransactionWhere } from '../auth/scope';
 import { currentAuth } from '../auth/middleware';
-import { loadCategoryTree, buildRollupRows } from '../categories/rollup';
+import {
+  loadCategoryTree,
+  buildRollupRows,
+  type CategoryTree,
+} from '../categories/rollup';
 import {
   aggregateSankey,
+  lookupEdgeTxnIds,
   type SankeyTxnRow,
   DEFAULT_TOP_CATEGORIES,
 } from '../summary/aggregateSankey';
@@ -87,9 +101,9 @@ function parseTopCategories(raw: unknown): number {
 }
 
 /**
- * Pulls the household's visible transaction rows + account map and runs
- * the aggregator. Returns both the aggregation result and the account
- * map so route handlers can reuse the lookup for drill-down serialization.
+ * Pulls the household's visible transaction rows, the account-type map and
+ * the category tree, then runs the aggregator. The tree is returned too so
+ * the handler can build the category rollup without loading it twice.
  */
 async function loadAndAggregate(
   req: import('express').Request,
@@ -99,10 +113,11 @@ async function loadAndAggregate(
   topCategories: number,
 ): Promise<{
   result: ReturnType<typeof aggregateSankey>;
-  accountTypeById: Map<number, string | null>;
+  categoryTree: CategoryTree;
 }> {
   const where = buildSankeyWhere(req, currency, dateFrom, dateTo);
-  const [rows, accounts] = await Promise.all([
+  const householdId = currentAuth(req).household.id;
+  const [rows, accounts, categoryTree] = await Promise.all([
     Transaction.findAll({
       where,
       attributes: [
@@ -125,6 +140,7 @@ async function loadAndAggregate(
       attributes: ['id', 'accountType'],
       raw: true,
     }),
+    loadCategoryTree(householdId),
   ]);
   type AccountRow = { id: number; accountType: string | null };
   const accountTypeById = new Map<number, string | null>(
@@ -158,8 +174,11 @@ async function loadAndAggregate(
     accountType: accountTypeById.get(r.accountId) ?? null,
   }));
 
-  const result = aggregateSankey(sankeyRows, currency, { topCategories });
-  return { result, accountTypeById };
+  const result = aggregateSankey(sankeyRows, currency, {
+    topCategories,
+    categoryTree,
+  });
+  return { result, categoryTree };
 }
 
 /**
@@ -208,6 +227,8 @@ router.get('/', async (req, res, next) => {
         currency: null,
         totalIncome: 0,
         totalSpend: 0,
+        surplus: 0,
+        balanced: true,
         transactionCount: 0,
         nodes: [],
         links: [],
@@ -217,7 +238,7 @@ router.get('/', async (req, res, next) => {
       return;
     }
 
-    const { result } = await loadAndAggregate(
+    const { result, categoryTree } = await loadAndAggregate(
       req,
       currency,
       dateFrom,
@@ -225,22 +246,22 @@ router.get('/', async (req, res, next) => {
       topCategories,
     );
 
-    // Build a raw spend map from sankey category nodes for the rollup.
-    // Each link.target points to a node; use node.categoryId and link.value.
-    const sankeyRaw = new Map<number, number>();
-    for (const link of result.links) {
-      const node = result.nodes[link.target];
-      if (node?.categoryId != null) {
-        sankeyRaw.set(node.categoryId, (sankeyRaw.get(node.categoryId) ?? 0) + link.value);
-      }
-    }
-    const householdId = currentAuth(req).household.id;
-    const categoryTree = buildRollupRows(sankeyRaw, await loadCategoryTree(householdId), currency);
+    // The rollup needs DIRECT per-category spend. Summing link values would
+    // double-count now that a parent link already carries its children's
+    // totals, and would lose the subcategories the chart collapsed — so the
+    // aggregator hands back the raw per-id map instead.
+    const categoryRollup = buildRollupRows(
+      result.spendByCategoryId,
+      categoryTree,
+      currency,
+    );
 
     res.json({
       currency: result.currency,
       totalIncome: result.totalIncome,
       totalSpend: result.totalSpend,
+      surplus: result.surplus,
+      balanced: result.balanced,
       transactionCount: result.transactionCount,
       // Pass nodes + links through unchanged; the client passes them
       // directly to <Sankey data={...} />.
@@ -248,7 +269,7 @@ router.get('/', async (req, res, next) => {
       links: result.links,
       availableCurrencies,
       dateRange: { from: dateFrom ?? null, to: dateTo ?? null },
-      categoryTree,
+      categoryTree: categoryRollup,
     });
   } catch (e) {
     next(e);
@@ -301,7 +322,7 @@ router.get('/source-transactions', async (req, res, next) => {
       dateTo,
       topCategories,
     );
-    const ids = result.edgeMap.get(`${source}-${target}`);
+    const ids = lookupEdgeTxnIds(result, source, target);
     if (!ids || ids.length === 0) {
       res.json({
         edge: { source, target },
