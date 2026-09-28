@@ -129,3 +129,173 @@ test('normalizeMerchant strips PADDLE.NET* prefix', () => {
   assert.equal(normalizeMerchant('PADDLE.NET* MTW LONDON'), 'MTW LONDON');
   assert.equal(normalizeMerchant('PADDLE.NET* BTTRDISPLY LONDON'), 'BTTRDISPLY LONDON');
 });
+
+// ---------------------------------------------------------------------------
+// Transaction-specific boilerplate (issue: phantom merchants)
+//
+// `merchant_clean` is the key merchant memory and rules hinge on, so every
+// transaction-specific token retained in it forks one real merchant into many
+// low-support memory buckets. The three families below were each measured
+// against production before being stripped; see
+// docs/superpowers/specs/2026-09-28-embedding-threshold-calibration.md.
+// ---------------------------------------------------------------------------
+
+test('normalizeMerchant strips a trailing [CURRENCY amount @ rate] suffix', () => {
+  assert.equal(
+    normalizeMerchant('DISCORD* NITROMONTHLY SAN FRANCISCO [UNITED STATES DOLLAR 11.29 @ 1.4349]'),
+    'DISCORD* NITROMONTHLY SAN FRANCISCO',
+  );
+  assert.equal(
+    normalizeMerchant('CLOUDFLARE SAN FRANCISCO [UNITED STATES DOLLAR 4.72 @ 1.41314]'),
+    'CLOUDFLARE SAN FRANCISCO',
+  );
+  assert.equal(
+    normalizeMerchant('ENDOR AMERICA LLC BERVERLY HILLS [EUROPEAN UNION EURO 305.90 @ 1.52867]'),
+    'ENDOR AMERICA LLC BERVERLY HILLS',
+  );
+  assert.equal(
+    normalizeMerchant('EMPEROR SERVERS POOLE [UNITED KINGDOM POUND STERLING 12.00 @ 1.71]'),
+    'EMPEROR SERVERS POOLE',
+  );
+  // Thousands separator and an integer rate both occur in production.
+  assert.equal(
+    normalizeMerchant('UNITED AIRLINES HOUSTON [UNITED STATES DOLLAR 1,692.74 @ 1.4]'),
+    'UNITED AIRLINES HOUSTON',
+  );
+});
+
+test('normalizeMerchant collapses FX-rate variants of one merchant to one key', () => {
+  const a = normalizeMerchant('BT*IRACING MOTORSPORT S CHELMSFORD [UNITED STATES DOLLAR 1.35 @ 1.45185]');
+  const b = normalizeMerchant('BT*IRACING MOTORSPORT S CHELMSFORD [UNITED STATES DOLLAR 1.35 @ 1.43704]');
+  assert.equal(a, b);
+  assert.equal(a, 'BT*IRACING MOTORSPORT S CHELMSFORD');
+});
+
+test('normalizeMerchant leaves bracketed text that is not a currency-rate payload', () => {
+  // A bracketed qualifier can be part of a merchant's identity. Only the
+  // `[<CURRENCY WORDS> <amount> @ <rate>]` shape is boilerplate.
+  assert.equal(normalizeMerchant('COFFEE CO [LIMITED EDITION]'), 'COFFEE CO [LIMITED EDITION]');
+  assert.equal(normalizeMerchant('SOME SHOP [USD]'), 'SOME SHOP [USD]');
+  assert.equal(normalizeMerchant('SOME SHOP [UNITED STATES DOLLAR 5.00]'), 'SOME SHOP [UNITED STATES DOLLAR 5.00]');
+  // Not anchored at the end -> not the FX suffix, so it stays.
+  assert.equal(
+    normalizeMerchant('ACME [UNITED STATES DOLLAR 5.00 @ 1.4] STORE'),
+    'ACME [UNITED STATES DOLLAR 5.00 @ 1.4] STORE',
+  );
+});
+
+test('normalizeMerchant strips a date-bearing parenthetical', () => {
+  assert.equal(normalizeMerchant('Withdrawal (executed at 2026-06-04)'), 'Withdrawal');
+  assert.equal(
+    normalizeMerchant('Money transfer out of the account (executed at 2026-07-01)'),
+    'Money transfer out of the account',
+  );
+  assert.equal(
+    normalizeMerchant('Tax-free money transfer out of the account (executed at 2026-06-04)'),
+    'Tax-free money transfer out of the account',
+  );
+  assert.equal(
+    normalizeMerchant('Online bill payment for CIBC MASTERCARD, account \u2219\u2219\u2219\u22193114 (executed at 2026-08-01)'),
+    'Online bill payment for CIBC MASTERCARD, account \u2219\u2219\u2219\u22193114',
+  );
+  // Mid-string parenthetical: the text after it survives.
+  assert.equal(
+    normalizeMerchant('GOLD - Physically backed gold: Bought 0.0084 ounces (executed at 2026-01-02), Fee: $0.2700'),
+    'GOLD - Physically backed gold: Bought 0.0084 ounces, Fee: $0.2700',
+  );
+});
+
+test('normalizeMerchant strips a trailing date clause', () => {
+  assert.equal(
+    normalizeMerchant(
+      'XEQT - iShares Core Equity ETF Portfolio: Cash dividend distribution, received on 2024-10-07, record date of',
+    ),
+    'XEQT - iShares Core Equity ETF Portfolio: Cash dividend distribution',
+  );
+  assert.equal(
+    normalizeMerchant('DOO - BRP Inc: Cash dividend distribution, received on 2026-04-24, record date of 2026-03-31'),
+    'DOO - BRP Inc: Cash dividend distribution',
+  );
+  assert.equal(normalizeMerchant('Subscription fee paid for period 2026-01-01 to'), 'Subscription fee paid');
+});
+
+test('normalizeMerchant collapses date variants of one Wealthsimple sentence to one key', () => {
+  const a = normalizeMerchant('Money transfer out of the account (executed at 2026-03-08)');
+  const b = normalizeMerchant('Money transfer out of the account (executed at 2026-07-01)');
+  assert.equal(a, b);
+  assert.equal(a, 'Money transfer out of the account');
+  assert.equal(
+    normalizeMerchant('Contribution (executed at 2025-02-14)'),
+    normalizeMerchant('Contribution (executed at 2026-02-14)'),
+  );
+});
+
+test('normalizeMerchant leaves digit groups that are not a full ISO date', () => {
+  assert.equal(normalizeMerchant('ACME 2026-09 SUBSCRIPTION'), 'ACME 2026-09 SUBSCRIPTION');
+  assert.equal(normalizeMerchant('Widget 12-34-5678 Depot'), 'Widget 12-34-5678 Depot');
+  assert.equal(normalizeMerchant('Contribution (executed at)'), 'Contribution (executed at)');
+  // A parenthetical with no ISO date is identity, not boilerplate.
+  assert.equal(normalizeMerchant('BELL CANADA (OB) MONTREAL'), 'BELL CANADA (OB) MONTREAL');
+});
+
+test('normalizeMerchant strips card-network purchase prefixes', () => {
+  assert.equal(
+    normalizeMerchant('CONTACTLESS INTERAC PURCHASE - 1089 ZEHRS GUELPH CL'),
+    'ZEHRS GUELPH CL',
+  );
+  assert.equal(normalizeMerchant('CONTACTLESS INTERAC PURCHASE - 5587 TIM HORTONS'), 'TIM HORTONS');
+  assert.equal(normalizeMerchant('INTERAC PURCHASE - 2183 WAL-MART'), 'WAL-MART');
+  assert.equal(normalizeMerchant('INTERAC PURCHASE REFUND - 2183 WAL-MART'), 'WAL-MART');
+  assert.equal(
+    normalizeMerchant('ONLINE BANKING INTERAC PURCHASE - 4410 CANADIAN TIRE'),
+    'CANADIAN TIRE',
+  );
+  assert.equal(normalizeMerchant('VISA DEBIT PURCHASE - 5678 PETRO-CANADA'), 'PETRO-CANADA');
+});
+
+test('normalizeMerchant collapses Interac variants onto the plain merchant key', () => {
+  assert.equal(
+    normalizeMerchant('CONTACTLESS INTERAC PURCHASE - 8507 SHOPPERS DRUG M'),
+    normalizeMerchant('CONTACTLESS INTERAC PURCHASE - 5637 SHOPPERS DRUG M'),
+  );
+  assert.equal(normalizeMerchant('CONTACTLESS INTERAC PURCHASE - 9315 TIM HORTONS'), normalizeMerchant('TIM HORTONS'));
+});
+
+test('normalizeMerchant leaves other bank boilerplate prefixes alone', () => {
+  // Deliberately out of scope: these carry transfer counterparty/reference
+  // information and are consumed by transfer matching and type detection.
+  // (Trailing reference numbers on these are stripped by the pre-existing
+  // store-number pass; what matters here is that the prefix itself survives.)
+  assert.equal(
+    normalizeMerchant('ONLINE BANKING PAYMENT CIBC MASTERCARD'),
+    'ONLINE BANKING PAYMENT CIBC MASTERCARD',
+  );
+  assert.equal(normalizeMerchant('E-TRANSFER - AUTODEPOSIT JANE DOE'), 'E-TRANSFER - AUTODEPOSIT JANE DOE');
+  assert.equal(normalizeMerchant('ONLINE TRANSFER RECEIVED SAVINGS'), 'ONLINE TRANSFER RECEIVED SAVINGS');
+  // No card-network qualifier -> not our prefix.
+  assert.equal(normalizeMerchant('PURCHASE - SOMETHING ELSE'), 'PURCHASE - SOMETHING ELSE');
+});
+
+test('normalizeMerchant never returns empty for a non-empty input', () => {
+  // A row whose merchant is nothing but boilerplate (36 production rows are
+  // exactly this) must keep something to key on rather than collapse to ''.
+  assert.equal(normalizeMerchant('CONTACTLESS INTERAC PURCHASE -'), 'CONTACTLESS INTERAC PURCHASE -');
+  assert.equal(normalizeMerchant('INTERAC PURCHASE -'), 'INTERAC PURCHASE -');
+  assert.equal(normalizeMerchant('(executed at 2026-06-04)'), '(executed at 2026-06-04)');
+  assert.equal(normalizeMerchant('[UNITED STATES DOLLAR 1.35 @ 1.45185]'), '[UNITED STATES DOLLAR 1.35 @ 1.45185]');
+});
+
+test('normalizeMerchant no longer reduces an Interac purchase to the bare prefix', () => {
+  // Regression lock on the strongest reason to strip this prefix. Before the
+  // prefix strip existed, MID_STORE_WITH_CITY read "5587 TIM HORTONS" as a
+  // store id plus city words and ate it, leaving the transaction type as the
+  // merchant: 219 production rows normalized to a bare card-network prefix,
+  // i.e. one meaningless 219-row memory bucket spanning Tim Hortons, Metro,
+  // Wal-Mart and a dozen others. Stripping the prefix FIRST means the tail
+  // passes see "TIM HORTONS", which has no digits for them to chew on.
+  assert.equal(normalizeMerchant('CONTACTLESS INTERAC PURCHASE - 5587 TIM HORTONS'), 'TIM HORTONS');
+  assert.equal(normalizeMerchant('CONTACTLESS INTERAC PURCHASE - 4149 WENDY\'S'), "WENDY'S");
+  assert.equal(normalizeMerchant('INTERAC PURCHASE - 2183 WAL-MART'), 'WAL-MART');
+  // The store-number pass must still do its job on merchants it should trim.
+  assert.equal(normalizeMerchant('CONTACTLESS INTERAC PURCHASE - 8714 METRO 123 GUELPH ON'), 'METRO');
+});

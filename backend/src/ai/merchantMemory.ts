@@ -72,7 +72,17 @@ async function queryMemory(opts: {
        AND reviewed_at IS NOT NULL
        AND final_category IS NOT NULL${amountClause}
      GROUP BY merchant_clean, final_category, final_business, final_split_type, final_pct_me, final_pct_partner
-     ORDER BY COUNT(*) DESC, MAX(reviewed_at) DESC
+     -- Merge-conflict resolution. Re-normalizing merchant_clean (migration
+     -- 20260928000002) merges memory buckets, so one key can legitimately hold
+     -- two different decisions -- in production the Wealthsimple transfer
+     -- sentences are labelled Transfer some months and Investments others.
+     -- Support count decides first, then recency. The trailing keys make a full
+     -- tie deterministic: without them Postgres' HashAggregate returns groups in
+     -- whatever order it likes, so the same data could categorise differently
+     -- between two runs, or between Postgres and SQLite. No row's label is
+     -- rewritten to achieve this -- the losing decision stays on its own rows.
+     ORDER BY COUNT(*) DESC, MAX(reviewed_at) DESC,
+              final_category ASC, final_split_type ASC, final_business ASC
      LIMIT 1`,
     { replacements, type: QueryTypes.SELECT, transaction: opts.transaction },
   );
