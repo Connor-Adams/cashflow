@@ -200,12 +200,18 @@ test('an unavailable embedder is reported on the import result instead of failin
   const { householdId, accountId } = await seedAccount();
   await seedReviewedMerchant(householdId, accountId, 'Blue Bottle Coffee', 'Coffee');
 
-  // No embedder injected: `@xenova/transformers` is an optional peer that is not
-  // installed, so `getDefaultEmbedder()` resolves null — exactly production.
+  // Absence is INJECTED, not inferred from the package being missing. The
+  // embedding model is a declared dependency now, so on this machine
+  // `getDefaultEmbedder()` resolves a real embedder — but an image whose model
+  // files never arrived is still a production case, and the import must degrade
+  // to a warning rather than fail. `embedderLoader` reproduces that
+  // deterministically and without network.
   const result = await commitStatementImport(
     makePreview(accountId, householdId, 'SHOPPERS DRUG MART #1234'),
     null,
     householdId,
+    {},
+    { embedderLoader: async () => null },
   );
 
   assert.equal(result.insertedTransactions, 1, 'the import still commits');

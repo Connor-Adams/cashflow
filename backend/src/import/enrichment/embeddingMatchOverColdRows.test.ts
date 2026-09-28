@@ -182,9 +182,14 @@ test('a null embedder reports embedder_unavailable, not a generic skip', async (
   await seedReviewedMerchant(hh.id, acc.id, 'Blue Bottle Coffee', 'Coffee');
   const cold = await coldTxn(hh.id, acc.id, 'SQ *BLUE BOTTLE');
 
-  // No embedder injected and `@xenova/transformers` is not installed, so
-  // getDefaultEmbedder() resolves null — the production container's state.
-  const result = await orch.maybeRunEmbeddingMatchOverColdRows([cold], hh.id);
+  // Absence is INJECTED, not inferred from the package being missing. The model
+  // is a declared dependency now, so `getDefaultEmbedder()` resolves a real
+  // embedder here — but an operator can still run an image where the model files
+  // never arrived, and the graceful-degradation path stays a production case.
+  // `embedderLoader` is the seam that reproduces it deterministically.
+  const result = await orch.maybeRunEmbeddingMatchOverColdRows([cold], hh.id, {
+    embedderLoader: async () => null,
+  });
   assert.equal(result.summary.attempted, false);
   assert.equal(result.summary.skipReason, 'embedder_unavailable');
   assert.equal(result.remainingColdRows.length, 1);

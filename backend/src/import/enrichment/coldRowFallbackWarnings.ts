@@ -25,8 +25,8 @@ function embeddingWarning(summary: EmbeddingMatchSummary): string | null {
     case 'embedder_unavailable':
       return (
         `Embedding match did not run: no local embedding model is available ` +
-        `(@xenova/transformers is not installed). ${rows} were left for the AI ` +
-        `fallback instead.`
+        `(@huggingface/transformers could not be loaded, or its model files are ` +
+        `missing from the image). ${rows} were left for the AI fallback instead.`
       );
     case 'disabled':
       return (

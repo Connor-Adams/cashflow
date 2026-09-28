@@ -386,6 +386,11 @@ export type CommitStatementImportOptions = {
  */
 export type CommitStatementImportDeps = {
   embedder?: Embedder;
+  /** Replaces how the stage RESOLVES an embedder, so a test can reproduce "no
+   *  local embedding model" — still a production case (an image built without
+   *  egress, a stripped model cache) — now that the model is a declared
+   *  dependency and is genuinely present in dev and CI. */
+  embedderLoader?: () => Promise<Embedder | null>;
   aiCaller?: (msgs: ChatMessage[]) => Promise<Record<string, unknown>>;
 };
 
@@ -949,11 +954,17 @@ export async function commitStatementImport(
  * absent key, so each key is present only when a dep was actually supplied.
  */
 function coldRowStageOverrides(deps: CommitStatementImportDeps): {
-  embedding: { embedder?: CommitStatementImportDeps['embedder'] };
+  embedding: {
+    embedder?: CommitStatementImportDeps['embedder'];
+    embedderLoader?: CommitStatementImportDeps['embedderLoader'];
+  };
   ai: { openaiCaller?: CommitStatementImportDeps['aiCaller'] };
 } {
   return {
-    embedding: { ...(deps.embedder ? { embedder: deps.embedder } : {}) },
+    embedding: {
+      ...(deps.embedder ? { embedder: deps.embedder } : {}),
+      ...(deps.embedderLoader ? { embedderLoader: deps.embedderLoader } : {}),
+    },
     ai: { ...(deps.aiCaller ? { openaiCaller: deps.aiCaller } : {}) },
   };
 }

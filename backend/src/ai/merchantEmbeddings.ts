@@ -16,14 +16,38 @@
  *      against.
  *
  * The default production embedder lazily loads a small local sentence model via
- * `@xenova/transformers`. That library is an OPTIONAL, operator-installed peer
- * (NOT a declared dependency) so the heavyweight ONNX runtime never burdens the
- * default install / CI; it is loaded through a runtime-computed specifier so
- * the TypeScript compiler does not try to resolve it at build time. If the
- * library or model is unavailable, `getDefaultEmbedder` returns null; the stage
- * then emits nothing and cold rows fall through to the OpenAI batch unchanged —
- * an embedding failure must never fail an import. Tests inject a stub embedder
- * and never touch this path.
+ * `@huggingface/transformers`, which IS a declared backend dependency and is
+ * present in the image (see `backend/Dockerfile`, which also warms the model
+ * cache at build time so the first import never waits on a download). It used to
+ * be an optional, operator-installed peer that nobody installed, which is why
+ * `getDefaultEmbedder` returned null everywhere and `merchant_embeddings` had
+ * zero rows: the free, deterministic tier of the categorisation pipeline never
+ * ran, and every cold row went straight to the paid AI batch.
+ *
+ * `@xenova/transformers` — the package this module originally named — is not
+ * usable here. It eagerly `require`s `sharp@0.32`, whose native binary arrives
+ * via a postinstall script, and `.yarnrc.yml` sets `enableScripts: false` as
+ * deliberate supply-chain hardening (issue #828). Installing it therefore still
+ * yields a null embedder. Its maintained successor,
+ * `@huggingface/transformers`, depends on `sharp@0.35`, which ships prebuilt
+ * `@img/sharp-*` platform packages and needs no install script at all. The
+ * successor also carries no open advisories, where `@xenova/transformers@2.17.2`
+ * (its last release) carries five, including a critical protobufjs RCE.
+ *
+ * It is still loaded through a runtime-computed specifier: the package is
+ * ESM-only and this workspace compiles to CommonJS, so a literal `import()`
+ * specifier would be downlevelled by tsc into a `require()` that cannot load an
+ * ES module. `new Function('return import(m))` preserves a genuine dynamic ESM
+ * import through the CJS emit. The type-only `typeof import(...)` below is
+ * erased at compile time, so it costs nothing at runtime while keeping the
+ * dependency statically visible to typecheck and dependency analysis.
+ *
+ * If the library or its model files are unavailable anyway — an image built
+ * without egress, a stripped model cache — `getDefaultEmbedder` returns null;
+ * the stage then emits nothing and cold rows fall through to the OpenAI batch
+ * unchanged. An embedding failure must never fail an import. Tests cover that
+ * path by injecting a loader that returns null (`embedderLoader`), never by
+ * relying on the package being genuinely absent.
  */
 import { QueryTypes } from 'sequelize';
 import { sequelize, MerchantEmbedding } from '../models';
@@ -189,25 +213,32 @@ export async function getDefaultEmbedder(): Promise<Embedder | null> {
   return defaultEmbedderPromise;
 }
 
-type TransformersModule = {
-  pipeline: (
-    task: string,
-    model: string,
-  ) => Promise<
-    (text: string, opts: { pooling: string; normalize: boolean }) => Promise<{ data: Float32Array | number[] }>
-  >;
-};
+/**
+ * The installed library's own type, referenced type-only. `typeof import(...)` is
+ * erased by the compiler, so it emits no `require()` into the CommonJS output
+ * while still making `@huggingface/transformers` a statically-resolved import:
+ * typecheck fails if the package or its `pipeline` export goes away, instead of
+ * the runtime silently degrading to a null embedder.
+ */
+type TransformersModule = typeof import('@huggingface/transformers');
 
-/** Optional-dependency module specifier, computed at runtime so the TypeScript
- *  compiler does not try to resolve `@xenova/transformers` at build time (it is
- *  an optionalDependency that may not be installed). */
-const TRANSFORMERS_MODULE = ['@xenova', 'transformers'].join('/');
+/** Module specifier computed at runtime: the package is ESM-only and this
+ *  workspace emits CommonJS, so a literal specifier would be downlevelled into
+ *  a `require()` that throws ERR_REQUIRE_ESM. See the file header. */
+const TRANSFORMERS_MODULE = ['@huggingface', 'transformers'].join('/');
+
+/** 8-bit-quantized weights: ~23 MB of model files instead of the ~99 MB fp32
+ *  default. `backend/Dockerfile` bakes exactly this variant into the image, so
+ *  changing it changes which file is fetched and must be changed there too. */
+const EMBEDDING_MODEL_DTYPE = 'q8';
 
 async function buildDefaultEmbedder(): Promise<Embedder | null> {
   try {
     const importer = new Function('m', 'return import(m);') as (m: string) => Promise<unknown>;
     const mod = (await importer(TRANSFORMERS_MODULE)) as TransformersModule;
-    const extractor = await mod.pipeline('feature-extraction', DEFAULT_EMBEDDING_MODEL);
+    const extractor = await mod.pipeline('feature-extraction', DEFAULT_EMBEDDING_MODEL, {
+      dtype: EMBEDDING_MODEL_DTYPE,
+    });
     return async (text: string): Promise<number[]> => {
       const out = await extractor(text, { pooling: 'mean', normalize: true });
       return Array.from(out.data);

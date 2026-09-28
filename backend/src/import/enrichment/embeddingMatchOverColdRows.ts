@@ -163,10 +163,25 @@ async function loadPriorEmbeddings(
   return priors;
 }
 
+/**
+ * `embedder` supplies a working embedder outright; `embedderLoader` replaces the
+ * *resolution* of one, which is the only way to exercise the unavailable case
+ * now that the model is a declared dependency present in dev, CI and the image.
+ * Before it existed, "no local embedding model" was reproduced by the package
+ * genuinely not being installed — so installing it would have deleted coverage of
+ * a path that is still a real production case (an image built without egress, a
+ * stripped model cache). Production passes neither.
+ */
+export type EmbeddingMatchOptions = {
+  embedder?: Embedder;
+  embedderLoader?: () => Promise<Embedder | null>;
+  threshold?: number;
+};
+
 export async function maybeRunEmbeddingMatchOverColdRows(
   coldRows: ColdRow[],
   householdId: number | null,
-  opts?: { embedder?: Embedder; threshold?: number },
+  opts?: EmbeddingMatchOptions,
 ): Promise<EmbeddingMatchResult> {
   // Checked separately (not as one boolean) so the caller learns WHICH of these
   // is why nothing happened.
@@ -178,7 +193,8 @@ export async function maybeRunEmbeddingMatchOverColdRows(
   // warning, emits no signal, and leaves every cold row in place for the
   // OpenAI batch. It must NEVER throw out of here and fail the import.
   try {
-    const embed = opts?.embedder ?? (await getDefaultEmbedder());
+    const loadEmbedder = opts?.embedderLoader ?? getDefaultEmbedder;
+    const embed = opts?.embedder ?? (await loadEmbedder());
     if (embed == null) return emptyResult(coldRows, 'embedder_unavailable');
 
     const merchants = await loadHouseholdMerchants(householdId);
