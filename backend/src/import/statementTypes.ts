@@ -135,6 +135,15 @@ export type StatementPreview = {
   usedParser: StatementParserId;
   usedProfileId?: string;
   profileInferred?: boolean;
+  /**
+   * Trust level for every transaction this preview commits. Absent means
+   * 'authoritative': a statement, CSV or PDF is the source's own closed record.
+   *
+   * The SimpleFIN sync commits through this same pipeline, so the tier has to
+   * travel with the preview rather than be decided inside commitStatementImport
+   * — the commit path cannot tell a nightly feed from a statement otherwise.
+   */
+  sourceTier?: 'provisional' | 'authoritative';
   headers?: string[];
   transactions: NormalizedCashTransaction[];
   investmentActivities: NormalizedInvestmentActivity[];
