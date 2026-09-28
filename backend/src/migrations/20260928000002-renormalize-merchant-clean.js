@@ -38,137 +38,28 @@
  *   - It does not touch Rules. Measured against production: of 59 rule
  *     patterns, zero rows lose a match and zero gain one.
  *
- * The normalizer is INLINED below rather than imported. Migrations must be
- * frozen at the semantics of their moment — `sequelize-cli` loads plain JS with
- * no TS pipeline, and a migration that tracked a live module would silently
- * change meaning on every later normalizer edit. Mirrors
- * `backend/src/import/normalizeMerchant.ts` as of 2026-09-28; if that file
- * changes, this one deliberately does not.
+ * It runs the FULL normalizer, not just the new boilerplate strips. Applying
+ * only the strips leaves rows whose value differs from what the import pipeline
+ * produces — stripping `CONTACTLESS INTERAC PURCHASE - 9444 ` off
+ * `SQ *HIGHLAND PI` exposes a processor prefix the later passes then remove, and
+ * stripping an FX suffix exposes a trailing store number — and those rows would
+ * be freshly orphaned by the next import. Measured on production: 23 such rows.
  */
 
-// --- BEGIN inlined mirror of src/import/normalizeMerchant.ts (2026-09-28) ---
-
-const PROCESSOR_PREFIXES = [
-  /^SQ\s*\*\s*/i,
-  /^TST\s*\*\s*/i,
-  /^PAYPAL\s*\*\s*/i,
-  /^STRIPE\s*\*\s*/i,
-  /^GOOGLE\s*\*\s*/i,
-  /^GOOGLE\s+\*\s*/i,
-  /^DD\s*\*\s*/i,
-  /^GH\s*\*\s*/i,
-  /^IC\s*\*\s*/i,
-  /^CTLP\s*\*\s*/i,
-  /^INTUIT\s*\*\s*/i,
-  /^PADDLE\.NET\s*\*\s*/i,
-];
-
-const TRAILING_AMZN_MKTP_ID = /\*[A-Z0-9]{4,}$/;
-const TRAILING_STORE_NUMBER = /\s+(#\d+|STORE\s*#?\d+|\d{4,6})$/i;
-const TRAILING_PHONE = /\s+\+?\d[\d\-.\s()]{6,}\d$/;
-const MID_STORE_WITH_CITY =
-  /\s+(?:(?:#\s*\d{2,}|[A-Z]\d{4,})(?:\s+[A-Z][A-Z'\-]+){0,2}|\d{3,}(?:\s+[A-Z][A-Z'\-]+){1,2})\s*$/;
-
-const FX_RATE_SUFFIX = /\s*\[[A-Z][A-Z ]*\s[\d,]+(?:\.\d+)?\s@\s\d+(?:\.\d+)?\]\s*$/;
-const DATE_PARENTHETICAL = /\s*\([^()]*\d{4}-\d{2}-\d{2}[^()]*\)/g;
-const TRAILING_DATE_CLAUSE =
-  /,?\s*(?:received on|record date of|executed at|for period|from|to|on|at)?\s*\d{4}-\d{2}-\d{2}\b.*$/i;
-const DANGLING_TAIL_PUNCTUATION = /[\s,;:]+$/;
-const CARD_NETWORK_PURCHASE_PREFIX =
-  /^(?:CONTACTLESS\s+INTERAC|ONLINE\s+BANKING\s+INTERAC|VISA\s+DEBIT|INTERAC)\s+PURCHASE(?:\s+REFUND)?\s*-\s*\d*\s*/i;
-
-const STATE_PROV_SET = new Set([
-  'AB','BC','MB','NB','NL','NS','NT','NU','ON','PE','QC','SK','YT',
-  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
-  'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
-  'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
-  'VA','WA','WV','WI','WY','DC',
-]);
-const COUNTRY_SET = new Set(['US', 'USA', 'CA', 'CAN']);
-const ALL_CAPS_WORD = /^[A-Z][A-Z'\-]+$/;
-
-function stripCityStateTail(s) {
-  const words = s.split(' ');
-  let i = words.length - 1;
-  if (i >= 0 && COUNTRY_SET.has(words[i].toUpperCase())) i--;
-  if (i < 0 || !STATE_PROV_SET.has(words[i].toUpperCase())) return s;
-  i--;
-  let cityStripped = 0;
-  while (cityStripped < 2 && i >= 2 && ALL_CAPS_WORD.test(words[i])) {
-    i--;
-    cityStripped++;
-  }
-  const end = i + 1;
-  if (end < 1) return s;
-  return words.slice(0, end).join(' ');
-}
-
-function collapseDuplicateTailWord(s) {
-  const words = s.split(' ');
-  if (
-    words.length >= 2 &&
-    words[words.length - 1].toLowerCase() === words[words.length - 2].toLowerCase()
-  ) {
-    words.pop();
-    return words.join(' ');
-  }
-  return s;
-}
-
-function decodeHtmlEntities(s) {
-  return s.replace(/&#39;/g, "'").replace(/&amp;/g, '&').replace(/&quot;/g, '"');
-}
-
-function stripTransactionBoilerplate(input) {
-  let s = input;
-
-  const withoutPrefix = s.replace(CARD_NETWORK_PURCHASE_PREFIX, '').trim();
-  if (withoutPrefix) s = withoutPrefix;
-
-  const withoutFx = s.replace(FX_RATE_SUFFIX, '').trim();
-  if (withoutFx) s = withoutFx;
-
-  const dateStripped = s.replace(DATE_PARENTHETICAL, '').replace(TRAILING_DATE_CLAUSE, '');
-  if (dateStripped !== s) {
-    const cleaned = dateStripped.replace(DANGLING_TAIL_PUNCTUATION, '').trim();
-    if (cleaned) s = cleaned;
-  }
-
-  return s.replace(/\s+/g, ' ').trim();
-}
-
-function normalizeMerchant(raw) {
-  if (raw == null) return '';
-  const collapsed = decodeHtmlEntities(String(raw)).trim().replace(/\s+/g, ' ');
-  if (!collapsed) return '';
-  let s = collapsed;
-
-  s = stripTransactionBoilerplate(s);
-
-  for (const re of PROCESSOR_PREFIXES) {
-    if (re.test(s)) {
-      s = s.replace(re, '').trim();
-      break;
-    }
-  }
-
-  s = s.replace(TRAILING_AMZN_MKTP_ID, '').trim();
-  s = s.replace(TRAILING_PHONE, '').trim();
-  s = s.replace(MID_STORE_WITH_CITY, '').trim();
-
-  let prev = '';
-  while (prev !== s) {
-    prev = s;
-    s = s.replace(TRAILING_STORE_NUMBER, '').trim();
-    s = collapseDuplicateTailWord(s);
-    s = stripCityStateTail(s);
-  }
-
-  const out = s.replace(/\s+/g, ' ').trim();
-  return out || collapsed;
-}
-
-// --- END inlined mirror ---
+// The normalizer is SHARED, not copied: `backend/lib/merchantNormalization.js`
+// is plain CommonJS precisely so `sequelize-cli` (which loads migrations as
+// plain JS, with no TypeScript pipeline) and the app's typed facade at
+// `src/import/normalizeMerchant.ts` can run the identical function. Inlining a
+// ~120-line copy here would drift silently from the live rules.
+//
+// The consequence, stated plainly: this migration is not frozen in time. Its
+// contract is "make stored merchant_clean equal what the current normalizer
+// produces", so re-running it after a later normalizer change re-converges
+// rather than replaying 2026-09-28 semantics. That is the right contract for a
+// derived, fully recomputable column -- `runEnrichmentBackfill` re-derives the
+// same value from the untouched `merchant_raw` -- and it is why `up` is
+// idempotent.
+const { normalizeMerchant } = require('../../lib/merchantNormalization');
 
 const BATCH = 500;
 
