@@ -1,5 +1,11 @@
 # Deploying to Railway
 
+> **RETIRED — historical only.** Cashflow moved off Railway to Dokploy on
+> 2026-09-26. Nothing below is live: the Railway project has no services, and
+> the `RAILWAY_TOKEN` secret is dead. For the current pipeline see
+> [releasing.md](releasing.md); for the Dokploy layout see
+> [superpowers/plans/2026-09-23-cashflow-dokploy-migration.md](superpowers/plans/2026-09-23-cashflow-dokploy-migration.md).
+
 Cashflow deploys to Railway as a single Yarn workspace monorepo with two
 services. Both services point at the repo root and select their target via the
 `RAILWAY_DEPLOY_TARGET` environment variable.

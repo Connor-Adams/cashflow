@@ -199,11 +199,12 @@ rules, and sample transactions are ensured without duplicating on later deploys.
 
 Image-based and **not** auto-deployed from `main`: CI builds and pushes
 `backend`/`frontend` images to GHCR on merge; publishing a GitHub Release
-re-tags them `:production` and fires Railway redeploys. The full pipeline,
-version-bump rules, and rollback steps are in
-[docs/releasing.md](docs/releasing.md); Railway service config and storage in
-[docs/deploy-railway.md](docs/deploy-railway.md). Local dev setup, CI parity,
-and git hooks are in [CONTRIBUTING.md](CONTRIBUTING.md).
+re-tags the changed ones `:production`. Publishing does **not** deploy —
+hosting is [Dokploy](https://dokploy.com), whose panel CI cannot reach, so the
+redeploy is a human step (the promote run summary names which services need
+it). The full pipeline, version-bump rules, and rollback steps are in
+[docs/releasing.md](docs/releasing.md). Local dev setup, CI parity, and git
+hooks are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

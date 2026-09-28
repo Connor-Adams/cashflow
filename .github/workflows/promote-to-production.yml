@@ -1,8 +1,31 @@
 name: promote-to-production
 
+# Publishing a release pins a version: every service is stamped :<tag>, and the
+# services whose image actually changed get :production moved onto them.
+#
+# It does NOT deploy. The Dokploy panel is on a LAN address, unreachable from a
+# GitHub-hosted runner, so the redeploy is a human step — the run summary names
+# exactly which services need it. Dokploy's own per-application deploy webhook
+# (`POST /api/deploy/<refreshToken>`, autoDeploy already enabled) is what a
+# future automation should call if the panel is ever exposed; nothing else here
+# needs to change for that.
+#
+# History: this job used to run `railway redeploy` as its last step. Railway was
+# retired 2026-09-26, so that call began failing with "Project has no services."
+# Under `set -e` it aborted the whole loop, and v0.13.187 promoted a re-tagged
+# backend against an untouched frontend. Hence the per-service fault isolation.
+
 on:
   release:
     types: [published]
+  # Re-promote an existing release — finishes a run that failed part-way
+  # without cutting a new version.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to promote, e.g. v0.13.187
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -13,13 +36,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RAILWAY_BACKEND_SERVICE_ID: 42977748-ab5c-4552-a206-faf86d353e5b
-  RAILWAY_FRONTEND_SERVICE_ID: e0dc05b7-3961-4d4f-aea9-bed3810ea2f5
-  RAILWAY_OTEL_COLLECTOR_SERVICE_ID: "8e2cf3d2-7255-43d7-8237-6dd4b97a6699"
-  RAILWAY_LOKI_SERVICE_ID: "90312934-b760-4cb4-aae5-2c1eddf0b483"
-  RAILWAY_PROMETHEUS_SERVICE_ID: "03a89189-868d-44af-89cf-d096a1c6e61a"
-  RAILWAY_GRAFANA_SERVICE_ID: 0649a415-40cb-4d45-b28f-38111a77b959
-  RAILWAY_TEMPO_SERVICE_ID: 977ae051-e712-4194-a564-f821346ad098
   IMAGE_WAIT_ATTEMPTS: 30
   IMAGE_WAIT_SECONDS: 10
 
@@ -27,9 +43,8 @@ jobs:
   promote:
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
       REPO: ${{ github.repository }}
-      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
     steps:
       # Check out the released commit so we can recompute each service's content
       # hash exactly as build-images.yml did. `ref: <tag>` resolves annotated
@@ -37,7 +52,7 @@ jobs:
       - name: Check out release commit
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
           fetch-depth: 0
 
       - name: Log in to GHCR
@@ -47,52 +62,36 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Railway CLI
-        # Pinned: @railway/cli 4.66.1 (2026-06-03) sends a GraphQL query with a
-        # `deletedAt` field on VolumeInstance that Railway's API rejects, crashing
-        # `railway redeploy` ("Cannot query field deletedAt on type VolumeInstance").
-        # 4.66.0 is the last version that promotes cleanly. Bump deliberately after
-        # verifying redeploy works against the live API.
-        run: npm install -g @railway/cli@4.66.0
-
       # Resolve each service by its content hash (:tree-<hash>), stamp every
-      # service with the release version tag, and re-tag :production + redeploy
-      # ONLY the services whose image actually differs from what's live. Images
-      # are NOT rebuilt here — build-images.yml already pushed :tree-<hash>.
+      # service with the release version tag, and re-tag :production for the
+      # services whose image differs from what production serves. Images are NOT
+      # rebuilt here — build-images.yml already pushed :tree-<hash>.
       # Design: docs/superpowers/specs/2026-06-02-skip-unchanged-image-builds-design.md
-      - name: Promote, version-tag, and redeploy changed services
+      - name: Promote and version-tag changed services
         run: |
-          set -euo pipefail
-
-          if [ -z "${RAILWAY_TOKEN}" ]; then
-            echo "RAILWAY_TOKEN secret is not set" >&2
-            exit 1
-          fi
+          # Deliberately not `set -e`: a service that fails must not prevent the
+          # others from being promoted. Failures are collected and re-raised at
+          # the end, after every service has had its turn.
+          set -uo pipefail
 
           REPO_LC=$(echo "$REPO" | tr '[:upper:]' '[:lower:]')
           RELEASE_SHA=$(git rev-parse HEAD)
           echo "Promoting release $RELEASE_TAG (commit $RELEASE_SHA)"
 
-          # name|railway-service-id
-          SERVICES=(
-            "backend|$RAILWAY_BACKEND_SERVICE_ID"
-            "frontend|$RAILWAY_FRONTEND_SERVICE_ID"
-            "otel-collector|$RAILWAY_OTEL_COLLECTOR_SERVICE_ID"
-            "loki|$RAILWAY_LOKI_SERVICE_ID"
-            "prometheus|$RAILWAY_PROMETHEUS_SERVICE_ID"
-            "grafana|$RAILWAY_GRAFANA_SERVICE_ID"
-            "tempo|$RAILWAY_TEMPO_SERVICE_ID"
-          )
+          SERVICES=(backend frontend otel-collector loki prometheus grafana tempo)
 
           # Manifest digest a tag resolves to, or empty if the tag doesn't exist.
           digest() {
             docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$1" 2>/dev/null || true
           }
 
-          for entry in "${SERVICES[@]}"; do
-            IFS='|' read -r name service_id <<< "$entry"
+          # Promote one service. Returns non-zero on failure; sets `changed_flag`
+          # when :production actually moved.
+          promote_one() {
+            name="$1"
             image="ghcr.io/${REPO_LC}-${name}"
-            hash=$(node scripts/service-content-hash.cjs "$name" "$RELEASE_SHA")
+
+            hash=$(node scripts/service-content-hash.cjs "$name" "$RELEASE_SHA") || return 1
             src="${image}:tree-${hash}"
 
             # Wait for the source image — covers a release racing a still-running build.
@@ -108,15 +107,15 @@ jobs:
               fi
             done
             if [ -z "$ready" ]; then
-              echo "Source image not available after $(( IMAGE_WAIT_ATTEMPTS * IMAGE_WAIT_SECONDS )) seconds: $src" >&2
-              exit 1
+              echo "  $name: source image not available after $(( IMAGE_WAIT_ATTEMPTS * IMAGE_WAIT_SECONDS )) seconds: $src" >&2
+              return 1
             fi
 
             # Version snapshot for ALL services (cheap registry manifest copy) so
             # the release tag labels a complete per-service image set for rollback.
-            docker buildx imagetools create --tag "${image}:${RELEASE_TAG}" "$src"
+            docker buildx imagetools create --tag "${image}:${RELEASE_TAG}" "$src" || return 1
 
-            # Redeploy only when this release's image differs from production.
+            # Move :production only when this release's image differs from it.
             # `imagetools create` wraps a single manifest in an OCI index, so
             # :production's own digest won't equal the :tree-<hash> manifest
             # digest. Treat it as unchanged if the source digest matches
@@ -136,15 +135,50 @@ jobs:
               fi
             fi
             if [ -n "$unchanged" ]; then
-              echo "  $name: unchanged (production already serves $src_digest); skipping redeploy"
-              continue
+              echo "  $name: unchanged (production already serves $src_digest)"
+              return 0
             fi
 
-            echo "  $name: changed; re-tagging :production and redeploying"
-            docker buildx imagetools create --tag "${image}:production" "$src"
-            if [ -n "$service_id" ]; then
-              railway redeploy --service "$service_id" -y
+            echo "  $name: changed; re-tagging :production"
+            docker buildx imagetools create --tag "${image}:production" "$src" || return 1
+            changed_flag=1
+            return 0
+          }
+
+          changed=()
+          failed=()
+          for name in "${SERVICES[@]}"; do
+            changed_flag=""
+            if promote_one "$name"; then
+              if [ -n "$changed_flag" ]; then changed+=("$name"); fi
             else
-              echo "  $name: no Railway service id set; skipped redeploy"
+              echo "  $name: PROMOTION FAILED" >&2
+              failed+=("$name")
+              continue
             fi
           done
+
+          # The summary is the deploy instruction. A green run here means the
+          # images are pinned, NOT that production is serving them.
+          {
+            echo "### Promotion — $RELEASE_TAG"
+            echo ""
+            if [ ${#changed[@]} -gt 0 ]; then
+              echo "Re-tagged \`:production\`: ${changed[*]}"
+              echo ""
+              echo "**Not deployed yet.** The Dokploy panel is LAN-only, so CI cannot trigger it."
+              echo "Redeploy these in Dokploy to ship them:"
+              for n in "${changed[@]}"; do echo "- \`$n\`"; done
+            else
+              echo "No service changed — production already serves this release."
+            fi
+            if [ ${#failed[@]} -gt 0 ]; then
+              echo ""
+              echo "**Failed to promote:** ${failed[*]}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "Promotion failed for: ${failed[*]}" >&2
+            exit 1
+          fi
