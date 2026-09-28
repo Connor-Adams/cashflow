@@ -622,7 +622,7 @@ export type AuthUser = {
 /**
  * A rule's composable effect (issue #795). The scalar columns below mirror the
  * `set_category` / `set_business` / `set_split` actions for backward compat;
- * `set_label` / `set_alert` live only in the actions list.
+ * `set_label` / `set_alert` / `set_txn_type` live only in the actions list.
  */
 export type RuleAction =
   | { type: 'set_category'; payload: { category: string | null } }
@@ -630,6 +630,27 @@ export type RuleAction =
   | { type: 'set_split'; payload: { splitType: string; pctMe: string | null; pctPartner: string | null } }
   | { type: 'set_label'; payload: { labelId: number } }
   | { type: 'set_alert'; payload: { severity: 'info' | 'warn' | 'critical'; title?: string; body?: string } }
+  /**
+   * Overrides the transaction's `txnType`. Beware: this field drives whether a
+   * row counts as spend at all (`transfer` / `investment` / `dividend` drop out
+   * of the dashboard and the Sankey entirely) and feeds the tax engine, so the
+   * editor warns on those values.
+   */
+  | { type: 'set_txn_type'; payload: { txnType: TxnTypeValue } }
+
+/** The `txn_type` vocabulary a rule may assign. */
+export type TxnTypeValue =
+  | 'purchase'
+  | 'income'
+  | 'transfer'
+  | 'payment'
+  | 'refund'
+  | 'reward'
+  | 'fee'
+  | 'interest'
+  | 'dividend'
+  | 'investment'
+  | 'unknown'
 
 export type Rule = {
   id: number

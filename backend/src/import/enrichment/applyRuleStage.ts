@@ -1,5 +1,5 @@
 import { findBestRule, applyRuleToAuto, type RuleRow } from '../applyRules';
-import type { Signal } from './types';
+import type { Signal, TxnType } from './types';
 
 export interface ApplyRuleInput {
   merchantClean: string;
@@ -23,8 +23,16 @@ export function runApplyRuleStage(input: ApplyRuleInput): Signal[] {
   // so we don't double-apply them here.
   const labelIds: number[] = [];
   const alerts: NonNullable<Signal['ruleActions']>['alerts'] = [];
+  // `set_txn_type` is NOT a side-channel action: txnType is a plain column on
+  // `transactions` and already a first-class SignalFields key written by all
+  // three persist paths, so it rides `fields` like autoCategory does. (Labels
+  // and alerts need the side-channel because they write to other tables.)
+  // validateActions has already constrained the payload to SETTABLE_TXN_TYPES,
+  // which is the TxnType union spelled as strings.
+  let txnType: TxnType | undefined;
   for (const a of rule.actions ?? []) {
-    if (a.type === 'set_label') labelIds.push(a.payload.labelId);
+    if (a.type === 'set_txn_type') txnType = a.payload.txnType as TxnType;
+    else if (a.type === 'set_label') labelIds.push(a.payload.labelId);
     else if (a.type === 'set_alert') {
       alerts.push({
         severity: a.payload.severity,
@@ -44,6 +52,10 @@ export function runApplyRuleStage(input: ApplyRuleInput): Signal[] {
       autoPctMe: auto.autoPctMe,
       autoPctPartner: auto.autoPctPartner,
       appliedRuleId: rule.id,
+      // Only claim the field when the rule actually sets it — an absent key
+      // lets the lower-precedence type-detect stage decide, which is what
+      // every rule without this action should keep doing.
+      ...(txnType != null ? { txnType } : {}),
     },
     rationale: `matched rule pattern "${rule.merchantPattern}"`,
   };

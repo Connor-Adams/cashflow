@@ -19,9 +19,39 @@ import { ImportRulesModal } from '../components/rules/ImportRulesModal'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import { useUrlSort } from '../hooks/useUrlSort'
 import { useLabels } from '../lib/useLabels'
-import type { Rule, RuleAction } from '../types/api'
+import type { Rule, RuleAction, TxnTypeValue } from '../types/api'
 
 type AlertSeverity = 'info' | 'warn' | 'critical'
+
+/** The txn_type vocabulary a rule may assign; mirrors SETTABLE_TXN_TYPES. */
+const TXN_TYPE_OPTIONS: readonly TxnTypeValue[] = [
+  'purchase',
+  'income',
+  'transfer',
+  'payment',
+  'refund',
+  'reward',
+  'fee',
+  'interest',
+  'dividend',
+  'investment',
+  'unknown',
+]
+
+/**
+ * Types that DELETE money from the reports: transfer / investment / dividend
+ * drop out of spend entirely, and payment / refund / reward change the
+ * net-spend arithmetic. Mirrors RISKY_TXN_TYPES on the backend. `income` is
+ * absent — it adds, never removes.
+ */
+const RISKY_TXN_TYPES: ReadonlySet<TxnTypeValue> = new Set([
+  'transfer',
+  'investment',
+  'dividend',
+  'payment',
+  'refund',
+  'reward',
+])
 
 const RULES_SORT_FIELDS = ['name', 'matchType', 'priority', 'updatedAt'] as const
 
@@ -97,6 +127,7 @@ export function RulesPage() {
   const [alertSeverity, setAlertSeverity] = useState<AlertSeverity>('info')
   const [alertTitle, setAlertTitle] = useState('')
   const [alertBody, setAlertBody] = useState('')
+  const [newTxnType, setNewTxnType] = useState<TxnTypeValue | ''>('')
   // A set_label row referencing a label that no longer exists must block save
   // and surface a warning (AC #9, editor side).
   const danglingLabelIds = useMemo(
@@ -282,6 +313,9 @@ export function RulesPage() {
       for (const labelId of newLabelIds) {
         actions.push({ type: 'set_label', payload: { labelId } })
       }
+      if (newTxnType) {
+        actions.push({ type: 'set_txn_type', payload: { txnType: newTxnType } })
+      }
       if (alertEnabled) {
         actions.push({
           type: 'set_alert',
@@ -316,6 +350,7 @@ export function RulesPage() {
       setAlertSeverity('info')
       setAlertTitle('')
       setAlertBody('')
+      setNewTxnType('')
       setShareError(null)
       setPatternError(null)
       setPreviewState(null)
@@ -685,6 +720,39 @@ export function RulesPage() {
                   />
                 </label>
               </div>
+            )}
+          </div>
+
+          {/* Override the detected transaction type. Separate from category:
+            * category says what the money was for, txn_type says whether it
+            * counts as spend at all. */}
+          <div className="col-span-full" data-testid="rule-txn-type-action">
+            <label>
+              Transaction type
+              <select
+                name="txnType"
+                value={newTxnType}
+                onChange={(e) => setNewTxnType(e.target.value as TxnTypeValue | '')}
+              >
+                <option value="">Leave as detected</option>
+                {TXN_TYPE_OPTIONS.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {newTxnType && RISKY_TXN_TYPES.has(newTxnType) && (
+              <p
+                className="mt-1 text-sm text-warning"
+                data-testid="txn-type-warning"
+                role="status"
+              >
+                <strong>{newTxnType}</strong> removes matching transactions from
+                your spend totals — the dashboard, the cashflow chart and the tax
+                figures will all change. Saving also re-applies this to matching
+                transactions already imported.
+              </p>
             )}
           </div>
         </div>

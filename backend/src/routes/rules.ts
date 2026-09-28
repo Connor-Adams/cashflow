@@ -28,6 +28,7 @@ import {
   validateActions,
   deriveActionsFromScalars,
   deriveScalarsFromActions,
+  preserveNonScalarActions,
   type RuleAction,
 } from '../rules/actions';
 import { validateUserPattern, safeRegexTest } from '../util/safeRegex';
@@ -400,9 +401,7 @@ router.patch('/:id', async (req, res, next) => {
       // Preserve any non-scalar (set_label / set_alert) actions already on the
       // rule; only re-derive the scalar-backed action triplet.
       const existing = (row.get('actions') as RuleAction[] | null) ?? [];
-      const nonScalar = existing.filter(
-        (a) => a.type === 'set_label' || a.type === 'set_alert',
-      );
+      const nonScalar = preserveNonScalarActions(existing);
       row.set('actions', [...deriveActionsFromScalars(scalar), ...nonScalar]);
     }
     await row.save();
