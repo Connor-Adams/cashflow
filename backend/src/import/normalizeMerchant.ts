@@ -113,10 +113,116 @@ function decodeHtmlEntities(s: string): string {
     .replace(/&quot;/g, '"');
 }
 
+// ---------------------------------------------------------------------------
+// Transaction-specific boilerplate.
+//
+// `merchant_clean` is the key merchant memory (`findMerchantMemory`) and Rule
+// patterns hinge on, so anything transaction-specific left in it forks one real
+// merchant into many single-support memory buckets — a merchant seen fifteen
+// times looks like fifteen merchants seen once and never reaches the support
+// threshold that would let memory categorise it for free.
+//
+// Each pattern below was measured against production before being added; see
+// docs/superpowers/specs/2026-09-28-embedding-threshold-calibration.md. They are
+// deliberately narrow: bracketed qualifiers, parentheticals and digit groups
+// that are NOT of these exact shapes can be part of a merchant's identity and
+// are left alone.
+// ---------------------------------------------------------------------------
+
+/**
+ * Trailing foreign-exchange annotation the card issuer appends to a
+ * foreign-currency charge: `[<CURRENCY WORDS> <amount> @ <rate>]`.
+ *   "CLOUDFLARE SAN FRANCISCO [UNITED STATES DOLLAR 4.72 @ 1.41314]"
+ * The amount and rate differ on every charge, so one monthly subscription
+ * becomes one merchant key per month.
+ *
+ * Anchored to end-of-string and requires the full `<words> <amount> @ <rate>`
+ * shape. Every one of the 119 production rows carrying a `[...]` matched this;
+ * none carried a bracketed qualifier that was part of the merchant name. A
+ * bracket that is not this shape (e.g. `[LIMITED EDITION]`) is preserved.
+ */
+const FX_RATE_SUFFIX = /\s*\[[A-Z][A-Z ]*\s[\d,]+(?:\.\d+)?\s@\s\d+(?:\.\d+)?\]\s*$/;
+
+/**
+ * A parenthetical containing a full ISO date. Wealthsimple stores whole
+ * sentences as the merchant, each carrying the execution date:
+ *   "Money transfer out of the account (executed at 2026-07-01)"
+ * Dropping the parenthetical collapses every month of one activity onto one
+ * key. A parenthetical with no ISO date (`BELL CANADA (OB) MONTREAL`) is
+ * identity, not boilerplate, and is kept.
+ */
+const DATE_PARENTHETICAL = /\s*\([^()]*\d{4}-\d{2}-\d{2}[^()]*\)/g;
+
+/**
+ * A trailing clause introduced by a date-bearing connective, for the
+ * Wealthsimple sentences whose date is not parenthesised:
+ *   "... Cash dividend distribution, received on 2024-10-07, record date of"
+ *   "Subscription fee paid for period 2026-01-01 to"
+ * Everything from the connective (or the bare date) to end-of-string goes. The
+ * ISO date is required, so `ACME 2026-09 SUBSCRIPTION` is untouched.
+ */
+const TRAILING_DATE_CLAUSE =
+  /,?\s*(?:received on|record date of|executed at|for period|from|to|on|at)?\s*\d{4}-\d{2}-\d{2}\b.*$/i;
+
+/** Dangling punctuation exposed by removing a trailing clause. */
+const DANGLING_TAIL_PUNCTUATION = /[\s,;:]+$/;
+
+/**
+ * Card-network transaction-type prefix plus the terminal reference number that
+ * follows it:
+ *   "CONTACTLESS INTERAC PURCHASE - 8507 SHOPPERS DRUG M" -> "SHOPPERS DRUG M"
+ * The reference number is per-transaction, so in production 281 rows carried
+ * 241 distinct keys — twelve separate `SHOPPERS DRUG M` merchants, twelve
+ * separate `TIM HORTONS`. Stripping it also merges these rows onto the plain
+ * credit-card spelling of the same merchant.
+ *
+ * At least one card-network qualifier is required, so a merchant string that
+ * merely starts with `PURCHASE - ` is not touched. Other bank boilerplate
+ * (`ONLINE BANKING PAYMENT`, `E-TRANSFER - ...`, `ATM DEPOSIT - ...`,
+ * `ONLINE TRANSFER ...`) is deliberately NOT stripped: those carry transfer
+ * counterparty and reference information that transfer matching and
+ * `detectTypeStage` read, and need their own measurement.
+ */
+const CARD_NETWORK_PURCHASE_PREFIX =
+  /^(?:CONTACTLESS\s+INTERAC|ONLINE\s+BANKING\s+INTERAC|VISA\s+DEBIT|INTERAC)\s+PURCHASE(?:\s+REFUND)?\s*-\s*\d*\s*/i;
+
+/**
+ * Remove transaction-specific boilerplate from an already-whitespace-collapsed
+ * merchant string. Pure and total: it never throws and never returns a string
+ * that is empty when the input was not (a row whose merchant is nothing *but*
+ * boilerplate keeps the boilerplate, so it still has something to key on).
+ *
+ * Exported because migration `20260928000002-renormalize-merchant-clean`
+ * mirrors it to re-key historical rows; keep the two in step.
+ */
+export function stripTransactionBoilerplate(input: string): string {
+  let s = input;
+
+  const withoutPrefix = s.replace(CARD_NETWORK_PURCHASE_PREFIX, '').trim();
+  if (withoutPrefix) s = withoutPrefix;
+
+  const withoutFx = s.replace(FX_RATE_SUFFIX, '').trim();
+  if (withoutFx) s = withoutFx;
+
+  const dateStripped = s.replace(DATE_PARENTHETICAL, '').replace(TRAILING_DATE_CLAUSE, '');
+  if (dateStripped !== s) {
+    // Only tidy the tail when a date clause actually went — otherwise this
+    // would silently start rewriting merchants whose stored name happens to
+    // end in punctuation, which is not a pattern we measured.
+    const cleaned = dateStripped.replace(DANGLING_TAIL_PUNCTUATION, '').trim();
+    if (cleaned) s = cleaned;
+  }
+
+  return s.replace(/\s+/g, ' ').trim();
+}
+
 export function normalizeMerchant(raw: unknown): string {
   if (raw == null) return '';
-  let s = decodeHtmlEntities(String(raw)).trim().replace(/\s+/g, ' ');
-  if (!s) return '';
+  const collapsed = decodeHtmlEntities(String(raw)).trim().replace(/\s+/g, ' ');
+  if (!collapsed) return '';
+  let s = collapsed;
+
+  s = stripTransactionBoilerplate(s);
 
   for (const re of PROCESSOR_PREFIXES) {
     if (re.test(s)) {
@@ -137,5 +243,8 @@ export function normalizeMerchant(raw: unknown): string {
     s = stripCityStateTail(s);
   }
 
-  return s.replace(/\s+/g, ' ').trim();
+  const out = s.replace(/\s+/g, ' ').trim();
+  // Never hand back nothing when we were given something: an empty
+  // `merchant_clean` is a row with no memory key and no rule surface at all.
+  return out || collapsed;
 }
