@@ -194,6 +194,53 @@ export function resolveCategoryLabel(row: {
   return c.length > 0 ? c : UNCATEGORIZED_LABEL;
 }
 
+/**
+ * True when a row's resolved category id is a node in the household tree —
+ * i.e. the hierarchy can be walked from it. A row can carry an id that the
+ * tree does not know (a deleted category, or no tree supplied at all); such a
+ * row buckets by label instead.
+ */
+function isInCategoryTree(
+  categoryId: number | null,
+  tree: CategoryTree | undefined,
+): boolean {
+  if (categoryId == null) return false;
+  return tree?.parentById.has(categoryId) === true;
+}
+
+/**
+ * Display label for an in-tree category. The tree's own name wins; a node
+ * present in `parentById` but missing from `nameById` falls back to the row's
+ * label so the bucket is still named something.
+ */
+function categoryTreeLabel(
+  categoryId: number,
+  row: { finalCategory: string | null },
+  tree: CategoryTree | undefined,
+): string {
+  return tree?.nameById.get(categoryId) ?? resolveCategoryLabel(row);
+}
+
+/**
+ * Where a row's spend accumulates: keyed by `id:<categoryId>` when the row's
+ * category is in the tree (so Pass 2 can walk the hierarchy), else by
+ * `name:<label>`, which keeps flat/unknown categories as their own branch.
+ */
+function resolveBucketTarget(
+  row: { finalCategory: string | null; finalCategoryId?: number | null },
+  tree: CategoryTree | undefined,
+): { key: string; label: string } {
+  const categoryId = row.finalCategoryId ?? null;
+  if (!isInCategoryTree(categoryId, tree)) {
+    const label = resolveCategoryLabel(row);
+    return { key: `name:${label}`, label };
+  }
+  return {
+    key: `id:${categoryId}`,
+    label: categoryTreeLabel(categoryId as number, row, tree),
+  };
+}
+
 interface AggregateOptions {
   /** Cap on top-level nodes; the tail collapses into "Other categories". */
   topCategories?: number;
@@ -216,6 +263,11 @@ interface Bucket {
   txnIds: number[];
   /** Resolved category id, when the row carried one. */
   categoryId: number | null;
+}
+
+/** A bucket before anything has been routed into it. */
+function emptyBucket(label: string): Bucket {
+  return { label, netU: 0, txnIds: [], categoryId: null };
 }
 
 /** A top-level branch of the chart: a tree root, or a flat (id-less) bucket. */
@@ -274,24 +326,12 @@ export function aggregateSankey(
 
   /** Route one signed amount (in units) into the right category bucket. */
   const addToCategory = (row: SankeyTxnRow, deltaU: number): void => {
-    const rowCategoryId = row.finalCategoryId ?? null;
-    const inTree = rowCategoryId != null && tree?.parentById.has(rowCategoryId) === true;
-    const label = inTree
-      ? (tree?.nameById.get(rowCategoryId as number) ?? resolveCategoryLabel(row))
-      : resolveCategoryLabel(row);
-    const key = inTree ? `id:${rowCategoryId}` : `name:${label}`;
-    const bucket = buckets.get(key) ?? {
-      label,
-      netU: 0,
-      txnIds: [],
-      categoryId: null,
-    };
+    const { key, label } = resolveBucketTarget(row, tree);
+    const bucket = buckets.get(key) ?? emptyBucket(label);
     bucket.netU += deltaU;
     bucket.txnIds.push(row.id);
     // Keep the first non-null categoryId seen for this bucket.
-    if (bucket.categoryId === null && rowCategoryId !== null) {
-      bucket.categoryId = rowCategoryId;
-    }
+    bucket.categoryId = bucket.categoryId ?? row.finalCategoryId ?? null;
     buckets.set(key, bucket);
   };
 
@@ -518,10 +558,59 @@ export function aggregateSankey(
     }
   }
 
+  /** Biggest subtree first; ties broken by name so output is deterministic. */
+  const bySubtreeThenName = (a: number, b: number): number =>
+    subtreeU(b) - subtreeU(a) || displayName(a).localeCompare(displayName(b));
+
+  /** A node's drawable children — those with spend — in draw order. */
+  const rankedChildren = (id: number): number[] =>
+    (childrenById.get(id) ?? []).filter((c) => subtreeU(c) > 0).sort(bySubtreeThenName);
+
+  /**
+   * Split a node's children into the ones drawn in their own right and the
+   * hairlines that fold into the parent's remainder. A lone thin child with no
+   * sibling remainder to hide behind keeps its own name instead — relabelling
+   * it "(other)" would lose which category it was.
+   */
+  const splitChildren = (
+    children: number[],
+    directU: number,
+  ): { kept: number[]; folded: number[] } => {
+    const kept = children.filter((c) => subtreeU(c) >= minNodeU);
+    const folded = children.filter((c) => subtreeU(c) < minNodeU);
+    if (folded.length === 1 && directU === 0) {
+      return { kept: [...kept, ...folded], folded: [] };
+    }
+    return { kept, folded };
+  };
+
+  /**
+   * Draw the parent's own direct charges plus every folded child under a single
+   * `"<Parent> (other)"` node, so a split sums to exactly the parent's subtree
+   * total — nothing is dropped by not drawing a child on its own.
+   */
+  const emitRemainder = (id: number, idx: number, folded: number[]): void => {
+    const remainderU = ownU(id) + folded.reduce((sum, c) => sum + subtreeU(c), 0);
+    if (remainderU <= 0) return;
+    const remainderIdx = nodes.length;
+    nodes.push({
+      name: `${displayName(id)}${REMAINDER_SUFFIX}`,
+      kind: 'category',
+      categoryId: id,
+    });
+    addLink(idx, remainderIdx, remainderU, [
+      ...ownIds(id),
+      ...folded.flatMap((c) => subtreeIds(c)),
+    ]);
+  };
+
   /**
    * Emit one tree node under `parentIdx`, then recurse if its share of total
    * spend earns the split. The inbound link always carries the node's whole
    * subtree total, and any split sums back to exactly that.
+   *
+   * A leaf, and a node whose every child is a hairline, both fall out through
+   * the empty-`kept` return — drawn as one undivided node.
    */
   const emitTreeNode = (id: number, parentIdx: number): void => {
     const idx = nodes.length;
@@ -529,36 +618,11 @@ export function aggregateSankey(
     addLink(parentIdx, idx, subtreeU(id), subtreeIds(id));
 
     if (subtreeU(id) < minSplitU) return; // too small to be worth the width
-    const children = (childrenById.get(id) ?? [])
-      .filter((c) => subtreeU(c) > 0)
-      .sort((a, b) => subtreeU(b) - subtreeU(a) || displayName(a).localeCompare(displayName(b)));
-    if (children.length === 0) return; // leaf
-
-    let kept = children.filter((c) => subtreeU(c) >= minNodeU);
-    let folded = children.filter((c) => subtreeU(c) < minNodeU);
-    const direct = ownU(id);
-    if (folded.length === 1 && direct === 0) {
-      // A lone thin child with no sibling remainder keeps its own name.
-      kept = [...kept, ...folded];
-      folded = [];
-    }
-    if (kept.length === 0) return; // every child is a hairline — draw as one
+    const { kept, folded } = splitChildren(rankedChildren(id), ownU(id));
+    if (kept.length === 0) return;
 
     for (const child of kept) emitTreeNode(child, idx);
-
-    const remainderU = direct + folded.reduce((sum, c) => sum + subtreeU(c), 0);
-    if (remainderU > 0) {
-      const remainderIdx = nodes.length;
-      nodes.push({
-        name: `${displayName(id)}${REMAINDER_SUFFIX}`,
-        kind: 'category',
-        categoryId: id,
-      });
-      addLink(idx, remainderIdx, remainderU, [
-        ...ownIds(id),
-        ...folded.flatMap((c) => subtreeIds(c)),
-      ]);
-    }
+    emitRemainder(id, idx, folded);
   };
 
   for (const branch of visible) {

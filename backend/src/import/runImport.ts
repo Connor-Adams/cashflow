@@ -9,7 +9,6 @@ import {
   HoldingSnapshot,
   Transaction,
   ImportHistory,
-  TransactionSignal,
 } from '../models';
 import { upsertAccountCardIdentifier } from '../models/AccountCardIdentifier';
 import {
@@ -40,9 +39,12 @@ import { parseWsHoldingsCsv } from './wealthsimpleHoldingsParse';
 import { wsRecordsHaveSecurityActivity } from './wealthsimpleInvestParse';
 import { assertUnderRoot } from './pathUtils';
 import { findMerchantMemory } from '../ai/merchantMemory';
-import { upsertSuggestedOrderLink } from '../amazon/matcher';
 import * as env from '../config/env';
 import { enrichTransaction } from './enrich';
+import {
+  persistTransactionSignals,
+  persistSuggestedOrderLink,
+} from './enrichment/persistSignals';
 import { applyRuleSideEffects, findRuleActionsSignal } from '../rules/applyRuleSideEffects';
 import {
   computeImportConfidence,
@@ -564,31 +566,10 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         // so the unique-violation rolls back only this row.
         await sequelize.transaction({ transaction: t }, async (sp) => {
           await txn.save({ transaction: sp });
-          if (enriched.signals.length > 0) {
-            await TransactionSignal.bulkCreate(
-              enriched.signals.map((s) => ({
-                transactionId: txn.id,
-                source: s.source,
-                confidence: s.confidence,
-                fields: s.fields,
-                rationale: s.rationale ?? null,
-              })),
-              { transaction: sp },
-            );
-          }
+          await persistTransactionSignals(txn.id, enriched.signals, sp);
 
-          // Persist the item-link match through the canonical TransactionOrderLink
-          // join table (status 'suggested') so imports auto-surface suggested links.
-          const orderLink = enriched.signals.find((s) => s.orderLink)?.orderLink;
-          if (orderLink) {
-            await upsertSuggestedOrderLink({
-              transactionId: txn.id,
-              externalOrderId: orderLink.externalOrderId,
-              confidence: orderLink.confidence,
-              matchReason: orderLink.matchReason,
-              transaction: sp,
-            });
-          }
+          // Surfaces the item-link match as a suggested TransactionOrderLink.
+          await persistSuggestedOrderLink(txn.id, enriched.signals, sp);
 
           // Rule actions side-effects (issue #795): set_label / set_alert.
           const ruleActions = findRuleActionsSignal(enriched.signals);

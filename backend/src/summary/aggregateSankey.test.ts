@@ -56,6 +56,21 @@ function row(overrides: Partial<SankeyTxnRow> & { id: number }): SankeyTxnRow {
 }
 
 /**
+ * `id` plus its ancestors that are present in the map, ROOT FIRST. The walk
+ * stops at a parent the map does not know (or a null one), which is exactly
+ * what makes that node a root — so the chain length is the node's depth + 1.
+ */
+function ancestryOf(id: number, parentById: Map<number, number | null>): number[] {
+  const chain: number[] = [];
+  let cursor: number | null = id;
+  while (cursor != null && parentById.has(cursor)) {
+    chain.push(cursor);
+    cursor = parentById.get(cursor) ?? null;
+  }
+  return chain.reverse();
+}
+
+/**
  * Build a CategoryTree from `[id, name, parentId]` triples — the same shape
  * `loadCategoryTree` produces, without touching the DB.
  */
@@ -68,22 +83,11 @@ function tree(defs: Array<[number, string, number | null]>): CategoryTree {
   }
   const depthById = new Map<number, number>();
   const pathById = new Map<number, string>();
-  const resolve = (id: number): { depth: number; path: string } => {
-    const cached = pathById.get(id);
-    if (cached != null) return { depth: depthById.get(id)!, path: cached };
-    const parent = parentById.get(id) ?? null;
-    const name = nameById.get(id) ?? '';
-    if (parent == null || !parentById.has(parent)) {
-      depthById.set(id, 0);
-      pathById.set(id, name);
-      return { depth: 0, path: name };
-    }
-    const up = resolve(parent);
-    depthById.set(id, up.depth + 1);
-    pathById.set(id, `${up.path} / ${name}`);
-    return { depth: up.depth + 1, path: `${up.path} / ${name}` };
-  };
-  for (const id of parentById.keys()) resolve(id);
+  for (const id of parentById.keys()) {
+    const chain = ancestryOf(id, parentById);
+    depthById.set(id, chain.length - 1);
+    pathById.set(id, chain.map((n) => nameById.get(n) ?? '').join(' / '));
+  }
   return { parentById, nameById, depthById, pathById };
 }
 
@@ -102,40 +106,70 @@ const edgeIds = (r: SankeyResult, from: string, to: string): number[] | null => 
   return lookupEdgeTxnIds(r, link.source, link.target);
 };
 
-/**
- * Structural invariants every result must satisfy. Asserted by most tests —
- * a Sankey whose node in/out sums disagree is silently losing money.
- */
-function assertStructurallySound(r: SankeyResult): void {
-  const inSum = new Map<number, number>();
-  const outSum = new Map<number, number>();
+/** Property 1: every link is drawable — real width, real endpoints. */
+function assertLinksWellFormed(r: SankeyResult): void {
   for (const l of r.links) {
     assert.ok(l.value > 0, 'no zero/negative-width links');
     assert.ok(l.source >= 0 && l.source < r.nodes.length, 'source in range');
     assert.ok(l.target >= 0 && l.target < r.nodes.length, 'target in range');
     assert.notEqual(l.source, l.target, 'no self links');
+  }
+}
+
+/** Inbound and outbound link value totals, per node index. */
+function flowSums(r: SankeyResult): {
+  inSum: Map<number, number>;
+  outSum: Map<number, number>;
+} {
+  const inSum = new Map<number, number>();
+  const outSum = new Map<number, number>();
+  for (const l of r.links) {
     inSum.set(l.target, (inSum.get(l.target) ?? 0) + l.value);
     outSum.set(l.source, (outSum.get(l.source) ?? 0) + l.value);
   }
-  for (let i = 0; i < r.nodes.length; i += 1) {
-    const inflow = inSum.get(i) ?? 0;
-    const outflow = outSum.get(i) ?? 0;
-    if (i === 0) {
-      assert.equal(inflow, 0, 'the income node has no inbound link');
-      continue;
-    }
-    assert.ok(inflow > 0, `node ${i} (${nameOf(r, i)}) is not orphaned`);
-    if (outflow > 0) {
-      // Intermediate node: everything in flows back out — no leakage, no
-      // invention. Compared in cents to tolerate float division at the
-      // fromUnits boundary.
-      assert.equal(
-        Math.round(inflow * 100),
-        Math.round(outflow * 100),
-        `node ${i} (${nameOf(r, i)}) conserves value`,
-      );
-    }
+  return { inSum, outSum };
+}
+
+/**
+ * Property 2, for one node: the income source is the only one with no inbound
+ * link, nothing else is orphaned, and an intermediate node passes on everything
+ * it received — no leakage, no invention. Compared in cents to tolerate float
+ * division at the fromUnits boundary.
+ */
+function assertNodeBalanced(
+  r: SankeyResult,
+  i: number,
+  inflow: number,
+  outflow: number,
+): void {
+  if (i === 0) {
+    assert.equal(inflow, 0, 'the income node has no inbound link');
+    return;
   }
+  assert.ok(inflow > 0, `node ${i} (${nameOf(r, i)}) is not orphaned`);
+  if (outflow <= 0) return; // terminal node — this is where the money stops
+  assert.equal(
+    Math.round(inflow * 100),
+    Math.round(outflow * 100),
+    `node ${i} (${nameOf(r, i)}) conserves value`,
+  );
+}
+
+/** Property 2: every node is reached, and every intermediate one conserves. */
+function assertNodesBalanced(r: SankeyResult): void {
+  const { inSum, outSum } = flowSums(r);
+  for (let i = 0; i < r.nodes.length; i += 1) {
+    assertNodeBalanced(r, i, inSum.get(i) ?? 0, outSum.get(i) ?? 0);
+  }
+}
+
+/**
+ * Structural invariants every result must satisfy. Asserted by most tests —
+ * a Sankey whose node in/out sums disagree is silently losing money.
+ */
+function assertStructurallySound(r: SankeyResult): void {
+  assertLinksWellFormed(r);
+  assertNodesBalanced(r);
 }
 
 // ---- resolveCategoryLabel ----------------------------------------------

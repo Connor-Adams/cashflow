@@ -36,14 +36,34 @@ const categoryIds = new Map<string, number>();
 /** Transaction ids by merchant label, so assertions can name rows. */
 const txnIds = new Map<string, number>();
 
+interface MakeTxnOptions {
+  category?: string;
+  business?: boolean;
+  txnType?: string;
+}
+
+/**
+ * The name/id pair for a row's category. An id is only ever set alongside the
+ * name it was looked up from, so the two mirrors never disagree.
+ */
+function categoryFields(name: string | undefined): {
+  finalCategory: string | null;
+  finalCategoryId: number | null;
+} {
+  if (name == null) return { finalCategory: null, finalCategoryId: null };
+  return { finalCategory: name, finalCategoryId: categoryIds.get(name) ?? null };
+}
+
+/** Negative amounts are purchases and positive ones income, unless overridden. */
+function txnTypeFor(amount: string, override: string | undefined): string {
+  if (override != null) return override;
+  return Number(amount) < 0 ? 'purchase' : 'income';
+}
+
 async function makeTxn(
   label: string,
   amount: string,
-  opts: {
-    category?: string;
-    business?: boolean;
-    txnType?: string;
-  } = {},
+  opts: MakeTxnOptions = {},
 ): Promise<void> {
   const fp = `sankey-drill-${label}-${crypto.randomBytes(6).toString('hex')}`;
   const created = await Transaction.create({
@@ -59,10 +79,9 @@ async function makeTxn(
     merchantClean: label,
     sourceRowFingerprint: fp,
     sourceIdentityFingerprint: fp,
-    finalCategory: opts.category ?? null,
-    finalCategoryId: opts.category ? (categoryIds.get(opts.category) ?? null) : null,
+    ...categoryFields(opts.category),
     finalBusiness: opts.business ?? false,
-    txnType: opts.txnType ?? (Number(amount) < 0 ? 'purchase' : 'income'),
+    txnType: txnTypeFor(amount, opts.txnType),
     reviewFlag: false,
     finalSplitType: 'me',
   } as never);

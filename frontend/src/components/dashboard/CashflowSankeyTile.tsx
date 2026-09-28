@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Button, Icon } from '@connor-adams/designsystem'
 import { BentoTile } from './BentoTile'
 import { SankeyChart } from '@/components/SankeyChart'
-import { getJson } from '@/lib/api'
 import { formatMoney } from '@/lib/formatMoney'
 import { summaryQueryString } from '@/lib/summaryQuery'
+import { useJsonResource } from '@/lib/useJsonResource'
 import type { SankeyResponse } from '@/types/api'
 
 type CashflowSankeyTileProps = {
@@ -32,42 +32,64 @@ const TILE_CHART_HEIGHT = 420
  * controls of its own. Drill-down and the stat cards stay on the full page,
  * which the header links through to.
  */
+/**
+ * True when there is a chart worth drawing: a response, with nodes, that is
+ * not the aggregator's all-zero empty state.
+ */
+function hasDrawableFlows(data: SankeyResponse | null): data is SankeyResponse {
+  if (data === null || data.nodes.length === 0) return false
+  return !(data.totalIncome === 0 && data.totalSpend === 0)
+}
+
+/** The tile's one-line status text, in the DS's muted body style. */
+function TileNote({ children }: { children: ReactNode }) {
+  return <p className="m-0 text-sm text-muted-foreground">{children}</p>
+}
+
+/**
+ * What fills the tile, in precedence order: a failed fetch, the first load,
+ * the chart, then the nothing-to-draw note. Separated from the tile frame so
+ * neither has to be read while thinking about the other.
+ */
+function TileBody({
+  data,
+  loading,
+  failed,
+  currency,
+}: {
+  data: SankeyResponse | null
+  loading: boolean
+  failed: boolean
+  currency: string
+}) {
+  if (failed) return <TileNote>Cashflow chart unavailable for this period.</TileNote>
+  if (loading && data === null) return <TileNote>Loading cashflow…</TileNote>
+  if (hasDrawableFlows(data)) {
+    return (
+      <SankeyChart
+        data={data}
+        currency={currency || data.currency || 'CAD'}
+        height={TILE_CHART_HEIGHT}
+      />
+    )
+  }
+  return (
+    <TileNote>
+      No flows in this period. Widen the date range, or check that income and
+      categories are set on these transactions.
+    </TileNote>
+  )
+}
+
 export function CashflowSankeyTile({
   currency,
   dateFrom,
   dateTo,
 }: CashflowSankeyTileProps) {
-  const [data, setData] = useState<SankeyResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [err, setErr] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setErr(null)
-    const qs = summaryQueryString({ currency, dateFrom, dateTo })
-    getJson<SankeyResponse>(`/api/summary/sankey${qs}`)
-      .then((json) => {
-        if (cancelled) return
-        setData(json)
-      })
-      .catch(() => {
-        if (cancelled) return
-        setData(null)
-        setErr('Cashflow chart unavailable for this period.')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [currency, dateFrom, dateTo])
-
-  const hasFlows =
-    data !== null &&
-    data.nodes.length > 0 &&
-    !(data.totalIncome === 0 && data.totalSpend === 0)
+  const qs = summaryQueryString({ currency, dateFrom, dateTo })
+  const { data, loading, error } = useJsonResource<SankeyResponse>(
+    `/api/summary/sankey${qs}`,
+  )
 
   return (
     <BentoTile
@@ -77,7 +99,7 @@ export function CashflowSankeyTile({
       icon={<Icon name="git-merge" className="size-5" />}
       label="Where the money went"
       description={
-        hasFlows
+        hasDrawableFlows(data)
           ? describeFlows(data, currency)
           : 'Income into draws, categories and surplus — for the range above.'
       }
@@ -89,22 +111,12 @@ export function CashflowSankeyTile({
         </Link>
       }
     >
-      {err ? (
-        <p className="m-0 text-sm text-muted-foreground">{err}</p>
-      ) : loading && data === null ? (
-        <p className="m-0 text-sm text-muted-foreground">Loading cashflow…</p>
-      ) : hasFlows && data ? (
-        <SankeyChart
-          data={data}
-          currency={currency || data.currency || 'CAD'}
-          height={TILE_CHART_HEIGHT}
-        />
-      ) : (
-        <p className="m-0 text-sm text-muted-foreground">
-          No flows in this period. Widen the date range, or check that income
-          and categories are set on these transactions.
-        </p>
-      )}
+      <TileBody
+        data={data}
+        loading={loading}
+        failed={error !== null}
+        currency={currency}
+      />
     </BentoTile>
   )
 }

@@ -63,6 +63,16 @@ function aiWarning(summary: AiBatchSummary): string | null {
 }
 
 /**
+ * One stage's contribution: its warning, but only if it actually had cold rows
+ * in front of it — a stage with nothing to work on cannot have failed to help.
+ * Spread-shaped so the caller reads as pipeline order.
+ */
+function stageWarning(coldRowCount: number, warning: string | null): string[] {
+  if (coldRowCount === 0) return [];
+  return warning == null ? [] : [warning];
+}
+
+/**
  * Warnings for the fallbacks that could not run, in pipeline order (embedding
  * before AI). Empty when both ran, or when there was nothing cold for them to
  * work on.
@@ -71,15 +81,8 @@ export function coldRowFallbackWarnings(
   embedding: EmbeddingMatchSummary,
   ai: AiBatchSummary,
 ): string[] {
-  const out: string[] = [];
-  // A stage with no cold rows in front of it cannot have failed to help.
-  if (embedding.coldRowCount > 0) {
-    const w = embeddingWarning(embedding);
-    if (w != null) out.push(w);
-  }
-  if (ai.coldRowCount > 0) {
-    const w = aiWarning(ai);
-    if (w != null) out.push(w);
-  }
-  return out;
+  return [
+    ...stageWarning(embedding.coldRowCount, embeddingWarning(embedding)),
+    ...stageWarning(ai.coldRowCount, aiWarning(ai)),
+  ];
 }

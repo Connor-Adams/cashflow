@@ -19,7 +19,6 @@ import { findMerchantMemory } from '../ai/merchantMemory';
 import { caseInsensitiveLikeOp } from '../ai/chat/_common';
 import { enrichTransaction } from './enrich';
 import { applyRuleSideEffects, findRuleActionsSignal } from '../rules/applyRuleSideEffects';
-import { upsertSuggestedOrderLink } from '../amazon/matcher';
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
@@ -41,6 +40,10 @@ import {
   type ColdRow,
 } from './enrichment/aiBatchOverColdRows';
 import { maybeRunEmbeddingMatchOverColdRows } from './enrichment/embeddingMatchOverColdRows';
+import {
+  persistTransactionSignals,
+  persistSuggestedOrderLink,
+} from './enrichment/persistSignals';
 import type { ChatMessage } from './enrichment/aiBatchStage';
 import { mergeSignals } from './enrichment/computeReviewFlag';
 import type { Confidence, Signal, SignalFields, SignalSource } from './enrichment/types';
@@ -466,32 +469,10 @@ export async function runBackfill(
                     },
                 transaction: t,
               });
-              if (enriched.signals.length > 0) {
-                await TransactionSignal.bulkCreate(
-                  enriched.signals.map((s) => ({
-                    transactionId: txn.id,
-                    source: s.source,
-                    confidence: s.confidence,
-                    fields: s.fields,
-                    rationale: s.rationale ?? null,
-                  })),
-                  { transaction: t },
-                );
-              }
+              await persistTransactionSignals(txn.id, enriched.signals, t);
 
-              // Persist the item-link match through the canonical
-              // TransactionOrderLink join table (status 'suggested'). Idempotent,
-              // and never resurrects a link the user has already rejected.
-              const orderLink = enriched.signals.find((s) => s.orderLink)?.orderLink;
-              if (orderLink) {
-                await upsertSuggestedOrderLink({
-                  transactionId: txn.id,
-                  externalOrderId: orderLink.externalOrderId,
-                  confidence: orderLink.confidence,
-                  matchReason: orderLink.matchReason,
-                  transaction: t,
-                });
-              }
+              // Surfaces the item-link match as a suggested TransactionOrderLink.
+              await persistSuggestedOrderLink(txn.id, enriched.signals, t);
 
               // Rule actions side-effects (issue #795): re-apply labels
               // (idempotent), but do NOT re-fire alerts on a backfill — that

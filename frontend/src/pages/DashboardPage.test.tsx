@@ -42,10 +42,13 @@ vi.mock('recharts', async (importOriginal) => {
 // minimal valid shape per endpoint (empty arrays where lists are expected)
 // so the page renders its shell/empty states without throwing. Unknown
 // endpoints fall through to [] (safe default, mirrors the tile tests).
-vi.mock('@/lib/api', () => ({
-  getJson: vi.fn((path: string) => {
-    if (path.startsWith('/api/summary/dashboard')) {
-      return Promise.resolve({
+vi.mock('@/lib/api', () => {
+  // Prefix → minimal valid payload. No prefix here is a prefix of another, so
+  // first match is the only match; order is presentational.
+  const payloads: Array<[string, unknown]> = [
+    [
+      '/api/summary/dashboard',
+      {
         byCategory: [],
         metricsByCurrency: [],
         monthlyByCurrency: [],
@@ -55,10 +58,11 @@ vi.mock('@/lib/api', () => ({
         accountSummaries: [],
         reviewQueue: [],
         categoryTree: [],
-      })
-    }
-    if (path.startsWith('/api/summary/sankey')) {
-      return Promise.resolve({
+      },
+    ],
+    [
+      '/api/summary/sankey',
+      {
         currency: 'CAD',
         totalIncome: 0,
         totalSpend: 0,
@@ -69,50 +73,46 @@ vi.mock('@/lib/api', () => ({
         links: [],
         availableCurrencies: ['CAD'],
         dateRange: { from: null, to: null },
-      })
-    }
-    if (path.startsWith('/api/summary/monthly')) {
-      return Promise.resolve({ points: [] })
-    }
-    if (path.startsWith('/api/summary/period-insight')) {
-      return Promise.resolve({ byCurrency: [] })
-    }
-    if (path.startsWith('/api/budgets/progress')) {
-      return Promise.resolve({ items: [] })
-    }
-    if (path.startsWith('/api/budgets/status')) {
-      return Promise.resolve({ items: [] })
-    }
-    if (path.startsWith('/api/recurring')) {
-      return Promise.resolve({ items: [] })
-    }
-    if (path.startsWith('/api/insights')) {
-      return Promise.resolve({ data: [] })
-    }
-    if (path.startsWith('/api/activation-state')) {
+      },
+    ],
+    ['/api/summary/monthly', { points: [] }],
+    ['/api/summary/period-insight', { byCurrency: [] }],
+    ['/api/budgets/progress', { items: [] }],
+    ['/api/budgets/status', { items: [] }],
+    ['/api/recurring', { items: [] }],
+    ['/api/insights', { data: [] }],
+    [
       // ActivationCardDeck reads dismissedCards (array) + boolean flags.
-      // Return an all-satisfied state so the deck renders nothing.
-      return Promise.resolve({
+      // An all-satisfied state makes the deck render nothing.
+      '/api/activation-state',
+      {
         hasAccounts: true,
         unreviewedCount: 0,
         hasBudget: true,
         hasGoal: true,
         hasOutboundInvite: true,
         dismissedCards: [],
-      })
-    }
-    // Catch-all for the self-fetching tiles (safe-to-spend, net worth,
-    // email status, etc.). They consume their data through useFetch, which
-    // turns a rejection into { data: null, error } — every tile renders its
-    // own empty/error/loading shell from that, so a reject is the safest
-    // generic default (an empty array would be a truthy wrong-shaped payload
-    // that tiles like SafeToSpendTile dereference and crash on).
-    return Promise.reject(new Error(`unmocked endpoint: ${path}`))
-  }),
-  postJson: vi.fn(() => Promise.resolve({})),
-  patchJson: vi.fn(() => Promise.resolve({})),
-  deleteReq: vi.fn(() => Promise.resolve(undefined)),
-}))
+      },
+    ],
+  ]
+
+  return {
+    getJson: vi.fn((path: string) => {
+      const match = payloads.find(([prefix]) => path.startsWith(prefix))
+      // Catch-all for the self-fetching tiles (safe-to-spend, net worth,
+      // email status, etc.). They consume their data through useFetch, which
+      // turns a rejection into { data: null, error } — every tile renders its
+      // own empty/error/loading shell from that, so a reject is the safest
+      // generic default (an empty array would be a truthy wrong-shaped payload
+      // that tiles like SafeToSpendTile dereference and crash on).
+      if (!match) return Promise.reject(new Error(`unmocked endpoint: ${path}`))
+      return Promise.resolve(match[1])
+    }),
+    postJson: vi.fn(() => Promise.resolve({})),
+    patchJson: vi.fn(() => Promise.resolve({})),
+    deleteReq: vi.fn(() => Promise.resolve(undefined)),
+  }
+})
 
 async function renderPage() {
   const { DashboardPage } = await import('./DashboardPage')

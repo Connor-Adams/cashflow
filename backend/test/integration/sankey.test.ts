@@ -251,26 +251,50 @@ function findLink(
   return link;
 }
 
-/** Every intermediate node must pass on exactly what it received. */
-function assertConserves(body: SankeyBody): void {
+/** No hairlines: every drawn flow carries real money. */
+function assertLinkValuesPositive(body: SankeyBody): void {
+  for (const l of body.links) assert.ok(l.value > 0);
+}
+
+/** Inbound and outbound link value totals, per node index. */
+function flowSums(body: SankeyBody): {
+  inSum: Map<number, number>;
+  outSum: Map<number, number>;
+} {
   const inSum = new Map<number, number>();
   const outSum = new Map<number, number>();
   for (const l of body.links) {
-    assert.ok(l.value > 0);
     inSum.set(l.target, (inSum.get(l.target) ?? 0) + l.value);
     outSum.set(l.source, (outSum.get(l.source) ?? 0) + l.value);
   }
+  return { inSum, outSum };
+}
+
+/**
+ * One node: reached from somewhere, and — unless it is terminal — passing on
+ * exactly what it received. Compared in cents to tolerate float division.
+ */
+function assertNodeConserves(
+  body: SankeyBody,
+  i: number,
+  inflow: number,
+  outflow: number,
+): void {
+  assert.ok(inflow > 0, `node ${i} (${body.nodes[i].name}) is not orphaned`);
+  if (outflow <= 0) return; // terminal node — this is where the money stops
+  assert.equal(
+    Math.round(inflow * 100),
+    Math.round(outflow * 100),
+    `node ${i} (${body.nodes[i].name}) conserves value`,
+  );
+}
+
+/** Every intermediate node must pass on exactly what it received. */
+function assertConserves(body: SankeyBody): void {
+  assertLinkValuesPositive(body);
+  const { inSum, outSum } = flowSums(body);
   for (let i = 1; i < body.nodes.length; i += 1) {
-    const inflow = inSum.get(i) ?? 0;
-    const outflow = outSum.get(i) ?? 0;
-    assert.ok(inflow > 0, `node ${i} (${body.nodes[i].name}) is not orphaned`);
-    if (outflow > 0) {
-      assert.equal(
-        Math.round(inflow * 100),
-        Math.round(outflow * 100),
-        `node ${i} (${body.nodes[i].name}) conserves value`,
-      );
-    }
+    assertNodeConserves(body, i, inSum.get(i) ?? 0, outSum.get(i) ?? 0);
   }
 }
 

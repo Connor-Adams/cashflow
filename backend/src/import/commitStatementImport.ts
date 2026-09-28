@@ -8,7 +8,6 @@ import {
   InvestmentActivity,
   Security,
   Transaction,
-  TransactionSignal,
   sequelize,
 } from '../models';
 import { loadAllRules } from './applyRules';
@@ -42,6 +41,7 @@ import {
   type ColdRow,
 } from './enrichment/aiBatchOverColdRows';
 import { maybeRunEmbeddingMatchOverColdRows } from './enrichment/embeddingMatchOverColdRows';
+import { persistTransactionSignals } from './enrichment/persistSignals';
 import { coldRowFallbackWarnings } from './enrichment/coldRowFallbackWarnings';
 import type { ChatMessage } from './enrichment/aiBatchStage';
 import type { Embedder } from '../ai/merchantEmbeddings';
@@ -677,18 +677,7 @@ export async function commitStatementImport(
       try {
         await sequelize.transaction({ transaction: t }, async (sp) => {
           await txn.save({ transaction: sp });
-          if (enriched.signals.length > 0) {
-            await TransactionSignal.bulkCreate(
-              enriched.signals.map((s) => ({
-                transactionId: txn.id,
-                source: s.source,
-                confidence: s.confidence,
-                fields: s.fields,
-                rationale: s.rationale ?? null,
-              })),
-              { transaction: sp },
-            );
-          }
+          await persistTransactionSignals(txn.id, enriched.signals, sp);
           // Fix 2: write the reverse pointer back onto the already-persisted
           // sibling. Without this, the link is one-directional — the new txn
           // points at the sibling but the sibling's linked_transaction_id is
@@ -954,6 +943,41 @@ export async function commitStatementImport(
  * An import that reached this point has committed; a categorisation failure
  * must never turn that into a failed import.
  */
+/**
+ * Test-injected stage stubs, in the spread shape each stage's options take.
+ * `exactOptionalPropertyTypes` makes an explicit `undefined` different from an
+ * absent key, so each key is present only when a dep was actually supplied.
+ */
+function coldRowStageOverrides(deps: CommitStatementImportDeps): {
+  embedding: { embedder?: CommitStatementImportDeps['embedder'] };
+  ai: { openaiCaller?: CommitStatementImportDeps['aiCaller'] };
+} {
+  return {
+    embedding: { ...(deps.embedder ? { embedder: deps.embedder } : {}) },
+    ai: { ...(deps.aiCaller ? { openaiCaller: deps.aiCaller } : {}) },
+  };
+}
+
+/**
+ * A fallback threw past its own guards. The import has already committed, so
+ * this becomes a warning on the preview — never a thrown error.
+ */
+function recordColdRowFallbackFailure(
+  coldRowCount: number,
+  preview: StatementPreview,
+  e: unknown,
+): void {
+  logger.warn(
+    { err: e, module: 'enrichment', coldRowCount },
+    'statement_import_cold_row_fallbacks_failed',
+  );
+  const reason = e instanceof Error ? e.message : String(e);
+  preview.warnings.push(
+    `Automatic categorisation of ${coldRowCount} uncategorised row(s) failed ` +
+      `(${reason}). The rest of the import was unaffected.`,
+  );
+}
+
 async function runColdRowFallbacks(
   coldRows: ColdRow[],
   householdId: number | null,
@@ -961,25 +985,20 @@ async function runColdRowFallbacks(
   deps: CommitStatementImportDeps,
 ): Promise<void> {
   if (coldRows.length === 0) return;
+  const overrides = coldRowStageOverrides(deps);
   try {
-    const embeddingMatch = await maybeRunEmbeddingMatchOverColdRows(coldRows, householdId, {
-      ...(deps.embedder ? { embedder: deps.embedder } : {}),
-    });
+    const embeddingMatch = await maybeRunEmbeddingMatchOverColdRows(
+      coldRows,
+      householdId,
+      overrides.embedding,
+    );
     const aiBatch = await maybeRunAiBatchOverColdRows(
       embeddingMatch.remainingColdRows,
       householdId,
-      { ...(deps.aiCaller ? { openaiCaller: deps.aiCaller } : {}) },
+      overrides.ai,
     );
     preview.warnings.push(...coldRowFallbackWarnings(embeddingMatch.summary, aiBatch));
   } catch (e) {
-    logger.warn(
-      { err: e, module: 'enrichment', coldRowCount: coldRows.length },
-      'statement_import_cold_row_fallbacks_failed',
-    );
-    preview.warnings.push(
-      `Automatic categorisation of ${coldRows.length} uncategorised row(s) failed (${
-        e instanceof Error ? e.message : String(e)
-      }). The rest of the import was unaffected.`,
-    );
+    recordColdRowFallbackFailure(coldRows.length, preview, e);
   }
 }
