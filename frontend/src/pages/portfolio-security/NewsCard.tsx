@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
 import { Card } from '@connor-adams/designsystem'
-import { getJson } from '../../lib/api'
+import { useJsonResource } from '../../lib/useJsonResource'
 import type { PortfolioSecurityNews } from '../../types/api'
 
 export type NewsCardProps = {
@@ -22,31 +21,16 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString()
 }
 
-export function NewsCard({ securityId }: NewsCardProps) {
-  const [data, setData] = useState<PortfolioSecurityNews | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [err, setErr] = useState<string | null>(null)
+/** The fetch's own message when it has one, else a plain fallback. */
+function newsErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Could not load news'
+}
 
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setErr(null)
-    getJson<PortfolioSecurityNews>(`/api/portfolio/security/${securityId}/news`)
-      .then((res) => {
-        if (cancelled) return
-        setData(res)
-      })
-      .catch((e) => {
-        if (cancelled) return
-        setErr(e instanceof Error ? e.message : 'Could not load news')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [securityId])
+export function NewsCard({ securityId }: NewsCardProps) {
+  const { data, loading, error } = useJsonResource<PortfolioSecurityNews>(
+    `/api/portfolio/security/${securityId}/news`,
+  )
+  const err = error == null ? null : newsErrorMessage(error)
 
   if (loading) {
     return (

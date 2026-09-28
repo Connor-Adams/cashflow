@@ -102,12 +102,24 @@
 :root,
 :root[data-theme="light"],
 :root[data-theme="dark"] {
-  /* Sankey node fills — five hues that stay distinguishable side by side */
+  /* Sankey node fills — hues that stay distinguishable side by side.
+   * (`--chart-business` needs no alias: the DS ramp ships that name itself.) */
   --chart-income: var(--chart-credit);         /* green — money in */
   --chart-category: var(--chart-line-1);       /* primary — the bulk of the flow */
   --chart-savings: var(--chart-line-5);        /* amber */
   --chart-uncategorized: var(--chart-payment); /* zinc — unknown, reads as inert */
-  --chart-link-stroke: var(--border);          /* node hairline, drawn at 0.2 alpha */
+  --chart-draws: var(--chart-4);               /* orange — the corporate→personal waypoint */
+  /* --chart-surplus: money left over at the right-hand end of the chain.
+   * KNOWN PROBLEM, deliberately left visible rather than silently inherited:
+   * --chart-personal resolves to --positive, which is the same green as
+   * --chart-income (--chart-credit → --green-600 light / --green-300 dark), so
+   * the chart's leftmost source and rightmost terminal paint an identical
+   * swatch. The DS ships no second positive-family chart hue, and the only
+   * unused distinct chart token is --chart-3 (hero-gradient magenta), which is
+   * wrong for "money left over". Preserving today's behaviour until the DS
+   * grows a second green — then this is a one-line change. */
+  --chart-surplus: var(--chart-personal);      /* green — SAME as --chart-income, see above */
+  --chart-link-stroke: var(--border);          /* node hairline + link ribbons, drawn under 1 alpha */
 
   /* Forecast */
   --chart-danger-line: var(--danger);          /* the y=0 crossing */

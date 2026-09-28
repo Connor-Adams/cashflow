@@ -34,6 +34,19 @@
  *
  * A test that needs the non-test behaviour sets `NODE_ENV` itself (several do,
  * and several spawn a child with `NODE_ENV=development` for exactly this).
+ *
+ * ## OpenAI env
+ *
+ * The OpenAI variables are CLEARED here so a test run is hermetic regardless of
+ * the developer's shell. `getOpenAiConfig()` reads `process.env.OPENAI_API_KEY`
+ * at call time, so a developer who exports a real key was running the
+ * cold-row / AI-fallback tests against the live litellm proxy — real spend, real
+ * latency, and results that differ between their machine and CI.
+ *
+ * Tests that need a configured OpenAI set the variables themselves, which still
+ * works: this runs before any test module is linked, so a module-top assignment
+ * in a test file (or a `withEnv` wrapper) wins. Tests that need it ABSENT
+ * already delete it, and now get that for free.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -42,6 +55,11 @@ import path from 'node:path';
 // Respect an explicit value — `NODE_ENV=production yarn test` should still mean
 // production — but default every unit-test worker to 'test'.
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
+
+// Hermetic AI: no unit or integration test may reach a real OpenAI-compatible
+// endpoint just because the developer's shell happened to export a key.
+delete process.env.OPENAI_API_KEY;
+delete process.env.OPENAI_BASE_URL;
 
 if (!process.env.DATABASE_URL) {
   const file = path.join(os.tmpdir(), `cashflow-test-${process.pid}.sqlite`);

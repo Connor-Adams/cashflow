@@ -2220,6 +2220,12 @@ router.post('/enrichment/backfill', async (req, res, next) => {
       // deterministic pipeline leaves cold. runBackfill still gates this off on
       // dry-run, so a dry-run preview never calls OpenAI.
       ai: true,
+      // Opt-in: also re-ask rows that already carry an `ai`/`embedding` signal,
+      // for when the prior ANSWER is what went stale (better model, corrected
+      // category vocabulary). Off unless the operator asks, because a re-ask
+      // costs a model call per merchant and normally buys nothing. The nightly
+      // scheduler never sets it.
+      forceFallbackReask: Boolean(body.forceFallbackReask),
     };
 
     // Content negotiation: NDJSON streaming only when the client explicitly

@@ -82,6 +82,7 @@ describe('chart tokens', () => {
   // The app-owned aliases, spelled out so a deletion names itself in the diff.
   const appOwned = [
     '--chart-income:', '--chart-category:', '--chart-savings:', '--chart-uncategorized:',
+    '--chart-draws:', '--chart-surplus:',
     '--chart-link-stroke:', '--chart-danger-line:',
     '--chart-scenario:', '--chart-scenario-pos:', '--chart-scenario-neg:',
     '--chart-portfolio:', '--chart-reference:',

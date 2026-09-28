@@ -35,6 +35,20 @@ import {
   enrichmentAiPerRowConcurrency,
 } from '../../config/env';
 
+/**
+ * Why the stage emitted nothing. Same rationale as
+ * `EmbeddingMatchSkipReason`: `attempted: false` alone could not tell an
+ * unavailable fallback apart from an import with nothing left to categorise,
+ * which is how a stage that had never once run in production stayed invisible.
+ */
+export type AiBatchSkipReason =
+  /** ENRICHMENT_AI_ENABLED=false. */
+  | 'disabled'
+  /** Rules, memory and embedding-match resolved everything. */
+  | 'no_cold_rows'
+  /** No OPENAI_API_KEY, so `getOpenAiConfig()` returned null. */
+  | 'no_openai_config';
+
 export type AiBatchSummary = {
   attempted: boolean;
   coldRowCount: number;
@@ -43,6 +57,8 @@ export type AiBatchSummary = {
   capped: boolean;
   usedBatch: boolean;
   fellBackToPerRow: boolean;
+  /** Set only when the stage did NOT run. Undefined on a real run. */
+  skipReason?: AiBatchSkipReason;
 };
 
 export type ColdRow = {
@@ -163,7 +179,7 @@ async function persistAiEnhancement(c: ColdRow, aiSignal: Signal, householdId: n
   }
 }
 
-function emptyAiSummary(coldRowCount: number): AiBatchSummary {
+function emptyAiSummary(coldRowCount: number, skipReason: AiBatchSkipReason): AiBatchSummary {
   return {
     attempted: false,
     coldRowCount,
@@ -172,13 +188,16 @@ function emptyAiSummary(coldRowCount: number): AiBatchSummary {
     capped: false,
     usedBatch: false,
     fellBackToPerRow: false,
+    skipReason,
   };
 }
 
-function aiBatchPossible(coldRows: ColdRow[]): boolean {
-  if (!enrichmentAiEnabled) return false;
-  if (coldRows.length === 0) return false;
-  return getOpenAiConfig() != null;
+/** Null when the stage can run; otherwise the specific reason it cannot. */
+function aiBatchSkipReason(coldRows: ColdRow[]): AiBatchSkipReason | null {
+  if (!enrichmentAiEnabled) return 'disabled';
+  if (coldRows.length === 0) return 'no_cold_rows';
+  if (getOpenAiConfig() == null) return 'no_openai_config';
+  return null;
 }
 
 async function tryEnhanceColdRow(c: ColdRow, sug: AiBatchSuggestion | undefined, householdId: number | null): Promise<boolean> {
@@ -203,7 +222,8 @@ export async function maybeRunAiBatchOverColdRows(
   householdId: number | null,
   opts?: { openaiCaller?: (msgs: ChatMessage[]) => Promise<Record<string, unknown>> },
 ): Promise<AiBatchSummary> {
-  if (!aiBatchPossible(coldRows)) return emptyAiSummary(coldRows.length);
+  const skipReason = aiBatchSkipReason(coldRows);
+  if (skipReason != null) return emptyAiSummary(coldRows.length, skipReason);
 
   const openaiCaller = opts?.openaiCaller ?? ((msgs: ChatMessage[]) => openaiJson(msgs));
 
