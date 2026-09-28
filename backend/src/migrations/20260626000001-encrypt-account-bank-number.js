@@ -7,10 +7,11 @@
  * with DB access. This migration moves it to the repo's encrypted-column pattern:
  *
  *   - bank_account_number_encrypted (TEXT)  — AES-256-GCM envelope, base64
- *   - bank_account_number_hash      (CHAR-ish STRING(64)) — sha256(plaintext) hex
+ *   - bank_account_number_hash      (CHAR-ish STRING(64)) — HMAC-SHA256(plaintext) hex
  *
  * The hash column carries the dedup UNIQUE(household_id, ...) constraint, because
- * the encrypted column can't be unique (every encrypt uses a fresh random IV).
+ * the encrypted column can't be unique (every encrypt uses a fresh random IV). It
+ * is a KEYED digest so it does not itself leak the plaintext back (see blindIndex).
  *
  * Existing rows are backfill-encrypted here. Encryption is a FROZEN inline copy
  * of util/symmetricEncryption.encryptSecret (envelope: version(1)||iv(12)||
@@ -19,14 +20,16 @@
  *
  * Dual-dialect (SQLite + Postgres): column adds via queryInterface, backfill via
  * a row-by-row read/encrypt/write loop (no SQL crypto), index swap via
- * add/removeIndex. down() decrypts back to plaintext and restores the original
- * column + index, so the round-trip is reversible.
+ * add/removeIndex, and column DROPS via `dropColumn` below — NOT
+ * queryInterface.removeColumn, which wrecks the SQLite schema (see its comment).
+ * down() decrypts back to plaintext and restores the original column + index, so
+ * the round-trip is reversible.
  *
  * Requires EMAIL_INTEGRATION_ENCRYPTION_KEY (64-hex / 32 bytes) — same key the
  * app uses. If unset, up() throws before mutating data (fail fast); down()
  * likewise needs it to decrypt.
  */
-const { createCipheriv, createDecipheriv, createHash, randomBytes } = require('crypto');
+const { createCipheriv, createDecipheriv, createHmac, randomBytes } = require('crypto');
 
 const VERSION_BYTE = 0x01;
 const IV_LEN = 12;
@@ -68,8 +71,41 @@ function decryptSecret(envelopeBase64, key) {
   return Buffer.concat([decipher.update(cipher), decipher.final()]).toString('utf8');
 }
 
-function sha256Hex(value) {
-  return createHash('sha256').update(value, 'utf8').digest('hex');
+/**
+ * Keyed blind index — frozen inline copy of util/symmetricEncryption.blindIndex.
+ * HMAC rather than a bare sha256: a bank account number is a short digit string,
+ * so an unkeyed digest column would be reversible by exhaustive search and hand
+ * back the very plaintext this migration encrypts away.
+ */
+function blindIndex(value, key) {
+  return createHmac('sha256', key).update(value, 'utf8').digest('hex');
+}
+
+/**
+ * Drop a column without letting SQLite's table rebuild mangle the schema.
+ *
+ * Sequelize 6 emulates `removeColumn` on SQLite by recreating the table from
+ * `describeTable()`, and that rebuild is destructive twice over: it drops every
+ * index on the table, and it re-reports each COMPOSITE unique index as a
+ * per-COLUMN `UNIQUE` flag. On the real `accounts` table that turned
+ * `UNIQUE (household_id, short_code)` into `household_id INTEGER UNIQUE` — one
+ * account per household, ever — plus it lost AUTOINCREMENT and every FK action.
+ * Verified, not theoretical: it broke `Account.create` for the second account in
+ * a household.
+ *
+ * SQLite has had native `ALTER TABLE ... DROP COLUMN` since 3.35 (the bundled
+ * sqlite3 ships 3.44), which alters in place and touches nothing else, so use it
+ * directly and skip the rebuild. It refuses to drop an indexed column, which is
+ * why both callers below remove the column's index first.
+ */
+async function dropColumn(queryInterface, table, column) {
+  if (queryInterface.sequelize.getDialect() !== 'sqlite') {
+    await queryInterface.removeColumn(table, column);
+    return;
+  }
+  await queryInterface.sequelize.query(
+    `ALTER TABLE "${table}" DROP COLUMN "${column}"`,
+  );
 }
 
 const OLD_INDEX = 'accounts_household_bank_number_unique';
@@ -101,19 +137,18 @@ module.exports = {
         {
           replacements: {
             enc: encryptSecret(plaintext, key),
-            hash: sha256Hex(plaintext),
+            hash: blindIndex(plaintext, key),
             id: row.id,
           },
         },
       );
     }
 
-    // 3. Drop the old plaintext index, THEN the plaintext column. Order matters
-    //    on SQLite: removeColumn recreates the table and re-applies whatever
-    //    indexes exist; doing the column drop with no bank-number index present
-    //    avoids the partial-index WHERE clause being lost during recreation.
+    // 3. Drop the old plaintext index, THEN the plaintext column. Order matters:
+    //    SQLite refuses a native DROP COLUMN on an indexed column, and the
+    //    partial index's WHERE clause references this column.
     await queryInterface.removeIndex('accounts', OLD_INDEX);
-    await queryInterface.removeColumn('accounts', 'bank_account_number');
+    await dropColumn(queryInterface, 'accounts', 'bank_account_number');
 
     // 4. Add the new hash-based unique index (after the table is in final shape).
     await queryInterface.addIndex('accounts', ['household_id', 'bank_account_number_hash'], {
@@ -127,7 +162,7 @@ module.exports = {
     const key = getKey();
     const sequelize = queryInterface.sequelize;
 
-    // 1. Drop the hash index first (same SQLite recreation concern as up()).
+    // 1. Drop the hash index first — SQLite will not drop an indexed column.
     await queryInterface.removeIndex('accounts', NEW_INDEX);
 
     // 2. Re-add the plaintext column.
@@ -153,8 +188,8 @@ module.exports = {
     }
 
     // 4. Drop the encrypted + hash columns.
-    await queryInterface.removeColumn('accounts', 'bank_account_number_hash');
-    await queryInterface.removeColumn('accounts', 'bank_account_number_encrypted');
+    await dropColumn(queryInterface, 'accounts', 'bank_account_number_hash');
+    await dropColumn(queryInterface, 'accounts', 'bank_account_number_encrypted');
 
     // 5. Restore the original plaintext unique index (table now in final shape).
     await queryInterface.addIndex('accounts', ['household_id', 'bank_account_number'], {

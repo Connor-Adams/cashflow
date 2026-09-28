@@ -8,18 +8,22 @@ import {
   CreationOptional,
   Op,
 } from 'sequelize';
-import { createHash } from 'crypto';
 import { logger } from '../observability/logger';
-import { encryptSecret, decryptSecret } from '../util/symmetricEncryption';
+import { encryptSecret, decryptSecret, blindIndex } from '../util/symmetricEncryption';
 
 /**
- * Deterministic sha256 hex of a bank account number, used for the dedup unique
- * index (the encrypted column can't be unique — each encrypt uses a random IV).
+ * Keyed blind index of a bank account number, used for the dedup unique index
+ * (the encrypted column can't be unique — each encrypt uses a random IV).
  * Exported so callers that dedup by bank number (import accountLookup) compute
- * the same hash without holding plaintext in a query.
+ * the same value without holding plaintext in a query.
+ *
+ * HMAC, not a bare digest: bank account numbers are short digit strings, so an
+ * unkeyed sha256 column would be reversible by exhaustive search and would give
+ * back the plaintext that encrypting this column exists to hide. See
+ * `blindIndex` in util/symmetricEncryption.
  */
 export function hashBankAccountNumber(value: string): string {
-  return createHash('sha256').update(value, 'utf8').digest('hex');
+  return blindIndex(value);
 }
 
 export type AccountTaxStatus =
@@ -119,9 +123,9 @@ export function initAccount(sequelize: Sequelize): typeof Account {
         field: 'bank_account_number_encrypted',
         allowNull: true,
       },
-      // Deterministic sha256(plaintext) for the dedup unique index. The
-      // encrypted column can't be unique (random IV per encrypt), so dedup keys
-      // off this hash instead.
+      // Keyed blind index (HMAC-SHA256 hex) of the plaintext, for the dedup
+      // unique index. The encrypted column can't be unique (random IV per
+      // encrypt), so dedup keys off this instead.
       bankAccountNumberHash: {
         type: DataTypes.STRING(64),
         field: 'bank_account_number_hash',
