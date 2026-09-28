@@ -599,6 +599,8 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
               memory,
               accountVisibility,
               txnType: f.txnType,
+              // Brand-new row: it cannot carry a user override yet.
+              categoryOverride: null,
             });
           }
         }
