@@ -42,6 +42,37 @@ import {
 } from './enrichment/aiBatchOverColdRows';
 import { maybeRunEmbeddingMatchOverColdRows } from './enrichment/embeddingMatchOverColdRows';
 import type { ChatMessage } from './enrichment/aiBatchStage';
+import { mergeSignals } from './enrichment/computeReviewFlag';
+import type { Confidence, Signal, SignalFields, SignalSource } from './enrichment/types';
+
+/**
+ * Signal sources the deterministic re-derivation CANNOT reproduce.
+ *
+ * `enrichTransaction` runs stages 1-7+9 only; the `embedding` (5.5) and `ai` (8)
+ * stages run AFTER the row loop, over accumulated cold rows, and persist their
+ * own TransactionSignal rows there. So a blanket
+ * `TransactionSignal.destroy({ where: { transactionId } })` before writing the
+ * fresh deterministic signals deleted real prior observations — and with them
+ * the `auto_category` those signals supplied through mergeSignals precedence.
+ * Within one run the post-loop AI batch partly healed it, but only for rows that
+ * survived `enrichmentAiMaxMerchants` and merchant-dedupe; a row enhanced on an
+ * earlier run and not re-selected lost its category outright.
+ *
+ * These rows are therefore loaded, merged alongside the fresh deterministic
+ * signals, and left in place. Deterministic signals are still replaced — that is
+ * the point of a backfill.
+ */
+const PRESERVED_SIGNAL_SOURCES: readonly SignalSource[] = ['ai', 'embedding'];
+
+/** Rehydrate a persisted signal row into the in-memory Signal the merge wants. */
+function persistedSignalToSignal(row: TransactionSignal): Signal {
+  return {
+    source: row.source as SignalSource,
+    confidence: row.confidence as Confidence,
+    fields: (row.fields ?? {}) as SignalFields,
+    ...(row.rationale ? { rationale: row.rationale } : {}),
+  };
+}
 
 export interface BackfillFlags {
   dryRun: boolean;
@@ -72,6 +103,18 @@ export interface BackfillFlags {
    * it true. Ignored on dry-run (AI never runs without persistence).
    */
   ai?: boolean;
+  /**
+   * Re-ask the `ai` / `embedding` fallbacks on rows that already carry one of
+   * their signals — dropping the prior answer so the new one wins.
+   *
+   * Off by default, and the nightly scheduler must never set it: a row the model
+   * already answered keeps `reviewFlag = true` on purpose (an AI guess still
+   * wants human review), so without this gate every previously-AI-categorised
+   * row was cold again every night — a permanent 80-merchant/run spend floor
+   * that bought nothing. A MANUAL backfill sets it when the answer itself is
+   * stale: a better model, or a corrected category vocabulary.
+   */
+  forceFallbackReask?: boolean;
 }
 
 export interface BackfillResult {
@@ -291,6 +334,20 @@ export async function runBackfill(
               (c) => c.id !== txn.id,
             );
 
+            // Prior fallback observations, loaded BEFORE re-deriving so they can
+            // be merged in and so the write below knows to keep their rows. A
+            // forced re-ask deliberately ignores (and below, deletes) them.
+            const priorFallbackSignals = flags.forceFallbackReask
+              ? []
+              : (
+                  await TransactionSignal.findAll({
+                    where: {
+                      transactionId: txn.id,
+                      source: { [Op.in]: PRESERVED_SIGNAL_SOURCES },
+                    },
+                  })
+                ).map(persistedSignalToSignal);
+
             const enriched = await enrichTransaction({
               raw: {
                 merchantRaw: txn.merchantRaw,
@@ -314,7 +371,14 @@ export async function runBackfill(
               amazonLinkThreshold: enrichmentAmazonLinkThreshold,
             });
 
-            const f = enriched.fields;
+            // Re-merge with the preserved signals so precedence in
+            // computeReviewFlag.ts hands the AI/embedding-set category back to
+            // `f.autoCategory` — otherwise the write below nulls it.
+            const merged =
+              priorFallbackSignals.length > 0
+                ? mergeSignals([...enriched.signals, ...priorFallbackSignals])
+                : enriched;
+            const f = merged.fields;
 
             let willClearReview = false;
             if (
@@ -390,8 +454,16 @@ export async function runBackfill(
               recomputeTransactionAmounts(txn);
               await txn.save({ transaction: t });
 
+              // Replace only what the re-derivation can reproduce. On a forced
+              // re-ask the prior fallback answer IS the thing being superseded,
+              // so it goes too and the post-loop stages write a fresh one.
               await TransactionSignal.destroy({
-                where: { transactionId: txn.id },
+                where: flags.forceFallbackReask
+                  ? { transactionId: txn.id }
+                  : {
+                      transactionId: txn.id,
+                      source: { [Op.notIn]: PRESERVED_SIGNAL_SOURCES },
+                    },
                 transaction: t,
               });
               if (enriched.signals.length > 0) {
@@ -443,7 +515,19 @@ export async function runBackfill(
             // Accumulate cold rows for the post-loop ai-batch stage. Built the
             // same way the import path builds them (runImport.ts), so the shared
             // module sees an identical ColdRow shape.
-            if (accumulateColdRows && f.reviewFlag === true) {
+            // `reviewFlag` alone is the wrong gate: it stays true on an
+            // AI-categorised row by design (hasNonAiHighConfidence requires a
+            // NON-ai high-confidence signal — correct, an AI guess should still
+            // get human review), so gating on it alone re-sent the same rows to
+            // the model every night. A row already carrying a fallback signal has
+            // been answered; re-running embedding on it would also duplicate its
+            // signal row. `forceFallbackReask` empties priorFallbackSignals, so a
+            // manual forced run falls through here as intended.
+            if (
+              accumulateColdRows &&
+              f.reviewFlag === true &&
+              priorFallbackSignals.length === 0
+            ) {
               const key = (f.merchantCanonical ?? '').trim() || f.merchantClean.trim();
               if (key.length > 0) {
                 pushColdRow(txn.householdId, {
