@@ -290,7 +290,7 @@ export function ForecastPage() {
                 <Area
                   type="monotone"
                   dataKey="balance"
-                  stroke="var(--chart-income-stroke)"
+                  stroke="var(--chart-income)"
                   fill="url(#forecastFill)"
                   strokeWidth={2}
                 />
