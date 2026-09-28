@@ -70,6 +70,7 @@ import {
   type ColdRow,
 } from './enrichment/aiBatchOverColdRows';
 import { maybeRunEmbeddingMatchOverColdRows } from './enrichment/embeddingMatchOverColdRows';
+import { coldRowFallbackWarnings } from './enrichment/coldRowFallbackWarnings';
 export { aiSuggestionToSignal, dedupeColdRowsByMerchantKey } from './enrichment/aiBatchOverColdRows';
 import { logger } from '../observability/logger';
 import { findOrCreateAccount } from './accountLookup';
@@ -708,6 +709,10 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
       matched: embeddingMatch.summary.matched,
     };
   }
+  // A fallback that could not run is reported, not silently absent — same text
+  // as the statement path, from the same shared builder.
+  const fallbackWarnings = coldRowFallbackWarnings(embeddingMatch.summary, aiEnhanced);
+  if (fallbackWarnings.length > 0) out.enrichmentWarnings = fallbackWarnings;
   if (aiEnhanced.attempted) {
     out.aiBatch = {
       coldRows: aiEnhanced.coldRowCount,

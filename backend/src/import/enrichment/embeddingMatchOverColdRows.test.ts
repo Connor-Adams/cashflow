@@ -170,3 +170,69 @@ test('local-first: matches with no OpenAI key / network (AC #12) — embed fn is
   const result = await orch.maybeRunEmbeddingMatchOverColdRows([cold], hh.id, { embedder: toyEmbedder, threshold: 0.85 });
   assert.equal(result.summary.matched, 1);
 });
+
+// --- skip reasons -----------------------------------------------------------
+// `attempted: false` collapsed six different situations into one value, so an
+// import where the embedder was missing was indistinguishable from an import
+// with nothing to categorise. The reason is now on the summary.
+
+test('a null embedder reports embedder_unavailable, not a generic skip', async () => {
+  const hh = await models.Household.create({ name: 'H' } as never);
+  const acc = await models.Account.create({ householdId: hh.id, name: 'C', visibility: 'private' } as never);
+  await seedReviewedMerchant(hh.id, acc.id, 'Blue Bottle Coffee', 'Coffee');
+  const cold = await coldTxn(hh.id, acc.id, 'SQ *BLUE BOTTLE');
+
+  // No embedder injected and `@xenova/transformers` is not installed, so
+  // getDefaultEmbedder() resolves null — the production container's state.
+  const result = await orch.maybeRunEmbeddingMatchOverColdRows([cold], hh.id);
+  assert.equal(result.summary.attempted, false);
+  assert.equal(result.summary.skipReason, 'embedder_unavailable');
+  assert.equal(result.remainingColdRows.length, 1);
+});
+
+test('a household with no reviewed priors reports no_priors (a cold start, not a fault)', async () => {
+  const hh = await models.Household.create({ name: 'H' } as never);
+  const acc = await models.Account.create({ householdId: hh.id, name: 'C', visibility: 'private' } as never);
+  const cold = await coldTxn(hh.id, acc.id, 'SQ *BLUE BOTTLE');
+
+  const result = await orch.maybeRunEmbeddingMatchOverColdRows([cold], hh.id, { embedder: toyEmbedder });
+  assert.equal(result.summary.skipReason, 'no_priors');
+});
+
+test('an embedder that throws reports stage_error', async () => {
+  const hh = await models.Household.create({ name: 'H' } as never);
+  const acc = await models.Account.create({ householdId: hh.id, name: 'C', visibility: 'private' } as never);
+  await seedReviewedMerchant(hh.id, acc.id, 'Blue Bottle Coffee', 'Coffee');
+  const cold = await coldTxn(hh.id, acc.id, 'SQ *BLUE BOTTLE');
+
+  const boom: typeof Embedder = async () => { throw new Error('model load failed'); };
+  const result = await orch.maybeRunEmbeddingMatchOverColdRows([cold], hh.id, { embedder: boom });
+  assert.equal(result.summary.skipReason, 'stage_error');
+});
+
+test('no cold rows reports no_cold_rows, and a successful run reports no reason at all', async () => {
+  const hh = await models.Household.create({ name: 'H' } as never);
+  const acc = await models.Account.create({ householdId: hh.id, name: 'C', visibility: 'private' } as never);
+  await seedReviewedMerchant(hh.id, acc.id, 'Blue Bottle Coffee', 'Coffee');
+
+  const none = await orch.maybeRunEmbeddingMatchOverColdRows([], hh.id, { embedder: toyEmbedder });
+  assert.equal(none.summary.skipReason, 'no_cold_rows');
+
+  const cold = await coldTxn(hh.id, acc.id, 'SQ *BLUE BOTTLE');
+  const ran = await orch.maybeRunEmbeddingMatchOverColdRows([cold], hh.id, { embedder: toyEmbedder, threshold: 0.85 });
+  assert.equal(ran.summary.attempted, true);
+  assert.equal(ran.summary.skipReason, undefined);
+});
+
+test('a row with no household reports no_household', async () => {
+  const result = await orch.maybeRunEmbeddingMatchOverColdRows(
+    [{
+      txnId: 1, signals: [], merchantKey: 'X', merchantRaw: 'X', merchantClean: 'X',
+      merchantCanonical: null, amount: -1, date: '2026-06-01', currency: 'CAD',
+      memory: null, accountVisibility: 'private' as const, txnType: 'purchase',
+    }],
+    null,
+    { embedder: toyEmbedder },
+  );
+  assert.equal(result.summary.skipReason, 'no_household');
+});

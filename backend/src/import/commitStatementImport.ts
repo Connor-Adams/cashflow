@@ -38,6 +38,15 @@ import {
   enrichmentTransferWindowDays,
 } from '../config/env';
 import {
+  maybeRunAiBatchOverColdRows,
+  type ColdRow,
+} from './enrichment/aiBatchOverColdRows';
+import { maybeRunEmbeddingMatchOverColdRows } from './enrichment/embeddingMatchOverColdRows';
+import { coldRowFallbackWarnings } from './enrichment/coldRowFallbackWarnings';
+import type { ChatMessage } from './enrichment/aiBatchStage';
+import type { Embedder } from '../ai/merchantEmbeddings';
+import { logger } from '../observability/logger';
+import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
   loadHouseholdOwnerNames,
@@ -370,11 +379,22 @@ export type CommitStatementImportOptions = {
   acceptUnreconciled?: boolean;
 };
 
+/**
+ * Test seams for the two cold-row fallbacks, mirroring `runBackfill`'s `deps`.
+ * Production passes neither: the embedder is the process-wide memoized local
+ * model and the AI caller is `openaiJson`.
+ */
+export type CommitStatementImportDeps = {
+  embedder?: Embedder;
+  aiCaller?: (msgs: ChatMessage[]) => Promise<Record<string, unknown>>;
+};
+
 export async function commitStatementImport(
   preview: StatementPreview,
   userId: number | null,
   householdId: number | null,
-  options: CommitStatementImportOptions = {}
+  options: CommitStatementImportOptions = {},
+  deps: CommitStatementImportDeps = {},
 ): Promise<{
   file: string;
   batchLabel: string;
@@ -473,6 +493,14 @@ export async function commitStatementImport(
   let insertedHoldings = 0;
   let skippedDuplicates = 0;
   let ratePeriodsWritten = 0;
+  /**
+   * Rows the deterministic stages could not resolve (review_flag still true),
+   * accumulated for the cold-row fallbacks that run after the commit. Gate is
+   * `reviewFlag === true` and a non-empty merchant key — identical to
+   * runImport.ts, so the two import routes cannot drift apart on which rows the
+   * fallbacks see.
+   */
+  const coldRows: ColdRow[] = [];
 
   await sequelize.transaction(async (t) => {
     for (const row of preview.transactions) {
@@ -713,6 +741,27 @@ export async function commitStatementImport(
           }
         });
         insertedTransactions += 1;
+        if (f.reviewFlag) {
+          const merchantKey = (f.merchantCanonical ?? '').trim() || f.merchantClean.trim();
+          if (merchantKey.length > 0) {
+            coldRows.push({
+              txnId: txn.id,
+              signals: enriched.signals,
+              merchantKey,
+              merchantRaw: row.merchantRaw,
+              merchantClean: f.merchantClean,
+              merchantCanonical: f.merchantCanonical,
+              amount: row.amount,
+              date: row.date,
+              currency: row.currency,
+              memory,
+              accountVisibility,
+              // The type actually persisted, not the pipeline's guess — the
+              // fallbacks recompute import confidence from it.
+              txnType: effectiveTxnType,
+            });
+          }
+        }
       } catch (e) {
         if (isUniqueLike(e)) skippedDuplicates += 1;
         else throw e;
@@ -859,6 +908,20 @@ export async function commitStatementImport(
     });
   }
 
+  // === Cold-row fallbacks, AFTER the commit and outside every transaction ===
+  // The statement path used to stop at `enrichTransaction`, so rows the
+  // deterministic stages could not categorise were simply left review-flagged
+  // and never seen by either intelligent fallback — while the folder-CSV path
+  // ran both. Same two shared modules, same order: embedding match (free, local,
+  // deterministic) first, then the OpenAI batch over only what it could not
+  // resolve. Outside the transaction so model/network latency never holds row
+  // locks, and after it so the rows these stages UPDATE by id are durable.
+  //
+  // Nothing in here may fail the import — categorisation is a bonus on top of a
+  // ledger that is already committed, exactly the posture captureRatePeriods
+  // takes with rate windows. A failure warns and the transactions stand.
+  await runColdRowFallbacks(coldRows, account.householdId ?? null, preview, deps);
+
   return {
     file: preview.fileName,
     batchLabel: preview.importBatch,
@@ -876,4 +939,44 @@ export async function commitStatementImport(
     usedProfileId: preview.usedProfileId,
     profileInferred: preview.profileInferred,
   };
+}
+
+/**
+ * Run the two cold-row fallbacks over the rows this commit left uncategorised,
+ * and record on `preview.warnings` whichever of them could not run.
+ *
+ * Contained by construction: each stage already swallows its own failures, and
+ * this wrapper catches anything that still escapes (a model load that throws
+ * outside the stage's own try, an OpenAI client that rejects on construction).
+ * An import that reached this point has committed; a categorisation failure
+ * must never turn that into a failed import.
+ */
+async function runColdRowFallbacks(
+  coldRows: ColdRow[],
+  householdId: number | null,
+  preview: StatementPreview,
+  deps: CommitStatementImportDeps,
+): Promise<void> {
+  if (coldRows.length === 0) return;
+  try {
+    const embeddingMatch = await maybeRunEmbeddingMatchOverColdRows(coldRows, householdId, {
+      ...(deps.embedder ? { embedder: deps.embedder } : {}),
+    });
+    const aiBatch = await maybeRunAiBatchOverColdRows(
+      embeddingMatch.remainingColdRows,
+      householdId,
+      { ...(deps.aiCaller ? { openaiCaller: deps.aiCaller } : {}) },
+    );
+    preview.warnings.push(...coldRowFallbackWarnings(embeddingMatch.summary, aiBatch));
+  } catch (e) {
+    logger.warn(
+      { err: e, module: 'enrichment', coldRowCount: coldRows.length },
+      'statement_import_cold_row_fallbacks_failed',
+    );
+    preview.warnings.push(
+      `Automatic categorisation of ${coldRows.length} uncategorised row(s) failed (${
+        e instanceof Error ? e.message : String(e)
+      }). The rest of the import was unaffected.`,
+    );
+  }
 }

@@ -512,6 +512,24 @@ export const enrichmentAiEnabled = parseBoolEnv(
   'ENRICHMENT_AI_ENABLED',
   true,
 );
+/**
+ * Whether the NIGHTLY enrichment backfill is allowed to run the stage-8
+ * ai-batch over the rows the deterministic stages left cold.
+ *
+ * On by default. The cron used to omit the AI flag entirely to avoid recurring
+ * OpenAI cost, which meant the one job that sweeps every review-flagged row
+ * every night was structurally unable to categorise anything the 59 literal
+ * rules and exact-name memory had already missed — production held zero rows
+ * with `auto_source = 'ai'`. Calls now go through a self-hosted litellm proxy,
+ * and the per-run spend is bounded by ENRICHMENT_AI_MAX_MERCHANTS_PER_IMPORT
+ * plus merchant-dedupe, so the cost argument no longer holds.
+ *
+ * It stays env-gated so it can be switched off in an incident without a deploy.
+ */
+export const enrichmentBackfillAiEnabled = parseBoolEnv(
+  'ENRICHMENT_BACKFILL_AI_ENABLED',
+  true,
+);
 export const enrichmentAiMaxMerchants = parseIntEnv(
   'ENRICHMENT_AI_MAX_MERCHANTS_PER_IMPORT',
   80,
