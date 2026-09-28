@@ -86,6 +86,7 @@ export type {
   RealizedTotalsRow,
   Rule,
   RuleAction,
+  TxnTypeValue,
   Paginated,
   RollupRow,
   Security,

@@ -26,6 +26,7 @@ import {
   NOTIFICATION_TITLE_MAX_LENGTH,
   type NotificationSeverity,
 } from '../models/Notification';
+import { NON_SPEND_TXN_TYPES } from '../summary/classifyTransactionFlow';
 
 export const RULE_ACTION_TYPES = [
   'set_category',
@@ -33,16 +34,82 @@ export const RULE_ACTION_TYPES = [
   'set_split',
   'set_label',
   'set_alert',
+  'set_txn_type',
 ] as const;
 export type RuleActionType = (typeof RULE_ACTION_TYPES)[number];
 
-/** Action types that each may appear at most once on a rule (they map 1:1 to a
- * scalar column triplet). `set_label` and `set_alert` may repeat. */
+/** Action types that each may appear at most once on a rule. `set_category` /
+ * `set_business` / `set_split` map 1:1 to a scalar column triplet;
+ * `set_txn_type` is singleton for the simpler reason that a transaction has
+ * exactly one `txn_type` — two conflicting actions is a mistake, not a merge.
+ * `set_label` and `set_alert` may repeat. */
 export const SINGLETON_ACTION_TYPES: readonly RuleActionType[] = [
   'set_category',
   'set_business',
   'set_split',
+  'set_txn_type',
 ];
+
+/**
+ * The action types the scalar columns mirror 1:1. These are rederived from the
+ * columns on every write, so a scalar-only update may safely discard and
+ * rebuild them — and must NOT discard anything else.
+ */
+export const SCALAR_MIRRORED_ACTION_TYPES: readonly RuleActionType[] = [
+  'set_category',
+  'set_business',
+  'set_split',
+];
+
+/**
+ * The actions a scalar-only update must carry across untouched.
+ *
+ * Defined as "not scalar-mirrored" rather than as a list of the types we happen
+ * to know about. The previous inline filter was an allowlist of
+ * `set_label`/`set_alert`, which meant every new non-scalar action type was
+ * silently dropped the first time someone edited the rule's category.
+ */
+export function preserveNonScalarActions(existing: RuleAction[]): RuleAction[] {
+  return existing.filter(
+    (a) => !(SCALAR_MIRRORED_ACTION_TYPES as readonly string[]).includes(a.type),
+  );
+}
+
+/**
+ * The `txn_type` vocabulary a rule may assign. There is no DB enum — the column
+ * is a plain STRING(16) defaulting to 'purchase' — so this list is the guard.
+ *
+ * It is deliberately the WHOLE vocabulary rather than a safe subset: marking an
+ * owner distribution a `dividend` is exactly the kind of correction a rule
+ * should be able to make, and a validator that forbade it would just push the
+ * work back to hand-editing rows.
+ */
+export const SETTABLE_TXN_TYPES: ReadonlySet<string> = new Set([
+  'purchase',
+  'income',
+  'transfer',
+  'payment',
+  'refund',
+  'reward',
+  'fee',
+  'interest',
+  'dividend',
+  'investment',
+  'unknown',
+]);
+
+/**
+ * Settable types that REMOVE money from the reports when applied in bulk:
+ * `transfer` / `investment` / `dividend` drop out of the Sankey and the
+ * dashboard entirely (isNonCategorical), and `payment` / `refund` / `reward`
+ * change net-spend arithmetic. `income` is excluded — it adds, never deletes.
+ *
+ * Derived from NON_SPEND_TXN_TYPES rather than restated, so the two cannot
+ * drift apart. The API accepts these; the editor warns about them.
+ */
+export const RISKY_TXN_TYPES: ReadonlySet<string> = new Set(
+  [...NON_SPEND_TXN_TYPES].filter((t) => t !== 'income'),
+);
 
 export type SetCategoryAction = {
   type: 'set_category';
@@ -60,6 +127,10 @@ export type SetLabelAction = {
   type: 'set_label';
   payload: { labelId: number };
 };
+export type SetTxnTypeAction = {
+  type: 'set_txn_type';
+  payload: { txnType: string };
+};
 export type SetAlertAction = {
   type: 'set_alert';
   payload: { severity: NotificationSeverity; title?: string; body?: string };
@@ -70,7 +141,8 @@ export type RuleAction =
   | SetBusinessAction
   | SetSplitAction
   | SetLabelAction
-  | SetAlertAction;
+  | SetAlertAction
+  | SetTxnTypeAction;
 
 /** The scalar effect columns that the actions list mirrors for back-compat. */
 export interface RuleScalarEffects {
@@ -142,6 +214,7 @@ export type ActionValidationError =
   | 'INVALID_SPLIT'
   | 'INVALID_TAG'
   | 'INVALID_ALERT'
+  | 'INVALID_TXN_TYPE'
   | 'DUPLICATE_ACTION';
 
 export type ValidateActionsResult =
@@ -227,6 +300,19 @@ export function validateActions(
           return { ok: false, error: 'INVALID_TAG', message: `label ${labelId} not in household`, index: i };
         }
         out.push({ type: 'set_label', payload: { labelId } });
+        break;
+      }
+      case 'set_txn_type': {
+        const txnType = typeof payload.txnType === 'string' ? payload.txnType : '';
+        if (!SETTABLE_TXN_TYPES.has(txnType)) {
+          return {
+            ok: false,
+            error: 'INVALID_TXN_TYPE',
+            message: `unknown txnType "${txnType}"`,
+            index: i,
+          };
+        }
+        out.push({ type: 'set_txn_type', payload: { txnType } });
         break;
       }
       case 'set_alert': {

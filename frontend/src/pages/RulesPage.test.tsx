@@ -152,6 +152,82 @@ describe('RulesPage', () => {
     })
   })
 
+  describe('rule actions: set_txn_type', () => {
+    function renderRules() {
+      return render(
+        <MemoryRouter initialEntries={['/rules']}>
+          <ToastProvider>
+            <RulesPage />
+          </ToastProvider>
+        </MemoryRouter>,
+      )
+    }
+
+    it('posts a set_txn_type action when a transaction type is chosen', async () => {
+      renderRules()
+      await waitFor(() => expect(screen.getByText('amazon')).toBeInTheDocument())
+
+      await userEvent.type(screen.getByLabelText(/^pattern$/i), 'cdg labs')
+      await userEvent.selectOptions(screen.getByLabelText(/transaction type/i), 'income')
+      await userEvent.click(screen.getByRole('button', { name: /add rule/i }))
+
+      await waitFor(() => {
+        const post = vi
+          .mocked(fetch)
+          .mock.calls.find(
+            (c) =>
+              String(c[0]).endsWith('/api/rules') &&
+              (c[1] as RequestInit | undefined)?.method === 'POST',
+          )
+        expect(post).toBeTruthy()
+        const body = JSON.parse(String((post![1] as RequestInit).body))
+        expect(body.actions).toEqual(
+          expect.arrayContaining([{ type: 'set_txn_type', payload: { txnType: 'income' } }]),
+        )
+      })
+    })
+
+    it('posts no set_txn_type action when left unset', async () => {
+      renderRules()
+      await waitFor(() => expect(screen.getByText('amazon')).toBeInTheDocument())
+
+      await userEvent.type(screen.getByLabelText(/^pattern$/i), 'acme')
+      await userEvent.click(screen.getByRole('button', { name: /add rule/i }))
+
+      await waitFor(() => {
+        const post = vi
+          .mocked(fetch)
+          .mock.calls.find(
+            (c) =>
+              String(c[0]).endsWith('/api/rules') &&
+              (c[1] as RequestInit | undefined)?.method === 'POST',
+          )
+        expect(post).toBeTruthy()
+        const body = JSON.parse(String((post![1] as RequestInit).body))
+        expect(
+          (body.actions as Array<{ type: string }>).some((a) => a.type === 'set_txn_type'),
+        ).toBe(false)
+      })
+    })
+
+    // txn_type decides whether a row is spend at all. Picking one of the
+    // destructive values must say so before the rule is saved and backfilled
+    // over history.
+    it('warns when a destructive transaction type is chosen, and not otherwise', async () => {
+      renderRules()
+      await waitFor(() => expect(screen.getByText('amazon')).toBeInTheDocument())
+
+      const select = screen.getByLabelText(/transaction type/i)
+      expect(screen.queryByTestId('txn-type-warning')).toBeNull()
+
+      await userEvent.selectOptions(select, 'transfer')
+      expect(await screen.findByTestId('txn-type-warning')).toBeInTheDocument()
+
+      await userEvent.selectOptions(select, 'income')
+      await waitFor(() => expect(screen.queryByTestId('txn-type-warning')).toBeNull())
+    })
+  })
+
   describe('rule actions: tags + alert (issue #795)', () => {
     function renderRules() {
       return render(
