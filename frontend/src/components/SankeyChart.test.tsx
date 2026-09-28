@@ -7,7 +7,6 @@
  * mocked so the render props can be exercised without SVG layout math.
  */
 import React from 'react'
-import { existsSync, readFileSync } from 'node:fs'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -125,35 +124,12 @@ describe('SankeyChart', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  /**
-   * The chart shipped referencing --chart-income / --chart-category /
-   * --chart-link-stroke and four more tokens that no stylesheet defines, so
-   * every node painted SVG-default black and every link ribbon vanished
-   * (an invalid `stroke` paints nothing). Static guard, same shape as
-   * styles/theme.test.ts: a colour the design system does not define is a
-   * colour the user does not see.
-   */
-  it('paints only with colour tokens the design system actually defines', () => {
-    const source = readFileSync(
-      ['src/components/SankeyChart.tsx', 'frontend/src/components/SankeyChart.tsx'].find(
-        existsSync,
-      )!,
-      'utf8',
-    )
-    const tokenCss = ['../node_modules/@connor-adams/tokens/src', 'node_modules/@connor-adams/tokens/src']
-      .filter(existsSync)
-      .flatMap((dir) => ['colors.css', 'semantic.css'].map((f) => readFileSync(`${dir}/${f}`, 'utf8')))
-      .join('\n')
-    expect(tokenCss).not.toBe('')
-
-    // `var(--x)` with no fallback — those are the ones that must resolve.
-    const referenced = [...source.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/g)].map((m) => m[1])
-    expect(referenced.length).toBeGreaterThan(0)
-    const undefinedTokens = [...new Set(referenced)].filter(
-      (t) => !tokenCss.includes(`${t}:`),
-    )
-    expect(undefinedTokens).toEqual([])
-  })
+  // The "does every colour token this chart names actually resolve?" guard
+  // used to live here, reading only @connor-adams/tokens. It is superseded by
+  // `src/styles/theme.test.ts`, which scans every `var(--chart-…)` call site
+  // under src/ and accepts a name defined in either the DS ramp or the
+  // app-owned aliases in theme.css — the seam this chart's per-domain names
+  // (--chart-income, --chart-draws, --chart-surplus, …) live on.
 
   it('honours the height prop so the dashboard embed can be shorter', () => {
     const { container } = render(

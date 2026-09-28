@@ -87,3 +87,49 @@
   --accent-green: var(--success);
   --accent-positive: var(--positive);
 }
+
+/* ── Chart semantic aliases ──────────────────────────────────────────────────
+ * @connor-adams/tokens ships the chart ramp (--chart-1…5, --chart-line-1…6,
+ * --chart-spend/credit/payment/business/personal) but not the per-domain names
+ * the Sankey, forecast, scenario and portfolio-performance charts reach for.
+ * Alias them onto the DS ramp here — not to new colour values — so a chart's
+ * hue stays the DS's call. No light/dark fork needed: the DS tokens on the
+ * right-hand side already flip under :root[data-theme="light"|"dark"].
+ * An unresolved var() in an SVG `fill`/`stroke` is not a visible error — it
+ * silently degrades to the browser default (black fill, no stroke), so these
+ * are load-bearing. `frontend/src/styles/theme.test.ts` scans the call sites.
+ */
+:root,
+:root[data-theme="light"],
+:root[data-theme="dark"] {
+  /* Sankey node fills — hues that stay distinguishable side by side.
+   * (`--chart-business` needs no alias: the DS ramp ships that name itself.) */
+  --chart-income: var(--chart-credit);         /* green — money in */
+  --chart-category: var(--chart-line-1);       /* primary — the bulk of the flow */
+  --chart-savings: var(--chart-line-5);        /* amber */
+  --chart-uncategorized: var(--chart-payment); /* zinc — unknown, reads as inert */
+  --chart-draws: var(--chart-4);               /* orange — the corporate→personal waypoint */
+  /* --chart-surplus: money left over at the right-hand end of the chain.
+   * KNOWN PROBLEM, deliberately left visible rather than silently inherited:
+   * --chart-personal resolves to --positive, which is the same green as
+   * --chart-income (--chart-credit → --green-600 light / --green-300 dark), so
+   * the chart's leftmost source and rightmost terminal paint an identical
+   * swatch. The DS ships no second positive-family chart hue, and the only
+   * unused distinct chart token is --chart-3 (hero-gradient magenta), which is
+   * wrong for "money left over". Preserving today's behaviour until the DS
+   * grows a second green — then this is a one-line change. */
+  --chart-surplus: var(--chart-personal);      /* green — SAME as --chart-income, see above */
+  --chart-link-stroke: var(--border);          /* node hairline + link ribbons, drawn under 1 alpha */
+
+  /* Forecast */
+  --chart-danger-line: var(--danger);          /* the y=0 crossing */
+
+  /* Scenarios sparklines */
+  --chart-scenario: var(--chart-line-1);
+  --chart-scenario-pos: var(--positive);
+  --chart-scenario-neg: var(--negative);
+
+  /* Portfolio performance */
+  --chart-portfolio: var(--chart-line-1);
+  --chart-reference: var(--chart-line-3);      /* steel — the dashed benchmark */
+}

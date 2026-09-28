@@ -8,30 +8,34 @@ import type { SankeyNode as SankeyNodeType, SankeyResponse } from '../types/api'
  * Node fill per backend `kind`. Tailwind v4 JIT requires literal class names
  * (lookup tables, not concatenation), so we map to CSS vars directly.
  *
- * Every entry must name a token `@connor-adams/tokens` actually defines —
- * these are the same swatches the dashboard's other recharts components use,
- * and they carry their own light/dark values, so the chart follows the theme
- * for free. An invented token paints SVG-default black (and an invented
- * *stroke* paints nothing at all), which is how this chart previously shipped
- * as black bars with no visible ribbons. `SankeyChart.test.tsx` guards it.
+ * These are the *per-domain* chart names — `--chart-income`, not
+ * `--chart-credit`. They are app-owned aliases declared in
+ * `src/styles/theme.css`, each pointing at a `@connor-adams/tokens` ramp
+ * entry, so the hue stays the design system's call and light/dark flips for
+ * free. Naming the domain rather than the swatch means a re-hue is a one-line
+ * edit in `theme.css` instead of a hunt through render code.
+ *
+ * An invented token paints SVG-default black (and an invented *stroke* paints
+ * nothing at all), which is how this chart once shipped as black bars with no
+ * visible ribbons. `src/styles/theme.test.ts` scans every `var(--chart-…)`
+ * call site under `src/` and fails if the name resolves in neither place.
  */
 const NODE_COLORS: Record<SankeyNodeType['kind'], string> = {
-  // Money in, and the slice of it that survived: the two green ends of the
-  // chain. They never sit adjacent, so sharing a hue reads as a rhyme.
-  income: 'var(--chart-credit)',
-  surplus: 'var(--chart-personal)',
+  // Money in, and the slice of it that survived.
+  income: 'var(--chart-income)',
+  surplus: 'var(--chart-surplus)',
   // The corporate side-branch, kept visually apart from personal spend.
   business: 'var(--chart-business)',
   // The waypoint between corporate revenue and personal spend.
-  draws: 'var(--chart-4)',
+  draws: 'var(--chart-draws)',
   // Money out.
-  category: 'var(--chart-spend)',
-  savings: 'var(--chart-line-5)',
-  uncategorized: 'var(--chart-5)',
+  category: 'var(--chart-category)',
+  savings: 'var(--chart-savings)',
+  uncategorized: 'var(--chart-uncategorized)',
 }
 
 /** Ribbon colour. Neutral so the node fills carry the meaning. */
-const LINK_STROKE = 'var(--chart-payment)'
+const LINK_STROKE = 'var(--chart-link-stroke)'
 
 const DEFAULT_HEIGHT = 520
 
@@ -163,7 +167,7 @@ function SankeyNode({
         height={height}
         fill={fill}
         fillOpacity={0.95}
-        stroke="var(--border)"
+        stroke="var(--chart-link-stroke)"
         strokeOpacity={0.6}
       />
       <text

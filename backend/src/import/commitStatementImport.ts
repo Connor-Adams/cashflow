@@ -661,6 +661,9 @@ export async function commitStatementImport(
         reviewedAt: null,
         importConfidence: confidence.state,
         importConfidenceFlags: serializeFlags(confidence.flags),
+        // Absent means authoritative: a statement is the source's own closed
+        // record. Only the SimpleFIN feed declares itself provisional.
+        sourceTier: preview.sourceTier ?? 'authoritative',
       });
       recomputeTransactionAmounts(txn);
       // SAVEPOINT around the per-row insert + its signal sidecar. On

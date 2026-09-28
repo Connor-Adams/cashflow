@@ -147,6 +147,11 @@ test('a cold row is categorised by the embedding stage during a statement commit
   assert.equal(txn!.autoSource, 'embedding', 'the cold-row fallback actually ran on this path');
   assert.equal(txn!.autoCategory, 'Coffee');
   assert.equal(txn!.reviewFlag, false, 'review flag cleared by the fallback');
+  assert.equal(
+    txn!.sourceTier,
+    'authoritative',
+    'provenance survives the fallback: a statement row stays authoritative',
+  );
 
   const sig = await models.TransactionSignal.findOne({
     where: { transactionId: txn!.id, source: 'embedding' },
@@ -156,6 +161,38 @@ test('a cold row is categorised by the embedding stage during a statement commit
     result.warnings.filter((w) => /embedding/i.test(w)).length,
     0,
     `a stage that ran must not warn, got ${JSON.stringify(result.warnings)}`,
+  );
+});
+
+/**
+ * The two changes that met here: the commit path now stamps
+ * `transactions.source_tier` ('provisional' for the SimpleFIN feed,
+ * 'authoritative' for a statement), and the cold-row fallbacks now UPDATE rows
+ * after that commit. Provenance is not categorisation — a fallback that
+ * re-categorises a pending SimpleFIN charge must leave its tier alone, or a
+ * later statement would stop superseding it. Both stages write a narrow
+ * allow-list of auto_* / review / confidence columns; this locks that.
+ */
+test('a cold-row fallback does not rewrite the provisional/authoritative tier', async () => {
+  const { householdId, accountId } = await seedAccount();
+  await seedReviewedMerchant(householdId, accountId, 'Blue Bottle Coffee', 'Coffee');
+
+  const result = await commitStatementImport(
+    { ...makePreview(accountId, householdId, 'SQ *BLUE BOTTLE 8812'), sourceTier: 'provisional' },
+    null,
+    householdId,
+    {},
+    { embedder: matchingEmbedder('Blue Bottle Coffee') },
+  );
+
+  const txn = await models.Transaction.findOne({
+    where: { importBatch: result.batchLabel },
+  });
+  assert.equal(txn!.autoSource, 'embedding', 'the fallback did update this row');
+  assert.equal(
+    txn!.sourceTier,
+    'provisional',
+    'the fallback must not promote a pending feed row to authoritative',
   );
 });
 

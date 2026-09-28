@@ -146,6 +146,10 @@ function buildPreview(
     usedParser: 'ofx',
     usedProfileId: 'simplefin',
     profileInferred: false,
+    // The feed reports the AUTHORISED amount. A pending card charge can change
+    // value before it settles and some never settle, so a later statement is
+    // allowed to correct or remove these rows.
+    sourceTier: 'provisional',
     transactions,
     investmentActivities: [],
     holdings: [],
