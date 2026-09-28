@@ -274,4 +274,4 @@ function normalizeMerchant(raw) {
   return out || collapsed;
 }
 
-module.exports = { normalizeMerchant, stripTransactionBoilerplate };
+module.exports = { normalizeMerchant };

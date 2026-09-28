@@ -11,4 +11,3 @@
 import merchantNormalization = require('../../lib/merchantNormalization');
 
 export const normalizeMerchant = merchantNormalization.normalizeMerchant;
-export const stripTransactionBoilerplate = merchantNormalization.stripTransactionBoilerplate;

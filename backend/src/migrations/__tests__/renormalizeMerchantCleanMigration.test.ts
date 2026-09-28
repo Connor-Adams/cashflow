@@ -82,22 +82,27 @@ async function memoryBuckets(key: string): Promise<Array<{ key: string; cat: str
   }));
 }
 
+/** Only the columns this migration reads or writes; everything else is noise. */
+const PK = { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true };
+const OPTIONAL_TEXT = { type: DataTypes.TEXT, allowNull: true };
+const REQUIRED_TEXT = { type: DataTypes.TEXT, allowNull: false };
+
 before(async () => {
   sequelize = new Sequelize({ dialect: 'sqlite', storage: ':memory:', logging: false });
   const qi = sequelize.getQueryInterface();
   await qi.createTable('transactions', {
-    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    id: PK,
     household_id: { type: DataTypes.INTEGER, allowNull: true },
-    merchant_raw: { type: DataTypes.TEXT, allowNull: true },
-    merchant_clean: { type: DataTypes.TEXT, allowNull: true },
+    merchant_raw: OPTIONAL_TEXT,
+    merchant_clean: OPTIONAL_TEXT,
     final_category: { type: DataTypes.STRING(120), allowNull: true },
     reviewed_at: { type: DataTypes.DATE, allowNull: true },
   });
   await qi.createTable('merchant_embeddings', {
-    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    id: PK,
     household_id: { type: DataTypes.INTEGER, allowNull: false },
-    merchant_clean: { type: DataTypes.TEXT, allowNull: false },
-    embedding: { type: DataTypes.TEXT, allowNull: false },
+    merchant_clean: REQUIRED_TEXT,
+    embedding: REQUIRED_TEXT,
     dim: { type: DataTypes.INTEGER, allowNull: false },
     model: { type: DataTypes.STRING(120), allowNull: false },
   });
