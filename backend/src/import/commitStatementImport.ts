@@ -751,6 +751,8 @@ export async function commitStatementImport(
               // The type actually persisted, not the pipeline's guess — the
               // fallbacks recompute import confidence from it.
               txnType: effectiveTxnType,
+              // Brand-new row: it cannot carry a user override yet.
+              categoryOverride: null,
             });
           }
         }

@@ -524,6 +524,11 @@ export async function runBackfill(
                   memory,
                   accountVisibility: txn.visibility === 'shared' ? 'shared' : 'private',
                   txnType: f.txnType,
+                  // EXISTING row — it may carry a category a human chose, and
+                  // the post-loop fallbacks must not overwrite it. The
+                  // recompute at the top of this loop cannot cover them: it
+                  // runs before those stages produce anything.
+                  categoryOverride: txn.categoryOverride,
                 });
               }
             }

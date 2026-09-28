@@ -74,6 +74,27 @@ export function businessAmount(amount: string | number, finalBusiness: boolean):
   return a;
 }
 
+/**
+ * THE project rule for resolving `final_category`: a non-empty
+ * `categoryOverride` is the user's own explicit choice and beats whatever the
+ * enrichment pipeline inferred into `autoCategory`.
+ *
+ * Extracted from `recomputeTransactionAmounts` because the two cold-row
+ * fallback stages (`import/enrichment/{aiBatchOverColdRows,
+ * embeddingMatchOverColdRows}.ts`) persist with a STATIC `Transaction.update`
+ * — which bypasses the `beforeSave` hook and so cannot go through the full
+ * recompute — yet must still honour an override. Three call sites now share
+ * one definition instead of hand-rolling the precedence.
+ */
+export function resolveFinalCategory(
+  categoryOverride: string | null | undefined,
+  autoCategory: string | null | undefined,
+): string | null {
+  return categoryOverride != null && categoryOverride !== ''
+    ? categoryOverride
+    : autoCategory ?? null;
+}
+
 /** Apply finals + persisted share columns on a transaction instance or plain object fields. */
 export function recomputeTransactionAmounts(t: TxLike): Record<string, unknown> {
   const categoryOverride = get<string | null>(t, 'categoryOverride', 'category_override');
@@ -95,10 +116,7 @@ export function recomputeTransactionAmounts(t: TxLike): Record<string, unknown> 
     'auto_pct_partner'
   );
 
-  const finalCategory =
-    categoryOverride != null && categoryOverride !== ''
-      ? categoryOverride
-      : autoCategory ?? null;
+  const finalCategory = resolveFinalCategory(categoryOverride, autoCategory);
   const finalBusiness =
     businessOverride != null ? Boolean(businessOverride) : Boolean(autoBusiness);
   const finalSplitType =

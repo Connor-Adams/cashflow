@@ -1,5 +1,8 @@
 import { before, beforeEach, after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { summarizeReportingCashflow } from '../../reporting/cashflowTotals';
+import { aggregateSankey } from '../../summary/aggregateSankey';
+import { computeImportConfidence } from '../computeImportConfidence';
 
 process.env.DATABASE_PATH = ':memory:';
 process.env.ENRICHMENT_EMBEDDING_ENABLED = 'true';
@@ -46,16 +49,26 @@ async function seedReviewedMerchant(householdId: number, accountId: number, merc
   } as never);
 }
 
-async function coldTxn(householdId: number, accountId: number, merchantClean: string) {
+async function coldTxn(
+  householdId: number,
+  accountId: number,
+  merchantClean: string,
+  opts: { categoryOverride?: string | null } = {},
+) {
   const fp = `cold-${Math.random()}`;
+  const categoryOverride = opts.categoryOverride ?? null;
   const txn = await models.Transaction.create({
     accountId, householdId, visibility: 'private', importBatch: 'import',
     date: '2026-06-01', amount: '-7.00', currency: 'CAD',
     merchantRaw: merchantClean, merchantClean,
     sourceRowFingerprint: fp, sourceIdentityFingerprint: fp,
     txnType: 'purchase', reviewFlag: true, finalSplitType: 'me',
+    categoryOverride,
+    // A row carrying an override already has final_category resolved to it.
+    finalCategory: categoryOverride,
   } as never);
   return {
+    categoryOverride,
     txnId: txn.id,
     signals: [{ source: 'normalize-seed' as const, confidence: 'low' as const, fields: { merchantClean } }],
     merchantKey: merchantClean,
@@ -235,4 +248,122 @@ test('a row with no household reports no_household', async () => {
     { embedder: toyEmbedder },
   );
   assert.equal(result.summary.skipReason, 'no_household');
+});
+
+// ---------------------------------------------------------------------------
+// final_category persistence (PR #1140 follow-up).
+//
+// Same defect as the AI stage: the static `Transaction.update` wrote
+// `auto_category` and skipped `final_category`, the column the spend rollups
+// and the Sankey aggregator actually read — so a matched row never left the
+// uncategorised bucket. Asserted through the real read paths, because a
+// column-only assertion would pass while nothing user-visible changed.
+// ---------------------------------------------------------------------------
+
+test('embedding-matched cold row lands in final_category and leaves the uncategorised bucket', async () => {
+  const hh = await models.Household.create({ name: 'H' } as never);
+  const acc = await models.Account.create({ householdId: hh.id, name: 'C', visibility: 'private' } as never);
+  await seedReviewedMerchant(hh.id, acc.id, 'Blue Bottle Coffee', 'Coffee');
+
+  const cold = await coldTxn(hh.id, acc.id, 'SQ *BLUE BOTTLE');
+  const result = await orch.maybeRunEmbeddingMatchOverColdRows([cold], hh.id, {
+    embedder: toyEmbedder,
+    threshold: 0.85,
+  });
+  assert.equal(result.summary.matched, 1);
+
+  const fresh = await models.Transaction.findByPk(cold.txnId);
+  assert.ok(fresh);
+  assert.equal(fresh.autoCategory, 'Coffee');
+  assert.equal(fresh.finalCategory, 'Coffee', 'final_category is the column every rollup reads');
+
+  // Read path 1: the reporting spend rollup.
+  const totals = summarizeReportingCashflow(
+    [{ amount: fresh.amount, txnType: fresh.txnType, finalCategory: fresh.finalCategory }],
+    new Set(['coffee']),
+  );
+  assert.equal(totals.totalSpend, 7);
+  assert.equal(totals.essentialSpend, 7, 'row is attributed to its category, not dropped');
+
+  // Read path 2: the Sankey aggregator's uncategorised bucket.
+  const sankey = aggregateSankey(
+    [
+      {
+        id: fresh.id,
+        date: fresh.date,
+        currency: 'CAD',
+        finalCategory: fresh.finalCategory,
+        finalBusiness: false,
+        merchantRaw: fresh.merchantRaw,
+        merchantClean: fresh.merchantClean,
+        amount: fresh.amount,
+        txnType: fresh.txnType,
+        accountType: null,
+      },
+    ],
+    'CAD',
+  );
+  assert.equal(
+    sankey.nodes.some((n) => n.kind === 'uncategorized'),
+    false,
+    'no uncategorised node remains',
+  );
+  assert.ok(sankey.nodes.some((n) => n.name === 'Coffee'));
+});
+
+test('embedding stage never clobbers a user categoryOverride in final_category', async () => {
+  const hh = await models.Household.create({ name: 'H' } as never);
+  const acc = await models.Account.create({ householdId: hh.id, name: 'C', visibility: 'private' } as never);
+  await seedReviewedMerchant(hh.id, acc.id, 'Blue Bottle Coffee', 'Coffee');
+
+  const cold = await coldTxn(hh.id, acc.id, 'SQ *BLUE BOTTLE', { categoryOverride: 'Groceries' });
+  const result = await orch.maybeRunEmbeddingMatchOverColdRows([cold], hh.id, {
+    embedder: toyEmbedder,
+    threshold: 0.85,
+  });
+  assert.equal(result.summary.matched, 1);
+
+  const fresh = await models.Transaction.findByPk(cold.txnId);
+  assert.ok(fresh);
+  // The match is still recorded as the machine's opinion...
+  assert.equal(fresh.autoCategory, 'Coffee');
+  // ...but the human's explicit choice still wins the resolved column.
+  assert.equal(fresh.categoryOverride, 'Groceries');
+  assert.equal(fresh.finalCategory, 'Groceries', 'user override beats autoCategory');
+});
+
+test('embedding stage import_confidence matches the final_category actually persisted', async () => {
+  const hh = await models.Household.create({ name: 'H' } as never);
+  const acc = await models.Account.create({ householdId: hh.id, name: 'C', visibility: 'private' } as never);
+  await seedReviewedMerchant(hh.id, acc.id, 'Blue Bottle Coffee', 'Coffee');
+
+  const cold = await coldTxn(hh.id, acc.id, 'SQ *BLUE BOTTLE');
+  await orch.maybeRunEmbeddingMatchOverColdRows([cold], hh.id, {
+    embedder: toyEmbedder,
+    threshold: 0.85,
+  });
+
+  const fresh = await models.Transaction.findByPk(cold.txnId);
+  assert.ok(fresh);
+  // The stage tells computeImportConfidence that final_category is set; that
+  // claim is only honest if the column really is set. `hasCategory` is
+  // `finalCategory || autoCategory`, so blanking autoCategory is what actually
+  // distinguishes a truthful call from a stand-in.
+  const fromFinalCategoryAlone = computeImportConfidence({
+    reviewFlag: fresh.reviewFlag,
+    finalCategory: fresh.finalCategory,
+    autoCategory: null,
+    autoSplitType: fresh.autoSplitType,
+    finalSplitType: fresh.finalSplitType,
+    txnType: fresh.txnType,
+    accountVisibility: 'private',
+    linkedTransactionId: fresh.linkedTransactionId,
+    amount: -7,
+  });
+  assert.equal(
+    fromFinalCategoryAlone.flags.includes('missing_category'),
+    false,
+    'final_category alone satisfies the category check the stage claimed',
+  );
+  assert.equal(fresh.importConfidence, fromFinalCategoryAlone.state);
 });

@@ -29,6 +29,7 @@ import {
   type PriorEmbedding,
 } from './embeddingMatchStage';
 import { mergeSignals } from './computeReviewFlag';
+import { resolveFinalCategory } from '../calculateShares';
 import {
   computeImportConfidence,
   serializeFlags,
@@ -101,9 +102,15 @@ async function persistEmbeddingMatch(
   householdId: number | null,
 ): Promise<boolean> {
   const merged = mergeSignals([...c.signals, signal]);
+  // `final_category` is the column every read path aggregates on (spend
+  // rollups, the Sankey aggregator, the uncategorised bucket), so a row this
+  // stage matches has to land there or the match is invisible downstream. The
+  // user's own `categoryOverride` still wins — see resolveFinalCategory.
+  // computeImportConfidence is told the value actually persisted below.
+  const finalCategory = resolveFinalCategory(c.categoryOverride, merged.fields.autoCategory);
   const confidence = computeImportConfidence({
     reviewFlag: merged.fields.reviewFlag,
-    finalCategory: merged.fields.autoCategory,
+    finalCategory,
     autoCategory: merged.fields.autoCategory,
     autoSplitType: merged.fields.autoSplitType,
     finalSplitType:
@@ -116,9 +123,14 @@ async function persistEmbeddingMatch(
     amount: c.amount,
   });
   try {
+    // NOTE: static update bypasses the beforeSave category-id hook, so
+    // *_category_id stays null momentarily (auto_category_id and
+    // final_category_id alike). Migration 20260623000001 backfills any null
+    // FKs where the category string is set.
     await Transaction.update(
       {
         autoCategory: merged.fields.autoCategory,
+        finalCategory,
         autoBusiness: merged.fields.autoBusiness,
         autoSplitType: merged.fields.autoSplitType,
         autoPctMe: merged.fields.autoPctMe,
