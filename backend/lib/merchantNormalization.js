@@ -220,24 +220,28 @@ const CARD_NETWORK_PURCHASE_PREFIX =
  * Exported because migration `20260928000002-renormalize-merchant-clean`
  * mirrors it to re-key historical rows; keep the two in step.
  */
-function stripTransactionBoilerplate(input) {
-  let s = input;
-
-  const withoutPrefix = s.replace(CARD_NETWORK_PURCHASE_PREFIX, '').trim();
-  if (withoutPrefix) s = withoutPrefix;
-
-  const withoutFx = s.replace(FX_RATE_SUFFIX, '').trim();
-  if (withoutFx) s = withoutFx;
-
-  const dateStripped = s.replace(DATE_PARENTHETICAL, '').replace(TRAILING_DATE_CLAUSE, '');
-  if (dateStripped !== s) {
-    // Only tidy the tail when a date clause actually went — otherwise this
+/** One pass per boilerplate family, applied in order. */
+const BOILERPLATE_PASSES = [
+  (s) => s.replace(CARD_NETWORK_PURCHASE_PREFIX, '').trim(),
+  (s) => s.replace(FX_RATE_SUFFIX, '').trim(),
+  (s) => {
+    const stripped = s.replace(DATE_PARENTHETICAL, '').replace(TRAILING_DATE_CLAUSE, '');
+    // Tidy the tail only when a date clause actually went — otherwise this
     // would silently start rewriting merchants whose stored name happens to
     // end in punctuation, which is not a pattern we measured.
-    const cleaned = dateStripped.replace(DANGLING_TAIL_PUNCTUATION, '').trim();
-    if (cleaned) s = cleaned;
-  }
+    return stripped === s ? s : stripped.replace(DANGLING_TAIL_PUNCTUATION, '').trim();
+  },
+];
 
+function stripTransactionBoilerplate(input) {
+  let s = input;
+  for (const pass of BOILERPLATE_PASSES) {
+    const next = pass(s);
+    // A pass that consumed the whole string found boilerplate where the
+    // merchant name should have been; keep what we had rather than hand back an
+    // empty key.
+    if (next) s = next;
+  }
   return s.replace(/\s+/g, ' ').trim();
 }
 

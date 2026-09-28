@@ -61,7 +61,20 @@
 // idempotent.
 const { normalizeMerchant } = require('../../lib/merchantNormalization');
 
-const BATCH = 500;
+/**
+ * The rows whose stored key the current normalizer disagrees with. A
+ * normalization that produced nothing is a bug, not an improvement — an empty
+ * `merchant_clean` is a row with no memory key and no rule surface — so those
+ * rows are left alone.
+ */
+function plannedRekeys(rows) {
+  const planned = [];
+  for (const row of rows) {
+    const next = normalizeMerchant(row.merchant_clean);
+    if (next && next !== row.merchant_clean) planned.push({ id: row.id, merchantClean: next });
+  }
+  return planned;
+}
 
 module.exports = {
   async up(queryInterface) {
@@ -73,27 +86,14 @@ module.exports = {
         { transaction },
       );
 
-      const changes = [];
-      for (const row of rows) {
-        const next = normalizeMerchant(row.merchant_clean);
-        // A normalization that produced nothing is a bug, not an improvement:
-        // an empty merchant_clean is a row with no memory key and no rule
-        // surface. Skip it rather than degrade the row.
-        if (!next || next === row.merchant_clean) continue;
-        changes.push({ id: row.id, merchantClean: next });
-      }
-
-      for (let i = 0; i < changes.length; i += BATCH) {
-        const slice = changes.slice(i, i + BATCH);
-        // One UPDATE per row: the values are arbitrary text and the row count
-        // here is in the low thousands, so a CASE-folded bulk statement buys
-        // nothing and costs readability.
-        for (const c of slice) {
-          await queryInterface.sequelize.query(
-            'UPDATE transactions SET merchant_clean = :mc WHERE id = :id',
-            { replacements: { mc: c.merchantClean, id: c.id }, transaction },
-          );
-        }
+      // One UPDATE per row: the values are arbitrary text and the row count is
+      // in the low thousands (831 on production), so a CASE-folded bulk
+      // statement buys nothing and costs readability.
+      for (const rekey of plannedRekeys(rows)) {
+        await queryInterface.sequelize.query(
+          'UPDATE transactions SET merchant_clean = :mc WHERE id = :id',
+          { replacements: { mc: rekey.merchantClean, id: rekey.id }, transaction },
+        );
       }
 
       // merchant_embeddings is a pure memoization cache keyed on
