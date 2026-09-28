@@ -38,7 +38,7 @@ const DEFAULT_CURRENCY = 'CAD'
 const NODE_COLORS: Record<SankeyNodeType['kind'], string> = {
   income: 'var(--chart-income)',
   category: 'var(--chart-category)',
-  business: 'var(--chart-business-alt)',
+  business: 'var(--chart-business)',
   savings: 'var(--chart-savings)',
   uncategorized: 'var(--chart-uncategorized)',
 }
