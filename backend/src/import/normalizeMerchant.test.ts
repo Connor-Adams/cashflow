@@ -284,3 +284,18 @@ test('normalizeMerchant never returns empty for a non-empty input', () => {
   assert.equal(normalizeMerchant('(executed at 2026-06-04)'), '(executed at 2026-06-04)');
   assert.equal(normalizeMerchant('[UNITED STATES DOLLAR 1.35 @ 1.45185]'), '[UNITED STATES DOLLAR 1.35 @ 1.45185]');
 });
+
+test('normalizeMerchant no longer reduces an Interac purchase to the bare prefix', () => {
+  // Regression lock on the strongest reason to strip this prefix. Before the
+  // prefix strip existed, MID_STORE_WITH_CITY read "5587 TIM HORTONS" as a
+  // store id plus city words and ate it, leaving the transaction type as the
+  // merchant: 219 production rows normalized to a bare card-network prefix,
+  // i.e. one meaningless 219-row memory bucket spanning Tim Hortons, Metro,
+  // Wal-Mart and a dozen others. Stripping the prefix FIRST means the tail
+  // passes see "TIM HORTONS", which has no digits for them to chew on.
+  assert.equal(normalizeMerchant('CONTACTLESS INTERAC PURCHASE - 5587 TIM HORTONS'), 'TIM HORTONS');
+  assert.equal(normalizeMerchant('CONTACTLESS INTERAC PURCHASE - 4149 WENDY\'S'), "WENDY'S");
+  assert.equal(normalizeMerchant('INTERAC PURCHASE - 2183 WAL-MART'), 'WAL-MART');
+  // The store-number pass must still do its job on merchants it should trim.
+  assert.equal(normalizeMerchant('CONTACTLESS INTERAC PURCHASE - 8714 METRO 123 GUELPH ON'), 'METRO');
+});
