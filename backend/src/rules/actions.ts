@@ -21,12 +21,12 @@
  * import/export paths all import from here. The forward migration replicates the
  * derivation in plain JS (it can't import TS) — keep the two in lockstep.
  */
+import { TXN_TYPE_VALUES } from '@cashflow/shared';
 import {
   NOTIFICATION_SEVERITIES,
   NOTIFICATION_TITLE_MAX_LENGTH,
   type NotificationSeverity,
 } from '../models/Notification';
-import { NON_SPEND_TXN_TYPES } from '../summary/classifyTransactionFlow';
 
 export const RULE_ACTION_TYPES = [
   'set_category',
@@ -55,7 +55,7 @@ export const SINGLETON_ACTION_TYPES: readonly RuleActionType[] = [
  * columns on every write, so a scalar-only update may safely discard and
  * rebuild them — and must NOT discard anything else.
  */
-export const SCALAR_MIRRORED_ACTION_TYPES: readonly RuleActionType[] = [
+const SCALAR_MIRRORED_ACTION_TYPES: readonly RuleActionType[] = [
   'set_category',
   'set_business',
   'set_split',
@@ -76,40 +76,16 @@ export function preserveNonScalarActions(existing: RuleAction[]): RuleAction[] {
 }
 
 /**
- * The `txn_type` vocabulary a rule may assign. There is no DB enum — the column
- * is a plain STRING(16) defaulting to 'purchase' — so this list is the guard.
+ * The `txn_type` vocabulary a rule may assign, from the shared contract so the
+ * API and the editor cannot disagree about what is selectable.
  *
- * It is deliberately the WHOLE vocabulary rather than a safe subset: marking an
- * owner distribution a `dividend` is exactly the kind of correction a rule
- * should be able to make, and a validator that forbade it would just push the
- * work back to hand-editing rows.
+ * Deliberately the WHOLE vocabulary rather than a safe subset: marking an owner
+ * distribution a `dividend` is exactly the kind of correction a rule should be
+ * able to make, and a validator that forbade it would just push the work back
+ * to hand-editing rows.
  */
-export const SETTABLE_TXN_TYPES: ReadonlySet<string> = new Set([
-  'purchase',
-  'income',
-  'transfer',
-  'payment',
-  'refund',
-  'reward',
-  'fee',
-  'interest',
-  'dividend',
-  'investment',
-  'unknown',
-]);
+const SETTABLE_TXN_TYPES: ReadonlySet<string> = new Set(TXN_TYPE_VALUES);
 
-/**
- * Settable types that REMOVE money from the reports when applied in bulk:
- * `transfer` / `investment` / `dividend` drop out of the Sankey and the
- * dashboard entirely (isNonCategorical), and `payment` / `refund` / `reward`
- * change net-spend arithmetic. `income` is excluded — it adds, never deletes.
- *
- * Derived from NON_SPEND_TXN_TYPES rather than restated, so the two cannot
- * drift apart. The API accepts these; the editor warns about them.
- */
-export const RISKY_TXN_TYPES: ReadonlySet<string> = new Set(
-  [...NON_SPEND_TXN_TYPES].filter((t) => t !== 'income'),
-);
 
 export type SetCategoryAction = {
   type: 'set_category';

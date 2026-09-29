@@ -19,39 +19,11 @@ import { ImportRulesModal } from '../components/rules/ImportRulesModal'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import { useUrlSort } from '../hooks/useUrlSort'
 import { useLabels } from '../lib/useLabels'
+import { TXN_TYPE_VALUES, RISKY_TXN_TYPE_VALUES } from '@cashflow/shared'
 import type { Rule, RuleAction, TxnTypeValue } from '../types/api'
 
 type AlertSeverity = 'info' | 'warn' | 'critical'
 
-/** The txn_type vocabulary a rule may assign; mirrors SETTABLE_TXN_TYPES. */
-const TXN_TYPE_OPTIONS: readonly TxnTypeValue[] = [
-  'purchase',
-  'income',
-  'transfer',
-  'payment',
-  'refund',
-  'reward',
-  'fee',
-  'interest',
-  'dividend',
-  'investment',
-  'unknown',
-]
-
-/**
- * Types that DELETE money from the reports: transfer / investment / dividend
- * drop out of spend entirely, and payment / refund / reward change the
- * net-spend arithmetic. Mirrors RISKY_TXN_TYPES on the backend. `income` is
- * absent — it adds, never removes.
- */
-const RISKY_TXN_TYPES: ReadonlySet<TxnTypeValue> = new Set([
-  'transfer',
-  'investment',
-  'dividend',
-  'payment',
-  'refund',
-  'reward',
-])
 
 const RULES_SORT_FIELDS = ['name', 'matchType', 'priority', 'updatedAt'] as const
 
@@ -735,14 +707,14 @@ export function RulesPage() {
                 onChange={(e) => setNewTxnType(e.target.value as TxnTypeValue | '')}
               >
                 <option value="">Leave as detected</option>
-                {TXN_TYPE_OPTIONS.map((t) => (
+                {TXN_TYPE_VALUES.map((t) => (
                   <option key={t} value={t}>
                     {t}
                   </option>
                 ))}
               </select>
             </label>
-            {newTxnType && RISKY_TXN_TYPES.has(newTxnType) && (
+            {newTxnType && (RISKY_TXN_TYPE_VALUES as readonly string[]).includes(newTxnType) && (
               <p
                 className="mt-1 text-sm text-warning"
                 data-testid="txn-type-warning"
