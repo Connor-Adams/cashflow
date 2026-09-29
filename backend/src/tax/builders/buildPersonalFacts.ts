@@ -73,6 +73,28 @@ function daysBetween(a: string, b: string): number {
   return Math.round((da - db) / 86_400_000);
 }
 
+/**
+ * Collapse the two legs of one internal contribution transfer into one.
+ *
+ * Both legs live in the same entity — the funding account's outflow and the
+ * registered account's inflow — and both collect as an absolute amount, so
+ * counting both deducts the contribution twice. When a pair is linked and both
+ * sides carry the treatment, keep the outflow: that is the leg that represents
+ * money committed, and it is the one that exists whether or not the registered
+ * side was ever imported.
+ *
+ * A leg tagged on its own is always kept, linked or not — the user may only have
+ * classified one side, and dropping it would lose a real deduction.
+ */
+function dedupeLinkedContribs<T extends { txnId: number; linkedId: number | null; positive: boolean }>(
+  rows: T[],
+): Omit<T, 'txnId' | 'linkedId' | 'positive'>[] {
+  const present = new Set(rows.map((r) => r.txnId));
+  return rows
+    .filter((r) => !(r.positive && r.linkedId != null && present.has(r.linkedId)))
+    .map(({ txnId: _t, linkedId: _l, positive: _p, ...rest }) => rest);
+}
+
 export async function buildPersonalFacts(entityId: number, year: number): Promise<TaxYearFacts> {
   const entity = await Entity.findByPk(entityId);
   if (!entity) throw new Error(`Entity ${entityId} not found`);
@@ -114,8 +136,16 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   const selfEmploymentIncome: IncomeItem[] = [];
   const selfEmploymentExpenses: IncomeItem[] = [];
   const donations: IncomeItem[] = [];
-  const rrspContribs: RrspContrib[] = [];
-  const fhsaContribs: RrspContrib[] = [];
+  /**
+   * Contributions carry their transaction id and link so the two legs of one
+   * internal transfer can be collapsed afterwards. A chequing→FHSA contribution
+   * has a leg on each account inside the same entity — the brokerage cash mirror
+   * made that shape common — and both collect as `cad.abs()`, so tagging both
+   * would deduct the money twice.
+   */
+  type ContribRow = RrspContrib & { txnId: number; linkedId: number | null; positive: boolean };
+  const rrspContribRows: ContribRow[] = [];
+  const fhsaContribRows: ContribRow[] = [];
   const medicalExpenses: IncomeItem[] = [];
   let pensionTotal = D('0');
   const rentalIncome: IncomeItem[] = [];
@@ -163,10 +193,16 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
       // self-employment income, and a reimbursement is exactly that shape.
     }
     else if (treatment === 'rrsp_contribution') {
-      rrspContribs.push({ source: item.source, amount: cad.abs(), date: t.date as unknown as string });
+      rrspContribRows.push({
+        source: item.source, amount: cad.abs(), date: t.date as unknown as string,
+        txnId: t.id as number, linkedId: t.linkedTransactionId ?? null, positive: cad.greaterThan(0),
+      });
     }
     else if (treatment === 'fhsa_contribution') {
-      fhsaContribs.push({ source: item.source, amount: cad.abs(), date: t.date as unknown as string });
+      fhsaContribRows.push({
+        source: item.source, amount: cad.abs(), date: t.date as unknown as string,
+        txnId: t.id as number, linkedId: t.linkedTransactionId ?? null, positive: cad.greaterThan(0),
+      });
     }
     else if (treatment === 'medical_expense') {
       medicalExpenses.push({ ...item, cadAmount: cad.abs(), amount: D(t.amount as unknown as string).abs() });
@@ -476,8 +512,8 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     eligibleDividends,
     nonEligibleDividends,
     capitalGainEvents,
-    rrspContribs,
-    fhsaContribs,
+    rrspContribs: dedupeLinkedContribs(rrspContribRows),
+    fhsaContribs: dedupeLinkedContribs(fhsaContribRows),
     donations,
     slips,
     carryforwards,
