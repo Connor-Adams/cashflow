@@ -71,7 +71,7 @@ stayed stalled until September.
 |---|---|
 | $42,000 of corp draws untagged (May–Aug, found 2026-09-16) | **~$4,227** of tax |
 | $15,000 draw whose corp leg was never written (brokerage cash leg, part 1a) | **~$3,042** of tax |
-| WS Corporate Chequing (account 24) uncovered 2026-08-14 → 2026-09-28 | est. $8–14k of draws, **~$1,700–$3,000** of tax |
+| WS Corporate Chequing (account 24) quiet since 2026-08-13 | est. $8–14k of draws — reported as a gap, not priced; part 4 step 1 imports it rather than estimating |
 | ~25 duplicate pairs, $28,848 phantom corp inflow | corrupts every balance |
 | No 2026 carryforward roll (personal stops at `as_of_year 2025`) | RRSP/FHSA room wrong |
 
@@ -93,7 +93,7 @@ None of these produced a single character of warning on the T1.
 | Gate hardness | **Show the number, never bare** | Connor's call. A refused total is hostile when you want a rough mid-year sense; a bare total is what caused this three times. |
 | Shape | Typed `completeness: { status, blockers[], gaps[] }` on the return DTO | A first-class field, not a warning string. The UI can treat it structurally; a string forces re-parsing. |
 | Where it is computed | A dedicated `buildCompletenessReport(entityId, year)` module | Keeps `buildPersonalFacts` focused on facts. Completeness needs import history and statement coverage, outside that builder's remit. |
-| Dollar impact | Every gap carries an estimate, or states it cannot | "$15,000 of draws not imported (~$3,040 of tax)" drives action; "1 issue found" does not. |
+| Dollar impact | Every **blocker** carries an estimate; a gap carries one only where it is honest to | "$15,000 of draws not imported (~$3,042 of tax)" drives action; "1 issue found" does not. The distinction is the point: a blocker is boundable missing money by definition, so an estimate always exists. A gap often has no honest basis for one, and inventing it is worse than omitting it. |
 | How the estimate is derived | **Re-run the return with the gap's amount added, take the delta** | The marginal rate depends on what is already counted (see the table above). A stored per-dollar rate is wrong by ~60% between two gaps in the same year. |
 | Persistence | None — derived on read | Per `CLAUDE.md`: derived → computation, no table. |
 | Bulk classification | In scope | A gate that surfaces 50 pending rows and offers one-at-a-time clearing just relocates the stall. |
@@ -120,37 +120,42 @@ demonstrably wrong.
   "Money arrived and you have not accounted for it" is the cheapest detector in this
   spec and was missing from it.
 - Unlinked corp outflows with no resolvable counterpart
-- Activities with a cash leg but no transaction — scoped to **both** of part 1a's
-  gates: its allowlist (`transfer_in`, `transfer_out`, `cash_movement`) **and its
-  `allowInvestmentAccountIds` opt-in set**. 1a deliberately converts neither a bare
-  `transfer` nor an `interest` activity, and it never defaults its account list, so
-  an orphan on account 8 (TFSA), 11 (FHSA) or 15 — all parsed by the same path,
-  which writes `transactions: []` (`importWsActivityStatement.ts:92`) — is not
-  something this set converts. Counting either class would report a blocker nothing
-  can clear. **Orphans outside the opt-in set are a gap**, which is the honest
-  status: worth knowing, not evidence the total is wrong — and for the registered
-  accounts among them, not tax-relevant at all.
-- **A truncated import** — an account that was high-frequency and then stopped.
-  Not "coverage ends before today", which two earlier drafts of this spec tried and
-  which has no workable measure: `account_statements` is empty by design of the
-  import path (`commitStatementImport.ts:234-238`), so `periodEnd` is null
-  everywhere, and `max(transaction.date)` is behind today on essentially every
-  account on essentially every day. Connor's own operating doctrine says so —
-  `cashflow-data-status`: "If *every* active account stops at roughly the same
-  recent date, that's **export/statement lag, not gaps**", and "trailing-stale ≠
-  missing. The data is all there".
+- Activities with a cash leg but no transaction, **that part 1a would convert** —
+  an allowlisted type (`transfer_in`, `transfer_out`, `cash_movement`) on an account
+  in the opt-in set. This is boundable: the activity carries its own amount, so the
+  missing money's size is known exactly. Everything else orphaned is a gap (below).
 
-  So the measure borrows that doctrine and is computable from `transactions` alone:
-  fire only when an account's trailing silence **exceeds its own observed cadence by
-  a margin** *and* it is an **outlier against the household's other active
-  accounts**. A chequing account that posts weekly and has been silent 45 days is a
-  truncated import; the same 45 days on a TFSA is event-driven normality; and every
-  account stopping together is lag, reported once as lag and not as N blockers.
-  Account types follow that doctrine too — high-frequency accounts can be judged by
-  a missing month, investment and savings accounts cannot.
+  **The opt-in set must be a shared exported constant**, not a CLI argument.
+  An earlier draft had part 1a take `allowInvestmentAccountIds` per invocation and
+  "never defaulted", which part 3 cannot read: this is a read-path computation with
+  no table (see Primitives), `Account` has no field distinguishing account 13 from
+  any other `investment` account, and a shell argument is not queryable. So 1a
+  exports the list, its runner defaults to it, and part 3 imports it. One
+  declaration, two readers, no persistence.
 
 **Gap** — a correctness risk of unknown size. The total may be right.
 
+- **A possible truncated import** — an account that was high-frequency and then
+  went quiet. A **gap**, not a blocker, and this is the third and final attempt at
+  it: the first two tried to make it a blocker and failed the same way each time.
+  A blocker must name boundable missing money, and a truncated import cannot —
+  bounding it needs a run rate, and a run rate over a window that may simply be
+  quiet is a fabricated number. As a gap it needs no threshold and no estimate: it
+  says "account 24 last posted 46 days ago and posts roughly monthly; check whether
+  a statement is missing", and a human decides.
+
+  Even as a gap, respect Connor's own doctrine (`cashflow-data-status`): when every
+  active account stops at roughly the same recent date that is export lag, so report
+  it **once, as lag**, not as N per-account gaps. Investment and savings accounts are
+  event-driven and are not flagged at all. Closed and merged accounts are excluded —
+  `Account.closedAt` and `mergedIntoId` (`models/Account.ts:40,48-49`), which is why
+  this needs `Account` joined, not `transactions` alone as an earlier draft claimed.
+- **Orphaned cash-leg activities that part 1a does not convert** — an allowlisted
+  activity on an account outside the opt-in set, or a non-allowlisted one
+  (`interest`, `fee`, bare `transfer`) inside it. A gap, because nothing in this set
+  converts them. The bare-`transfer` case on an opt-in brokerage account is the most
+  tax-relevant residue in the whole set — 1a declines to auto-convert it precisely
+  because it might be a draw — so it must be visible even though it is not a blocker.
 - Suspected duplicate pairs awaiting review (part 1b's detector)
 - ACB warnings raised and discarded — `computeAcb` emits them for clamped sells,
   zero-cost `transfer_in` and mixed currency (`portfolio/acb.ts:154-176,197-202,366-370`)
@@ -158,7 +163,10 @@ demonstrably wrong.
 - Carryforwards not rolled into the period
 - The year's rate table carries `provenance: 'projected'` (ties to part 2)
 - Slips entered for the year that reconcile against nothing
-- Accounts with no statement ever registered
+*(Not included: "accounts with no statement ever registered". Nothing on the import
+path ever registers one — `commitStatementImport.ts:234-238` names
+`routes/statements.ts:197` as the only `AccountStatement.create` — so that gap would
+fire on every account, always.)*
 
 **Not included, because part 1c was cut:** derived balance diverging from a printed
 closing balance. Nothing persists a statement balance, so there is no signal to
@@ -166,8 +174,11 @@ compute. Reinstate with 1c if it is ever revived.
 
 `status` is `complete` | `gaps` | `blocked`, worst-wins.
 
-**Every blocker must be clearable by work this set schedules, and must not fire on
-a healthy ledger.** That is the discipline the refinements above enforce. A blocker
+**A blocker must be boundable, clearable by work this set schedules, and must not
+fire on a healthy ledger.** If any of the three fails, it is a gap.
+
+That test is what finally settled the truncated-import item, after two failed
+attempts to force it into the blocker list. That is the discipline the refinements above enforce. A blocker
 nothing can clear is not a signal, it is a permanent red light that trains the reader
 to ignore the panel — and one that fires on ordinary statement lag is worse, because
 it is wrong rather than merely useless.
@@ -256,7 +267,7 @@ Backend `node:test` via `tsx`, colocated. Frontend vitest.
 - The report is recomputed when import coverage changes but facts do not. This is
   the specific regression that would silently reintroduce staleness.
 - Regression fixture from Connor's real 2026: 13 classified pairs + 1 unimported
-  $15,000 draw + a 45-day coverage gap + 25 duplicate pairs → `blocked`, with the
+  $15,000 draw + 25 duplicate pairs → `blocked`, with the
   $15,000 blocker carrying a tax estimate in the **$2,900–$3,200** band
   (total payable $4,527.17 → $7,568.96 on the **published** 2026 rates, per part 2's
   measured table — the $4,538.85 / $7,580.64 pair in that table is the *file* rates

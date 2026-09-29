@@ -104,7 +104,7 @@ on when deciding December draws and when paying in March.
 | Forward view basis | **Year-to-date actuals + run-rate projection of the remainder**, never a scaled prior year | The prior-year scaling is the mechanism part 0 demotes. Reusing it here would reintroduce the same defect under a new name. |
 | How it is modelled | **A fourth `ScenarioKind`** and a third branch in `resolveScenario` | `models/Scenario.ts:6` is `'baseline' \| 'fork' \| 'projection_root'` and `resolveScenario.ts:25-28` has exactly two branches. A YTD-plus-remainder basis is neither. **No migration is needed** — `migrations/20260526014957-scenarios.js:12` declares `kind` as `Sequelize.STRING(20)` with the value list in a comment only, no ENUM and no constraint. The union is declared in three places: `models/Scenario.ts:6`, `frontend/src/hooks/useScenarios.ts:4` and `useCorpScenarios.ts:4`. |
 | Caching | The forward view must **not** ride the facts-only `ScenarioReturn` cache | `computeScenarioReturn.ts:44-50` keys on `hashFacts(facts)` alone. A run-rate projection changes as the calendar advances with no fact changing, so it would cache and go stale — the same failure part 2 documents for rate corrections and part 3 for the completeness report. |
-| Run-rate source | Corp→personal draws per month over the elapsed year, excluding the coverage gap | The gap is part 3's blocker; the projection must not treat an unimported month as a zero-draw month, or it under-projects exactly when data is missing. |
+| Run-rate source | Corp→personal draws per month over the elapsed year, **over months the ledger actually covers** | The projection must not read an unimported month as a zero-draw month, or it under-projects exactly when data is missing. Part 3 reports truncation as a *gap* with no window and no rate, so this part derives its own covered-month set from `transactions` — a month with no draws on an account that otherwise draws monthly is excluded from the denominator and flagged in the output, rather than silently averaged in. Part 5 must not depend on a part-3 output that does not exist. |
 | Forward view is labelled | Same provenance discipline as part 0 — it says it is a projection and states its assumption | A forward number that looks like a filed number is the failure part 0 exists to prevent. |
 | Placement | Beside the T1 total, not on its own tab | The question "what do I owe" and "what will I owe" are asked together. |
 
@@ -154,8 +154,8 @@ its deadline.
 - Each of the three calculation options produces its documented amount for a fixture
   taxpayer, and the current-year option is flagged.
 - The forward view on a part-year 2026 projects the remainder from the run rate, and
-  **excludes** months inside a coverage gap from the rate rather than counting them
-  as zero.
+  **excludes** uncovered months from the denominator rather than counting them as
+  zero — using its own covered-month derivation, not a part-3 window.
 - The forward view is labelled a projection and states its assumption.
 - With the year complete, the forward view converges on the actual return.
 
@@ -165,5 +165,5 @@ Seven parts. Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 1b → 3 �
 
 Part 5 is last by dependency, not by importance: its instalment test needs three
 years of returns that parts 0–4 make trustworthy, and its run-rate projection needs
-part 3's coverage blocker so it does not read an unimported month as a zero-draw
-month. It is, however, the part that answers the question Connor actually asked.
+its own covered-month derivation so it does not read an unimported month as a
+zero-draw month. It is, however, the part that answers the question Connor actually asked.

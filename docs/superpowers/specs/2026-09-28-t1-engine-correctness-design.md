@@ -325,7 +325,7 @@ This does not make the work optional — the constants are wrong, the phantom
 a wrong rate table poisons every scenario and projection built on it. But it must
 not be sold as moving Connor's bottom line. **The data work is worth roughly a
 thousand times more to him**: the single unimported $15,000 draw is $3,042, and the
-coverage gap $1,700–$3,000.
+coverage gap is worth importing rather than estimating.
 
 The slip box fix has no effect on today's numbers — `tax_slips` holds exactly one
 row, a 2025 T4 — and is the difference between a correct and a corrupted return the
