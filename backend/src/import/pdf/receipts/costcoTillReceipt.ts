@@ -20,6 +20,13 @@ const ITEMS_SOLD_FOOTER = /Items Sold:\s*\d+/i;
  * three lines, with the numeric data on the middle line).
  */
 const ITEM_LINE = /^(\d+)\s+(.*?)\s+(-?[\d,]+\.\d+)(-?)\s*([YN])?\s*$/;
+/**
+ * Quantity continuation line: ` <QTY> @ <UNIT_PRICE>`, printed on its own row
+ * ABOVE the item it belongs to. The item's own row carries the EXTENDED price
+ * (qty x unit), so this line must never become an item of its own — doing so
+ * double-counts it against SUBTOTAL.
+ */
+const QTY_LINE = /^(\d+)\s*@\s*([\d,]+\.\d+)\s*$/;
 const SUBTOTAL_LINE = /^SUBTOTAL\s+([\d,]+\.\d+)\s*$/;
 const TAX_LINE = /^TAX\s+([\d,]+\.\d+)\s*$/;
 const TOTAL_LINE = /^\*+\s*TOTAL\s+([\d,]+\.\d+)\s*$/;
@@ -126,6 +133,7 @@ function parseItemRow(line: string, index: number): ParsedItemRow | null {
 /** Patterns that mark a line as structural (totals, tender, header, footer chrome). */
 const STRUCTURAL_LINE_PATTERNS: RegExp[] = [
   ITEM_LINE,
+  QTY_LINE,
   SUBTOTAL_LINE,
   TAX_LINE,
   TOTAL_LINE,
@@ -177,23 +185,41 @@ function resolveWrappedName(texts: string[], rowIndex: number, midName: string):
 // fallow-ignore-next-line complexity
 function parseItems(texts: string[], startIdx: number, endIdx: number): ExtractedReceiptItem[] {
   const items: ExtractedReceiptItem[] = [];
+  // Set by a QTY_LINE, consumed by the next item row. Survives intervening
+  // wrapped-name fragments (`2 @ 0.20` / `DEPOSIT` / `2519  0.40`).
+  let pendingQty: { quantity: number; unitPrice: number } | null = null;
   for (let i = startIdx; i < endIdx; i++) {
     const trimmed = texts[i].trim();
+    // Must precede parseItemRow: ITEM_LINE also matches a qty line, reading it
+    // as itemId='2', name='@'.
+    const q = trimmed.match(QTY_LINE);
+    if (q) {
+      pendingQty = { quantity: Number(q[1]), unitPrice: toNumber(q[2]) };
+      continue;
+    }
     const row = parseItemRow(trimmed, i);
     if (!row) continue;
     const name = resolveWrappedName(texts, i, row.midName);
     let price = toNumber(row.priceText);
     if (row.neg) price = -price;
     const title = name || row.itemId;
+    // Only trust the pending qty when it actually reconciles to the printed
+    // extended price; otherwise fall back rather than record a wrong breakdown.
+    const breakdown =
+      pendingQty != null &&
+      Math.abs(pendingQty.quantity * pendingQty.unitPrice - price) <= CENT_TOLERANCE
+        ? pendingQty
+        : null;
     items.push({
       title: title.slice(0, 512),
-      quantity: 1,
-      unitPrice: price,
+      quantity: breakdown ? breakdown.quantity : 1,
+      unitPrice: breakdown ? breakdown.unitPrice : price,
       totalPrice: price,
       inferredCategory: null,
       vendorItemId: row.itemId,
       taxable: row.taxFlag === 'Y' ? true : row.taxFlag === 'N' ? false : null,
     });
+    pendingQty = null;
   }
   return items;
 }
