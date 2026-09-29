@@ -6,7 +6,11 @@ import { existsSync } from 'node:fs';
 import { extractPdfLines } from './extractLines';
 import { parseCibcCostcoHeader, parseCibcCostcoRow, inferYearForMonthDay, cibcCostcoMastercardParser } from './cibcCostcoMastercard';
 
-const fixturesDir = join(__dirname, 'fixtures', 'pdf');
+// Real statement/receipt PDFs are personal financial documents and are
+// gitignored (.gitignore: backend/test/fixtures/pdf/), so these tests are
+// LOCAL-ONLY. CI coverage comes from the synthetic line fixtures in-file.
+const backendRoot = join(__dirname, '..', '..', '..');
+const fixturesDir = join(backendRoot, 'test', 'fixtures', 'pdf');
 const hasFixtures = existsSync(join(fixturesDir, 'cibc-costco-2026-01-12.pdf'));
 const skipNoFixtures = hasFixtures ? undefined : 'PDF fixtures not present (gitignored — see backend/test/fixtures/pdf/)';
 
