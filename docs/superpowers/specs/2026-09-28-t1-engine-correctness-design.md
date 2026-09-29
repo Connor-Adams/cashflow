@@ -191,7 +191,8 @@ This paragraph exists so the next audit does not re-raise it.
 | `rates-2027.ts` | Leave as a projection; mark it `provenance: 'projected'` | 2027 figures are not published. A projection is fine for scenario planning and wrong for a return, and the provenance field is what expresses that. |
 | T2 scope | The corporate inclusion-rate change is **in scope and intended**; corp tests must be updated to expect 50% for 2026/2027 | It is the same cancellation, and leaving corporations at a repealed 66⅔% to keep this spec "backend-personal-only" would be preserving a known error for tidiness. |
 | **Cache invalidation** | Add a **version component** to both return hashes — `hashFacts` in `scenarios/computeScenarioReturn.ts:126-129` and `factsHash(serializeFacts(facts))` at `routes/tax.ts:380` | Without this, **nothing in this spec changes any number on screen.** Both caches are keyed on facts alone, so a rate or engine correction leaves every cached row intact; the only invalidator is `{ force: true }` (`tax-scenarios.ts:483`), which nothing calls automatically. Prod holds 45 `scenario_returns` rows, oldest 2026-06-02. A version cannot be forgotten; a one-off purge has to be remembered on every future engine change. |
-| FHSA room | Load `fhsa_room` into `PersonalCarryforwards` and cap L20805 by it, and enforce the $40,000 lifetime cap | The value is already computed and persisted; only the read is missing. |
+| FHSA room | Fix **both sides**: make `rollPersonalCarryforwards.ts` accumulate unused room, then load `fhsa_room` into `PersonalCarryforwards` and cap L20805 by it | An earlier draft said "the value is already computed and persisted; only the read is missing". Wrong. `rollPersonalCarryforwards.ts:56-64` computes `fhsaRoom = Decimal.min(fhsaAnnualLimit, lifetimeRemaining)` and never adds prior unused room — contrast the RRSP line three above it, which does `carryforwards.rrspRoom.plus(newRoom).minus(contribsUsed)`. So the stored value is capped at 8,000 forever and a read-only fix cannot produce a $16,000 catch-up year. `rollPersonalCarryforwards.ts` is therefore in scope. |
+| Unknown dividend eligibility | Default to **non-eligible**, and warn | `buildPersonalFacts.ts:205-209` is `security?.dividendEligibility ?? 'eligible'`, and the txnType pass at `:307` pushes to `eligibleDividends` unconditionally. So an XEQT or VFV distribution in non-registered account 15 collects the 15.0198% federal and 10% Ontario **eligible** DTC it is not entitled to — silently understating tax. Non-eligible is the conservative default; an unknown-eligibility dividend should also raise a warning, because the right answer is on a T5 the app does not have. |
 | Double-count guard | Exclude from the `txnType` pass any row the treatment pass already routed | Inverting the guard — skip rows already classified as income, rather than listing the four non-income treatments — is the fix that does not need maintaining as treatments are added. |
 | Guard against recurrence | `ratesFor(year)` must refuse to serve a table flagged as projected to a filing-grade caller | The header at `rates-2026.ts:1-4` **does** disclose that it is "encoded from indexation projection… engineer MUST update once CRA publishes". It told the truth and was served anyway. A citation test would not have caught it; the real failure is that `ratesFor(2026)` (`brackets.ts:27-31`, called unconditionally at `routes/tax.ts:394`) has no notion of provenance. |
 | What "filing-grade" means | A `provenance: 'published' \| 'projected'` field on the rate table; the return route refuses `projected` for a year that has closed, and surfaces it as a completeness gap otherwise | The codebase has no such concept today. Naming the mechanism here stops three implementers building three different guards. |
@@ -350,6 +351,9 @@ the AMT call site), `backend/src/tax/engine/amt.ts` (donation fraction, plus an
 rate-table field is inert without it), `backend/src/tax/engine/types.ts` (two new
 rate-table fields: the AMT donation fraction and `provenance`),
 `backend/src/tax/engine/brackets.ts` / the return route for the provenance guard,
+`backend/src/tax/services/rollPersonalCarryforwards.ts` (FHSA room accumulation),
+`backend/src/tax/builders/buildPersonalFacts.ts` (dividend-eligibility default, the
+double-count guard),
 **`frontend/src/pages/tax/slips/T3Form.tsx`** (box labels — the one frontend file
 this spec must touch), and their colocated tests.
 
@@ -406,11 +410,16 @@ Backend `node:test` via `tsx`, colocated per house convention.
   non-eligible line (failure mode B). A T3 with box 49 and box 50 must take box 50.
 - AMT: donation credit allowed at 80%; the full non-refundable credit set reaching
   the 50% allowance; exemption equal to the 4th federal bracket threshold.
-- FHSA: a $16,000 contribution against $8,000 carried room plus $8,000 current-year
-  room deducts $16,000; a contribution breaching the $40,000 lifetime cap is
+- FHSA, two tests: the **roll** accumulates $8,000 of unused room into the next
+  year's `fhsa_room`; and given $16,000 of stored room a $16,000 contribution
+  deducts $16,000 (the cap is the stored room, **not** stored room plus the annual
+  limit, which would double-count the current year); a contribution breaching the $40,000 lifetime cap is
   capped at the remaining room, not at the annual limit.
 - Double-count: a transaction typed `interest` and classified `non_eligible_dividend`
   appears on exactly one line, as a non-eligible dividend.
+- A dividend on a security with no recorded eligibility lands on L12010 as
+  non-eligible and raises a warning; one explicitly marked eligible still lands on
+  L12000.
 - **Cache invalidation: changing a rate constant changes the served number.** Assert
   it end-to-end through the route, not just through `buildT1` — this is the test
   that proves the spec has any visible effect at all.

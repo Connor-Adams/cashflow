@@ -40,57 +40,23 @@ tab and never reaches the T1 view.
 
 ### The tab does not show actuals at all
 
-Found 2026-09-28, and it reframes everything below.
+Moved to **part 0** (`2026-09-28-t1-provenance-design.md`), which ships first. In
+short: `PersonalT1Tab.tsx:91-98` auto-selects the last-created non-baseline scenario,
+which in prod is a `projection_root` holding zero 2026 transactions.
 
-`frontend/src/pages/tax/PersonalT1Tab.tsx:91-98` auto-selects
-`[...scenarios].reverse().find(s => s.kind !== 'baseline')`. The list arrives
-`order: [['createdAt','ASC']]` (`routes/tax-scenarios.ts:170-172`), so that is the
-**last-created non-baseline scenario**. In prod, for entity 1 / year 2026, that is
-scenario 18 — `kind: 'projection_root'`, parented to the *2025* Scratch fork.
+Two consequences bind this part:
 
-`backend/src/tax/scenarios/resolveScenario.ts:25-28` branches on the kind:
-
-```ts
-const baseFacts = root.kind === 'projection_root'
-  ? await projectPersonalFactsViaPort(root.id)
-  : await buildPersonalFacts(root.entityId, root.year);
-```
-
-and `projectPersonalFactsFromPrevYear.ts:106-123` builds year N+1 **entirely from
-year N scaled by inflation**, with `capitalGainEvents: []` and `slips: []`.
-
-So the tab renders a 2025-scaled forecast containing **zero 2026 transactions** —
-none of the $68,000 of classified 2026 non-eligible dividends is in it. Prod
-`scenario_returns` confirm it:
-
-| scenario | totalIncome | totalPayable | cppContrib | eiPremium |
-|---|---|---|---|---|
-| 12 (actuals fork) | 30,274.51 | 300.00 | 0 | 0 |
-| **18 (projection)** | 40,353.49 | 2,556.95 | **1,168.96** | **384.23** |
-
-The CPP and EI are the proof: they can only come from employment income, and Connor
-had none in 2026. They are his 2025 T4 scaled forward.
-
-`ScenarioTree.tsx:65-67` renders a `projection_root` identically to a `fork`, and
-appends "(actuals)" only for `baseline`. There is no visual cue whatsoever.
-
-Meanwhile `OverviewTab.tsx:34` calls `useTaxReturn(year)` →
-`/api/tax/personal/:year/return` → `buildPersonalFacts`, i.e. **true actuals**. Two
-tabs on the same page show different 2026 numbers with nothing reconciling them.
-
-**This changes the point of all four specs.** They make the actuals path correct.
-The tab does not render the actuals path. Fixing them without fixing provenance
-leaves Connor looking at the same forecast.
-
-So provenance joins completeness as a first-class property of the surface:
-
-- The rendered number always states what it is — **actuals**, **actuals + overrides**,
-  or **projection from <year>** — and a projection says outright that it contains no
-  transactions from the year on screen.
-- A projection can never be the **default** selection for a year that has actuals.
-  Default to the baseline; let the user choose a projection deliberately.
-- Overview and Personal T1 must agree, or visibly explain why they differ.
-- `ScenarioTree` distinguishes all three kinds, not just baseline.
+1. **This gate must attach to the scenario path, not `routes/tax.ts`.**
+   `PersonalT1Tab.tsx:110` renders `useScenarioDetail(activeId)` →
+   `routes/tax-scenarios.ts:328` → `computeScenarioReturn`'s `scenario_returns`
+   cache. `OverviewTab.tsx:34` is the **only** consumer of `useTaxReturn` →
+   `routes/tax.ts`. An earlier draft scoped this part to `routes/tax.ts` alone,
+   which would have shipped the gate onto Overview and left the Personal T1 tab
+   rendering a bare total — the exact failure this part exists to prevent.
+2. **The gate and the total must share a basis.** If the estimates re-run
+   `buildPersonalFacts` (actuals) while the selected scenario is a fork carrying
+   overrides, the displayed total and the estimates are computed on different
+   numbers. Compute the estimates against the *selected scenario's* resolved facts.
 
 ### The queue is also not workable
 
@@ -139,6 +105,17 @@ None of these produced a single character of warning on the T1.
 demonstrably wrong.
 
 - Unclassified corp→personal transfers in the period (count, sum, tax estimate)
+- **Computed income with no slip for the year.** ~$92,000 of non-eligible dividends
+  against **zero** `tax_slips` rows for 2026 produces no signal today. For this
+  taxpayer it is the single highest-value completeness check available: it is the
+  only cheap thing that reaches the corp-declared-versus-cash-moved question this
+  set otherwise defers. A year with dividend income and no T5 is a blocker.
+- **A personal transfer-in with no counterpart.** Exactly txn 12139's pre-fix shape:
+  `+15,000.00`, `txnType: 'transfer'`, `linkedTransactionId` NULL. The classification
+  queue cannot see it — `routes/tax.ts:54-63` requires a non-null
+  `linkedTransactionId` — and the blocker below covers only unlinked *corp outflows*.
+  "Money arrived and you have not accounted for it" is the cheapest detector in this
+  spec and was missing from it.
 - Unlinked corp outflows with no resolvable counterpart
 - Activities with a cash leg but no transaction (spec 1's detector)
 - Import coverage ending before the period end, on an account that has seen
@@ -183,7 +160,10 @@ Transaction, through the existing patch route. No new status machine.
 
 ## Scope
 
-**In:** a new `backend/src/tax/completeness/` module; the return route
+**In:** a new `backend/src/tax/completeness/` module; **the scenario detail path —
+`backend/src/routes/tax-scenarios.ts:328` and
+`backend/src/tax/scenarios/computeScenarioReturn.ts` — which is what
+`PersonalT1Tab` renders**; and the plain return route
 (`backend/src/routes/tax.ts:361-444`) merging the report into **both** of its
 response constructions — note the cache-hit path builds its response at `:384-390` and
 returns early at `:391`, while the miss path responds separately at `:433`, so editing only the miss path ships a gate that vanishes
