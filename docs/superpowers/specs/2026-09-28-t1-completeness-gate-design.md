@@ -3,7 +3,7 @@
 **Date:** 2026-09-28
 **Status:** Design; not yet implemented
 **Type:** Backend computation + frontend surface
-**Part:** 3 of 4 — depends on part 1 (reconciliation foundation)
+**Part:** 3 of 7 — depends on part 0 (provenance) and part 1a (brokerage cash legs)
 
 ## Problem
 
@@ -117,14 +117,13 @@ demonstrably wrong.
   "Money arrived and you have not accounted for it" is the cheapest detector in this
   spec and was missing from it.
 - Unlinked corp outflows with no resolvable counterpart
-- Activities with a cash leg but no transaction (spec 1's detector)
+- Activities with a cash leg but no transaction (part 1a's converter)
 - Import coverage ending before the period end, on an account that has seen
   activity — with the uncovered window and a run-rate-based estimate
-- Derived balance diverging from the latest statement closing balance
 
 **Gap** — a correctness risk of unknown size. The total may be right.
 
-- Suspected duplicate pairs awaiting review
+- Suspected duplicate pairs awaiting review (part 1b's detector)
 - ACB warnings raised and discarded — `computeAcb` emits them for clamped sells,
   zero-cost `transfer_in` and mixed currency (`portfolio/acb.ts:154-176,197-202,366-370`)
   and `buildPersonalFacts.ts:374-412` never reads `acb.warnings`. Surface them.
@@ -132,6 +131,10 @@ demonstrably wrong.
 - The year's rate table carries `provenance: 'projected'` (ties to spec 2)
 - Slips entered for the year that reconcile against nothing
 - Accounts with no statement ever registered
+
+**Not included, because part 1c was cut:** derived balance diverging from a printed
+closing balance. Nothing persists a statement balance, so there is no signal to
+compute. Reinstate with 1c if it is ever revived.
 
 `status` is `complete` | `gaps` | `blocked`, worst-wins.
 
@@ -241,4 +244,4 @@ Backend `node:test` via `tsx`, colocated. Frontend vitest.
    is finished. The gate reaching `complete` for 2026 **is** part 4's exit
    condition.
 
-Build order: 1, 2, 3, 4.
+Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 3 → 1b → 5**. Part 1c is **cut**.

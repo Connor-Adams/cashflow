@@ -3,7 +3,7 @@
 **Date:** 2026-09-28
 **Status:** Design; not yet implemented
 **Type:** Import correctness, backend
-**Part:** 1a of 6 — the only part that closes the missing $15,000, and the only one part 4 blocks on
+**Part:** 1a of 7 — the only part that closes the missing $15,000, and the only one part 4 blocks on
 
 ## Problem
 
@@ -48,7 +48,8 @@ tested, with `backend/scripts/migrate-ws-deposit-activities.ts` as its runner.
 `import/cardIdentifierBackfill.ts:40-41` cites it as the house pattern to follow
 "rather than inventing a new one".
 
-Its activity-type map (`:48-54`) is precisely the set needed:
+Its activity-type map (`:48-54`) is close to the set needed — but see the warning
+below: this map is a *hint*, not the selection filter.
 
 ```ts
 const ACTIVITY_TXN_TYPE: Record<string, TxnType> = {
@@ -74,16 +75,89 @@ It already solves what an earlier draft of this spec listed as open problems:
   converted orphans still present as activities; the next run reclassifies them as
   shadows and deletes them. Re-running is always safe.
 
-So the work is **generalising the account-kind scope**, not building new machinery.
+### But it must NOT simply be pointed at brokerage accounts
+
+An earlier draft of this spec said "the work is generalising the account-kind scope,
+not building new machinery." **That is wrong, and acting on it would destroy real
+investment data.**
+
+Selection is not by `activityType`. It is by absence of a security (`:246`):
+
+```ts
+const cashRows = activities.filter((a) => a.securityId == null);
+```
+
+`ACTIVITY_TXN_TYPE` is consulted only for a *hint* (`:207`), and an `undefined`
+lookup does not exclude the row — `orphanToRow` simply omits the hint. Both shadows
+and orphans are then **deleted** (`:376-381`):
+
+```ts
+const toDelete = [...shadows.map((s) => s.activityId), ...orphans.map((o) => o.activityId)];
+await InvestmentActivity.destroy({ where: { id: { [Op.in]: toDelete } } });
+```
+
+On a brokerage account that converts and destroys every security-less `fee`,
+`interest`, `other`, `split` and `unmapped` row — **including any `buy` or `sell`
+whose security failed to resolve**, which is reachable: `pdf/wsActivityStatement.ts`
+attaches a security only when the description opens with a ticker, and
+`commitStatementImport.ts:156` stores `securityId: security?.id ?? null`.
+
+The existing code guards against exactly this, and it is the guard the earlier draft
+proposed to relax (`:111-117`):
+
+```ts
+const wrong = accounts.filter((a) => !DEPOSIT_ACCOUNT_TYPES.has(String(a.accountType)));
+if (wrong.length > 0) {
+  // Refuse rather than silently skip: this cleanup deletes rows, and running
+  // it against a brokerage account would be a request to destroy real
+  // investment activity.
+```
+
+That comment is correct and was written by someone who had thought about this.
+
+So the work is: **add an explicit `activityType` allowlist to the selection, narrow
+the delete to rows that allowlist matched, give each run its own batch label, and
+only then widen the account guard.** That is new machinery — small, but real.
+
+### Rollback is currently incoherent for converted rows
+
+Two defects, both of which this part must fix before widening anything:
+
+1. The converter **deletes the source activity** (`:379`), so after a rollback of the
+   converted transaction the event exists nowhere and the $15,000 hole reopens.
+2. The batch label is a shared constant (`:311`):
+   ```ts
+   importBatch: 'WS deposit ledger cleanup',
+   ```
+   and `rollbackImportBatch` deletes purely by that string. So rolling back one
+   account's cleanup deletes **every converted transaction across all accounts and
+   all runs**.
+
+Fix: a per-run, per-account batch label, and either retain the source activity
+(marking it converted) or make rollback restore it.
+
+### The forward fix has prior art too
+
+`pdf/questrade.ts:409-422` already emits the cash-side mirror transaction for
+`cash_movement` and `transfer` activities. That is the pattern to copy for
+`importWsActivityStatement.ts:92`.
+
+It also means the generalised converter must **never be run against a Questrade
+account** — those mirrors already exist, so it would classify them as shadows and
+delete the activities.
 
 ## Decisions
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Mechanism | Generalise `wsDepositActivityMigration.ts` to brokerage accounts | It is the house pattern, already handles orphan/shadow pairing, provenance, fingerprints and idempotence. An earlier draft proposed a new import-time emission plus an FK column and discarded all of it. |
+| Mechanism | Extend `wsDepositActivityMigration.ts` — allowlist, narrowed delete, per-run batch label, then widen the account guard | It is the house pattern and already handles orphan/shadow pairing, provenance, fingerprints and idempotence. But it selects on `securityId == null` and deletes what it converts, so widening the guard alone destroys investment data. |
+| Selection | An explicit `activityType` allowlist — `transfer_in`, `transfer_out`, `cash_movement` — **in addition to** `securityId == null` | Selection today is `securityId == null` only. On a deposit account that is safe because every row is cash; on a brokerage account it is not. |
+| The delete | Narrowed to rows the allowlist matched | Otherwise a security-less `buy` is converted and its activity destroyed. |
+| Batch label | Per run and per account | `'WS deposit ledger cleanup'` is a shared constant and rollback deletes by batch label. |
 | No activity→transaction FK | **Dropped** | It was proposed to make a rollback take both sides, but `rollbackImportBatch.ts` destroys `InvestmentActivity` (`:379-388`) *before* `Transaction` (`:465`), so a real `references` FK would raise a constraint violation on Postgres unless `ON DELETE SET NULL`. The existing migration needs no FK: pairing is by `(accountId, date, amount, currency)`. Dropping it removes the migration from this part entirely. |
 | Keying | On `activityType`, not on statement codes | `models/InvestmentActivity.ts` has **no code column** — the declared fields are `activityType, tradeDate, description, quantity, price, amount, fees, splitRatio, currency, sourceReference, sourceRowFingerprint, importBatch`. A code-based rule could only live in the parser, which never sees the activity-statement path where the draw was lost. |
-| `CONT` scope | **Excluded** for now | Keying on `activityType` means `transfer` catches Questrade and RBC contributions too (`wealthsimpleInvestParse.ts`, `wsActivityStatement.ts`, `rbcInvestment.ts`, `questrade.ts` all emit it). `transfer_in`/`transfer_out`/`cash_movement` are unambiguous cash crossings; `CONT` is not, and over-capturing here creates phantom transactions. Revisit with evidence. |
+| The bare `transfer` activityType | **Excluded** from the allowlist | `rbcInvestment.ts:305` and `questrade.ts:246,251,258` emit it; `wsActivityStatement.ts` does **not**. `transfer_in`/`transfer_out`/`cash_movement` are unambiguous cash crossings; a bare `transfer` is not. (An earlier draft titled this row "`CONT` scope" — `CONT` is a statement *code*, and this spec's own next row establishes there is no code column on `InvestmentActivity`.) `interest` is also excluded here: it is income, not a cash crossing, and conflating them is how a tax line gets double-counted. |
+| Questrade accounts | **Never** run the converter against one | `pdf/questrade.ts:409-422` already emits the cash mirror, so the converter would see shadows and delete the activities. |
 | Linkability | **Add a `txnType` input to `enrichTransaction`** | Without this the bridge does not reliably link, and an unlinked bridge row is as invisible as no row. See below. |
 | Forward fix as well as retroactive | Both: fix `importWsActivityStatement.ts:92`, and run the generalised converter over history | The retroactive pass recovers the $15,000; the forward fix stops the next one. |
 
@@ -140,8 +214,14 @@ Backend `node:test` via `tsx`, colocated; SQLite per-process temp DB.
 
 - A brokerage account with an orphaned `transfer_out` activity produces one
   transaction; a brokerage account with only buys and sells produces none.
-- `cash_movement` and `transfer_in` are converted; `buy`, `sell`, `dividend`,
-  `staking_reward` and `transfer` are not.
+- `cash_movement`, `transfer_in` and `transfer_out` are converted; `buy`, `sell`,
+  `dividend`, `staking_reward`, `interest`, `fee`, `split`, `other` and a bare
+  `transfer` are not.
+- **A security-less `buy` or `sell` is neither converted nor deleted.** This is the
+  data-destruction regression guard and the most important test in this part.
+- Rolling back one account's conversion leaves other accounts' converted rows intact
+  — the per-run batch label holds.
+- Running against a Questrade account is refused.
 - The converter is idempotent: two runs produce one transaction. A run interrupted
   between insert and delete self-heals on the next run.
 - A converted row carries a `sourceIdentityFingerprint` and an `ImportHistory`
@@ -179,4 +259,4 @@ The original part 1 bundled three strands with different risk profiles. Split:
   hazard that can 422 the very imports part 4 needs. Off the critical path.
 - **2 Engine correctness**, **3 Completeness and provenance gate**, **4 Backfill**.
 
-Build order: **1a → 2 → 1b → 3 → 4**, with **1c** parallel and off part 4's path.
+Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 3 → 1b → 5**. Part 1c is **cut**.

@@ -3,7 +3,7 @@
 **Date:** 2026-09-28
 **Status:** Design; not yet implemented
 **Type:** Operational data work against production
-**Part:** 4 of 4 — depends on part 1 (importer fix) and part 3 (exit condition)
+**Part:** 4 of 7 — depends on part 1a (brokerage cash legs); steps 1, 2 and 7 are in the minimum path
 
 ## Problem
 
@@ -87,11 +87,11 @@ $20.73 — the duplicated RAILWAY row 11748/11559.)
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Ordering | Import **after** spec 1 lands | Importing the brokerage statements through the broken path recreates the $15k hole. |
+| Ordering | Import **after** part 1a lands | Importing the brokerage statements through the broken path recreates the $15k hole. |
 | The $2,872 | **Reimburse from the corp, tag both legs `expense_reimbursement`** | Removes the phantom L13500 loss and puts the deduction in the entity that bears the cost. **This raises Connor's personal tax by ~$850–$1,250** — the −$2,872 was suppressing taxable income. Doing it anyway: the loss is fictitious and claiming it is wrong. Booking the costs to entity 2 instead also works but rewrites history the bank statements contradict. |
 | $15,000 backfill | Through the fixed importer, re-running the source statement | Hand-inserting a row reproduces by hand exactly what the importer should do, and leaves no provenance. |
-| Duplicates | Auto-merge the certain ones (spec 1's rule), review the rest | Connor's call. |
-| Exit condition | **Spec 3's gate reports `complete` for 2026** | An objective finish line rather than "looks done". |
+| Duplicates | Auto-merge the certain ones (part 1b's rule), review the rest; 1b is detect-and-report only, so clearing them is manual | Connor's call. |
+| Exit condition | **Part 3's gate reports `complete` for 2026** | An objective finish line rather than "looks done". Note the gate no longer includes balance drift (part 1c cut), so `complete` means "no unclassified money, no orphan cash legs, no coverage gap" — not "every balance reconciles". |
 | Prod writes | Each step reviewed before execution; read-only by default | Per the `cashflow-prod-db` guardrails. This is Connor's real financial history. |
 
 ## Work
@@ -101,7 +101,7 @@ $20.73 — the duplicated RAILWAY row 11748/11559.)
 | Source | Window | Why |
 |---|---|---|
 | WS Corporate Chequing (WK79NVW07CAD) | 2026-08-14 → 2026-09-28 | Settles the $8–14k estimate. The CSV export can be pulled today; the monthly statement lands ~2026-10-01. |
-| WS Corporate Investing (HQ8H0GZ07CAD) | 2026-08, 2026-09 | Needs spec 1's brokerage bridge first, or draws vanish again. |
+| WS Corporate Investing (HQ8H0GZ07CAD) | 2026-08, 2026-09 | Needs part 1a's converter first, or draws vanish again. |
 | Personal WS Chequing (WK3DD9X35CAD) | 2026-09 | Ledger stops 2026-08-27; September draws need a personal leg to link to. |
 | RBC Digital Choice Business (account 28) | **2026-09-02 → 2026-10-05** | Ledger stops 2026-09-01. An earlier draft started this window at 2026-09-05 and left 09-02 → 09-04 uncovered by the plan. |
 
@@ -194,4 +194,4 @@ lost. `tax_entities.fiscal_year_end` is also NULL on the corp, which T2 work nee
    condition.
 4. **2026 data backfill** — this spec. Last, and mostly operational.
 
-Build order: 1, 2, 3, 4.
+Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 3 → 1b → 5**. Part 1c is **cut**.

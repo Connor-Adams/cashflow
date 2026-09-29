@@ -3,7 +3,43 @@
 **Date:** 2026-09-28
 **Status:** Design; not yet implemented
 **Type:** Data integrity, backend
-**Part:** 1b of 6
+**Part:** 1b of 7 — **scoped to detect-and-report** (2026-09-28)
+
+## Scope decision
+
+This part was cut back from "detect, supersede and exclude" to **detect and report**.
+
+Dropped: the `superseded_by_transaction_id` / `superseded_at` columns, the migration,
+the `rollbackImportBatch.ts` change, and the enumerated exclusion sweep across the 91
+non-test files that query `Transaction` — which this spec itself called "the bulk of
+this part's work".
+
+Why: the T1 exposure to duplicates is **$20.73** (the duplicated RAILWAY row
+11748/11559 inflating the business-expense total that feeds L13500). The $28,848.18
+phantom on account 13 is corp-side — T2, out of scope for this set. The detector's
+real value is keeping part 3's dollar estimates honest and giving part 4 a list to
+work, and neither needs supersession state.
+
+What remains: a period-bounded detector module that classifies pairs as
+**certain** or **for review**, exposed so part 3 can call it as a gap type and part 4
+can run it once. Connor clears the 25 pairs by hand.
+
+Reinstate supersession if duplicates recur after part 4 — the fingerprint divergence
+below says they probably will, and at that point permanence earns its cost.
+
+The sections below describe the full design; treat the supersession half as deferred,
+not rejected.
+
+**The scope-down also removes a hazard.** With supersession, `import/dedupExisting.ts`
+would have had to be taught not to match a superseded row — otherwise a legitimate
+re-import is silently dropped as a duplicate of a row that is no longer counted. That
+file was missing from this spec's exclusion list, along with ~18 other money-summing
+call sites (`summary/aggregateDashboard.ts`, `statements/computeReconciliation.ts`,
+`forecast/assembleForecast.ts`, `fx/currencyExposure.ts`,
+`tax/services/shareholderLoanBalance.ts`, `routes/sankey.ts`, `routes/reporting.ts`,
+`services/transactionsExport.ts`, `portfolio/dividendMatcher.ts` among them) — 86
+non-test files call `Transaction.findAll/findOne/sum/count`. Detect-and-report
+touches none of them.
 
 ## Problem
 

@@ -3,7 +3,7 @@
 **Date:** 2026-09-28
 **Status:** Design; not yet implemented
 **Type:** Correctness fix, backend only
-**Part:** 2 of 4 — see "Relationship to the other specs" below
+**Part:** 2 of 7 — see "Relationship to the other parts" below
 
 ## Problem
 
@@ -188,14 +188,15 @@ This paragraph exists so the next audit does not re-raise it.
 |---|---|---|
 | Source of 2026 constants | CRA / Service Canada / Ontario published figures, one citation per value | Ends the "LLM-generated, not cross-checked" provenance flagged in the 2026-06-08 audit. |
 | Values with only secondary-source support | Ship them, annotate `@low-confidence` with the source | Better than a projection, honest about what is not primary-sourced. |
-| `rates-2027.ts` | Leave as a projection; mark it `provenance: 'projected'` | 2027 figures are not published. A projection is fine for scenario planning and wrong for a return, and the provenance field is what expresses that. |
+| `rates-2027.ts` | **Re-derive the whole table from the corrected 2026 figures**, and update `rates-2027.test.ts`; then mark it `provenance: 'projected'` | It cannot be "provenance only". `rates-2027.test.ts` couples to 2026 three ways: it derives the federal brackets from `RATES_2026`, and it hardcodes `indexed('52886')`, `indexed('105775')` and `indexed('16564')`. Correcting 2026 fails all three. `:138` also carries the derived `amtExemption: D('186327')` (= 182,674 x 1.02) and `:62-67` asserts it equals `federalBrackets[2].upTo`. Note too that `:76,86` do `capitalGainsInclusionThreshold!` — a non-null assertion that throws if the 250,000 threshold is removed. **Both rate-table test files are in scope.** |
 | T2 scope | The corporate inclusion-rate change is **in scope and intended**; corp tests must be updated to expect 50% for 2026/2027 | It is the same cancellation, and leaving corporations at a repealed 66⅔% to keep this spec "backend-personal-only" would be preserving a known error for tidiness. |
 | **Cache invalidation** | Add a **version component** to both return hashes — `hashFacts` in `scenarios/computeScenarioReturn.ts:126-129` and `factsHash(serializeFacts(facts))` at `routes/tax.ts:380` | Without this, **nothing in this spec changes any number on screen.** Both caches are keyed on facts alone, so a rate or engine correction leaves every cached row intact; the only invalidator is `{ force: true }` (`tax-scenarios.ts:483`), which nothing calls automatically. Prod holds 45 `scenario_returns` rows, oldest 2026-06-02. A version cannot be forgotten; a one-off purge has to be remembered on every future engine change. |
 | FHSA room | Fix **both sides**: make `rollPersonalCarryforwards.ts` accumulate unused room, then load `fhsa_room` into `PersonalCarryforwards` and cap L20805 by it | An earlier draft said "the value is already computed and persisted; only the read is missing". Wrong. `rollPersonalCarryforwards.ts:56-64` computes `fhsaRoom = Decimal.min(fhsaAnnualLimit, lifetimeRemaining)` and never adds prior unused room — contrast the RRSP line three above it, which does `carryforwards.rrspRoom.plus(newRoom).minus(contribsUsed)`. So the stored value is capped at 8,000 forever and a read-only fix cannot produce a $16,000 catch-up year. `rollPersonalCarryforwards.ts` is therefore in scope. |
 | Unknown dividend eligibility | Default to **non-eligible**, and warn | `buildPersonalFacts.ts:205-209` is `security?.dividendEligibility ?? 'eligible'`, and the txnType pass at `:307` pushes to `eligibleDividends` unconditionally. So an XEQT or VFV distribution in non-registered account 15 collects the 15.0198% federal and 10% Ontario **eligible** DTC it is not entitled to — silently understating tax. Non-eligible is the conservative default; an unknown-eligibility dividend should also raise a warning, because the right answer is on a T5 the app does not have. |
 | Double-count guard | Exclude from the `txnType` pass any row the treatment pass already routed | Inverting the guard — skip rows already classified as income, rather than listing the four non-income treatments — is the fix that does not need maintaining as treatments are added. |
-| Guard against recurrence | `ratesFor(year)` must refuse to serve a table flagged as projected to a filing-grade caller | The header at `rates-2026.ts:1-4` **does** disclose that it is "encoded from indexation projection… engineer MUST update once CRA publishes". It told the truth and was served anyway. A citation test would not have caught it; the real failure is that `ratesFor(2026)` (`brackets.ts:27-31`, called unconditionally at `routes/tax.ts:394`) has no notion of provenance. |
-| What "filing-grade" means | A `provenance: 'published' \| 'projected'` field on the rate table; the return route refuses `projected` for a year that has closed, and surfaces it as a completeness gap otherwise | The codebase has no such concept today. Naming the mechanism here stops three implementers building three different guards. |
+| Guard against recurrence | A `provenance: 'published' \| 'projected'` field, enforced at **the return route** | The header at `rates-2026.ts:1-4` already discloses "encoded from indexation projection… engineer MUST update once CRA publishes". It told the truth and was served anyway, so a citation test would not have caught it. |
+| Where the guard lives | The return route, **not** `ratesFor` | `ratesFor` (`brackets.ts:27-31`) takes only a year and has no caller identity, so "filing-grade caller" is not expressible there — and `scenarios/computeScenario.ts:26`, `computeHouseholdPlan.ts:244` and `projectPersonalFactsFromPrevYear.ts:46` all legitimately want the 2027 projection. |
+| The "surface it as a gap" half | **Part 3 owns it** | It is part 3's `completeness.gaps` field. Keeping it here made this part depend on part 3 while claiming independence — and since 2026 does not close until 2026-12-31, the gap surface is the only live behaviour for the whole window Connor cares about. |
 | `capitalGainsInclusionHigh` | **Set it to 0.5**, and accept that this changes T2 — because the change is correct | Two earlier drafts got this wrong in opposite directions. The field is read as the *corporate* inclusion rate at `engine/t2.ts:65`, `integration.ts:106` and `aaii.ts:16`, always as `r.capitalGainsInclusionHigh ?? r.capitalGainsInclusion` — and `capitalGainsInclusion` is `0.5`. So **setting the field to 0.5 and deleting it are behaviourally identical**; a draft that argued "retain it so T2 does not change" was self-defeating. More importantly, T2 *should* change: the cancelled 2024 measure put corporations at 66⅔% on **all** capital gains with no threshold, and its cancellation returns them to 50% for 2026 exactly as it does individuals. `t2.ts:63`'s comment ("corps use the high rate (66.67%) on ALL gains") describes a regime that no longer exists. Retain the field for `rates-2024.ts`, where 0.666667 is legitimate. |
 | Slip box fix | Read box 11 / box 50, and re-gate `hasXSlips` off those boxes | Fixing the box without fixing the predicate leaves failure mode A in place. |
 | AMT donation fraction | New rate-table field, `amtDonationCreditFraction: 0.80` | Distinct statutory fraction; folding it into the 50% is simply wrong. |
@@ -344,13 +345,15 @@ guard either.
 
 ## Scope
 
-**In:** `backend/src/tax/data/rates-2026.ts`, `rates-2027.ts` (provenance only),
+**In:** `backend/src/tax/data/rates-2026.ts`, `rates-2027.ts` (**re-derived**),
+`rates-2026.test.ts` and `rates-2027.test.ts` (the hardcoded 2026 bases),
 `backend/src/tax/engine/t1.ts` (slip boxes and predicates, AMT credit total and
 the AMT call site), `backend/src/tax/engine/amt.ts` (donation fraction, plus an
 `AmtInput` field for the donation credit — `amt.ts:4-14` has none today, so the
 rate-table field is inert without it), `backend/src/tax/engine/types.ts` (two new
 rate-table fields: the AMT donation fraction and `provenance`),
-`backend/src/tax/engine/brackets.ts` / the return route for the provenance guard,
+`backend/src/tax/engine/brackets.ts` (the `provenance` field) and the return route
+(the guard),
 `backend/src/tax/services/rollPersonalCarryforwards.ts` (FHSA room accumulation),
 `backend/src/tax/builders/buildPersonalFacts.ts` (dividend-eligibility default, the
 double-count guard),
@@ -439,5 +442,5 @@ accurate".
 3. **T1 completeness gate** — depends on 1, which produces the signals.
 4. **2026 data backfill** — depends on 1's importer fix.
 
-Build order: 1, 2, 3, 4. This spec is the only one whose result is provable today
+Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 3 → 1b → 5**. Part 1c is **cut**.
 against published sources, independent of the state of the data.

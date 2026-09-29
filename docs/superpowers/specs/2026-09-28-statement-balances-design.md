@@ -1,9 +1,25 @@
 # Statement Balances — anchor a derived balance to a printed one, where that is possible
 
 **Date:** 2026-09-28
-**Status:** Design; not yet implemented
+**Status:** **CUT** (2026-09-28). Not scheduled. Retained for the per-source balance
+evidence, which is the durable finding.
+
+Cut because it cannot detect either anomaly that motivates it. The problem statement
+rests on corp account 16's impossible −$1,996.79 and account 13's 72,726.61 against a
+94,267.75 broker value — and both are Wealthsimple **brokerage**, which the Decisions
+table below puts out of scope, because only WS Chequing prints both balances. As
+scoped it anchors accounts 14, 24 and the RBC set, and sees neither account that
+justified the work.
+
+It also carries the set's largest rollout hazard: `reconciliationGate` refuses a
+commit outright on a blocking parse error, so a check that does not reconcile in
+practice would 422 every Wealthsimple import — including the ones part 4 depends on.
+
+Revisit only if Wealthsimple starts printing a balance on the brokerage statement, or
+if balance drift becomes a felt problem rather than an inferred one.
+
 **Type:** Import correctness, backend
-**Part:** 1c of 6 — **off the critical path**; parallel to everything, and not blocking part 4
+**Part:** 1c — cut from the build; was "off the critical path"
 
 ## Problem
 
@@ -101,4 +117,4 @@ Part 3's "derived balance diverging from the latest statement closing balance" s
 depends on this part, and therefore covers **only accounts whose source prints a
 balance**. Part 3 must say so rather than implying whole-ledger coverage.
 
-Build order: **1a → 2 → 1b → 3 → 4**, with **1c** parallel and off part 4's path.
+Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 3 → 1b → 5**. Part 1c is **cut**.
