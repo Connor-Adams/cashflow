@@ -638,19 +638,48 @@ export type RuleAction =
    */
   | { type: 'set_txn_type'; payload: { txnType: TxnTypeValue } }
 
-/** The `txn_type` vocabulary a rule may assign. */
-export type TxnTypeValue =
-  | 'purchase'
-  | 'income'
-  | 'transfer'
-  | 'payment'
-  | 'refund'
-  | 'reward'
-  | 'fee'
-  | 'interest'
-  | 'dividend'
-  | 'investment'
-  | 'unknown'
+/**
+ * The `txn_type` vocabulary a rule may assign. Runtime values, not just a type,
+ * because both sides need to enumerate them: the backend validates against this
+ * set and the editor renders it as a dropdown. One source, so they cannot drift.
+ */
+export const TXN_TYPE_VALUES = [
+  'purchase',
+  'income',
+  'transfer',
+  'payment',
+  'refund',
+  'reward',
+  'fee',
+  'interest',
+  'dividend',
+  'investment',
+  'unknown',
+] as const
+
+export type TxnTypeValue = (typeof TXN_TYPE_VALUES)[number]
+
+/**
+ * The types that REMOVE money from the reports when applied in bulk:
+ * `transfer` / `investment` / `dividend` drop out of the dashboard and the
+ * cashflow chart entirely, and `payment` / `refund` / `reward` change the
+ * net-spend arithmetic. `income` is absent — it adds, never removes.
+ *
+ * The backend holds the authoritative definition (NON_SPEND_TXN_TYPES minus
+ * `income`); this list is asserted equal to it by a backend test, so a change
+ * there fails CI rather than silently diverging from what the editor warns
+ * about.
+ */
+export const RISKY_TXN_TYPE_VALUES = [
+  'transfer',
+  'investment',
+  'dividend',
+  'payment',
+  'refund',
+  'reward',
+] as const
+
+export type RiskyTxnTypeValue = (typeof RISKY_TXN_TYPE_VALUES)[number]
 
 export type Rule = {
   id: number

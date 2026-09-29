@@ -4,14 +4,13 @@ import assert from 'node:assert/strict';
 import {
   RULE_ACTION_TYPES,
   SINGLETON_ACTION_TYPES,
-  SETTABLE_TXN_TYPES,
-  SCALAR_MIRRORED_ACTION_TYPES,
   preserveNonScalarActions,
-  RISKY_TXN_TYPES,
   validateActions,
   deriveScalarsFromActions,
   type RuleAction,
 } from './actions';
+import { TXN_TYPE_VALUES, RISKY_TXN_TYPE_VALUES } from '@cashflow/shared';
+import { NON_SPEND_TXN_TYPES } from '../summary/classifyTransactionFlow';
 
 function ok(raw: unknown): RuleAction[] {
   const res = validateActions(raw, null);
@@ -86,22 +85,21 @@ test('set_txn_type composes with the other actions', () => {
 // the T1 engine. The settable set is deliberately the full vocabulary (you must
 // be able to mark something a dividend), but the destructive ones are named so
 // the editor can warn rather than the API silently accepting them.
-test('the settable set covers the vocabulary actually in use', () => {
-  for (const t of ['income', 'purchase', 'transfer', 'payment', 'refund', 'reward', 'fee', 'interest', 'dividend', 'investment', 'unknown']) {
-    assert.ok(SETTABLE_TXN_TYPES.has(t), `${t} must be settable`);
+test('every value in the shared vocabulary validates', () => {
+  for (const t of TXN_TYPE_VALUES) {
+    const actions = ok([{ type: 'set_txn_type', payload: { txnType: t } }]);
+    assert.deepEqual(actions, [{ type: 'set_txn_type', payload: { txnType: t } }]);
   }
 });
 
-test('the risky types are flagged and are a subset of the settable ones', () => {
-  // Non-categorical (vanish from spend entirely) plus the ones that change
-  // net-spend arithmetic.
-  for (const t of ['transfer', 'investment', 'dividend', 'payment', 'refund', 'reward']) {
-    assert.ok(RISKY_TXN_TYPES.has(t), `${t} must be flagged risky`);
+test('every risky type is itself settable, and income is not one of them', () => {
+  for (const t of RISKY_TXN_TYPE_VALUES) {
+    assert.equal(validateActions([{ type: 'set_txn_type', payload: { txnType: t } }], null).ok, true);
   }
-  assert.ok(!RISKY_TXN_TYPES.has('income'), 'income is not destructive');
-  for (const t of RISKY_TXN_TYPES) {
-    assert.ok(SETTABLE_TXN_TYPES.has(t), `${t} flagged risky but not settable`);
-  }
+  assert.ok(
+    !(RISKY_TXN_TYPE_VALUES as readonly string[]).includes('income'),
+    'income is not destructive',
+  );
 });
 
 // ── regression guards on the existing actions ──────────────────────────────
@@ -123,13 +121,7 @@ test('set_category and set_split still validate as before', () => {
 // That filter used to be a literal allowlist of set_label/set_alert, so adding
 // any new non-scalar action silently DROPPED it on the next scalar edit.
 
-test('scalar-mirrored types are exactly the three with columns', () => {
-  assert.deepEqual([...SCALAR_MIRRORED_ACTION_TYPES].sort(), [
-    'set_business',
-    'set_category',
-    'set_split',
-  ]);
-});
+
 
 test('preserveNonScalarActions keeps set_txn_type across a scalar-only edit', () => {
   const existing: RuleAction[] = [
@@ -156,8 +148,20 @@ test('preserveNonScalarActions drops the scalar-mirrored ones (they get rederive
 // from scalars or preserved. Nothing may fall through the gap unnoticed.
 test('every action type is either scalar-mirrored or preserved', () => {
   for (const type of RULE_ACTION_TYPES) {
-    const mirrored = (SCALAR_MIRRORED_ACTION_TYPES as readonly string[]).includes(type);
+    const mirrored = ['set_category', 'set_business', 'set_split'].includes(type);
     const preserved = preserveNonScalarActions([{ type, payload: {} } as unknown as RuleAction]).length === 1;
     assert.ok(mirrored !== preserved, `${type} must be exactly one of mirrored/preserved`);
   }
+});
+
+// ── one vocabulary, two consumers ──────────────────────────────────────────
+// The editor renders these lists and warns on the risky ones. It used to hold
+// a hand-copied duplicate, which made the backend constants decorative and let
+// the two drift — the exact failure the derivation was supposed to prevent.
+// The shared module is now the single runtime source; these assertions are what
+// keep it honest against the backend's authoritative definitions.
+
+test('the shared risky list matches NON_SPEND_TXN_TYPES minus income', () => {
+  const authoritative = [...NON_SPEND_TXN_TYPES].filter((t) => t !== 'income').sort();
+  assert.deepEqual([...RISKY_TXN_TYPE_VALUES].sort(), authoritative);
 });
