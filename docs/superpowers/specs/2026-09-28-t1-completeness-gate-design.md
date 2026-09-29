@@ -104,28 +104,22 @@ None of these produced a single character of warning on the T1.
 demonstrably wrong.
 
 - Unclassified corp→personal transfers in the period (count, sum, tax estimate)
-- **Computed income with no slip for the year.** ~$92,000 of non-eligible dividends
-  against **zero** `tax_slips` rows for 2026 produces no signal today. For this
-  taxpayer it is the single highest-value completeness check available: it is the
-  only cheap thing that reaches the corp-declared-versus-cash-moved question this
-  set otherwise defers. **It is a blocker only once the slip deadline has passed** —
-  the last day of February following the year — and a **gap** before that. A slip
-  that does not exist yet because it is not yet due is not missing data; treating it
-  as a blocker would make part 4's exit unreachable for the whole period Connor
-  actually works in.
-- **A personal transfer-in with no counterpart.** Exactly txn 12139's pre-fix shape:
-  `+15,000.00`, `txnType: 'transfer'`, `linkedTransactionId` NULL. The classification
-  queue cannot see it — `routes/tax.ts:54-63` requires a non-null
-  `linkedTransactionId` — and the blocker below covers only unlinked *corp outflows*.
-  "Money arrived and you have not accounted for it" is the cheapest detector in this
-  spec and was missing from it.
-- Unlinked corp outflows with no resolvable counterpart
+- **Corp outflows that crossed the perimeter unaccounted for.** "Unlinked" alone is
+  the wrong predicate — `linkedTransactionId` is **one-directional**, so an arrival
+  leg is unlinked too (`tax/builders/corpPerimeter.ts:27-35`: "Testing
+  `linkedTransactionId == null` alone therefore re-counts the arrival"). Use that
+  file's rule: a row crossed the perimeter iff it is **neither a link source nor a
+  link target**, with the target set built from the entity's full history because a
+  chain can straddle year end.
 - Activities with a cash leg but no transaction, **that part 1a would convert** —
   an allowlisted type (`transfer_in`, `transfer_out`, `cash_movement`) on an account
   in the opt-in set. This is boundable: the activity carries its own amount, so the
   missing money's size is known exactly. Everything else orphaned is a gap (below).
 
-  **The opt-in set must be a shared exported constant**, not a CLI argument.
+  **The opt-in set must be a shared exported constant** — name it
+  `BROKERAGE_CASH_LEG_ACCOUNT_IDS`, declared in part 1a's module and imported here
+  along with its allowlisted `activityType` set, so the two cannot drift. Not a CLI
+  argument.
   An earlier draft had part 1a take `allowInvestmentAccountIds` per invocation and
   "never defaulted", which part 3 cannot read: this is a read-path computation with
   no table (see Primitives), `Account` has no field distinguishing account 13 from
@@ -156,6 +150,23 @@ demonstrably wrong.
   converts them. The bare-`transfer` case on an opt-in brokerage account is the most
   tax-relevant residue in the whole set — 1a declines to auto-convert it precisely
   because it might be a draw — so it must be visible even though it is not a blocker.
+- **Dividend income with no T5 for the year.** A **gap**, not a blocker, and the
+  demotion is the new rule applied to an item this spec previously exempted. It
+  fails two of the three conjuncts. *Boundable:* no — the ~$92,000 is already
+  counted, so entering the slip moves the return by $0; there is no missing money to
+  size. *Clearable by scheduled work:* no — this spec said so itself, "nothing in
+  this set produces one, because CDG must issue it". A gap is the honest status: it
+  is still the highest-value thing on the list for this taxpayer, because it is the
+  only cheap check that reaches the corp-declared-versus-cash-moved question, and it
+  should be loud from 2027-03-01. But loud is not the same as blocking.
+- **A personal transfer-in with no counterpart** — txn 12139's pre-fix shape. Also a
+  **gap**, for the same reason: it fires on a healthy ledger. The codebase already
+  treats this population as normal — `cashflow/safeToSpend.ts:342-345` calls an
+  unlinked transfer inflow "a coverage gap (the corp side was not imported)" and
+  deliberately does not count it — and the one-directional link means every link
+  *target* in the household matches the predicate. Money that arrived is also not
+  missing money, so pricing it would mean assuming it is an untagged draw, which is
+  the fabricated-number sin that demoted the truncated-import item.
 - Suspected duplicate pairs awaiting review (part 1b's detector)
 - ACB warnings raised and discarded — `computeAcb` emits them for clamped sells,
   zero-cost `transfer_in` and mixed currency (`portfolio/acb.ts:154-176,197-202,366-370`)
@@ -178,15 +189,13 @@ compute. Reinstate with 1c if it is ever revived.
 fire on a healthy ledger.** If any of the three fails, it is a gap.
 
 That test is what finally settled the truncated-import item, after two failed
-attempts to force it into the blocker list. That is the discipline the refinements above enforce. A blocker
-nothing can clear is not a signal, it is a permanent red light that trains the reader
+attempts to force it into the blocker list. A blocker nothing can clear is not a signal, it is a permanent red light that trains the reader
 to ignore the panel — and one that fires on ordinary statement lag is worse, because
 it is wrong rather than merely useless.
 
-The one accommodation that is temporal rather than clearability-based is the missing
-T5: after the slip deadline passes, nothing in this set produces one, because CDG
-must issue it. That is stated plainly rather than hidden, and part 4's exit condition
-names it.
+Applying that rule to the list cost two items their blocker status — the missing T5
+and the uncounted transfer-in — and the set is better for it. **There are no
+exemptions.** An item that needs one is a gap.
 
 ### Presentation
 
@@ -244,7 +253,7 @@ serves the cached `TaxReturn` when `factsHash` matches. The completeness report 
 so it must be computed on every request and must not be folded into `factsHash`.
 Getting this wrong reintroduces a stale gate, which is worse than none.
 
-**Cost.** The report needs per-account import-coverage spans, balance drift,
+**Cost.** The report needs per-account import-coverage spans,
 orphaned-activity detection, duplicate-pair detection across the year, and
 carryforward state — on a route whose cache exists because it is already slow.
 Since `buildPersonalFacts` runs unconditionally at `:379`, the cache only saves
