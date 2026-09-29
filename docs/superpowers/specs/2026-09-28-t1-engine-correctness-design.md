@@ -252,19 +252,47 @@ gains inclusion 100%; non-refundable credits allowed 50%; **donation credit allo
 Direction is **not** uniform. Every federal bracket sits too high (understates
 federal tax). Every Ontario amount except the surtax is frozen at 2025 (overstates
 Ontario tax). But the surtax thresholds were indexed *up* — 5,864/7,504 against a
-published 5,818/7,446 — which **understates** surtax. So the errors partly cancel
-by accident, not by structure, and the net cannot be reasoned about without
-recomputing.
+published 5,818/7,446 — which **understates** surtax.
 
-For Connor's 2026 profile — non-eligible dividends, single Ontario resident,
-negligible capital gains — the net effect of the rate corrections is a few hundred
-dollars. The phantom 66.67% capital-gains tier is immaterial to him personally
-(2026 realised gains are ~$3.25) and structurally severe for anyone with gains
-above $250,000.
+**Measured, not estimated.** `buildT1` was run against Connor's 2026 fact shape
+(non-eligible dividends only, $49.84 interest, the $2,872 self-employment-expense
+artefact, age 33, CA-ON) under `ratesFor(2026)`, and an independent model
+reproducing the file's constants matched the engine **to the cent** at every point.
+Swapping only the constants to the published figures gives:
+
+| Non-eligible dividend draws | File rates | Published rates | Correction worth |
+|---|---|---|---|
+| $67,000 | $4,538.85 | $4,527.17 | **−$11.68** |
+| $82,000 | $7,580.64 | $7,568.96 | **−$11.68** |
+| $91,000 | $9,533.96 | $9,520.80 | **−$13.17** |
+| $111,000 | $15,389.95 | $15,359.57 | **−$30.38** |
+
+So for this taxpayer the entire rate correction is worth **$12–$30 a year**. The
+errors very nearly cancel. An earlier draft of this spec said "a few hundred
+dollars"; that was a guess, and it was wrong by an order of magnitude.
+
+This does not make the work optional — the constants are wrong, the phantom
+66.67% capital-gains tier is severe for anyone realising gains above $250,000, and
+a wrong rate table poisons every scenario and projection built on it. But it must
+not be sold as moving Connor's bottom line. **The data work is worth roughly a
+thousand times more to him**: the single unimported $15,000 draw is $3,042, and the
+coverage gap $1,700–$3,000.
 
 The slip box fix has no effect on today's numbers — `tax_slips` holds exactly one
 row, a 2025 T4 — and is the difference between a correct and a corrupted return the
 first time a real T5 is entered.
+
+### Why the existing tests did not catch any of this
+
+`backend/src/tax/t1-scenarios.test.ts:39-56` ("Scenario A") asserts only that
+`totalPayable` falls between $14,000 and $17,000 — a $3,000-wide band — while its
+own comment states the correct value is `15,067.70`. Line `:41` still carries a
+literal `$XX,XXX (engineer: fill in from CRA publication or accountant)`
+placeholder. A rate-table error of roughly 10% passes that test in silence.
+
+Tightening the reference scenarios to exact expected values is therefore part of
+this spec, not a nicety: without it, the corrected constants have no regression
+guard either.
 
 ## Scope
 
@@ -303,6 +331,10 @@ principal-residence handling.
 
 Backend `node:test` via `tsx`, colocated per house convention.
 
+- **Tighten `t1-scenarios.test.ts` Scenario A to an exact expected value** and
+  remove the `$XX,XXX` placeholder at `:41`. Its current $14k–$17k band is why the
+  wrong constants survived. Do the same for any other scenario asserting a range
+  where an exact figure is known.
 - Per-bracket assertions on the 2026 table against the published figures in this
   spec — a table-driven test, one case per value, so a regression names the value.
   Values this spec marks "verify — not researched" must be researched before the
