@@ -90,8 +90,8 @@ $20.73 — the duplicated RAILWAY row 11748/11559.)
 | Ordering | Import **after** part 1a lands | Importing the brokerage statements through the broken path recreates the $15k hole. |
 | The $2,872 | **Reimburse from the corp, tag both legs `expense_reimbursement`** | Removes the phantom L13500 loss and puts the deduction in the entity that bears the cost. **This raises Connor's personal tax by ~$850–$1,250** — the −$2,872 was suppressing taxable income. Doing it anyway: the loss is fictitious and claiming it is wrong. Booking the costs to entity 2 instead also works but rewrites history the bank statements contradict. |
 | $15,000 backfill | Through the fixed importer, re-running the source statement | Hand-inserting a row reproduces by hand exactly what the importer should do, and leaves no provenance. |
-| Duplicates | Auto-merge the certain ones (part 1b's rule), review the rest; 1b is detect-and-report only, so clearing them is manual | Connor's call. |
-| Exit condition | **Part 3's gate reports `complete` for 2026** | An objective finish line rather than "looks done". Note the gate no longer includes balance drift (part 1c cut), so `complete` means "no unclassified money, no orphan cash legs, no coverage gap" — not "every balance reconciles". |
+| Duplicates | **Clear them by hand**, using part 1b's certain/for-review classification as the worklist | 1b is detect-and-report only; nothing merges automatically. |
+| Exit condition | **Part 3's gate reports no remaining *blockers* for 2026** | An objective finish line rather than "looks done". Deliberately not `complete`: part 3 makes "dividend income with no T5 for the year" a blocker, and **no step here produces a T5** — CDG must issue one by 2027-02-28, which is outside this part and outside the app. Requiring `complete` would make this part's exit unreachable. The gate no longer includes balance drift either (part 1c cut). |
 | Prod writes | Each step reviewed before execution; read-only by default | Per the `cashflow-prod-db` guardrails. This is Connor's real financial history. |
 
 ## Work
@@ -137,7 +137,9 @@ to 2026.
 account's first transaction (2026-04-09 direct deposit). It inflates every derived
 balance by 899.10.
 
-**8 — Recompute and record the 2026 return**, and set up 2027 instalments.
+**8 — Recompute and record the 2026 return.** Setting up 2027 instalments belongs
+to part 5, which builds the threshold test and the schedule; this step only leaves
+the 2026 number trustworthy enough for part 5 to read.
 
 ## Expected outcome
 
@@ -185,13 +187,11 @@ nothing and every cost rides Connor's Amex, or corp expenses are being imported
 nowhere. That question belongs to a T2 pass, not this one, but it should not be
 lost. `tax_entities.fiscal_year_end` is also NULL on the corp, which T2 work needs.
 
-## Relationship to the other specs
+## Relationship to the other parts
 
-1. **Reconciliation foundation** — must land before step 1 and step 2.
-2. **Engine correctness** — independent; needed before the final numbers are
-   trusted.
-3. **T1 completeness gate** — supplies step 4's tooling and this spec's exit
-   condition.
-4. **2026 data backfill** — this spec. Last, and mostly operational.
+**0** Provenance (ships first) · **1a** Brokerage cash legs · **1b** Duplicate
+detection, detect-and-report · **1c** Statement balances (**cut**) · **2** Engine
+correctness · **3** Completeness gate · **4** 2026 backfill · **5** Instalments and
+the forward view.
 
 Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 1b → 3 → 4 (rest) → 5**. Part 1c is **cut**.

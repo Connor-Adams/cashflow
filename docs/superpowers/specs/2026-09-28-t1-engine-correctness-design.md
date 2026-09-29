@@ -430,9 +430,7 @@ Backend `node:test` via `tsx`, colocated per house convention.
   Ontario surtax ordering. Its passing is the regression guard for the
   not-a-bug documented above.
 
-## Relationship to the other specs
-
-accurate".
+## Relationship to the other parts
 
 **0** Provenance (ships first) · **1a** Brokerage cash legs · **1b** Duplicate
 detection, detect-and-report · **1c** Statement balances (**cut**) · **2** Engine

@@ -99,10 +99,10 @@ on when deciding December draws and when paying in March.
 |---|---|---|
 | Instalment obligation | Implement the real CRA test: net owing > $3,000 in the current year **and** in either of the two prior years | The two-year condition is why 2026 required nothing. A naive "> $3,000 ⇒ pay" would have told him he was late all year. |
 | Calculation options | All three — no-calculation (CRA's reminder amount), prior-year, current-year estimate — with the current-year option flagged as the one that carries interest risk if underestimated | These are the actual choices CRA offers; picking one for him hides the trade-off. Prior-year is the safe default for a rising-income year. |
-| Due dates | March 15, June 15, September 15, December 15 | Replaces `quarterlyInstalments`' divide-by-four, which matches no CRA schedule. |
-| `quarterlyInstalments` | Delete it, or rewrite it as the schedule builder | Dead code that looks authoritative is worse than no code. |
+| Due dates | Keep the four in `DUE_DATES` — they are already correct | No change needed; assert they survive the rewrite. |
+| `quarterlyInstalments` | **Keep the arithmetic; add the missing inputs** | Divide-by-four is the prior-year option and the current-year option. What it lacks is a stated source year for `annualOwing`, the no-calculation variant, and any threshold test. It is also referenced by `instalments.test.ts:4`, so its signature is a CI surface. |
 | Forward view basis | **Year-to-date actuals + run-rate projection of the remainder**, never a scaled prior year | The prior-year scaling is the mechanism part 0 demotes. Reusing it here would reintroduce the same defect under a new name. |
-| How it is modelled | **A fourth `ScenarioKind`** and a third branch in `resolveScenario` | `models/Scenario.ts:6` is `'baseline' \| 'fork' \| 'projection_root'` and `resolveScenario.ts:25-28` has exactly two branches — `projectPersonalFactsViaPort` or `buildPersonalFacts`. A YTD-plus-remainder basis is neither, so an earlier draft's "no new primitive, no migration" was wrong: this needs a kind, a branch, and a migration if the column is constrained. |
+| How it is modelled | **A fourth `ScenarioKind`** and a third branch in `resolveScenario` | `models/Scenario.ts:6` is `'baseline' \| 'fork' \| 'projection_root'` and `resolveScenario.ts:25-28` has exactly two branches. A YTD-plus-remainder basis is neither. **No migration is needed** — `migrations/20260526014957-scenarios.js:12` declares `kind` as `Sequelize.STRING(20)` with the value list in a comment only, no ENUM and no constraint. The union is declared in three places: `models/Scenario.ts:6`, `frontend/src/hooks/useScenarios.ts:4` and `useCorpScenarios.ts:4`. |
 | Caching | The forward view must **not** ride the facts-only `ScenarioReturn` cache | `computeScenarioReturn.ts:44-50` keys on `hashFacts(facts)` alone. A run-rate projection changes as the calendar advances with no fact changing, so it would cache and go stale — the same failure part 2 documents for rate corrections and part 3 for the completeness report. |
 | Run-rate source | Corp→personal draws per month over the elapsed year, excluding the coverage gap | The gap is part 3's blocker; the projection must not treat an unimported month as a zero-draw month, or it under-projects exactly when data is missing. |
 | Forward view is labelled | Same provenance discipline as part 0 — it says it is a projection and states its assumption | A forward number that looks like a filed number is the failure part 0 exists to prevent. |
@@ -117,15 +117,17 @@ already have `InstalmentPayment`, an existing model.
 The forward view **extends an existing primitive**: a new `ScenarioKind` value on
 **Scenario**, which is a discriminator on a thing that already exists, not a new
 status machine. Per the build rule that is "a new variant → add a `kind` field
-value", which Scenario already has. It does need a migration if the column is
-constrained, and a third branch in `resolveScenario`.
+value", which Scenario already has. It needs a third branch in `resolveScenario` and **no
+migration** — `migrations/20260526014957-scenarios.js:12` declares `kind` as an
+unconstrained `Sequelize.STRING(20)`.
 
 ## Scope
 
 **In:** `backend/src/tax/engine/instalments.ts` and its colocated
 `instalments.test.ts`; a required-instalment computation reading the three years'
 returns; an L47600 line split out of L48200 in `backend/src/tax/engine/t1.ts`;
-`models/Scenario.ts` plus `tax/scenarios/resolveScenario.ts` and
+`models/Scenario.ts`, `frontend/src/hooks/useScenarios.ts` and `useCorpScenarios.ts`
+(the kind union is declared in all three), plus `tax/scenarios/resolveScenario.ts` and
 `computeScenarioReturn.ts` for the new kind and its cache exemption;
 `frontend/src/pages/tax/InstalmentTracker.tsx`; and a forward-view surface on the
 Personal T1 tab (the scenario path — see part 0).
@@ -147,6 +149,8 @@ its deadline.
   already has these; assert they survive the rewrite.
 - L47600 appears as its own line and L48200 still totals correctly.
 - The forward view recomputes as the calendar advances with no fact change.
+- Part 0's default-selection guard is not confused by the new kind: it still selects
+  the baseline, and the forward view is not auto-selected.
 - Each of the three calculation options produces its documented amount for a fixture
   taxpayer, and the current-year option is flagged.
 - The forward view on a part-year 2026 projects the remainder from the run rate, and

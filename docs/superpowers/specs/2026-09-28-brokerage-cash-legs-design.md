@@ -116,8 +116,10 @@ if (wrong.length > 0) {
 That comment is correct and was written by someone who had thought about this.
 
 So the work is: **add an explicit `activityType` allowlist to the selection, narrow
-the delete to rows that allowlist matched, give each run its own batch label, and
-only then widen the account guard.** That is new machinery — small, but real.
+the sweep to rows that allowlist matched, give each run its own batch label, hand
+shadow candidates on an opt-in account to a human, and teach the guard an explicit
+opt-in id set.** That is new machinery — small, but real. The `accountType` refusal
+stays exactly as it is for every account not named in that set.
 
 ### Rollback is currently incoherent for converted rows
 
@@ -150,15 +152,16 @@ delete the activities.
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Mechanism | Extend `wsDepositActivityMigration.ts` — allowlist, narrowed delete, per-run batch label, then widen the account guard | It is the house pattern and already handles orphan/shadow pairing, provenance, fingerprints and idempotence. But it selects on `securityId == null` and deletes what it converts, so widening the guard alone destroys investment data. |
+| Mechanism | Extend `wsDepositActivityMigration.ts` — allowlist, narrowed sweep, per-run batch label, shadow confirmation, and an opt-in id set the guard consults | It is the house pattern and already handles orphan/shadow pairing, provenance, fingerprints and idempotence. But it selects on `securityId == null` and deletes what it converts, so widening the guard alone destroys investment data. |
 | Selection | An explicit `activityType` allowlist — `transfer_in`, `transfer_out`, `cash_movement` — **in addition to** `securityId == null` | Selection today is `securityId == null` only. On a deposit account that is safe because every row is cash; on a brokerage account it is not. |
 | The delete | Narrowed to rows the allowlist matched | Otherwise a security-less `buy` is converted and its activity destroyed. |
 | Batch label | Per run and per account | `'WS deposit ledger cleanup'` is a shared constant and rollback deletes by batch label. |
 | No activity→transaction FK | **Dropped** | It was proposed to make a rollback take both sides, but `rollbackImportBatch.ts` destroys `InvestmentActivity` (`:379-388`) *before* `Transaction` (`:465`), so a real `references` FK would raise a constraint violation on Postgres unless `ON DELETE SET NULL`. The existing migration needs no FK: pairing is by `(accountId, date, amount, currency)`. Dropping it removes the migration from this part entirely. |
 | Keying | On `activityType`, not on statement codes | `models/InvestmentActivity.ts` has **no code column** — the declared fields are `activityType, tradeDate, description, quantity, price, amount, fees, splitRatio, currency, sourceReference, sourceRowFingerprint, importBatch`. A code-based rule could only live in the parser, which never sees the activity-statement path where the draw was lost. |
 | The bare `transfer` activityType | **Excluded** from the allowlist | `rbcInvestment.ts:305` and `questrade.ts:246,251,258` emit it — and so does the other Wealthsimple brokerage path: `wealthsimpleActivityCodes.ts:30` maps `CONT: 'transfer'`, and `wealthsimpleBrokerage.ts` parses exactly the monthly statements part 4 step 1 re-imports. (`wsActivityStatement.ts` does not emit it; an earlier draft rested the exclusion on that alone, which was the wrong reason for the right call.) `transfer_in`/`transfer_out`/`cash_movement` are unambiguous cash crossings; a bare `transfer` is not. (An earlier draft titled this row "`CONT` scope" — `CONT` is a statement *code*, and this spec's own next row establishes there is no code column on `InvestmentActivity`.) `interest` is also excluded here: it is income, not a cash crossing, and conflating them is how a tax line gets double-counted. |
-| Account admission | **An explicit per-account opt-in list passed to the runner** — never a widened `accountType` set | `Account` has no institution, provider or parser field (`models/Account.ts:26-51`), and every brokerage account of every provider is `accountType: 'investment'` (`runImport.ts:804-811` for Wealthsimple, `:999-1003` for Questrade). So widening `DEPOSIT_ACCOUNT_TYPES` to admit account 13 admits **every Questrade account in the household at the same time** — and `questrade.ts:408-423` already emits the cash mirror, so the converter would see shadows and clear real activities. A round-two draft of this spec said "widen the account guard"; that rebuilds the round-one hazard one provider over. The guard stays a refusal; the runner takes named account ids. |
-| Shadow pairing on brokerage | **Re-validate before running, and add a false-shadow test** | The shadow half is not protected by the allowlist. Pairing is `(accountId, date, amount, currency)` alone (`:100`), justified by an empirical claim measured on deposit accounts: "In prod no such key occurs twice on either side" (`:14-18`). On a brokerage account the transaction table is already populated by the twelve cash codes, so a same-day same-amount collision between an allowlisted `transfer_out` activity and an unrelated `E_TRFOUT` transaction is far likelier. A false shadow match clears a real cash crossing whose event is **not** in the ledger — the exact loss this part exists to stop. |
+| Account admission | **A new `allowInvestmentAccountIds` parameter that `loadDepositAccounts` consults**, never a widened `accountType` set | `Account` has no institution, provider or parser field (`models/Account.ts:26-51`), and every brokerage account of every provider is `accountType: 'investment'` (`runImport.ts:804-811` for Wealthsimple, `:999-1003` for Questrade). So widening `DEPOSIT_ACCOUNT_TYPES` to admit account 13 admits **every Questrade account in the household at the same time** — and `questrade.ts:408-423` already emits the cash mirror, so the converter would see shadows and clear real activities. A round-two draft said "widen the account guard"; that rebuilds the round-one hazard one provider over. A round-three draft then said "the runner takes named account ids" — **which is a no-op**: `backend/scripts/migrate-ws-deposit-activities.ts:35,46,67` already accepts `--accounts a,b,c` (default `14,16,24`), and the refusal lives *downstream* of those ids inside `loadDepositAccounts` (`:104-122`), so `--accounts 13` throws today and would still throw. The guard must itself take the opt-in set: `DEPOSIT_ACCOUNT_TYPES.has(type) || allowInvestmentAccountIds.includes(a.id)`. Ids are supplied per invocation and never defaulted. |
+| Shadow pairing on brokerage | **On an opt-in account, shadow candidates are reported for confirmation, not cleared unattended.** Orphan conversion still runs unattended. | The shadow half is not protected by the allowlist. Pairing is `(accountId, date, amount, currency)` alone (`:100`), justified by an empirical claim measured on deposit accounts: "In prod no such key occurs twice on either side" (`:14-18`). On a brokerage account the transaction table is already populated by the twelve cash codes, so a same-day same-amount collision between an allowlisted `transfer_out` activity and an unrelated `E_TRFOUT` transaction is far likelier. A false shadow match clears a real cash crossing whose event is **not** in the ledger — the exact loss this part exists to stop. And it cannot be settled by a cleverer key: `(date, amount, currency)` genuinely cannot distinguish "the same event, recorded twice" from "two events of the same size on the same day". Where the data cannot decide, a person does. |
+| Self-heal vs false-shadow | The converter recognises **its own** output by batch-label prefix; everything else on an opt-in account goes to confirmation | These two requirements pull against each other otherwise. Idempotence works *because* an interrupted run's converted orphan re-pairs with the transaction it just created — which under `pairKey` is indistinguishable from an unrelated same-day, same-amount row. Matching the converter's own label prefix (not the per-run suffix, so a prior run is recognised) separates them. |
 | Linkability | **Add a `txnType` input to `enrichTransaction`** | Without this the bridge does not reliably link, and an unlinked bridge row is as invisible as no row. See below. |
 | Forward fix as well as retroactive | Both: fix `importWsActivityStatement.ts:92`, and run the generalised converter over history | The retroactive pass recovers the $15,000; the forward fix stops the next one. |
 
@@ -199,8 +202,9 @@ Nothing new, no new table, no discriminator. With the FK dropped, **no migration
 
 ## Scope
 
-**In:** `backend/src/import/wsDepositActivityMigration.ts` (generalise the account
-scope), `backend/scripts/migrate-ws-deposit-activities.ts` (runner),
+**In:** `backend/src/import/wsDepositActivityMigration.ts` (the `activityType`
+allowlist, the narrowed sweep, the per-run batch label, shadow confirmation, and the
+`allowInvestmentAccountIds` guard parameter), `backend/scripts/migrate-ws-deposit-activities.ts` (runner),
 `backend/src/import/importWsActivityStatement.ts` (the `transactions: []` forward
 fix), `backend/src/import/enrich.ts` + `enrichment/detectRelationshipsStage.ts` (the
 `txnType` input), and colocated tests.
@@ -222,10 +226,15 @@ Backend `node:test` via `tsx`, colocated; SQLite per-process temp DB.
   data-destruction regression guard and the most important test in this part.
 - Rolling back one account's conversion leaves other accounts' converted rows intact
   — the per-run batch label holds.
-- Running against an account not on the opt-in list is refused, Questrade included.
-- **A false shadow match is caught:** an allowlisted `transfer_out` activity and an
-  unrelated same-day, same-amount cash transaction on the same brokerage account do
-  not pair, and the activity survives.
+- Running against an account not in `allowInvestmentAccountIds` is refused by the
+  existing `accountType` guard — Questrade included, since every brokerage account
+  of every provider is `accountType: 'investment'`.
+- **A false shadow match is not acted on:** an allowlisted `transfer_out` activity
+  and a same-day, same-amount cash transaction on an opt-in brokerage account are
+  reported as a candidate and the activity survives until confirmed.
+- **Self-heal still works:** a run interrupted between insert and sweep, resumed,
+  recognises its own prior output by batch-label prefix and pairs with it
+  unattended — it does not land in the confirmation queue.
 - The converter is idempotent: two runs produce one transaction. A run interrupted
   between insert and delete self-heals on the next run.
 - A converted row carries a `sourceIdentityFingerprint` and an `ImportHistory`

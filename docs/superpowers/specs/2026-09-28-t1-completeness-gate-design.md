@@ -3,7 +3,7 @@
 **Date:** 2026-09-28
 **Status:** Design; not yet implemented
 **Type:** Backend computation + frontend surface
-**Part:** 3 of 7 — depends on part 0 (provenance) and part 1a (brokerage cash legs)
+**Part:** 3 of 7 — depends on part 0 (provenance), part 1a (cash legs) and part 1b (the duplicate detector)
 
 ## Problem
 
@@ -70,12 +70,12 @@ stayed stalled until September.
 | Gap | Worth |
 |---|---|
 | $42,000 of corp draws untagged (May–Aug, found 2026-09-16) | **~$4,239** of tax |
-| $15,000 draw whose corp leg was never written (brokerage cash leg, spec 1) | **~$3,040** of tax |
+| $15,000 draw whose corp leg was never written (brokerage cash leg, part 1a) | **~$3,040** of tax |
 | WS Corporate Chequing (account 24) uncovered 2026-08-14 → 2026-09-28 | est. $8–14k of draws, **~$1,700–$3,000** of tax |
 | ~25 duplicate pairs, $28,848 phantom corp inflow | corrupts every balance |
 | No 2026 carryforward roll (personal stops at `as_of_year 2025`) | RRSP/FHSA room wrong |
 
-Note how unevenly those scale. The $42,000 backlog was worth $4,430 because it
+Note how unevenly those scale. The $42,000 backlog was worth ~$4,239 because it
 spanned a near-zero base (total payable $300.00 → $4,538.85, measured in part 2); the $15,000 draw is worth
 only $3,040 because it lands on top of it, at a ~20% marginal rate on cash
 non-eligible dividends. **A gap's tax impact depends on what is already counted,
@@ -185,7 +185,7 @@ so: a bulk endpoint, atomic per request, returning the updated rows for in-place
 application.
 
 **Out:** fixing any of the data problems the gate reports (spec 4), the importer
-and duplicate detector that feed it (spec 1), engine arithmetic (spec 2).
+and duplicate detector that feed it (parts 1a and 1b), engine arithmetic (part 2).
 
 **Caching note.** `routes/tax.ts:379-392` computes facts unconditionally, then
 serves the cached `TaxReturn` when `factsHash` matches. The completeness report is
@@ -218,7 +218,8 @@ Backend `node:test` via `tsx`, colocated. Frontend vitest.
 - Regression fixture from Connor's real 2026: 13 classified pairs + 1 unimported
   $15,000 draw + a 45-day coverage gap + 25 duplicate pairs → `blocked`, with the
   $15,000 blocker carrying a tax estimate in the **$2,900–$3,200** band
-  (total payable $4,528 → $7,570 on the published 2026 rates).
+  (total payable $4,538.85 → $7,580.64 on the published 2026 rates, per part 2's
+  measured table).
 - The same $15,000 gap against a *different* base yields a different estimate —
   the direct test that the impact is computed by re-running the return rather
   than from a stored rate.
@@ -226,14 +227,11 @@ Backend `node:test` via `tsx`, colocated. Frontend vitest.
   to their fix surface; bulk-classify applies one treatment to a multi-row
   selection and reflects the result without a full refetch.
 
-## Relationship to the other specs
+## Relationship to the other parts
 
-1. **Reconciliation foundation** — produces this spec's signals. Build first.
-2. **Engine correctness** — independent; the "rate table not verified" gap ties to
-   it but does not block.
-3. **T1 completeness gate** — this spec.
-4. **2026 data backfill** — clearing what this gate reports is how part 4 knows it
-   is finished. The gate reaching `complete` for 2026 **is** part 4's exit
-   condition.
+**0** Provenance (ships first) · **1a** Brokerage cash legs · **1b** Duplicate
+detection, detect-and-report · **1c** Statement balances (**cut**) · **2** Engine
+correctness · **3** Completeness gate · **4** 2026 backfill · **5** Instalments and
+the forward view.
 
 Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 1b → 3 → 4 (rest) → 5**. Part 1c is **cut**.

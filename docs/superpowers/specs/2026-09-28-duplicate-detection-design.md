@@ -78,17 +78,18 @@ it promises to detect its consequences repeatedly and cheaply.
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Auto-merge | Only when **structurally certain** (below) | Connor's call: auto-merge where clear, review otherwise. |
+| Classification | Pairs are reported **certain** or **for review**, using the rule below | Connor's call was auto-merge where clear, review otherwise. As scoped this part decides the classification and acts on neither. |
 | Everything else | Review queue | Nothing silently disappears from a financial ledger. |
-| Merge mechanism | Mark superseded; never `DELETE` | Reversible, auditable, and a rollback stays coherent. |
-| Marker shape | **A column pair** — `superseded_by_transaction_id` + `superseded_at` — not a new `status` value | `Transaction.status` is `pending \| posted \| cleared` with `validate: { isIn: [TRANSACTION_STATUSES] }` (`models/Transaction.ts:180-187`, `transactions/types.ts:1`), and `dedupExisting.promotePending` branches on `status === 'pending'`. A status value also carries no pointer to the surviving row, which the "restore what it found" rollback requirement needs. |
-| Exclusion mechanism | **A shared `notSuperseded` where-fragment**, applied explicitly at the sites that must exclude | There is no `defaultScope` on any model (`grep defaultScope models/` → zero hits) and 91 non-test files query `Transaction`. A `defaultScope` is a one-line change with a very large blast radius, and it would also hide superseded rows from the transaction list, which must still show them. |
+| Merge mechanism | *(Deferred)* Mark superseded; never `DELETE` | Reversible, auditable, and a rollback stays coherent. Not built in this part — nothing merges. |
+| Marker shape | *(Deferred)* **A column pair** — `superseded_by_transaction_id` + `superseded_at` — not a new `status` value | `Transaction.status` is `pending \| posted \| cleared` with `validate: { isIn: [TRANSACTION_STATUSES] }` (`models/Transaction.ts:180-187`, `transactions/types.ts:1`), and `dedupExisting.promotePending` branches on `status === 'pending'`. A status value also carries no pointer to the surviving row, which the "restore what it found" rollback requirement needs. |
+| Exclusion mechanism | *(Deferred)* **A shared `notSuperseded` where-fragment**, applied explicitly at the sites that must exclude | There is no `defaultScope` on any model (`grep defaultScope models/` → zero hits) and 91 non-test files query `Transaction`. A `defaultScope` is a one-line change with a very large blast radius, and it would also hide superseded rows from the transaction list, which must still show them. |
 | Surface | A **module**, plus a script wrapper | Part 3 needs it callable per request as a gap type; part 4 needs it as an operation. A script-only build blocks part 3. |
 | Detector scope | Bounded to a period | Part 3 calls it on every T1 request; an unbounded whole-ledger scan there is a latency problem. |
 
-### "Structurally certain" — the auto-merge rule
+### "Structurally certain" — the classification rule
 
-A pair auto-merges only when **all** hold:
+A pair is **certain** (and, once supersession is reinstated, auto-mergeable) only
+when **all** hold:
 
 1. Identical `account_id`, `date`, and `amount`.
 2. **And** both rows carry the same non-null `linked_transaction_id` — two legs
@@ -119,11 +120,14 @@ missed entirely; and only the CSV filename path
 (`parseStatementFilename.ts:15`, `CardName_YYYY_MM.csv`) yields a real period, so two
 ingest paths emit the same `"<YYYY-MM> <token>"` shape with opposite meanings.
 
-Consequence: **the 12 account-14 pairs go to review, not auto-merge**, unless they
-independently satisfy criterion 2. That is the correct outcome — they are the class
+Consequence: **the 12 account-14 pairs are classified for review**, unless they
+independently satisfy criterion 2. Note the impact table's largest class — account
+13's four pairs, and the Amex RAILWAY pair — is not stated to share a
+`linked_transaction_id`, and a merchant charge would not normally be transfer-linked
+at all, so those are likely for-review too. Confirm against prod before planning. That is the correct outcome — they are the class
 the withdrawn criterion would have merged on a false premise.
 
-Explicitly **not** auto-merged: two identical amounts on one day from one import
+Explicitly **not** certain: two identical amounts on one day from one import
 (the recurring $6.00 RBC monthly fees, equal staking rewards, two genuine $1,000
 e-transfers). `fuzzyDedupInvestmentActivity.ts:15-23` reasons about exactly this —
 "two legitimate identical activities within the window (recurring buys, equal
@@ -180,11 +184,11 @@ clearing Connor's actual 25 pairs (part 4).
 
 Backend `node:test` via `tsx`, colocated.
 
-- Auto-merge fires on the shared-`linked_transaction_id` shape (real prod pairs
-  2863/3315, 971/12178) and on neither of the ambiguous shapes (two $6.00 RBC fees
-  on one day).
-- A row classified only by an inherited category, with a null override, is **not**
-  auto-merged.
+- A pair is classified **certain** on the shared-`linked_transaction_id` shape (real
+  prod pairs 2863/3315, 971/12178) and **for review** on the ambiguous shapes (two
+  $6.00 RBC fees on one day).
+- A row classified only by an inherited category, with a null override, is reported
+  **for review**, never certain.
 - The detector is period-bounded: a call for 2026 does not scan 2023.
 - The detector returns pairs classified **certain** or **for review**, and changes
   no row.
