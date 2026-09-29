@@ -125,3 +125,23 @@ test('resolveScenario throws on cyclic ancestry', async () => {
   await a.update({ parentId: b.id });
   await assert.rejects(() => resolveScenario(a.id), /cycle/i);
 });
+
+// The Overview tab reads buildPersonalFacts directly (via /api/tax/personal/:year/
+// return); the Personal T1 tab reads it through resolveScenario. They showed
+// different 2026 numbers because the tab defaulted to a projection_root. Part 0
+// makes the baseline the default, so this locks the other half: a baseline must
+// resolve to the same actuals the Overview tab computes, or the two tabs drift
+// again for a different reason.
+test('a baseline scenario resolves to the same facts buildPersonalFacts produces', async () => {
+  const { entity } = await seedEntity();
+  const baseline = await ensureBaselineScenario(entity.id, 2025);
+
+  const viaScenario = await resolveScenario(baseline.id);
+  const { buildPersonalFacts } = await import('../builders/buildPersonalFacts');
+  const viaActuals = await buildPersonalFacts(entity.id, 2025);
+
+  assert.equal(
+    JSON.stringify(viaScenario, (_k, v) => (v && typeof v.toString === 'function' && v.constructor?.name === 'Decimal' ? v.toString() : v)),
+    JSON.stringify(viaActuals, (_k, v) => (v && typeof v.toString === 'function' && v.constructor?.name === 'Decimal' ? v.toString() : v)),
+  );
+});

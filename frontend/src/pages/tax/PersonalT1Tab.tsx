@@ -5,6 +5,7 @@ import {
 import { useScenarioChain } from '../../hooks/useScenarioChain';
 import { type TaxLineDto } from '../../hooks/useTaxReturn';
 import { ScenarioTree } from './scenarios/ScenarioTree';
+import { pickDefaultScenarioId, describeProvenance } from './scenarios/provenance';
 import { OverrideEditor } from './scenarios/OverrideEditor';
 import { ComparisonView } from './scenarios/ComparisonView';
 import { YearStripNav } from './scenarios/YearStripNav';
@@ -85,16 +86,14 @@ function PersonalT1ScenarioWorkspace({ year: yearProp, entityId }: WorkspaceProp
     }
   }, [loading, bootstrapping, scenarios.length, create]);
 
-  // Auto-select the most-recently-created leaf so the detail pane has content
-  // as soon as the bootstrap POST resolves (or the user logs in to an existing
-  // tree). Picks the latest fork if any, otherwise falls back to the baseline.
+  // Select the year's actuals so the detail pane has content as soon as the
+  // bootstrap POST resolves. This used to pick the most-recently-created
+  // non-baseline scenario, which in prod was a `projection_root` holding no
+  // transactions from the year on screen — see `pickDefaultScenarioId`.
   useEffect(() => {
     if (activeId !== null) return;
-    if (scenarios.length === 0) return;
-    const latestFork = [...scenarios]
-      .reverse()
-      .find((s) => s.kind !== 'baseline');
-    setActiveId((latestFork ?? scenarios[0]).id);
+    const id = pickDefaultScenarioId(scenarios);
+    if (id !== null) setActiveId(id);
   }, [activeId, scenarios]);
 
   // Prune deleted scenarios from the compare set so the comparison view never
@@ -286,14 +285,14 @@ function ActiveScenarioPanel({
   // computed lines come back through `JSON.parse(JSON.stringify(...))` which
   // collapses the Decimal instances to their string form (see computeScenario).
   const lines = (computed.lines ?? []) as TaxLineDto[];
-  const isProjection = scenario.kind === 'projection_root';
+  const provenance = describeProvenance(scenario);
+  const isProjection = provenance.isProjection;
   return (
     <div>
       <header className="mb-3 flex items-baseline gap-3">
         <h3 className="m-0">{scenario.name}</h3>
-        <span className="muted">
-          {scenario.kind === 'baseline' ? 'baseline (actuals)' : scenario.kind}
-        </span>
+        <span className="muted">{provenance.label}</span>
+        {provenance.caveat && <span className="muted">{provenance.caveat}</span>}
         <Button variant="secondary" size="sm" onClick={onAddToCompare} className="ml-auto">
           {inCompare ? '✓ In compare' : '+ Add to compare'}
         </Button>

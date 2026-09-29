@@ -88,8 +88,16 @@ presentation. Derived → computation. No spine change.
 **In:** `frontend/src/pages/tax/PersonalT1Tab.tsx` (default selection, label),
 `frontend/src/pages/tax/scenarios/ScenarioTree.tsx` (kind labels),
 `frontend/src/hooks/useScenarios.ts` if the kind is not already surfaced,
-`backend/src/routes/tax-scenarios.ts:328` (carry provenance on the detail response),
 and their tests.
+
+**Not needed after all:** an earlier scope line called for
+`backend/src/routes/tax-scenarios.ts:328` to carry provenance on the detail
+response. It already does — `res.json({ scenario, computed })` serialises the whole
+`Scenario`, `kind` included (`models/Scenario.ts:17`) — and the frontend derives
+label, caveat and default selection purely from that field
+(`pages/tax/scenarios/provenance.ts`). A server-computed duplicate of a pure client
+derivation would be two places to change and one to forget. No backend change was
+made for this part beyond a regression test.
 
 **Out:** completeness blockers and gaps (part 3), the cache-version work (part 2),
 anything touching `routes/tax.ts`.
