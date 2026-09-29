@@ -93,7 +93,7 @@ None of these produced a single character of warning on the T1.
 | Gate hardness | **Show the number, never bare** | Connor's call. A refused total is hostile when you want a rough mid-year sense; a bare total is what caused this three times. |
 | Shape | Typed `completeness: { status, blockers[], gaps[] }` on the return DTO | A first-class field, not a warning string. The UI can treat it structurally; a string forces re-parsing. |
 | Where it is computed | A dedicated `buildCompletenessReport(entityId, year)` module | Keeps `buildPersonalFacts` focused on facts. Completeness needs import history and statement coverage, outside that builder's remit. |
-| Dollar impact | Every **blocker** carries an estimate; a gap carries one only where it is honest to | "$15,000 of draws not imported (~$3,042 of tax)" drives action; "1 issue found" does not. The distinction is the point: a blocker is boundable missing money by definition, so an estimate always exists. A gap often has no honest basis for one, and inventing it is worse than omitting it. |
+| Dollar impact | Every **blocker** states its **amount**; a **tax estimate** only where the character is known. A gap carries a figure only where it is honest to | "$15,000 of draws not imported (~$3,042 of tax)" drives action; "1 issue found" does not. The distinction is the point: a blocker is boundable missing money by definition, so an amount always exists — but the amount and the tax it would cause are different claims, and one outbound-transfer blocker can state the first without the second. A gap often has no honest basis for one, and inventing it is worse than omitting it. |
 | How the estimate is derived | **Re-run the return with the gap's amount added, take the delta** | The marginal rate depends on what is already counted (see the table above). A stored per-dollar rate is wrong by ~60% between two gaps in the same year. |
 | Persistence | None — derived on read | Per `CLAUDE.md`: derived → computation, no table. |
 | Bulk classification | In scope | A gate that surfaces 50 pending rows and offers one-at-a-time clearing just relocates the stall. |
@@ -109,7 +109,16 @@ demonstrably wrong.
   account for which `claimMatchingCashMove` finds nothing, which that file already
   warns about as "NOT deducted as a business expense". Boundable (the row carries its
   amount), clearable (import the other leg, or classify it), and silent on a healthy
-  ledger.
+  ledger — `corpPerimeter.ts:217-218` excludes both link directions, and a classified
+  row is skipped at `:219`.
+
+  **It reports the amount and no tax estimate.** The character is unknown — an
+  outbound corp transfer may be a draw, an internal move, or a third-party payment —
+  and pricing it on the personal T1 would assume it reached Connor, which is the
+  fabricated-number sin that demoted two other items. This is also the one blocker
+  that reads **corp-entity** rows while `buildCompletenessReport` runs for the
+  personal entity; that cross-entity reach is deliberate, because a draw that never
+  arrived is invisible from the personal side alone.
 
   Two predicates that look right and are not. "Unlinked" alone fails because
   `linkedTransactionId` is **one-directional**, so arrival legs are unlinked too
@@ -278,7 +287,9 @@ Backend `node:test` via `tsx`, colocated. Frontend vitest.
 
 - Each blocker and gap type: detected when present, absent when not. Table-driven,
   one case per type.
-- **Every blocker carries the right dollar estimate.** Of the gaps, exactly three
+- **Every blocker states the right amount, and a tax estimate wherever the character
+  is known** — the outbound-corp-transfer blocker states its amount and deliberately
+  renders no tax figure. Of the gaps, exactly three
   render **no** figure and are asserted to: truncated import, missing T5, and the
   uncounted transfer-in — each says why in its own bullet. Every other gap carries
   one, including orphaned cash-leg activities outside the opt-in set, which are
