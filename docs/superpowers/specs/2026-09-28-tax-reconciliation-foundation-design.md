@@ -1,7 +1,20 @@
 # Reconciliation Foundation — brokerage cash legs, persisted statement balances, duplicate detection
 
 **Date:** 2026-09-28
-**Status:** Design; not yet implemented
+**Status:** **SUPERSEDED** — split into three parts after an implementability audit
+found that two of its three strands contained steps the codebase cannot perform.
+Do not plan from this file. Read instead:
+
+- `2026-09-28-brokerage-cash-legs-design.md` (**1a**) — closes the $15,000; the only
+  part 4 blocks on. Generalises the existing `wsDepositActivityMigration.ts` rather
+  than building new machinery, and drops the activity FK and its migration.
+- `2026-09-28-duplicate-detection-design.md` (**1b**) — supersession columns and a
+  retroactive detector. The `import_batch` auto-merge criterion is withdrawn: that
+  prefix is the import month, not the statement period.
+- `2026-09-28-statement-balances-design.md` (**1c**) — scoped to WS Chequing, the one
+  Wealthsimple source that prints both balances, and shipped non-blocking first.
+
+Retained for the problem statement and the prod evidence, both of which still hold.
 **Type:** Import correctness + data integrity, backend
 **Part:** 1 of 4 — the base the other three rest on
 
