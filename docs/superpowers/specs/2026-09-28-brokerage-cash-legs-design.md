@@ -115,11 +115,12 @@ if (wrong.length > 0) {
 
 That comment is correct and was written by someone who had thought about this.
 
-So the work is: **add an explicit `activityType` allowlist to the selection, narrow
-the sweep to rows that allowlist matched, give each run its own batch label, hand
-shadow candidates on an opt-in account to a human, and teach the guard an explicit
-opt-in id set.** That is new machinery — small, but real. The `accountType` refusal
-stays exactly as it is for every account not named in that set.
+So the work is: **add an explicit `activityType` allowlist to the selection, make
+the converter insert-only on opt-in accounts so it removes nothing there, give each
+run its own batch label, report shadows, and teach the guard an explicit opt-in id
+set.** That is new machinery — small, but real. The `accountType` refusal stays
+exactly as it is for every account not named in that set, and deposit-account
+handling is untouched throughout.
 
 ### Rollback is currently incoherent for converted rows
 
@@ -169,6 +170,8 @@ delete the activities.
 | Confirmation surface | **None — `--confirm-shadows` is cut** | It was designed when the converter still removed rows on opt-in accounts, and under insert-only there is nothing for a confirmation to authorise: the only act it could have taken was `InvestmentActivity.destroy`, which no longer happens there. Keeping a flag whose action is undefined is worse than not having one. Shadows appear in the run report; a human reading it is the whole mechanism. |
 | What the converter does on an opt-in account | **Inserts only. It never removes an activity there.** Shadows are reported, not swept. | Five successive drafts tried to decide *which* activities are safe to remove, and each fix opened a new hole. The deciding argument is in "Why nothing is removed" below: the two states that must be separated are byte-identical, so no rule can separate them. Removing nothing dissolves the whole class. |
 | Deposit accounts | **Entirely unchanged** — existing shadow and orphan handling, existing sweep, existing tests | The 190 shadows and 66 orphans the runner exists for (`migrate-ws-deposit-activities.ts:16-17`) are on accounts 14/16/24, where every row is a cash event and the pairing assumption was measured. Nothing in this part touches that path. |
+| The mirror's own `txnType` | **Stamp it as `overrideTxnType`** from the row's `activityType` — `transfer_in`/`transfer_out`/`cash_movement` all map to `transfer` | Without it the mirror is typed `'unknown'` (positive) or `'purchase'` (negative), because the allowlisted codes are missing from `CASH_CODE_TXN_TYPE`. That breaks two things at once: the corp filter (addressed above by keying on activities instead) **and linking**, since `detectRelationshipsStage.ts:226` gates the sibling hunt on `txnType`. |
+| The narrative detector cannot be relied on here | It matches `"Money transfer out of the account"` and **not** `"Money transfer into the account"` | `detectTypeStage.ts:57-58` is `\b(transfer (?:to\|from\|in\|out))\b`; "transfer into" does not match. So the confirmed `transfer_out` case types and links by luck while the symmetric `transfer_in` — activity 1712's shape — does neither. This is why the stamp above is required rather than nice to have. |
 | Linkability | **Add a `txnType` input to `enrichTransaction`** | Without this the bridge does not reliably link, and an unlinked bridge row is as invisible as no row. See below. |
 | Forward-fix scope | **Unscoped — every Wealthsimple brokerage account**, deliberately, unlike the retroactive converter | The opt-in set exists because the *converter removes rows*; the forward fix only adds a Transaction alongside an activity and removes nothing, so it carries none of that risk. **But these mirrors do reach the personal T1**, contrary to an earlier draft here: `buildPersonalFacts.ts:91-93` gates only the *activity and holdings* feeds by `taxStatus`; transactions are pulled by entity, unfiltered by account (`:104-109`, and the comment above it says so outright). So a chequing→FHSA contribution now has two legs in one entity, and tagging both `fhsa_contribution` would deduct it twice (`:168-170` pushes `cad.abs()`) — while part 2 is simultaneously tightening FHSA room. That is a test, not a reason to scope the fix down; account 15's legs are correct to have. Stating this because the two halves of this part genuinely have different blast radii and an earlier draft left the difference unexplained. Needs its own test — round eight added the fix and no test for it. |
 | Forward fix as well as retroactive | Both, and the forward fix covers **two** paths | `importWsActivityStatement.ts:92` hardcodes `transactions: []`. But `brokerageRouting` (`wealthsimpleBrokerage.ts:471-477`) also sends every allowlisted cash crossing to `investment_activities`, and that is the parser for the monthly statements **part 4 step 1 re-imports**. Fixing only the first leaves the very import part 4 performs still dropping cash legs. An earlier draft named only `importWsActivityStatement.ts`. |
@@ -249,14 +252,17 @@ limitation this part surfaces, not one it introduces, and out of scope to fix.
 `buildCorpFacts` reads exactly the rows both halves of this part change, and it must
 be in scope.
 
-**The converter removes `internalCashMoves` inputs.** `buildCorpFacts.ts:75-88`
+**~~The converter removes `internalCashMoves` inputs.~~ — retired by the insert-only
+decision, and recorded because it shaped this section.** It used to read: `buildCorpFacts.ts:75-88`
 queries `InvestmentActivity` for `transfer_in`/`transfer_out`/`deposit`/`withdrawal`
 on corp accounts and feeds them to `corpPerimeter`'s `claimMatchingCashMove`
 (`corpPerimeter.ts:196-207`), which is how a corp chequing outflow is recognised as
 an internal move to the brokerage rather than an expense. Those are the very types
 this part's allowlist converts and then sweeps — and `corpPerimeter.test.ts:258`
 fixtures activity 1634 itself. Once swept, corp rows previously explained that way
-fall through to the unmatched-outbound-transfer warning.
+fall through to the unmatched-outbound-transfer warning. **That no longer happens:
+nothing is removed on an opt-in account, so the feed is intact.** The second hazard
+below is the live one.
 
 **An unlinked forward-fix mirror on corp account 13 reads as revenue.** The mirror
 for a `transfer_in` is a *positive* transaction on a corp account.
@@ -273,21 +279,32 @@ statement import and carries that statement's `importBatch`, not the converter's
 per-run label, so a label predicate cannot reach it. And part 4 step 1 schedules
 exactly that import for account 13.
 
-The right predicate is structural. On a brokerage account a `transfer`-class row is
-by construction either an internal move — already explained by `internalCashMoves` —
-or an owner draw, which the personal side handles. It is never corporate revenue and
-never a third-party expense, so the perimeter should not see it at all. That covers
-converter mirrors and forward-fix mirrors alike, and it is stateless.
+**Key it on the activity feed, not on `txnType`.** A draft keyed on
+"cash-movement transactions" and that cannot work either: `txnType` is the only field
+expressing it, and every allowlisted Wealthsimple code — `TRFIN`, `TRFINTF`,
+`WIREIN`, `WIREINTF`, `TRFOUT`, `TRFOUTTF`, `DEP`, `WD`, `WDQ` — is **absent** from
+`CASH_CODE_TXN_TYPE` (`wealthsimpleActivityCodes.ts:71-84`). So
+`wsPdfCashCodeToTxnType` returns null, no hint reaches the commit, and
+`commitStatementImport.ts:561-562` falls through to `'unknown'` for a positive row.
+A `txnType === 'transfer'` filter would not catch activity 1712's mirror, which is
+the case this section exists for.
+
+The predicate that works is already sitting in the caller. `buildCorpFacts.ts:75-83`
+loads `cashMoves` — `InvestmentActivity` rows of exactly the allowlisted types on
+corp accounts, within the window. **Exclude a transaction on an investment-type
+account when a `cashMoves` row matches its `(accountId, date, amount, currency)`.**
+That is origin-independent by construction: a converter mirror and a forward-fix
+mirror both exist precisely because such an activity exists. It needs no `txnType`,
+no label, and no new query.
 
 The filter belongs at `buildCorpFacts.ts:90-101`, the only production call to
-`partitionCorpPerimeter`: `accountTypeById` is already built at `:88`, so it is a
-`.filter()` before the `.map()`. An earlier draft said to make `internalCashMoves` read the
+`partitionCorpPerimeter`; `accountTypeById` is built at `:66`. An earlier draft said to make `internalCashMoves` read the
 converted transactions too, which cannot help: `claimMatchingCashMove` matches on
 **opposite sign** (`corpPerimeter.ts:201`), and for activity 1712 — `transfer_in`
 **+10,000** into account 13, from part 4's own table — both the activity and its
 mirror are +10,000, so no same-sign entry can ever satisfy it. The unclaimed positive
 row then reaches `revenue.push` (`:237`) as $10,000 of phantom active business income.
-Excluding the mirror sidesteps all of it, Because nothing is removed either, the `internalCashMoves` feed is unchanged — so
+Excluding the mirror sidesteps all of it. Because nothing is removed either, the `internalCashMoves` feed is unchanged — so
 **corp totals before and after a conversion run are identical**, and that is one
 test. The second is that importing an account-13 statement through the fixed
 `brokerageRouting` does not move corp revenue, which the label predicate would have
@@ -305,8 +322,8 @@ Nothing new, no new table, no discriminator. With the FK dropped, **no migration
 per-run batch label,
 the `allowInvestmentAccountIds` guard parameter, shadow reporting, and a label on
 `TxnIndexEntry` with label-preferring `claimTransaction`;
-`backend/src/tax/builders/buildCorpFacts.ts` and `corpPerimeter.ts` — see the corp
-section above; `backend/src/import/pdf/wealthsimpleBrokerage.ts` — the forward fix for
+`backend/src/tax/builders/buildCorpFacts.ts` — the perimeter filter; **no change to
+`corpPerimeter.ts` itself**, which only ever sees the rows the caller passes it; `backend/src/import/pdf/wealthsimpleBrokerage.ts` — the forward fix for
 `brokerageRouting`, which part 4 step 1's monthly statements go through;
 `backend/scripts/migrate-ws-deposit-activities.ts` — the shadow report; **`wsDepositActivityMigration.test.ts`**, which has a
 currently-passing deposit-account case this part must not break;
@@ -355,8 +372,9 @@ Backend `node:test` via `tsx`, colocated; SQLite per-process temp DB.
   goes to the activity whose description it carries, not to whichever activity sorts
   first. The unrelated row is left
   alone and, if it pairs with a different activity, reported as a candidate. This is
-  the test for the label-preferring `claimTransaction`, and without it the gate
-  protects the wrong row.
+  the test for the label-preferring `claimTransaction`, which under insert-only
+  decides which of two activities counts as already-converted and therefore whose
+  description is re-inserted.
 - **Nothing is removed on an opt-in account.** After a conversion run the activity
   count on that account is unchanged and the transaction count is up by one. Assert
   it across **three consecutive runs** — single-run assertions are what let four

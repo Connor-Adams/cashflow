@@ -224,7 +224,8 @@ checked" look identical.
 When not complete it lists each blocker and gap with a link to where it is fixed,
 and with a figure **only where one is honest** — every blocker shows its amount, a
 tax estimate appears where the character is known, and the three gaps that must
-render none show none (the classify tab, the import page, the duplicate review).
+render none show none. The link goes to wherever the item is fixed — the classify
+tab, the import page, the duplicate review.
 The total renders below, normally, with a marker tying it to the block.
 
 No modal, no blocking interstitial. The number stays readable; it just never

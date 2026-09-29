@@ -7,7 +7,7 @@ Do not plan from this file. Read instead:
 
 - `2026-09-28-brokerage-cash-legs-design.md` (**1a**) — closes the $15,000; the only
   part 4 blocks on. Extends `wsDepositActivityMigration.ts` with an `activityType`
-  allowlist, a narrowed sweep and a per-account opt-in list. **Note:** an earlier
+  allowlist, insert-only handling on opt-in accounts, and an opt-in id set. **Note:** an earlier
   framing of "just widen the account scope" is retracted inside that file as a
   data-loss hazard. The activity FK and its migration are dropped.
 - `2026-09-28-duplicate-detection-design.md` (**1b**) — **detect and report only**;
