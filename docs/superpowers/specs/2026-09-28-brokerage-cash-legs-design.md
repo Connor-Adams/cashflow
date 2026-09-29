@@ -173,7 +173,7 @@ delete the activities.
 | The mirror's own `txnType` | **Stamp it as `overrideTxnType`** from the row's `activityType` — `transfer_in`/`transfer_out`/`cash_movement` all map to `transfer` — **on the brokerage mirror path only** | Without it the mirror is typed `'unknown'` (positive) or `'purchase'` (negative), because the allowlisted codes are missing from `CASH_CODE_TXN_TYPE` (`wealthsimpleActivityCodes.ts:71-84`). **Scope matters:** those codes are excluded from `AUTHORITATIVE_CODES` (`:146-148`) *deliberately*, with prod evidence in the comment above it — the same credit-card bill payment carries `WD` on one statement and `AFT_OUT` on another, "38 rows typed `transfer` against 24 typed `payment`". Overriding globally would invert that decision. The stamp applies to the synthesised mirror, whose `activityType` is unambiguous; ordinary statement rows keep `cashTyping`'s hint-vs-override logic (`wealthsimpleBrokerage.ts:300-313`) untouched. |
 | What the stamp does **not** fix | **Linking** | `overrideTxnType` is resolved at `commitStatementImport.ts:561-562`, *after* `enrichTransaction` returns at `:523`; `linkedTransactionId` comes from enrichment (`:625`). So the stamp fixes the stored column only. An earlier note claimed it "also makes the mirror link" — it does not. Linking is the row below, and the two are independent. |
 | The narrative detector cannot be relied on here | It matches `"Money transfer out of the account"` and **not** `"Money transfer into the account"` | `detectTypeStage.ts:57-58` is `\b(transfer (?:to\|from\|in\|out))\b`; "transfer into" does not match. So the confirmed `transfer_out` case types and links by luck while the symmetric `transfer_in` — activity 1712's shape — does neither. This is why the stamp above is required rather than nice to have. |
-| Linkability | **Add a `txnType` input to `enrichTransaction`**, resolved as `row.overrideTxnType ?? narrativeTxnType(signals) ?? row.txnTypeHint ?? pickTxnType(signals)` — the same ladder `commitStatementImport.ts:561-562` already uses, evaluated before stage 7 | Without this the bridge does not reliably link, and an unlinked bridge row is as invisible as no row. See below. |
+| Linkability | **Add two optional inputs to `EnrichInputs`** — the preview row's `overrideTxnType` and `txnTypeHint` — and resolve the stage-7 type as `row.overrideTxnType ?? narrativeTxnType(signals) ?? row.txnTypeHint ?? pickTxnType(signals)` — the same ladder `commitStatementImport.ts:561-562` already uses, evaluated at `enrich.ts:104` where `pickTxnType(signals)` is computed today. **`narrativeTxnType` must move into `enrich.ts`**: it is module-private at `commitStatementImport.ts:63` and that file already imports `./enrich`, so importing it back would be a cycle. | Without this the bridge does not reliably link, and an unlinked bridge row is as invisible as no row. See below. |
 | Forward-fix scope | **Unscoped — every Wealthsimple brokerage account**, deliberately, unlike the retroactive converter | The opt-in set exists because the *converter removes rows*; the forward fix only adds a Transaction alongside an activity and removes nothing, so it carries none of that risk. **But these mirrors do reach the personal T1**, contrary to an earlier draft here: `buildPersonalFacts.ts:91-93` gates only the *activity and holdings* feeds by `taxStatus`; transactions are pulled by entity, unfiltered by account (`:104-109`, and the comment above it says so outright). So a chequing→FHSA contribution now has two legs in one entity, and tagging both `fhsa_contribution` would deduct it twice (`:168-170` pushes `cad.abs()`) — while part 2 is simultaneously tightening FHSA room. That is a test, not a reason to scope the fix down; account 15's legs are correct to have. Stating this because the two halves of this part genuinely have different blast radii and an earlier draft left the difference unexplained. Needs its own test — round eight added the fix and no test for it. |
 | Forward fix as well as retroactive | Both, and the forward fix covers **two** paths | `importWsActivityStatement.ts:92` hardcodes `transactions: []`. But `brokerageRouting` (`wealthsimpleBrokerage.ts:471-477`) also sends every allowlisted cash crossing to `investment_activities`, and that is the parser for the monthly statements **part 4 step 1 re-imports**. Fixing only the first leaves the very import part 4 performs still dropping cash legs. An earlier draft named only `importWsActivityStatement.ts`. |
 
@@ -224,11 +224,22 @@ accounts are entirely unchanged, since `wsDepositActivityMigration.ts:276` feeds
 `txnTypeHintPrecedence.test.ts` are all unaffected. The damage lands in
 `autoCategory` alone.
 
+Two further mechanics. `narrativeTxnType` is module-private at
+`commitStatementImport.ts:63` and that file imports `./enrich` (`:21`), so it moves
+into `enrich.ts` rather than being imported back. And the inputs are **optional**: the
+other two production callers, `runImport.ts:472` and `runEnrichmentBackfill.ts:294`,
+supply neither, so for them the ladder collapses to
+`narrativeTxnType(signals) ?? pickTxnType(signals)` — which is exactly
+`pickTxnType(signals)` today, since `runDetectTypeStage` is the only stage emitting
+`fields.txnType`. Behaviour-preserving for them by construction.
+
 **The precedence is therefore the ladder the commit path already uses**:
 `row.overrideTxnType ?? narrativeTxnType(signals) ?? row.txnTypeHint ??
 pickTxnType(signals)`. A high-confidence narrative beats a hint, so the card payment
-stays `payment`; the synthesised mirror carries an `overrideTxnType` and wins
-outright, so the `transfer_in` case links. Both goals, no regression.
+stays `payment`; the **forward-fix** mirror carries an `overrideTxnType` and wins
+outright. The **retroactive** converter's rows carry `txnTypeHint` instead
+(`orphanToRow`, `:274`) and win at tier 3, because "Money transfer into the account"
+does not match the narrative pattern — so the `transfer_in` case links either way. Both goals, no regression.
 
 Note what this means for Scope: under the ladder,
 `enrichment/detectRelationshipsStage.ts` needs **no change** — it already reads

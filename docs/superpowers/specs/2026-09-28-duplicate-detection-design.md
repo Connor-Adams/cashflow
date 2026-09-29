@@ -201,3 +201,5 @@ Backend `node:test` via `tsx`, colocated.
 *(Deferred, with supersession: exclusion from `buildPersonalFacts`, derived-balance
 arithmetic and the classification queue while remaining in the transaction list; and
 rollback clearing a dangling `superseded_by_transaction_id`.)*
+
+Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 1b → 3 → 4 (rest) → 5**. Part 1c is **cut**.
