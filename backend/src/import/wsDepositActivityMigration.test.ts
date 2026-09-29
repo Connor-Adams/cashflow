@@ -365,3 +365,86 @@ test('the cleanup content hash identifies the exact row set', () => {
   assert.notEqual(cleanupContentHash(14, [1, 2, 3]), cleanupContentHash(14, [1, 2]));
   assert.notEqual(cleanupContentHash(14, [1, 2, 3]), cleanupContentHash(24, [1, 2, 3]));
 });
+
+// ---------------------------------------------------------------------------
+// Opt-in brokerage accounts (part 1a).
+//
+// A cash movement on a brokerage account is recorded only as an
+// InvestmentActivity, so a draw taken straight out of one is invisible to the tax
+// engine — that is how a real $15,000 owner draw went missing. The converter is
+// the right instrument, but it selects on `securityId == null` and removes what it
+// converts, so pointing it at a brokerage account unmodified would take out real
+// investment activity. Hence: an explicit opt-in id set, an activityType allowlist
+// that applies only there, and insert-only handling on those accounts.
+// ---------------------------------------------------------------------------
+
+test('classify refuses a brokerage account that is not opted in', async () => {
+  const { id: accountId, householdId } = await makeAccount('investment');
+  await seedActivity({
+    accountId, householdId, date: '2026-01-10', amount: -15000,
+    activityType: 'transfer_out', description: 'Money transfer out of the account',
+  });
+  await assert.rejects(
+    () => classifyWsDepositActivities([accountId]),
+    /not a deposit account/,
+  );
+});
+
+test('classify accepts a brokerage account that is opted in', async () => {
+  const { id: accountId, householdId } = await makeAccount('investment');
+  await seedActivity({
+    accountId, householdId, date: '2026-01-10', amount: -15000,
+    activityType: 'transfer_out', description: 'Money transfer out of the account',
+  });
+  const { orphans } = await classifyWsDepositActivities([accountId], [accountId]);
+  assert.equal(orphans.length, 1);
+  assert.equal(orphans[0].amount, -15000);
+});
+
+test('on an opt-in account only allowlisted activity types are converted', async () => {
+  const { id: accountId, householdId } = await makeAccount('investment');
+  // Allowlisted: a genuine cash crossing.
+  await seedActivity({
+    accountId, householdId, date: '2026-01-10', amount: -15000,
+    activityType: 'transfer_out', description: 'Money transfer out of the account',
+  });
+  // Not allowlisted, and the dangerous one: a sell whose security failed to
+  // resolve is security-less, so the old selection would have converted it.
+  await seedActivity({
+    accountId, householdId, date: '2026-02-01', amount: 7500,
+    activityType: 'sell', description: 'Sold something the parser could not name',
+  });
+  // Not allowlisted: income, not a cash crossing.
+  await seedActivity({
+    accountId, householdId, date: '2026-03-01', amount: 4.67,
+    activityType: 'interest', description: 'Interest received',
+  });
+
+  const { orphans } = await classifyWsDepositActivities([accountId], [accountId]);
+  assert.deepEqual(orphans.map((o) => o.activityType), ['transfer_out']);
+});
+
+test('migrate removes nothing on an opt-in account', async () => {
+  const { id: accountId, householdId } = await makeAccount('investment');
+  await seedActivity({
+    accountId, householdId, date: '2026-01-10', amount: -15000,
+    activityType: 'transfer_out', description: 'Money transfer out of the account',
+  });
+
+  const first = await migrateWsDepositActivities({
+    accountIds: [accountId], userId: null, brokerageAccountIds: [accountId],
+  });
+  assert.equal(first.insertedTransactions, 1);
+  assert.equal(first.deletedShadows, 0);
+  // The activity survives. Nothing is ever removed on an opt-in account, because
+  // the two states that would have to be told apart are byte-identical.
+  assert.equal(await models.InvestmentActivity.count({ where: { accountId } }), 1);
+
+  // Idempotent: the second run finds the transaction already there and dedups.
+  const second = await migrateWsDepositActivities({
+    accountIds: [accountId], userId: null, brokerageAccountIds: [accountId],
+  });
+  assert.equal(second.insertedTransactions, 0);
+  assert.equal(await models.InvestmentActivity.count({ where: { accountId } }), 1);
+  assert.equal(await models.Transaction.count({ where: { accountId } }), 1);
+});
