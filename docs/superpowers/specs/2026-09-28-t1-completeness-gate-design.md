@@ -104,13 +104,21 @@ None of these produced a single character of warning on the T1.
 demonstrably wrong.
 
 - Unclassified corp→personal transfers in the period (count, sum, tax estimate)
-- **Corp outflows that crossed the perimeter unaccounted for.** "Unlinked" alone is
-  the wrong predicate — `linkedTransactionId` is **one-directional**, so an arrival
-  leg is unlinked too (`tax/builders/corpPerimeter.ts:27-35`: "Testing
-  `linkedTransactionId == null` alone therefore re-counts the arrival"). Use that
-  file's rule: a row crossed the perimeter iff it is **neither a link source nor a
-  link target**, with the target set built from the entity's full history because a
-  chain can straddle year end.
+- **Outbound corp transfers whose matching leg was never imported.** Precisely
+  `corpPerimeter.ts:249-257`'s branch: a negative `txnType: 'transfer'` on a corp
+  account for which `claimMatchingCashMove` finds nothing, which that file already
+  warns about as "NOT deducted as a business expense". Boundable (the row carries its
+  amount), clearable (import the other leg, or classify it), and silent on a healthy
+  ledger.
+
+  Two predicates that look right and are not. "Unlinked" alone fails because
+  `linkedTransactionId` is **one-directional**, so arrival legs are unlinked too
+  (`corpPerimeter.ts:29-31`). And "neither a link source nor a link target" — which an
+  earlier draft of this bullet lifted from that file's headline comment — means, *in
+  that file*, **is real revenue or a real expense**: the healthy outcome. It would
+  flag every third-party corp outgoing, including the nine $6.00 RBC monthly fees part
+  4 names, each with a tax estimate attached. It would also re-flag corp txn 12183,
+  which part 4 documents as a past misdiagnosis.
 - Activities with a cash leg but no transaction, **that part 1a would convert** —
   an allowlisted type (`transfer_in`, `transfer_out`, `cash_movement`) on an account
   in the opt-in set. This is boundable: the activity carries its own amount, so the
@@ -158,7 +166,7 @@ demonstrably wrong.
   this set produces one, because CDG must issue it". A gap is the honest status: it
   is still the highest-value thing on the list for this taxpayer, because it is the
   only cheap check that reaches the corp-declared-versus-cash-moved question, and it
-  should be loud from 2027-03-01. But loud is not the same as blocking.
+  should be loud from 2027-03-01, the day after the slip deadline. But loud is not the same as blocking.
 - **A personal transfer-in with no counterpart** — txn 12139's pre-fix shape. Also a
   **gap**, for the same reason: it fires on a healthy ledger. The codebase already
   treats this population as normal — `cashflow/safeToSpend.ts:342-345` calls an
@@ -270,10 +278,11 @@ Backend `node:test` via `tsx`, colocated. Frontend vitest.
 
 - Each blocker and gap type: detected when present, absent when not. Table-driven,
   one case per type.
-- **Every blocker carries the right dollar estimate. A gap carries one only where
-  the Decisions table says it is honest to** — and the three that must not
-  (truncated import, missing T5, uncounted transfer-in) assert that they render
-  **no** figure. A test demanding an estimate per gap type is the instruction that
+- **Every blocker carries the right dollar estimate.** Of the gaps, exactly three
+  render **no** figure and are asserted to: truncated import, missing T5, and the
+  uncounted transfer-in — each says why in its own bullet. Every other gap carries
+  one, including orphaned cash-leg activities outside the opt-in set, which are
+  boundable by the same argument as their blocker counterpart. A test demanding an estimate per gap type is the instruction that
   manufactures the fabricated numbers this spec twice demoted an item for.
 - Worst-wins `status` across mixed inputs.
 - A genuinely complete year yields `status: 'complete'` with an affirmative line —

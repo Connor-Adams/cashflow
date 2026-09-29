@@ -169,28 +169,9 @@ delete the activities.
 | Account admission | **An exported `BROKERAGE_CASH_LEG_ACCOUNT_IDS` constant that `loadDepositAccounts` consults**, never a widened `accountType` set | `Account` has no institution, provider or parser field (`models/Account.ts:26-51`), and every brokerage account of every provider is `accountType: 'investment'` (`runImport.ts:804-811` for Wealthsimple, `:999-1003` for Questrade). So widening `DEPOSIT_ACCOUNT_TYPES` to admit account 13 admits **every Questrade account in the household at the same time** — and `questrade.ts:408-423` already emits the cash mirror, so the converter would see shadows and clear real activities. A round-two draft said "widen the account guard"; that rebuilds the round-one hazard one provider over. A round-three draft then said "the runner takes named account ids" — **which is a no-op**: `backend/scripts/migrate-ws-deposit-activities.ts:35,46,67` already accepts `--accounts a,b,c` (default `14,16,24`), and the refusal lives *downstream* of those ids inside `loadDepositAccounts` (`:104-122`), so `--accounts 13` throws today and would still throw. The guard must itself take the opt-in set: `DEPOSIT_ACCOUNT_TYPES.has(type) || allowInvestmentAccountIds.includes(a.id)`. **The list is an exported constant in this module**, which the runner defaults to and **part 3 imports** — an earlier draft made it a per-invocation CLI argument "never defaulted", which part 3 cannot read: it is a read-path computation with no table, and a shell argument is not queryable. One declaration, two readers, no persistence. |
 | Shadow pairing on brokerage | **On an opt-in account, shadow candidates are reported and not acted on** until a second invocation names them. Orphan conversion still runs unattended, and deposit accounts are unchanged. | The shadow half is not protected by the allowlist. Pairing is `(accountId, date, amount, currency)` alone (`:100`), justified by an empirical claim measured on deposit accounts: "In prod no such key occurs twice on either side" (`:14-18`). On a brokerage account the transaction table is already populated by the twelve cash codes, so a same-day same-amount collision between an allowlisted `transfer_out` activity and an unrelated `E_TRFOUT` transaction is far likelier. A false shadow match clears a real cash crossing whose event is **not** in the ledger — the exact loss this part exists to stop. And it cannot be settled by a cleverer key: `(date, amount, currency)` genuinely cannot distinguish "the same event, recorded twice" from "two events of the same size on the same day". Where the data cannot decide, a person does. |
 | Confirmation surface | **A second runner invocation with `--confirm-shadows <activityIds>`** — no queue table, no route, no model change | `migrate-ws-deposit-activities.ts:48-55` already has `flag()` and `value()` helpers and a `parseAccountIds` pattern to copy. Run one converts orphans unattended, reports shadow candidates, and exits without sweeping them; run two acts only on the ids named back. Candidate state lives in the operator's terminal, not the database, which is why this part still needs no migration. |
-| Self-heal vs false-shadow | The converter recognises **its own** output by batch-label prefix; everything else on an opt-in account goes to the report | These two requirements pull against each other otherwise. Idempotence works *because* an interrupted run's converted orphan re-pairs with the transaction it just created — which under `pairKey` is indistinguishable from an unrelated same-day, same-amount row. Matching the converter's own label prefix (not the per-run suffix, so a prior run is recognised) separates them. **Match on the label prefix AND `merchantRaw`**, which `TxnIndexEntry` already carries (`:124`), **and never remove an orphan whose insert did not land**. That second clause closes a data-loss path the first does not: `orphanToRow` stamps the activity's description as `merchantRaw`, so two same-key activities with the same templated WS description ("Money transfer out of the account" — the confirmed instance's own wording) produce the same `stableIdentityFingerprint` (`commitStatementImport.ts:479-485`). `findExistingForDedup` threads the open transaction and sees the row inserted moments earlier, so the second is skipped (`:497-500`, `skippedDuplicates += 1; continue`) — while `:376-381` removes both orphans regardless. One real cash event gone, no transaction written, visible only as a `skippedDuplicates` count. The sweep must take only orphans whose insert actually produced a row.
-
-**That guard is not enough on its own, because it is run-scoped.** Candidate state
-lives in the operator's terminal, not the database, so run 2 starts clean: the
-survivor is no longer an orphan but a *shadow* of the transaction run 1 created, and
-it carries the identical `merchantRaw` — identical description is what caused the
-dedup in the first place — so it reads as the converter's own output and is swept
-unattended. Two real cash events, one transaction, no surviving activity. The runner
-is idempotent by design and part 4 step 1 re-runs it, so this is the normal path, not
-an edge case.
-
-**So the invariant is a count, which is stateless and holds on every run:** at a
-given `pairKey`, the number of activities that may be swept is capped at the number
-of transactions there that carry the converter's label prefix *and* match
-`merchantRaw`. N activities against M such transactions means M are self-heal and
-the surplus N−M are reported, every run, and never swept. Run 1: two activities, one
-transaction, one swept, one reported. Run 2: unchanged. The surplus is exactly the
-cash event the import path cannot represent, because `stableIdentityFingerprint`
-collides on identical `(account, date, amount, currency, merchantRaw)` — a
-pre-existing limitation this part surfaces rather than fixes. `orphanToRow` (`:258-262`) stamps the activity's description onto the transaction as `merchantRaw` and `commitStatementImport.ts:601` stores it verbatim, so the pair is identifiable exactly, at zero cost. Label alone is not enough: with two activities at one `pairKey` and one converter-made transaction, label preference hands it to whichever *activity* sorts first, which need not be the one that was converted — and that activity is then swept unattended, which is the harm this gate exists to prevent. (An earlier draft also had the single-activity failure backwards: there, `claimTransaction` returns the unlabelled `bucket[0]`, the label check fails, and the shadow goes to the report — an unnecessary confirmation, which is safe. The unsafe case is the two-activity one.) |
+| Self-heal vs false-shadow | **Sweep an activity only when N == M at its `pairKey`** — activities there, against transactions there carrying the converter's label prefix and matching `merchantRaw`. See "Why the sweep is count-gated" below. |
 | Linkability | **Add a `txnType` input to `enrichTransaction`** | Without this the bridge does not reliably link, and an unlinked bridge row is as invisible as no row. See below. |
-| Forward-fix scope | **Unscoped — every Wealthsimple brokerage account**, deliberately, unlike the retroactive converter | The opt-in set exists because the *converter removes rows*; the forward fix only adds a Transaction alongside an activity and removes nothing, so it carries none of that risk. Accounts 8 (TFSA) and 11 (FHSA) are registered and their cash legs never reach the T1 anyway (`buildPersonalFacts.ts:91-93` admits only `non_registered`/`n_a`); account 15's legs are correct to have. Stating this because the two halves of this part genuinely have different blast radii and an earlier draft left the difference unexplained. Needs its own test — round eight added the fix and no test for it. |
+| Forward-fix scope | **Unscoped — every Wealthsimple brokerage account**, deliberately, unlike the retroactive converter | The opt-in set exists because the *converter removes rows*; the forward fix only adds a Transaction alongside an activity and removes nothing, so it carries none of that risk. **But these mirrors do reach the personal T1**, contrary to an earlier draft here: `buildPersonalFacts.ts:91-93` gates only the *activity and holdings* feeds by `taxStatus`; transactions are pulled by entity, unfiltered by account (`:104-109`, and the comment above it says so outright). So a chequing→FHSA contribution now has two legs in one entity, and tagging both `fhsa_contribution` would deduct it twice (`:168-170` pushes `cad.abs()`) — while part 2 is simultaneously tightening FHSA room. That is a test, not a reason to scope the fix down; account 15's legs are correct to have. Stating this because the two halves of this part genuinely have different blast radii and an earlier draft left the difference unexplained. Needs its own test — round eight added the fix and no test for it. |
 | Forward fix as well as retroactive | Both, and the forward fix covers **two** paths | `importWsActivityStatement.ts:92` hardcodes `transactions: []`. But `brokerageRouting` (`wealthsimpleBrokerage.ts:471-477`) also sends every allowlisted cash crossing to `investment_activities`, and that is the parser for the monthly statements **part 4 step 1 re-imports**. Fixing only the first leaves the very import part 4 performs still dropping cash legs. An earlier draft named only `importWsActivityStatement.ts`. |
 
 ### Why linkability needs a new input
@@ -223,6 +204,73 @@ Threading a caller-supplied `txnType` into `enrichTransaction` so it reaches
 `runDetectRelationshipsStage` is therefore in scope. It is also the fix the existing
 migration needs and never got.
 
+### Why the sweep is count-gated
+
+`orphanToRow` (`:258-262`) stamps the activity's description onto the transaction as
+`merchantRaw`, and `commitStatementImport.ts:601` stores it verbatim, so a
+converter-made row is identifiable. That much is easy. The hard case is two genuinely
+distinct cash events with the same account, date, amount, currency **and** the same
+templated Wealthsimple description — "Money transfer out of the account", which is
+the confirmed instance's own wording.
+
+**No stateless predicate can resolve that case, and three earlier drafts of this
+spec tried.** After one conversion run the database holds one activity at the key and
+one converter-labelled transaction with the same `merchantRaw`. That state is
+byte-identical whether it arose from (a) two real events where the second insert
+collided on `stableIdentityFingerprint` (`commitStatementImport.ts:479-485`) and was
+skipped at `:497-500`, or (b) a single event whose run crashed between the insert and
+the sweep. In (a) the surviving activity is a real cash event and must never be
+swept; in (b) it is redundant and must be. Same state, opposite correct actions. A
+flag would work and this part persists none; a count of matching transactions does
+not, and an earlier draft claiming it did was wrong.
+
+So the rule is not "sweep up to M" but **sweep only when N == M**:
+
+| Situation | N | M | Outcome |
+|---|---|---|---|
+| Ordinary orphan, run 1 (index is built before the insert, `:226-235` vs `:374`) | 1 | 0 | no sweep; the insert lands |
+| Same orphan, run 2 | 1 | 1 | swept — conversion completes |
+| Interrupted run, resumed | 1 | 1 | swept — self-heal, unattended |
+| Two identical events, run 1 | 2 | 0 | no sweep; one insert lands, one dedups |
+| Two identical events, any later run | 2 | 1 | **never swept**, reported every run |
+
+The cost is that an ordinary conversion takes **two runs** to retire its activity,
+which is acceptable for an idempotent runner that part 4 invokes anyway. The benefit
+is that the ambiguous group is never resolved by guessing: it is reported, forever,
+until a human looks. Nothing is lost, which is the only property that actually
+matters here.
+
+The residue is real and worth naming: the import path cannot represent two
+byte-identical cash events on one account and day. That is a pre-existing limitation
+of `stableIdentityFingerprint`, surfaced by this part rather than introduced by it,
+and out of scope to fix.
+
+### The corp side, which no earlier draft considered
+
+`buildCorpFacts` reads exactly the rows both halves of this part change, and it must
+be in scope.
+
+**The converter removes `internalCashMoves` inputs.** `buildCorpFacts.ts:75-88`
+queries `InvestmentActivity` for `transfer_in`/`transfer_out`/`deposit`/`withdrawal`
+on corp accounts and feeds them to `corpPerimeter`'s `claimMatchingCashMove`
+(`corpPerimeter.ts:196-207`), which is how a corp chequing outflow is recognised as
+an internal move to the brokerage rather than an expense. Those are the very types
+this part's allowlist converts and then sweeps — and `corpPerimeter.test.ts:258`
+fixtures activity 1634 itself. Once swept, corp rows previously explained that way
+fall through to the unmatched-outbound-transfer warning.
+
+**An unlinked forward-fix mirror on corp account 13 reads as revenue.** The mirror
+for a `transfer_in` is a *positive* transaction on a corp account.
+`claimMatchingCashMove` matches on opposite sign (`corpPerimeter.ts:201`), and the
+activity is positive too, so it never claims; an unlinked positive row then reaches
+`revenue.push(t)` (`:237`) as phantom corporate revenue.
+
+Both are T2-side, which this set otherwise declares out of scope — which is exactly
+how an unconsidered regression ships. **In scope for this part:** make
+`internalCashMoves` read the converted Transactions as well as surviving activities,
+and assert that a converted account-13 row is not counted as revenue. Corp totals
+before and after the converter must be identical; that is the test.
+
 ### Primitives check
 
 Per `CLAUDE.md`: the bridge produces a **Transaction**, an existing primitive.
@@ -234,7 +282,8 @@ Nothing new, no new table, no discriminator. With the FK dropped, **no migration
 `activityType` allowlist, the narrowed sweep, the opt-in-scoped per-run batch label,
 the `allowInvestmentAccountIds` guard parameter, shadow reporting, and a label on
 `TxnIndexEntry` with label-preferring `claimTransaction`;
-`backend/src/import/pdf/wealthsimpleBrokerage.ts` — the forward fix for
+`backend/src/tax/builders/buildCorpFacts.ts` and `corpPerimeter.ts` — see the corp
+section above; `backend/src/import/pdf/wealthsimpleBrokerage.ts` — the forward fix for
 `brokerageRouting`, which part 4 step 1's monthly statements go through;
 `backend/scripts/migrate-ws-deposit-activities.ts` — the `--confirm-shadows` flag
 and the candidate report; **`wsDepositActivityMigration.test.ts`**, which has a
@@ -287,13 +336,19 @@ Backend `node:test` via `tsx`, colocated; SQLite per-process temp DB.
   alone and, if it pairs with a different activity, reported as a candidate. This is
   the test for the label-preferring `claimTransaction`, and without it the gate
   protects the wrong row.
-- **The sweep never exceeds the matching-transaction count at a `pairKey`.** Two
-  identical activities against one converter-made transaction: one is swept, one is
-  reported — **and re-running produces the same result**, not a second sweep. The
-  re-run assertion is the regression guard; the single-run guard alone is not, because
-  candidate state does not persist between runs.
+- **N == M gates the sweep.** An ordinary orphan is retired on the **second** run,
+  not the first. An interrupted run's activity is swept on resume. Two identical
+  activities against one converter-made transaction are **never** swept — on run 2,
+  run 3 or any run — and are reported each time. Assert all four, and assert the
+  two-identical case is stable across three consecutive runs; a single-run assertion
+  is what let three earlier versions of this rule through.
 - The forward fix emits a cash Transaction on a brokerage account that is **not** in
   the opt-in set — that scope difference is intended, and this test pins it.
+- **A chequing→FHSA transfer pair produces one deduction, not two**, after the
+  forward fix puts a mirror on account 11.
+- **Corp facts are unchanged by the converter**: `buildCorpFacts` totals for a corp
+  account are identical before and after a conversion run, and a converted account-13
+  `transfer_in` mirror is not counted as revenue.
 - A row the allowlist rejects on an opt-in account is counted in the runner's
   summary rather than vanishing: it is in neither `shadows`, `orphans` nor
   `skipped` today, since `skipped` is populated only from `securityId != null`
