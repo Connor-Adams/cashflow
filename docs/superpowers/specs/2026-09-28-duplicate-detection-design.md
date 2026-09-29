@@ -43,7 +43,9 @@ touches none of them.
 
 ## Problem
 
-25+ pairs share `(account_id, date, amount)` in 2026 alone.
+25+ pairs share `(account_id, date, amount)` in 2026 alone. The table below names
+18 of them; it is illustrative, not exhaustive, and the detector is what produces
+the full list.
 
 | Account | Pairs | Impact |
 |---|---|---|
@@ -124,8 +126,10 @@ Consequence: **the 12 account-14 pairs are classified for review**, unless they
 independently satisfy criterion 2. Note the impact table's largest class — account
 13's four pairs, and the Amex RAILWAY pair — is not stated to share a
 `linked_transaction_id`, and a merchant charge would not normally be transfer-linked
-at all, so those are likely for-review too. Confirm against prod before planning. That is the correct outcome — they are the class
-the withdrawn criterion would have merged on a false premise.
+at all, so those are likely for-review too — confirm against prod before the implementation
+plan is written. Classifying the account-14 pairs for review is the correct outcome
+regardless: they are the class the withdrawn criterion would have merged on a false
+premise.
 
 Explicitly **not** certain: two identical amounts on one day from one import
 (the recurring $6.00 RBC monthly fees, equal staking rewards, two genuine $1,000

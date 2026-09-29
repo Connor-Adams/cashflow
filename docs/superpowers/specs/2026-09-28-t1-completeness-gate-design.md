@@ -69,14 +69,14 @@ stayed stalled until September.
 
 | Gap | Worth |
 |---|---|
-| $42,000 of corp draws untagged (May–Aug, found 2026-09-16) | **~$4,239** of tax |
+| $42,000 of corp draws untagged (May–Aug, found 2026-09-16) | **~$4,227** of tax |
 | $15,000 draw whose corp leg was never written (brokerage cash leg, part 1a) | **~$3,040** of tax |
 | WS Corporate Chequing (account 24) uncovered 2026-08-14 → 2026-09-28 | est. $8–14k of draws, **~$1,700–$3,000** of tax |
 | ~25 duplicate pairs, $28,848 phantom corp inflow | corrupts every balance |
 | No 2026 carryforward roll (personal stops at `as_of_year 2025`) | RRSP/FHSA room wrong |
 
 Note how unevenly those scale. The $42,000 backlog was worth ~$4,239 because it
-spanned a near-zero base (total payable $300.00 → $4,538.85, measured in part 2); the $15,000 draw is worth
+spanned a near-zero base (total payable $300.00 → $4,527.17 on the published rates, measured in part 2); the $15,000 draw is worth
 only $3,040 because it lands on top of it, at a ~20% marginal rate on cash
 non-eligible dividends. **A gap's tax impact depends on what is already counted,
 so the estimate must be computed against the current return, not from a stored
@@ -108,7 +108,11 @@ demonstrably wrong.
   against **zero** `tax_slips` rows for 2026 produces no signal today. For this
   taxpayer it is the single highest-value completeness check available: it is the
   only cheap thing that reaches the corp-declared-versus-cash-moved question this
-  set otherwise defers. A year with dividend income and no T5 is a blocker.
+  set otherwise defers. **It is a blocker only once the slip deadline has passed** —
+  the last day of February following the year — and a **gap** before that. A slip
+  that does not exist yet because it is not yet due is not missing data; treating it
+  as a blocker would make part 4's exit unreachable for the whole period Connor
+  actually works in.
 - **A personal transfer-in with no counterpart.** Exactly txn 12139's pre-fix shape:
   `+15,000.00`, `txnType: 'transfer'`, `linkedTransactionId` NULL. The classification
   queue cannot see it — `routes/tax.ts:54-63` requires a non-null
@@ -116,9 +120,14 @@ demonstrably wrong.
   "Money arrived and you have not accounted for it" is the cheapest detector in this
   spec and was missing from it.
 - Unlinked corp outflows with no resolvable counterpart
-- Activities with a cash leg but no transaction (part 1a's converter)
-- Import coverage ending before the period end, on an account that has seen
-  activity — with the uncovered window and a run-rate-based estimate
+- Activities with a cash leg but no transaction — **scoped to part 1a's allowlist**
+  (`transfer_in`, `transfer_out`, `cash_movement`). A bare `transfer` or `interest`
+  activity on a brokerage account is deliberately not converted by 1a, so counting
+  it here would report a blocker nothing in the set can clear.
+- Import coverage ending before **`min(period end, today)`**, on an account that has
+  seen activity — with the uncovered window and a run-rate-based estimate. The
+  `min` matters: measured against 2026-12-31 this fires permanently for an open
+  year, which would make the gate useless exactly when it is most needed.
 
 **Gap** — a correctness risk of unknown size. The total may be right.
 
@@ -127,7 +136,7 @@ demonstrably wrong.
   zero-cost `transfer_in` and mixed currency (`portfolio/acb.ts:154-176,197-202,366-370`)
   and `buildPersonalFacts.ts:374-412` never reads `acb.warnings`. Surface them.
 - Carryforwards not rolled into the period
-- The year's rate table carries `provenance: 'projected'` (ties to spec 2)
+- The year's rate table carries `provenance: 'projected'` (ties to part 2)
 - Slips entered for the year that reconcile against nothing
 - Accounts with no statement ever registered
 
@@ -136,6 +145,10 @@ closing balance. Nothing persists a statement balance, so there is no signal to
 compute. Reinstate with 1c if it is ever revived.
 
 `status` is `complete` | `gaps` | `blocked`, worst-wins.
+
+**Every blocker must be clearable by work this set schedules.** That is the
+discipline the three refinements above enforce: a blocker nothing can clear is not a
+signal, it is a permanent red light that trains the reader to ignore the panel.
 
 ### Presentation
 
@@ -184,7 +197,7 @@ optimistically or refetches. This spec's testing asserts "without a full refetch
 so: a bulk endpoint, atomic per request, returning the updated rows for in-place
 application.
 
-**Out:** fixing any of the data problems the gate reports (spec 4), the importer
+**Out:** fixing any of the data problems the gate reports (part 4), the importer
 and duplicate detector that feed it (parts 1a and 1b), engine arithmetic (part 2).
 
 **Caching note.** `routes/tax.ts:379-392` computes facts unconditionally, then
@@ -218,8 +231,9 @@ Backend `node:test` via `tsx`, colocated. Frontend vitest.
 - Regression fixture from Connor's real 2026: 13 classified pairs + 1 unimported
   $15,000 draw + a 45-day coverage gap + 25 duplicate pairs → `blocked`, with the
   $15,000 blocker carrying a tax estimate in the **$2,900–$3,200** band
-  (total payable $4,538.85 → $7,580.64 on the published 2026 rates, per part 2's
-  measured table).
+  (total payable $4,527.17 → $7,568.96 on the **published** 2026 rates, per part 2's
+  measured table — the $4,538.85 / $7,580.64 pair in that table is the *file* rates
+  column; the delta is $3,041.79 either way).
 - The same $15,000 gap against a *different* base yields a different estimate —
   the direct test that the impact is computed by re-running the return rather
   than from a stored rate.

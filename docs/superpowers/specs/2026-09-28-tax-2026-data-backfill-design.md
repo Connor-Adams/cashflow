@@ -91,7 +91,7 @@ $20.73 — the duplicated RAILWAY row 11748/11559.)
 | The $2,872 | **Reimburse from the corp, tag both legs `expense_reimbursement`** | Removes the phantom L13500 loss and puts the deduction in the entity that bears the cost. **This raises Connor's personal tax by ~$850–$1,250** — the −$2,872 was suppressing taxable income. Doing it anyway: the loss is fictitious and claiming it is wrong. Booking the costs to entity 2 instead also works but rewrites history the bank statements contradict. |
 | $15,000 backfill | Through the fixed importer, re-running the source statement | Hand-inserting a row reproduces by hand exactly what the importer should do, and leaves no provenance. |
 | Duplicates | **Clear them by hand**, using part 1b's certain/for-review classification as the worklist | 1b is detect-and-report only; nothing merges automatically. |
-| Exit condition | **Part 3's gate reports no remaining *blockers* for 2026** | An objective finish line rather than "looks done". Deliberately not `complete`: part 3 makes "dividend income with no T5 for the year" a blocker, and **no step here produces a T5** — CDG must issue one by 2027-02-28, which is outside this part and outside the app. Requiring `complete` would make this part's exit unreachable. The gate no longer includes balance drift either (part 1c cut). |
+| Exit condition | **Part 3's gate reports no remaining *blockers* for 2026** | An objective finish line rather than "looks done", and now reachable: part 3 was amended so every blocker is clearable by work this set schedules. The missing-T5 item is a **gap** until the slip deadline (2027-02-28) passes, because a slip that is not yet due is not missing data — CDG must issue it, which is outside this part and outside the app. Coverage is measured against `min(period end, today)` rather than 2026-12-31. Balance drift is gone with part 1c. |
 | Prod writes | Each step reviewed before execution; read-only by default | Per the `cashflow-prod-db` guardrails. This is Connor's real financial history. |
 
 ## Work
@@ -113,7 +113,7 @@ tag both legs `non_eligible_dividend`.
 corp balance.
 
 **4 — Classify whatever the September imports surface**, using the bulk
-classification from spec 3.
+classification from part 3.
 
 **5 — Settle the $2,872.** Three parts, and the first two are often conflated:
 
@@ -143,7 +143,7 @@ the 2026 number trustworthy enough for part 5 to read.
 
 ## Expected outcome
 
-Computed with the corrected 2026 rates from spec 2 (single Ontario resident,
+Computed with the corrected 2026 rates from part 2 (single Ontario resident,
 ~$50 interest, ~$3 capital gains). "Draws" is total corp→personal; the taxable
 portion is that less the $1,000 already tagged `expense_reimbursement`.
 
