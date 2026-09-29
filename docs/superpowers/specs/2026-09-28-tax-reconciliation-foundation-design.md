@@ -15,21 +15,29 @@ Three findings, measured against prod on 2026-09-28.
 
 ### 1. A brokerage cash movement is recorded on only one side
 
-`backend/src/import/pdf/wealthsimpleActivityCodes.ts` draws a hard line by
-account kind. **Deposit** accounts (WS Cash / Chequing / Save) route every row
-through `DEPOSIT_CODE_TXN_TYPE` (`:104-125`) into the cash ledger as
-`transactions` — the comment at `:93-95` is explicit that "on a deposit account
-EVERY row is a cash-ledger event, so this covers the brokerage-taxonomy codes
-too". **Brokerage** accounts route rows into `investment_activities`, where
-`TRFIN`/`TRFINTF`/`WIREIN` → `transfer_in` and `TRFOUT`/`TRFOUTTF` →
-`transfer_out` (`:34-39`).
+`backend/src/import/pdf/wealthsimpleActivityCodes.ts` routes by **code**, not by
+account kind — `routeRow` is `depositRouting(…) ?? brokerageRouting(…)`.
+
+On a **deposit** account (WS Cash / Chequing / Save) every row goes through
+`DEPOSIT_CODE_TXN_TYPE` (`:104-126`) into the cash ledger as `transactions`; the
+comment at `:94-96` is explicit that "on a deposit account EVERY row is a
+cash-ledger event, so this covers the brokerage-taxonomy codes too".
+
+A **brokerage** account writes `transactions` too — but only for twelve cash codes
+(`SPEND`, `DCTFEE`, `OBP`, `CASHBACK`, `GIVEAWAY`, `AFT_IN/OUT`, `P2P_IN/OUT`,
+`E_TRFIN/OUT`, `EFT` — `pdf/wealthsimpleBrokerage.ts:239-242,473-482`). Everything
+else becomes an `InvestmentActivity` only, and that set includes six codes that
+move cash across the account boundary: `TRFIN`/`TRFINTF`/`WIREIN`/`WIREINTF` →
+`transfer_in`, `TRFOUT`/`TRFOUTTF` → `transfer_out`, plus `DEP`/`WD`/`WDQ` →
+`cash_movement` and `CONT` → `transfer` (`:30-39`).
 
 A brokerage `TRFOUT` is **both** an investment-account event and a cash movement
 out of the entity. Only the first is recorded.
 
 The tax engine reads `transactions`. The classification queue
-(`backend/src/routes/tax.ts:27`) requires `linked_transaction_id`. So a draw
-taken directly out of a brokerage account reaches neither.
+(`backend/src/routes/tax.ts:54-63,72-78`) requires three things: `txnType='transfer'`,
+a non-null `linkedTransactionId`, **and** that the linked counterpart belong to a
+corp entity. So a draw taken directly out of a brokerage account reaches neither.
 
 **Confirmed instance:** `investment_activities` id 1634 — account 13 (WS Corporate
 Investing), 2026-01-10, `transfer_out`, −15,000.00, "Money transfer out of the
@@ -53,25 +61,42 @@ build on.
 ### 2. Nothing anchors a balance to reality — and the check already exists
 
 `account_statements` is empty in prod. That is **by design of the current code**,
-not a failure: `commitStatementImport.ts:236-238` states outright that
+not a failure: `commitStatementImport.ts:234-238` states outright that
 `backend/src/routes/statements.ts:197` is the only `AccountStatement.create` in
 the codebase — a manual `POST /api/accounts/:id/statements` path nobody uses.
 
-Meanwhile `backend/src/import/reconciliationGate.ts` **already** recomputes the
-closing balance from opening plus every parsed row, compares it to the closing
-balance printed on the statement, and refuses the commit on a blocking mismatch.
-It is a good piece of work — the refusal carries a server-side digest so a client
-cannot pre-emptively disable the check (the `js/user-controlled-bypass` shape), and
-the decision is stamped on the `ImportHistory` row.
+There *is* a reconciliation mechanism, and it is good: a parser recomputes the
+closing balance from opening plus every row it parsed, compares it against the
+balance printed on the page, and on a mismatch pushes a `blocking: true`
+`parseError`. `backend/src/import/reconciliationGate.ts` then refuses the commit
+outright, with a server-side acknowledgement digest so a client cannot
+pre-emptively disable the check (the `js/user-controlled-bypass` shape), and stamps
+the decision on the `ImportHistory` row.
 
-So the anchor is **already computed at import time and simply never persisted.**
-This is a small change, not new machinery.
+**But it does not apply to any account in this investigation.** The gate itself
+performs no arithmetic — it filters parse errors (`reconciliationGate.ts:50-53`)
+and its own comment (`:4-8`) attributes the recomputation to the parsers. The only
+parsers that reconcile are RBC: `pdf/rbcBusinessBanking.ts:498,529,534`,
+`pdf/rbcPersonalBanking.ts:428,458,463`, and `pdf/rbcCreditLine.ts`. **No
+Wealthsimple parser reconciles a balance**, and `backend/src/import/statementTypes.ts`
+has no `openingBalance` / `closingBalance` fields at all — so
+`commitStatementImport` receives no balances to persist even in principle.
 
-Consequence of not persisting it: `accounts` has no balance column, so a derived
+Accounts 13, 14, 16 and 24 — every account in the 2026 owner-draw reconciliation —
+are Wealthsimple. None of them has ever had a balance checked.
+
+That changes the size of this work. It is **not** "persist what the gate already
+computes". It is: extract opening and closing balances in the Wealthsimple parsers,
+add a reconciliation check there so the existing gate has something to act on,
+thread the balances through `StatementPreview`, and then persist the
+`AccountStatement`.
+
+Consequence of having no anchor: `accounts` has no balance column, so a derived
 balance is `opening_balance + SUM(amount)` with nothing to check it against. Corp
 account 13's derived balance is 72,726.61 against a 2026-09-16 broker value of
 94,267.75. Account 16's derived balance is **−1,996.79 on a savings account** —
-structurally impossible, and unnoticed for a year.
+structurally impossible, and it went unnoticed for a year not because a check
+missed it but because no check runs on that account.
 
 ### 3. Duplicate rows from re-imported statements
 
@@ -89,17 +114,19 @@ Several personal legs point at the **same** `linked_transaction_id` (2863/3315 �
 structurally invalid, and that is what makes a confident auto-merge rule possible.
 
 A fuzzy matcher already exists for the activity side
-(`backend/src/import/fuzzyDedupInvestmentActivity.ts`) and `dedupExisting.ts`
-handles the within-import case. Neither runs across import batches after the fact.
+(`backend/src/import/fuzzyDedupInvestmentActivity.ts`), and `dedupExisting.ts`
+already matches across batches at import time (`:136,161-185`). What neither does
+is run **retroactively** over rows already committed.
 
 ## Decisions
 
 | Decision | Choice | Rationale |
 |---|---|---|
 | Brokerage cash legs | Emit a `Transaction` **alongside** the `InvestmentActivity` for cash-movement activity types, linked to it | A `transfer_out` is genuinely two things. Recording one side is what lost the $15k. |
-| Which activity types bridge | `transfer_in`, `transfer_out` only, in this spec | Buys/sells/dividends settle *within* the account and have no external cash leg. Widening this is a later question, not a quiet default. |
+| Which activity types bridge | `transfer_in`, `transfer_out`, **`cash_movement` (`DEP`/`WD`/`WDQ`) and `CONT`** | These six are the codes on the *brokerage* map that move cash across the account boundary (`wealthsimpleActivityCodes.ts:30-39`). Buys, sells, dividends and staking rewards settle *within* the account and have no external leg. An earlier draft covered only the two `transfer_*` codes and would have left `DEP`/`WD` — literally cash movements — still dropping their cash side. |
 | Relationship | FK on the Transaction pointing at the source activity | Makes the pairing explicit and lets a rollback take both. A field on an existing primitive — no new table. |
-| Statement balances | `commitStatementImport` writes the `AccountStatement` row it already reconciled | The gate computes it; persisting is the missing half. Keeps `routes/statements.ts` as the manual path. |
+| Bridge row must be linkable | The bridge Transaction is created with `txnType: 'transfer'` and runs through the **same transfer-linking and enrichment path** as an imported row | Otherwise it lands in `transactions` and is still invisible: the classification queue requires `txnType='transfer'` AND a non-null `linkedTransactionId` resolving to a corp entity (`routes/tax.ts:54-63,72-78`). Creating the row without linking it solves nothing. |
+| Statement balances | Add balance extraction + reconciliation to the **Wealthsimple parsers**, thread through `StatementPreview`, then persist the `AccountStatement` | The gate exists and works; what is missing is any WS parser producing a balance for it to check. Keeps `routes/statements.ts` as the manual path. |
 | Balance drift detection | Derived balance vs latest statement closing balance, surfaced — not auto-corrected | A mismatch means an import problem. Silently patching a balance hides it. |
 | Duplicate auto-merge | Only when **structurally certain** (definition below) | Connor asked for auto-merge where clear, review otherwise. |
 | Everything else | Review queue with a supersession marker | Nothing silently disappears from a financial ledger. |
@@ -113,17 +140,41 @@ A pair auto-merges only when **all** hold:
 2. **And one of:**
    - both rows carry the same non-null `linked_transaction_id` (two legs cannot
      share one counterpart — structurally invalid, as with 2863/3315 → 5499); or
-   - the two rows come from **different `import_batch` values whose
-     `ImportHistory` rows cover the same account and an overlapping statement
-     period** (the `2026-05` vs `2026-06 WK3DD9X35CAD` re-import shape).
-3. Neither row has been manually edited — no `business_override`, no
-   `tax_treatment_override`, no split, no attached receipt.
+   - the two rows carry **different `import_batch` values whose period prefixes
+     differ while the source identifier matches** — `batchLabel` is formatted
+     `"<YYYY-MM> <sourceId>"`, as in `2026-05 WK3DD9X35CAD` vs
+     `2026-06 WK3DD9X35CAD`. **`ImportHistory` has no statement-period column**
+     (`models/ImportHistory.ts:15-51`), so this prefix is the only period signal
+     available and parsing it is the mechanism — not a placeholder for one.
+3. Neither row has been manually edited. Concretely: `business_override` is false,
+   `tax_treatment_override` is null, `final_split_type` equals its column default
+   (every Transaction has one — `models/Transaction.ts:72` — so "no split" needs
+   this predicate, not a null check), and no receipt joins to it (receipts are a
+   separate primitive; the join must be named in the implementation plan).
+
+**Why the fingerprints did not already catch these.** `dedupExisting.ts:136,161-185`
+queries *all* existing rows in the account by `sourceIdentityFingerprint`, at import
+time — it is already a cross-batch deduper. So the 25 pairs exist because the two
+runs produced **different fingerprints for the same row**. Diagnosing why is part
+of this work: a retroactive merge that does not fix the fingerprint divergence will
+simply be needed again after the next re-import.
+
+### What "superseded" excludes
+
+Marking a row superseded is meaningless until it is stated what ignores it. A
+superseded Transaction is excluded from: `buildPersonalFacts` and every tax
+computation, derived-balance arithmetic, the classification queue, and spend and
+income rollups. It remains visible in the transaction list (flagged), remains
+attached to its `ImportHistory`, and `rollbackImportBatch` must restore the
+supersession state it found rather than leaving a merged pair half-reverted.
 
 Everything else goes to review. Explicitly **not** auto-merged: two identical
 amounts on one day from one import (the recurring $6.00 RBC monthly fees, equal
 staking rewards, two genuine $1,000 e-transfers). These are the cases
-`fuzzyDedupInvestmentActivity.ts:726-733` already reasons about carefully, and the
-same caution applies here.
+`fuzzyDedupInvestmentActivity.ts:15-23` already reasons about — its `excludeIds`
+comment notes that "two legitimate identical activities within the window
+(recurring buys, equal staking rewards)" are distinct events. The same caution
+applies here.
 
 ### Primitives check
 
@@ -144,9 +195,14 @@ No new status machine. No new primitive. No spine change.
 
 **In:** `backend/src/import/commitStatementImport.ts`, the Wealthsimple brokerage
 path (`importWsActivityStatement.ts`, `pdf/wealthsimpleBrokerage.ts`,
-`pdf/wealthsimpleActivityCodes.ts`), `reconciliationGate.ts` (persist, don't
-re-derive), a cross-batch duplicate detector, `models/Transaction.ts` (supersession
-marker + activity FK), one migration.
+`pdf/wealthsimpleActivityCodes.ts`), balance extraction + reconciliation in the
+Wealthsimple parsers, `statementTypes.ts` (`openingBalance`/`closingBalance` on
+`StatementPreview`), a retroactive duplicate detector, `models/Transaction.ts`
+(supersession marker + activity FK), `rollbackImportBatch.ts`, one migration.
+
+**Explicitly in, because the bridge is useless without it:** the bridge Transaction
+must reach the transfer-linking path, so the row that pairs with an existing
+personal leg is linked rather than merely created.
 
 **Out:** the tax engine (spec 2), the T1 surface (spec 3), actually importing
 Connor's missing statements or clearing his 25 pairs (spec 4). No SimpleFIN work —
@@ -168,21 +224,39 @@ Backend `node:test` via `tsx`, colocated.
   buys and sells produces no extra transactions.
 - Re-importing the same brokerage statement produces no second transaction
   (the bridge must respect existing dedup, not bypass it).
-- A rollback of the import removes both sides.
-- `commitStatementImport` writes an `AccountStatement` with the opening and
-  closing balances the gate already parsed; a blocking reconciliation failure
-  still refuses the commit and writes **nothing**.
+- Rollback: removing the import removes both sides. The FK runs
+  Transaction → activity, so an activity-side rollback would otherwise orphan the
+  transaction — assert it does not.
+- Dedup of a synthesised row: the bridge Transaction has no source row of its own,
+  so it needs a deterministic `sourceIdentityFingerprint` derived from the
+  activity. Assert that re-import matches it rather than inserting a second.
+- A Wealthsimple parser extracts opening and closing balances and pushes a
+  `blocking: true` parse error when they do not reconcile;
+  `commitStatementImport` then writes an `AccountStatement` carrying them. A
+  blocking failure still refuses the commit and writes **nothing**.
 - Derived balance vs statement closing balance: equal → no signal; divergent →
   surfaced with the delta, and the balance is **not** rewritten.
+- `batchLabel` period-prefix parsing: `"2026-05 WK3DD9X35CAD"` and
+  `"2026-06 WK3DD9X35CAD"` are recognised as the same source, different period.
+- A superseded row is excluded from `buildPersonalFacts`, from derived-balance
+  arithmetic, and from the classification queue, while remaining listable.
 - Auto-merge fires on each of the two certain shapes and on neither of the
   ambiguous ones — table-driven, with the real prod pairs (2863/3315, 2764/3329,
   971/12178) and the real false-positive shapes (two $6.00 RBC fees on one day)
   as cases.
 - A manually-edited row is never auto-merged.
-- Integration (Postgres, `backend/test/integration/`): the full path on a
-  fixture reproducing the 2026-01-10 account-13 shape — activity present,
-  transaction absent, personal counterpart unlinked — ending with the draw
-  visible to `buildPersonalFacts`.
+- Integration (Postgres, `backend/test/integration/`): the full path on a fixture
+  reproducing the 2026-01-10 account-13 shape — activity present, transaction
+  absent, personal counterpart unlinked — ending with the corp leg created, linked
+  to the personal leg, and **present in the classification queue**.
+
+  That is this spec's honest exit condition. An earlier draft asserted the draw
+  ends up "visible to `buildPersonalFacts`", which this spec cannot deliver:
+  `buildPersonalFacts` is entity-scoped and reaches `nonEligibleDividends` only via
+  a *personal* transaction's `taxTreatmentOverride`
+  (`buildPersonalFacts.ts:139-154`). The bridge row is on the corp side, and
+  nothing here classifies either leg — that is a human decision, made through the
+  queue, and it belongs to spec 4.
 
 ## Relationship to the other specs
 

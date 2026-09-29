@@ -8,12 +8,15 @@
 ## Problem
 
 Connor believed he had drawn ~$120,000 out of CDG Labs in 2026. Reconciliation
-against prod on 2026-09-28 puts proven draws at **$83,000**, with a point estimate
-of **$91,000–$93,000** and an absolute ceiling of ~$113,750.
+against prod on 2026-09-28 puts proven draws at **$83,000**. Adding the estimated
+$8,000–$14,000 drawn during the coverage gap gives **$91,000–$97,000** year-to-date.
+The absolute ceiling, if corporate chequing had been drained to zero, is ~$113,750
+— contradicted by the 2026-09-16 holdings showing $10,000.03 of idle corp cash.
 
 The difference matters: at $83,000 he owes roughly $7,570; at his full-year run
-rate he owes roughly $15,360. He cannot currently see either number, because the
-ledger holds only $68,000 of it.
+rate he owes roughly $15,360 — and roughly $850–$1,250 more than each once the
+L13500 artefact is corrected (see "Expected outcome"). He cannot currently see any
+of those numbers, because the ledger holds only $68,000 of it.
 
 This spec is the operational work to close that. It is mostly data, not code.
 
@@ -28,9 +31,12 @@ not return:
   Wealthsimple Corporate Investing account**. Money under Connor's control, but
   corporate property, not a distribution, and not taxable to him.
 
-The revenue side also caps the answer: $132,200.78 of 2026 CAD revenue against
-$135,848 of uses leaves no room for another $37,000 of draws. Trailing-twelve-month
-linked draws are $76,000.
+The revenue side constrains but does not cap the answer, and the earlier draft
+overstated it: $135,848 of uses already **exceeds** $132,200.78 of 2026 CAD revenue
+by $3,647, which means opening cash is funding part of the year. So "no room for
+another $37,000" does not follow from revenue alone — the binding constraint is the
+account-24 ledger and its interest-implied balances (below), not the revenue total.
+Trailing-twelve-month linked draws are $76,000.
 
 ### The reconciliation
 
@@ -39,7 +45,7 @@ linked draws are $76,000.
 | Linked and classified | **$68,000.00** | 13 × `non_eligible_dividend` = $67,000 + 1 × `expense_reimbursement` = $1,000 |
 | In the ledger but unlinked | **$0.00** | Both unlinked corp outflows resolve to corp-internal (below) |
 | Proven elsewhere in the DB, not in `transactions` | **$15,000.00** | `investment_activities` 1634 ⇄ personal txn 12139 |
-| Inferred from the coverage gap | **$8,000 – $14,000** | Account 24 uncovered 2026-08-14 → 2026-09-28; ~$20,300 drawable; Feb–Aug run rate $9,714/mo |
+| Inferred from the coverage gap | **$8,000 – $14,000** | Account 24 (**WS Corporate Chequing**) uncovered 2026-08-14 → 2026-09-28; ~$20,300 drawable; Feb–Aug run rate $9,714/mo |
 | Corp-internal and third-party, excluded | **$319,790.81** | |
 
 **Two rows that are NOT draws**, recorded here because an earlier reading got one
@@ -82,7 +88,7 @@ $20.73 — the duplicated RAILWAY row 11748/11559.)
 | Decision | Choice | Rationale |
 |---|---|---|
 | Ordering | Import **after** spec 1 lands | Importing the brokerage statements through the broken path recreates the $15k hole. |
-| The $2,872 | **Reimburse from the corp, tag both legs `expense_reimbursement`** | Removes the phantom L13500 loss, puts the deduction in the entity that actually bears the cost, and is what the transactions describe. Booking them to entity 2 also works but rewrites history the bank statements contradict. |
+| The $2,872 | **Reimburse from the corp, tag both legs `expense_reimbursement`** | Removes the phantom L13500 loss and puts the deduction in the entity that bears the cost. **This raises Connor's personal tax by ~$850–$1,250** — the −$2,872 was suppressing taxable income. Doing it anyway: the loss is fictitious and claiming it is wrong. Booking the costs to entity 2 instead also works but rewrites history the bank statements contradict. |
 | $15,000 backfill | Through the fixed importer, re-running the source statement | Hand-inserting a row reproduces by hand exactly what the importer should do, and leaves no provenance. |
 | Duplicates | Auto-merge the certain ones (spec 1's rule), review the rest | Connor's call. |
 | Exit condition | **Spec 3's gate reports `complete` for 2026** | An objective finish line rather than "looks done". |
@@ -97,7 +103,7 @@ $20.73 — the duplicated RAILWAY row 11748/11559.)
 | WS Corporate Chequing (WK79NVW07CAD) | 2026-08-14 → 2026-09-28 | Settles the $8–14k estimate. The CSV export can be pulled today; the monthly statement lands ~2026-10-01. |
 | WS Corporate Investing (HQ8H0GZ07CAD) | 2026-08, 2026-09 | Needs spec 1's brokerage bridge first, or draws vanish again. |
 | Personal WS Chequing (WK3DD9X35CAD) | 2026-09 | Ledger stops 2026-08-27; September draws need a personal leg to link to. |
-| RBC Digital Choice Business | 2026-09-05 → 2026-10-05 | Completes the corp year. |
+| RBC Digital Choice Business (account 28) | **2026-09-02 → 2026-10-05** | Ledger stops 2026-09-01. An earlier draft started this window at 2026-09-05 and left 09-02 → 09-04 uncovered by the plan. |
 
 **2 — Backfill the 2026-01-10 −$15,000 corp leg**, link it to personal txn 12139,
 tag both legs `non_eligible_dividend`.
@@ -109,8 +115,18 @@ corp balance.
 **4 — Classify whatever the September imports surface**, using the bulk
 classification from spec 3.
 
-**5 — Settle the $2,872.** Reimburse from the corp, tag both legs, and confirm
-L13500 goes to zero rather than −2,872.
+**5 — Settle the $2,872.** Three parts, and the first two are often conflated:
+
+- Reimburse from the corp and tag both legs `expense_reimbursement`. This zeroes
+  the personal L13500 artefact, and `buildPersonalFacts.ts:156-164` short-circuits
+  on the treatment before reaching the `finalBusiness` branch at `:183-185`, so
+  the mechanism works.
+- **Book the corresponding corp-side expenses.** Reimbursing creates the cash
+  movement; it does not create CDG's deduction. Without this the costs are
+  deducted nowhere, which is the opposite of the intent.
+- Expect the reimbursement transfers to **land in the classification queue
+  themselves**, alongside the draws. Tag them as they arrive rather than letting
+  them re-muddy the draw reconciliation.
 
 **6 — Roll 2026 carryforwards** for the personal entity. It stops at
 `as_of_year 2025` (RRSP room 4,122.9612; FHSA room 8,000) while the corp is rolled
@@ -125,17 +141,32 @@ balance by 899.10.
 
 ## Expected outcome
 
-Computed with the corrected 2026 rates from spec 2 (non-eligible dividends, single
-Ontario resident, ~$50 interest, ~$3 capital gains, L13500 resolved to zero):
+Computed with the corrected 2026 rates from spec 2 (single Ontario resident,
+~$50 interest, ~$3 capital gains). "Draws" is total corp→personal; the taxable
+portion is that less the $1,000 already tagged `expense_reimbursement`.
 
-| Draws | Federal | Ontario + OHP | Total payable |
-|---|---|---|---|
-| $83,000 proven | $4,131 | $3,439 | **~$7,570** |
-| ~$92,000 point estimate | $5,318 | $4,204 | **~$9,520** |
-| ~$112,000 full-year at run rate | $8,383 | $6,978 | **~$15,360** |
+Two columns, because **step 5 changes the answer**. Today L13500 carries the
+−$2,872 artefact, which suppresses taxable income. Once those costs are reimbursed
+from the corp and tagged, L13500 goes to zero and taxable income rises by $2,872:
 
-Note the shape: the Ontario surtax engages around $92,000 of draws and climbs
-quickly.
+| Draws | Total payable **today** (L13500 = −2,872) | **After step 5** (L13500 = 0) |
+|---|---|---|
+| $83,000 proven | ~$7,570 | **~$8,420** |
+| ~$92,000 point estimate | ~$9,520 | **~$10,430** |
+| ~$112,000 full-year at run rate | ~$15,360 | **~$16,610** |
+
+The $112,000 row is *draws at the current pace through December*, and it is the
+conservative end. $9,714/mo against $92,000 year-to-date projects closer to
+**$121,000** by 31 December, which would put payable near $18,500 before the
+L13500 correction. Treat $112,000–$121,000 as the planning band, not a point.
+
+The right-hand column is the one to plan against — it is the post-fix state, and
+the reimbursement itself is not taxable, so correcting the artefact costs roughly
+$850–$1,250 of real tax. That is not a reason to leave it: the −$2,872 is a
+fictitious self-employment loss, and claiming it is wrong.
+
+Note the shape: the Ontario surtax first engages at **~$85,000** of non-eligible
+dividend draws and climbs quickly after that.
 
 **2027 instalments become mandatory.** Net tax owing crosses $3,000 well before
 year end, and `instalment_payments` is empty. `shareholder_loans` is also empty

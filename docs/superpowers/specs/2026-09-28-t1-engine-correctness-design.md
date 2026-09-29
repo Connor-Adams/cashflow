@@ -15,13 +15,20 @@ engine defects are real, verified, and independent of any data question.
 
 `backend/src/tax/data/rates-2026.ts:1-4` claims `VERIFIED 2026-05-24`. The body is
 an indexation projection built before CRA published the real figures (federal
-indexed amounts, November 2025; CPP/EI, November–December 2025). Every constant
-in the file is wrong.
+indexed amounts, November 2025; CPP/EI, November–December 2025). Every *indexed*
+constant in it is therefore wrong.
 
-It also applies the **federal** indexation factor (2.0%) to **Ontario** amounts,
-which indexed at 1.9% — and in several places simply copies 2025 Ontario values
-verbatim (`:21`, `:34`, `:109`) while indexing the Ontario surtax bands (`:74-78`).
-Inconsistent treatment inside one file.
+The file applied **2.7%** (`:2` — "2025 thresholds x 1.027"); the published
+federal factor was 2.0% and Ontario's was 1.9%. It applied that 2.7% to exactly
+one Ontario item, the surtax bands (`:74`), and copied every other Ontario amount
+verbatim from 2025 with a comment saying so (`:21,:34,:41,:46,:109,:115`). So the
+treatment is inconsistent, but in the opposite direction to indexing Ontario
+federally: Ontario is frozen everywhere except the surtax.
+
+Not every constant is wrong. The gross-ups, the federal and Ontario DTC rates, the
+CPP basic exemption and rates, the non-indexed Ontario brackets, the $2,000 pension
+amount, the FHSA limits and the Ontario Health Premium table are all correct and
+must be left alone — the tables below mark each.
 
 Two arithmetic errors independent of the staleness: `177,882 × 1.027 = 182,684.81`
 but the file carries `182,674` at `:17`, `:31` and `:122` (a digit transposition,
@@ -51,7 +58,16 @@ Correct today and not to be touched: T5 box 13 → interest, T5 box 25 → taxab
 eligible, T3 box 32 → taxable non-eligible. T3 box 26 ("Other income") → interest
 is an acceptable approximation, since a T3 has no dedicated interest box.
 
-Two distinct failure modes, both silent:
+**The T3 entry form is also wrong, so a backend-only fix produces a new wrong
+answer.** `frontend/src/pages/tax/slips/T3Form.tsx:7-9` labels box32 "Eligible
+dividends actual" (CRA: taxable **non**-eligible), box49 "Eligible dividends
+taxable" (CRA: **actual** eligible) and box50 "Eligible div tax credit" (CRA:
+**taxable** eligible — the DTC is box 51). Reading box 50 in the engine while the
+form collects the DTC there wires a credit into the eligible-dividend line. The
+form must be corrected in the same change. `T5Form.tsx` is correct; generalising
+from it to T3 was the error.
+
+Two distinct failure modes. **One is silent; the other is loud but wrong** —
 
 - **A pure non-eligible T5** — what CDG Labs will issue Connor (boxes 10/11/12,
   box 26 empty). `hasNonElSlips` at `t1.ts:121-123` tests `box26 > 0`, so it is
@@ -62,9 +78,11 @@ Two distinct failure modes, both silent:
   a non-registered Wealthsimple Investing account). Box 26 holds the eligible DTC,
   `hasNonElSlips` flips **true**, and that credit figure *replaces* the entire
   computed non-eligible dividend total on L12010 via the slip preference at
-  `t1.ts:124`. Tens of thousands of dollars of owner dividends are replaced by a
-  ~15% credit figure, with no warning — because the warning is gated on the same
-  wrong predicate.
+  `t1.ts:123`. Tens of thousands of dollars of owner dividends are replaced by a
+  ~15% credit figure. This mode **does** warn — `t1.ts:124-131` runs precisely
+  because the predicate is true, and the divergence is enormous — but the warning
+  says the slip and the computation disagree, not that the engine read the wrong
+  box, and the wrong value is what lands on the line.
 
 ### 3. AMT credit fractions are incomplete
 
@@ -127,9 +145,10 @@ This paragraph exists so the next audit does not re-raise it.
 |---|---|---|
 | Source of 2026 constants | CRA / Service Canada / Ontario published figures, one citation per value | Ends the "LLM-generated, not cross-checked" provenance flagged in the 2026-06-08 audit. |
 | Values with only secondary-source support | Ship them, annotate `@low-confidence` with the source | Better than a projection, honest about what is not primary-sourced. |
-| `rates-2027.ts` | Leave as a projection, but make it **unusable for filing** | 2027 figures are not published. A projection is fine for scenario planning and wrong for a return. |
-| Guard against recurrence | A test asserting every value in a table marked `VERIFIED` carries a source citation | The failure here was a header claiming more than the body delivered. |
-| `capitalGainsInclusionHigh` | Remove the concept for 2026/2027; flat 50% | The tier does not exist. Keeping a disabled field invites re-enabling it. |
+| `rates-2027.ts` | Leave as a projection; mark it `provenance: 'projected'` | 2027 figures are not published. A projection is fine for scenario planning and wrong for a return, and the provenance field is what expresses that. |
+| Guard against recurrence | `ratesFor(year)` must refuse to serve a table flagged as projected to a filing-grade caller | The header at `rates-2026.ts:1-4` **does** disclose that it is "encoded from indexation projection… engineer MUST update once CRA publishes". It told the truth and was served anyway. A citation test would not have caught it; the real failure is that `ratesFor(2026)` (`brackets.ts:27-31`, called unconditionally at `routes/tax.ts:394`) has no notion of provenance. |
+| What "filing-grade" means | A `provenance: 'published' \| 'projected'` field on the rate table; the return route refuses `projected` for a year that has closed, and surfaces it as a completeness gap otherwise | The codebase has no such concept today. Naming the mechanism here stops three implementers building three different guards. |
+| `capitalGainsInclusionHigh` | **Retain the field, set it to 0.5** for 2026/2027 | Removing it changes T2: it is read as the *corporate* inclusion rate with a `?? capitalGainsInclusion` fallback (`engine/t2.ts:65`, `integration.ts:106`, `aaii.ts:16`), so dropping it would silently flip corp capital gains from 66.67% to 50% — a T2 behaviour change this spec does not own. `rates-2025.ts:59-65` already established this convention: retain at 50% so downstream code compiles and computes correctly. An earlier draft proposed removal and contradicted that precedent without engaging it. |
 | Slip box fix | Read box 11 / box 50, and re-gate `hasXSlips` off those boxes | Fixing the box without fixing the predicate leaves failure mode A in place. |
 | AMT donation fraction | New rate-table field, `amtDonationCreditFraction: 0.80` | Distinct statutory fraction; folding it into the 50% is simply wrong. |
 | `amtExemption` | Derive from the 4th federal bracket, don't store independently | Removes a class of drift and the inherited transposition. |
@@ -155,8 +174,12 @@ Researched 2026-09-28. Federal indexation 2.0%, Ontario 1.9%.
 | Medical 3% cap | 2,914 | **2,890** |
 | OAS recovery threshold | 95,977 | **95,323** |
 | RRSP dollar limit | 33,367 | **33,810** |
-| Disability amount | — | **10,341** |
-| Caregiver (child/spouse/eligible dep) | — | **2,740** |
+| Disability amount (`dtcBaseFederal`) | 10,412 | **10,341** |
+| `dtcSupplementFederal` | 6,075 | verify — not researched |
+| `dtcSupplementThreshold` | 3,558 | verify — not researched |
+| Caregiver (child/spouse/eligible dep) | — | **2,740** (new field) |
+| `caregiverAmountFederalInfirmAdult` | 8,437 | **8,773** `@low-confidence` |
+| `caregiverThresholdFederal` | 19,811 | **20,601** `@low-confidence` |
 | Pension income amount | 2,000 | **2,000** (never indexed) |
 | FHSA annual / lifetime | 8,000 / 40,000 | **unchanged** (never indexed) |
 | Dividend gross-ups | 38% / 15% | **unchanged** |
@@ -179,6 +202,8 @@ it down.
 | Age amount | 6,078 | **6,342** |
 | Age amount threshold | 44,323 | **47,210** |
 | Pension amount | 1,686 | **1,796** |
+| `spousalAmountOntario` | 10,818 | **11,029** `@low-confidence` |
+| `dtcBaseOntario` | 9,852 | verify — not researched |
 | Surtax threshold 1 (20%) | 5,864 | **5,818** |
 | Surtax threshold 2 (36%) | 7,504 | **7,446** |
 | ON DTC (of grossed-up) | 10.0% / 2.9863% | **unchanged** |
@@ -186,10 +211,19 @@ it down.
 | Ontario Health Premium table | as-is | **correct — never indexed, frozen since 2005** |
 
 `@low-confidence` (secondary sources only): Ontario age amount and threshold,
-pension amount, both surtax thresholds, ON DTC rates, ON tax reduction (300),
-ON caregiver (6,122). **NOT FOUND:** Ontario-specific medical expense dollar cap
-for 2026; ON caregiver net-income threshold. Leave those two at their current
-values with a `@not-found` annotation rather than inventing figures.
+pension amount, both surtax thresholds, ON DTC rates, spousal amount.
+
+**Fields that do not exist and are not being added here:** there is no ON tax
+reduction field, no Ontario caregiver field, and no Ontario-specific medical cap —
+`medicalCreditOntario` reuses the federal `r.medicalThresholdCap`
+(`engine/credits.ts:128-139`). An earlier draft said to "leave those at their
+current values", which is impossible; they have none. Adding them is out of scope.
+
+**Not stored, so not in the table:** the self-employed CPP rate, computed as
+`employeePortion x 2` (`engine/cpp-ei.ts:20-30`).
+
+Every value the table marks as changing must be verified against the file before
+the implementation plan is written — the "In file" column was transcribed by hand.
 
 ### CPP / EI 2026
 
@@ -215,9 +249,12 @@ gains inclusion 100%; non-refundable credits allowed 50%; **donation credit allo
 
 ## Materiality
 
-Direction is consistent and partly self-cancelling: every federal bracket in the
-file sits too high (understates federal tax); every Ontario amount is frozen at
-2025 (overstates Ontario tax).
+Direction is **not** uniform. Every federal bracket sits too high (understates
+federal tax). Every Ontario amount except the surtax is frozen at 2025 (overstates
+Ontario tax). But the surtax thresholds were indexed *up* — 5,864/7,504 against a
+published 5,818/7,446 — which **understates** surtax. So the errors partly cancel
+by accident, not by structure, and the net cannot be reasoned about without
+recomputing.
 
 For Connor's 2026 profile — non-eligible dividends, single Ontario resident,
 negligible capital gains — the net effect of the rate corrections is a few hundred
@@ -231,22 +268,33 @@ first time a real T5 is entered.
 
 ## Scope
 
-**In:** `backend/src/tax/data/rates-2026.ts`, `rates-2027.ts` (guard only),
-`backend/src/tax/engine/t1.ts` (slip boxes and predicates, AMT credit total),
-`backend/src/tax/engine/amt.ts` (donation fraction), `backend/src/tax/engine/types.ts`
-(new rate-table field), and their colocated tests.
+**In:** `backend/src/tax/data/rates-2026.ts`, `rates-2027.ts` (provenance only),
+`backend/src/tax/engine/t1.ts` (slip boxes and predicates, AMT credit total and
+the AMT call site), `backend/src/tax/engine/amt.ts` (donation fraction, plus an
+`AmtInput` field for the donation credit — `amt.ts:4-14` has none today, so the
+rate-table field is inert without it), `backend/src/tax/engine/types.ts` (two new
+rate-table fields: the AMT donation fraction and `provenance`),
+`backend/src/tax/engine/brackets.ts` / the return route for the provenance guard,
+**`frontend/src/pages/tax/slips/T3Form.tsx`** (box labels — the one frontend file
+this spec must touch), and their colocated tests.
 
-**Out:** anything touching data completeness, imports, reconciliation, or the
-frontend. `rates-2024.ts` and `rates-2025.ts` are not re-verified here — 2025 was
-verified on 2026-06-08 and 2024 is out of scope.
+**Out:** anything touching data completeness, imports or reconciliation, and any
+frontend file other than `T3Form.tsx`. `rates-2024.ts` and `rates-2025.ts` are not
+re-verified here — 2025 was verified on 2026-06-08 and 2024 is out of scope. T2
+behaviour must not change: see the `capitalGainsInclusionHigh` decision.
 
 **Known gaps left open deliberately**, recorded so they are not rediscovered as
 novel: superficial-loss detection does not scan registered accounts for affiliated
-repurchase (`buildPersonalFacts.ts:91-94`); no foreign tax credit anywhere; OAS
+repurchase (the taxable-account allowlist at `buildPersonalFacts.ts:91-94` bounds
+the scan at `:317,363,402`); no foreign tax credit anywhere; OAS
 clawback is not deducted from net income (`t1.ts:229-242`); `jurisdiction` is
 hardcoded `CA-ON` (`buildPersonalFacts.ts:471`) despite `Entity.jurisdiction`
 existing; the age credit reads an arbitrary `HouseholdMember` rather than the
-entity's own (`buildPersonalFacts.ts:453-467`); `spouse`, `cppBenefits`,
+entity's own (`buildPersonalFacts.ts:453-467`), and the birthday adjustment inside
+it is dead code — `dobMonth > 12 || (dobMonth === 12 && dobDay > 31)` at `:462` is
+unsatisfiable, so age is never decremented, though the result happens to be correct
+for an at-Dec-31 age; T5 boxes 10/12/18 and T3 box 23 are collected by the forms
+and never read by `buildT1`; `spouse`, `cppBenefits`,
 `oasBenefits`, `tuitionFees`, `disabilityCredit` and `caregiverDependents` are
 consumed by `buildT1` but never populated from actuals; no TOSI, LCGE, ABIL or
 principal-residence handling.
@@ -257,9 +305,16 @@ Backend `node:test` via `tsx`, colocated per house convention.
 
 - Per-bracket assertions on the 2026 table against the published figures in this
   spec — a table-driven test, one case per value, so a regression names the value.
-- A test asserting a `VERIFIED`-marked rate table has a source citation for every
-  value. This is the guard against the exact failure being fixed.
-- `rates-2027.ts` must be rejected by whatever path produces a filing-grade return.
+  Values this spec marks "verify — not researched" must be researched before the
+  plan is written; the test cannot be written against a blank.
+- A table marked `provenance: 'projected'` is refused by the return route for a
+  closed year and surfaced as a completeness gap otherwise. This is the guard
+  against the exact failure being fixed — not a citation test, which the honest
+  header at `rates-2026.ts:1-4` would already have passed.
+- `capitalGainsInclusionHigh` stays present at 0.5: assert `t2.ts`, `integration.ts`
+  and `aaii.ts` still compute corporate capital gains unchanged.
+- The corrected T3 form and the corrected engine boxes agree: a T3 entered through
+  the form produces the taxable eligible amount on L12000, not the DTC.
 - Slip mapping: a T5 with boxes 10/11/12 populated and box 26 empty must reconcile
   against computed non-eligible dividends and warn on a >$50 divergence
   (failure mode A). A T5 with boxes 24/25/26 populated must **not** disturb the
