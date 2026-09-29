@@ -220,6 +220,17 @@ personal leg is linked rather than merely created.
 Connor's missing statements or clearing his 25 pairs (spec 4). No SimpleFIN work —
 noted below but not fixed here.
 
+**In, because it is a live data-integrity defect:** `Account.taxStatus` defaults to
+`'n_a'` (`models/Account.ts:109-113`), which is inside the tax engine's taxable
+allowlist (`buildPersonalFacts.ts:91-93`), and the hook that would correct it
+returns early for any non-investment account (`Account.ts:211-215`) and is
+registered on `beforeCreate`/`beforeBulkCreate` only — never `beforeUpdate`. Prod
+account 46 is **"RBC TFSA" with `account_type='checking'` and `tax_status='n_a'`**,
+i.e. a TFSA sitting in the taxable allowlist. It holds no transactions today, so the
+impact is nil until that account is imported — at which point its interest lands on
+Connor's T1. `inferTaxStatus.ts` maps by name and would have caught it; it was never
+consulted because the account type is `checking`.
+
 **Noted, not fixed:** `simplefin_account_links` were created 2026-09-27 23:59; the
 two syncs since inserted 0 rows on all six corp accounts, and accounts 28/43/44
 have no link at all, so they are permanently manual. Corp account 24 carries a

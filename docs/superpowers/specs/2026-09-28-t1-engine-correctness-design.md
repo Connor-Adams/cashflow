@@ -97,7 +97,37 @@ Two distinct failure modes. **One is silent; the other is loud but wrong** —
   says the slip and the computation disagree, not that the engine read the wrong
   box, and the wrong value is what lands on the line.
 
-### 3. AMT credit fractions are incomplete
+### 3. Three more engine defects that do affect Connor
+
+- **FHSA ignores carryforward room and the lifetime cap.** `t1.ts:215-219` is
+  `Decimal.min(sum(fhsaContribs), r.fhsaAnnualLimit)` — the annual limit only. The
+  RRSP line five lines up correctly consults `facts.carryforwards.rrspRoom`
+  (`:210`). `rollPersonalCarryforwards.ts:56-71` computes and persists `fhsa_room`,
+  and `buildPersonalFacts.ts:437-443` never loads it: **`fhsa_room` is written and
+  never read.** Two errors in opposite directions — carried-forward participation
+  room is lost, and a contribution past the $40,000 lifetime cap still deducts
+  $8,000. Connor's prod carryforwards hold `fhsa_room 2025 = 8,000` with
+  `fhsa_lifetime_contribs = 0`, so an $16,000 catch-up year would deduct $8,000 and
+  overstate taxable income by $8,000 — roughly $2,300–$2,800 of tax.
+- **Income can be counted twice.** `buildPersonalFacts.ts:152-155` routes rows by
+  tax treatment; `:288-308` then re-scans the same `txns` by `txnType`, skipping
+  only the four treatments in `NOT_INCOME_TREATMENTS` (`not_income`,
+  `loan_advance`, `loan_repayment`, `expense_reimbursement`). A row already routed
+  as `non_eligible_dividend`, `salary` or `pension_income` and *also* typed
+  `interest`/`dividend` is added a second time — and a `dividend` txnType is added
+  as **eligible**, with the 38% gross-up and the eligible DTC. Reachable via a
+  Wealthsimple Chequing `INT` row classified as dividend income in the queue.
+- **Superficial loss cannot see registered accounts.** The repurchase scan runs over
+  `acbActivity` filtered to the `non_registered`/`n_a` allowlist
+  (`buildPersonalFacts.ts:91-94,321-333`). A trust governed by the taxpayer's
+  TFSA/RRSP/FHSA is an **affiliated person**, so a repurchase inside a plan within
+  the 61-day window denies the loss — and s.53(1)(f) gives **no** ACB addback in
+  that case, so the loss is permanently lost, whereas the engine's iterative
+  re-walk (`:363-396`) assumes the addback always applies. Connor holds account 15
+  (non-registered), 8 (TFSA) and 11 (FHSA) at the same broker — the exact setup
+  where this bites. Understates tax.
+
+### 4. AMT credit fractions are incomplete
 
 `engine/amt.ts` is implemented and genuinely wired (`t1.ts:316-335`, feeding
 `totalPayable` at `:376` and `totals.federalTax` at `:399`). Two defects inside it:
@@ -160,6 +190,9 @@ This paragraph exists so the next audit does not re-raise it.
 | Values with only secondary-source support | Ship them, annotate `@low-confidence` with the source | Better than a projection, honest about what is not primary-sourced. |
 | `rates-2027.ts` | Leave as a projection; mark it `provenance: 'projected'` | 2027 figures are not published. A projection is fine for scenario planning and wrong for a return, and the provenance field is what expresses that. |
 | T2 scope | The corporate inclusion-rate change is **in scope and intended**; corp tests must be updated to expect 50% for 2026/2027 | It is the same cancellation, and leaving corporations at a repealed 66⅔% to keep this spec "backend-personal-only" would be preserving a known error for tidiness. |
+| **Cache invalidation** | Add a **version component** to both return hashes — `hashFacts` in `scenarios/computeScenarioReturn.ts:126-129` and `factsHash(serializeFacts(facts))` at `routes/tax.ts:380` | Without this, **nothing in this spec changes any number on screen.** Both caches are keyed on facts alone, so a rate or engine correction leaves every cached row intact; the only invalidator is `{ force: true }` (`tax-scenarios.ts:483`), which nothing calls automatically. Prod holds 45 `scenario_returns` rows, oldest 2026-06-02. A version cannot be forgotten; a one-off purge has to be remembered on every future engine change. |
+| FHSA room | Load `fhsa_room` into `PersonalCarryforwards` and cap L20805 by it, and enforce the $40,000 lifetime cap | The value is already computed and persisted; only the read is missing. |
+| Double-count guard | Exclude from the `txnType` pass any row the treatment pass already routed | Inverting the guard — skip rows already classified as income, rather than listing the four non-income treatments — is the fix that does not need maintaining as treatments are added. |
 | Guard against recurrence | `ratesFor(year)` must refuse to serve a table flagged as projected to a filing-grade caller | The header at `rates-2026.ts:1-4` **does** disclose that it is "encoded from indexation projection… engineer MUST update once CRA publishes". It told the truth and was served anyway. A citation test would not have caught it; the real failure is that `ratesFor(2026)` (`brackets.ts:27-31`, called unconditionally at `routes/tax.ts:394`) has no notion of provenance. |
 | What "filing-grade" means | A `provenance: 'published' \| 'projected'` field on the rate table; the return route refuses `projected` for a year that has closed, and surfaces it as a completeness gap otherwise | The codebase has no such concept today. Naming the mechanism here stops three implementers building three different guards. |
 | `capitalGainsInclusionHigh` | **Set it to 0.5**, and accept that this changes T2 — because the change is correct | Two earlier drafts got this wrong in opposite directions. The field is read as the *corporate* inclusion rate at `engine/t2.ts:65`, `integration.ts:106` and `aaii.ts:16`, always as `r.capitalGainsInclusionHigh ?? r.capitalGainsInclusion` — and `capitalGainsInclusion` is `0.5`. So **setting the field to 0.5 and deleting it are behaviourally identical**; a draft that argued "retain it so T2 does not change" was self-defeating. More importantly, T2 *should* change: the cancelled 2024 measure put corporations at 66⅔% on **all** capital gains with no threshold, and its cancellation returns them to 50% for 2026 exactly as it does individuals. `t2.ts:63`'s comment ("corps use the high rate (66.67%) on ALL gains") describes a regime that no longer exists. Retain the field for `rates-2024.ts`, where 0.666667 is legitimate. |
@@ -326,7 +359,13 @@ re-verified here — 2025 was verified on 2026-06-08 and 2024 is out of scope. T
 behaviour must not change: see the `capitalGainsInclusionHigh` decision.
 
 **Known gaps left open deliberately**, recorded so they are not rediscovered as
-novel: superficial-loss detection does not scan registered accounts for affiliated
+novel: a dividend credited to a shareholder loan reaches the corp's `dividendsPaid`
+(`buildCorpFacts.ts:257-280`) but contributes $0 to the T1, because
+`buildPersonalFacts` never reads `ShareholderLoan` — and nothing reconciles corp
+`dividendsPaid` against personal `nonEligibleDividends` at all
+(`tax/reconciliation/buildReport.ts:10-14` has only three T4-only detectors). That
+is nil while `shareholder_loans` is empty and high the moment a year-end dividend
+clears a loan, which is the standard sole-shareholder move. Also: superficial-loss detection does not scan registered accounts for affiliated
 repurchase (the taxable-account allowlist at `buildPersonalFacts.ts:91-94` bounds
 the scan at `:317,363,402`); no foreign tax credit anywhere; OAS
 clawback is not deducted from net income (`t1.ts:229-242`); `jurisdiction` is
@@ -367,6 +406,14 @@ Backend `node:test` via `tsx`, colocated per house convention.
   non-eligible line (failure mode B). A T3 with box 49 and box 50 must take box 50.
 - AMT: donation credit allowed at 80%; the full non-refundable credit set reaching
   the 50% allowance; exemption equal to the 4th federal bracket threshold.
+- FHSA: a $16,000 contribution against $8,000 carried room plus $8,000 current-year
+  room deducts $16,000; a contribution breaching the $40,000 lifetime cap is
+  capped at the remaining room, not at the annual limit.
+- Double-count: a transaction typed `interest` and classified `non_eligible_dividend`
+  appears on exactly one line, as a non-eligible dividend.
+- **Cache invalidation: changing a rate constant changes the served number.** Assert
+  it end-to-end through the route, not just through `buildT1` — this is the test
+  that proves the spec has any visible effect at all.
 - **Do not modify `t1-scenarios.test.ts` Scenario H.** It locks the correct
   Ontario surtax ordering. Its passing is the regression guard for the
   not-a-bug documented above.

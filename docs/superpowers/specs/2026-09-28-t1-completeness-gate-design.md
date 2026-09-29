@@ -38,6 +38,60 @@ renders only `computed.warnings`, so the UI faithfully reports a complete return
 The classification queue *does* know about pending rows. It lives on a different
 tab and never reaches the T1 view.
 
+### The tab does not show actuals at all
+
+Found 2026-09-28, and it reframes everything below.
+
+`frontend/src/pages/tax/PersonalT1Tab.tsx:91-98` auto-selects
+`[...scenarios].reverse().find(s => s.kind !== 'baseline')`. The list arrives
+`order: [['createdAt','ASC']]` (`routes/tax-scenarios.ts:170-172`), so that is the
+**last-created non-baseline scenario**. In prod, for entity 1 / year 2026, that is
+scenario 18 — `kind: 'projection_root'`, parented to the *2025* Scratch fork.
+
+`backend/src/tax/scenarios/resolveScenario.ts:25-28` branches on the kind:
+
+```ts
+const baseFacts = root.kind === 'projection_root'
+  ? await projectPersonalFactsViaPort(root.id)
+  : await buildPersonalFacts(root.entityId, root.year);
+```
+
+and `projectPersonalFactsFromPrevYear.ts:106-123` builds year N+1 **entirely from
+year N scaled by inflation**, with `capitalGainEvents: []` and `slips: []`.
+
+So the tab renders a 2025-scaled forecast containing **zero 2026 transactions** —
+none of the $68,000 of classified 2026 non-eligible dividends is in it. Prod
+`scenario_returns` confirm it:
+
+| scenario | totalIncome | totalPayable | cppContrib | eiPremium |
+|---|---|---|---|---|
+| 12 (actuals fork) | 30,274.51 | 300.00 | 0 | 0 |
+| **18 (projection)** | 40,353.49 | 2,556.95 | **1,168.96** | **384.23** |
+
+The CPP and EI are the proof: they can only come from employment income, and Connor
+had none in 2026. They are his 2025 T4 scaled forward.
+
+`ScenarioTree.tsx:65-67` renders a `projection_root` identically to a `fork`, and
+appends "(actuals)" only for `baseline`. There is no visual cue whatsoever.
+
+Meanwhile `OverviewTab.tsx:34` calls `useTaxReturn(year)` →
+`/api/tax/personal/:year/return` → `buildPersonalFacts`, i.e. **true actuals**. Two
+tabs on the same page show different 2026 numbers with nothing reconciling them.
+
+**This changes the point of all four specs.** They make the actuals path correct.
+The tab does not render the actuals path. Fixing them without fixing provenance
+leaves Connor looking at the same forecast.
+
+So provenance joins completeness as a first-class property of the surface:
+
+- The rendered number always states what it is — **actuals**, **actuals + overrides**,
+  or **projection from <year>** — and a projection says outright that it contains no
+  transactions from the year on screen.
+- A projection can never be the **default** selection for a year that has actuals.
+  Default to the baseline; let the user choose a projection deliberately.
+- Overview and Personal T1 must agree, or visibly explain why they differ.
+- `ScenarioTree` distinguishes all three kinds, not just baseline.
+
 ### The queue is also not workable
 
 `frontend/src/pages/tax/ClassifyTab.tsx` is 111 lines with no bulk selection, no
@@ -70,6 +124,7 @@ None of these produced a single character of warning on the T1.
 
 | Decision | Choice | Rationale |
 |---|---|---|
+| Provenance | The number always states whether it is actuals, actuals + overrides, or a projection; a projection is never the default for a year with actuals | The tab currently defaults to a projection with no cue, which is a worse failure than an incomplete total: an incomplete actual is wrong by the gap, a projection is not the year at all. |
 | Gate hardness | **Show the number, never bare** | Connor's call. A refused total is hostile when you want a rough mid-year sense; a bare total is what caused this three times. |
 | Shape | Typed `completeness: { status, blockers[], gaps[] }` on the return DTO | A first-class field, not a warning string. The UI can treat it structurally; a string forces re-parsing. |
 | Where it is computed | A dedicated `buildCompletenessReport(entityId, year)` module | Keeps `buildPersonalFacts` focused on facts. Completeness needs import history and statement coverage, outside that builder's remit. |
@@ -93,6 +148,9 @@ demonstrably wrong.
 **Gap** — a correctness risk of unknown size. The total may be right.
 
 - Suspected duplicate pairs awaiting review
+- ACB warnings raised and discarded — `computeAcb` emits them for clamped sells,
+  zero-cost `transfer_in` and mixed currency (`portfolio/acb.ts:154-176,197-202,366-370`)
+  and `buildPersonalFacts.ts:374-412` never reads `acb.warnings`. Surface them.
 - Carryforwards not rolled into the period
 - The year's rate table carries `provenance: 'projected'` (ties to spec 2)
 - Slips entered for the year that reconcile against nothing
@@ -185,6 +243,13 @@ Backend `node:test` via `tsx`, colocated. Frontend vitest.
 - Frontend: the total never renders without the completeness block; blockers link
   to their fix surface; bulk-classify applies one treatment to a multi-row
   selection and reflects the result without a full refetch.
+- **Provenance:** with a baseline and a later-created `projection_root` both
+  present for a year, the tab selects the baseline. A projection, when chosen,
+  renders labelled as a projection and states that it holds no transactions from
+  the displayed year. `ScenarioTree` renders all three kinds distinguishably.
+- Overview and Personal T1 report the same figure for a year whose selected
+  scenario is the actuals baseline. This is the regression guard for the two tabs
+  drifting apart again.
 
 ## Relationship to the other specs
 
