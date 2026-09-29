@@ -111,7 +111,7 @@ Frontend vitest; backend `node:test` via `tsx`.
 
 ## Relationship to the other parts
 
-Seven parts. Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 3 → 1b → 5**. Part 1c is **cut**.
+Seven parts. Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 1b → 3 → 4 (rest) → 5**. Part 1c is **cut**.
 
 Part 0 first because it is the only part that makes any other part's effect visible
 on the tab Connor uses. The minimum path to a 2026 number he can rely on is

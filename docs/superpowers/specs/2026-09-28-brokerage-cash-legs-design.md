@@ -156,8 +156,9 @@ delete the activities.
 | Batch label | Per run and per account | `'WS deposit ledger cleanup'` is a shared constant and rollback deletes by batch label. |
 | No activity→transaction FK | **Dropped** | It was proposed to make a rollback take both sides, but `rollbackImportBatch.ts` destroys `InvestmentActivity` (`:379-388`) *before* `Transaction` (`:465`), so a real `references` FK would raise a constraint violation on Postgres unless `ON DELETE SET NULL`. The existing migration needs no FK: pairing is by `(accountId, date, amount, currency)`. Dropping it removes the migration from this part entirely. |
 | Keying | On `activityType`, not on statement codes | `models/InvestmentActivity.ts` has **no code column** — the declared fields are `activityType, tradeDate, description, quantity, price, amount, fees, splitRatio, currency, sourceReference, sourceRowFingerprint, importBatch`. A code-based rule could only live in the parser, which never sees the activity-statement path where the draw was lost. |
-| The bare `transfer` activityType | **Excluded** from the allowlist | `rbcInvestment.ts:305` and `questrade.ts:246,251,258` emit it; `wsActivityStatement.ts` does **not**. `transfer_in`/`transfer_out`/`cash_movement` are unambiguous cash crossings; a bare `transfer` is not. (An earlier draft titled this row "`CONT` scope" — `CONT` is a statement *code*, and this spec's own next row establishes there is no code column on `InvestmentActivity`.) `interest` is also excluded here: it is income, not a cash crossing, and conflating them is how a tax line gets double-counted. |
-| Questrade accounts | **Never** run the converter against one | `pdf/questrade.ts:409-422` already emits the cash mirror, so the converter would see shadows and delete the activities. |
+| The bare `transfer` activityType | **Excluded** from the allowlist | `rbcInvestment.ts:305` and `questrade.ts:246,251,258` emit it — and so does the other Wealthsimple brokerage path: `wealthsimpleActivityCodes.ts:30` maps `CONT: 'transfer'`, and `wealthsimpleBrokerage.ts` parses exactly the monthly statements part 4 step 1 re-imports. (`wsActivityStatement.ts` does not emit it; an earlier draft rested the exclusion on that alone, which was the wrong reason for the right call.) `transfer_in`/`transfer_out`/`cash_movement` are unambiguous cash crossings; a bare `transfer` is not. (An earlier draft titled this row "`CONT` scope" — `CONT` is a statement *code*, and this spec's own next row establishes there is no code column on `InvestmentActivity`.) `interest` is also excluded here: it is income, not a cash crossing, and conflating them is how a tax line gets double-counted. |
+| Account admission | **An explicit per-account opt-in list passed to the runner** — never a widened `accountType` set | `Account` has no institution, provider or parser field (`models/Account.ts:26-51`), and every brokerage account of every provider is `accountType: 'investment'` (`runImport.ts:804-811` for Wealthsimple, `:999-1003` for Questrade). So widening `DEPOSIT_ACCOUNT_TYPES` to admit account 13 admits **every Questrade account in the household at the same time** — and `questrade.ts:408-423` already emits the cash mirror, so the converter would see shadows and clear real activities. A round-two draft of this spec said "widen the account guard"; that rebuilds the round-one hazard one provider over. The guard stays a refusal; the runner takes named account ids. |
+| Shadow pairing on brokerage | **Re-validate before running, and add a false-shadow test** | The shadow half is not protected by the allowlist. Pairing is `(accountId, date, amount, currency)` alone (`:100`), justified by an empirical claim measured on deposit accounts: "In prod no such key occurs twice on either side" (`:14-18`). On a brokerage account the transaction table is already populated by the twelve cash codes, so a same-day same-amount collision between an allowlisted `transfer_out` activity and an unrelated `E_TRFOUT` transaction is far likelier. A false shadow match clears a real cash crossing whose event is **not** in the ledger — the exact loss this part exists to stop. |
 | Linkability | **Add a `txnType` input to `enrichTransaction`** | Without this the bridge does not reliably link, and an unlinked bridge row is as invisible as no row. See below. |
 | Forward fix as well as retroactive | Both: fix `importWsActivityStatement.ts:92`, and run the generalised converter over history | The retroactive pass recovers the $15,000; the forward fix stops the next one. |
 
@@ -221,7 +222,10 @@ Backend `node:test` via `tsx`, colocated; SQLite per-process temp DB.
   data-destruction regression guard and the most important test in this part.
 - Rolling back one account's conversion leaves other accounts' converted rows intact
   — the per-run batch label holds.
-- Running against a Questrade account is refused.
+- Running against an account not on the opt-in list is refused, Questrade included.
+- **A false shadow match is caught:** an allowlisted `transfer_out` activity and an
+  unrelated same-day, same-amount cash transaction on the same brokerage account do
+  not pair, and the activity survives.
 - The converter is idempotent: two runs produce one transaction. A run interrupted
   between insert and delete self-heals on the next run.
 - A converted row carries a `sourceIdentityFingerprint` and an `ImportHistory`
@@ -259,4 +263,4 @@ The original part 1 bundled three strands with different risk profiles. Split:
   hazard that can 422 the very imports part 4 needs. Off the critical path.
 - **2 Engine correctness**, **3 Completeness and provenance gate**, **4 Backfill**.
 
-Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 3 → 1b → 5**. Part 1c is **cut**.
+Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 1b → 3 → 4 (rest) → 5**. Part 1c is **cut**.

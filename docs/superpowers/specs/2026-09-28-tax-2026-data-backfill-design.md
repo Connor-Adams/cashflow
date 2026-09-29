@@ -108,8 +108,8 @@ $20.73 — the duplicated RAILWAY row 11748/11559.)
 **2 — Backfill the 2026-01-10 −$15,000 corp leg**, link it to personal txn 12139,
 tag both legs `non_eligible_dividend`.
 
-**3 — Resolve the ~25 duplicate pairs.** Auto-merge the certain ones; review the
-rest. Priority: account 13's four pairs ($28,848 phantom inflow) distort every
+**3 — Resolve the ~25 duplicate pairs by hand.** Part 1b reports them classified
+**certain** or **for review** and changes nothing; clearing them is manual. Priority: account 13's four pairs ($28,848 phantom inflow) distort every
 corp balance.
 
 **4 — Classify whatever the September imports surface**, using the bulk
@@ -194,4 +194,4 @@ lost. `tax_entities.fiscal_year_end` is also NULL on the corp, which T2 work nee
    condition.
 4. **2026 data backfill** — this spec. Last, and mostly operational.
 
-Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 3 → 1b → 5**. Part 1c is **cut**.
+Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 1b → 3 → 4 (rest) → 5**. Part 1c is **cut**.

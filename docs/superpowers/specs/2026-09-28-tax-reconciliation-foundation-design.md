@@ -6,17 +6,22 @@ found that two of its three strands contained steps the codebase cannot perform.
 Do not plan from this file. Read instead:
 
 - `2026-09-28-brokerage-cash-legs-design.md` (**1a**) — closes the $15,000; the only
-  part 4 blocks on. Generalises the existing `wsDepositActivityMigration.ts` rather
-  than building new machinery, and drops the activity FK and its migration.
-- `2026-09-28-duplicate-detection-design.md` (**1b**) — supersession columns and a
-  retroactive detector. The `import_batch` auto-merge criterion is withdrawn: that
-  prefix is the import month, not the statement period.
-- `2026-09-28-statement-balances-design.md` (**1c**) — scoped to WS Chequing, the one
-  Wealthsimple source that prints both balances, and shipped non-blocking first.
+  part 4 blocks on. Extends `wsDepositActivityMigration.ts` with an `activityType`
+  allowlist, a narrowed sweep and a per-account opt-in list. **Note:** an earlier
+  framing of "just widen the account scope" is retracted inside that file as a
+  data-loss hazard. The activity FK and its migration are dropped.
+- `2026-09-28-duplicate-detection-design.md` (**1b**) — **detect and report only**;
+  the supersession half is deferred. The `import_batch` auto-merge criterion is
+  withdrawn: that prefix is the import month, not the statement period.
+- `2026-09-28-statement-balances-design.md` (**1c**) — **CUT.** Retained only for its
+  per-source balance evidence.
+
+Also written since: `2026-09-28-t1-provenance-design.md` (**part 0**, ships first)
+and `2026-09-28-instalments-and-forward-view-design.md` (**part 5**).
 
 Retained for the problem statement and the prod evidence, both of which still hold.
 **Type:** Import correctness + data integrity, backend
-**Part:** 1 of 4 — the base the other three rest on
+**Part:** 1 — superseded, split into 1a / 1b / 1c — the base the other three rest on
 
 ## Problem
 

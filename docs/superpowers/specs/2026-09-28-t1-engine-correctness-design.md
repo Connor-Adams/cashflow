@@ -8,7 +8,7 @@
 ## Problem
 
 Connor's personal T1 "seems low". Investigation on 2026-09-28 separated that into
-data completeness (specs 1, 3, 4) and engine correctness (this spec). Three
+data completeness (parts 0, 1a, 3, 4) and engine correctness (this spec). Three
 engine defects are real, verified, and independent of any data question.
 
 ### 1. `rates-2026.ts` is a projection wearing a "VERIFIED" header
@@ -432,15 +432,17 @@ Backend `node:test` via `tsx`, colocated per house convention.
 
 ## Relationship to the other specs
 
-Four specs, written 2026-09-28, addressing "the personal tax section needs to be
 accurate".
 
-1. **Reconciliation foundation** — brokerage importer writes `transactions`,
-   statement-balance anchoring, duplicate detection. The base.
-2. **Engine correctness** — this spec. Fully independent; can proceed in parallel
-   with 1.
-3. **T1 completeness gate** — depends on 1, which produces the signals.
-4. **2026 data backfill** — depends on 1's importer fix.
+**0** Provenance (ships first) · **1a** Brokerage cash legs · **1b** Duplicate
+detection, detect-and-report · **1c** Statement balances (**cut**) · **2** Engine
+correctness, this part · **3** Completeness gate · **4** 2026 backfill ·
+**5** Instalments and the forward view.
 
-Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 3 → 1b → 5**. Part 1c is **cut**.
-against published sources, independent of the state of the data.
+This part shares no file, migration or test with 1a, so the two could run in
+parallel — but it is scheduled after part 4's first steps because its measured value
+to Connor is $12–$30/yr against part 4's thousands. Note also the cache-invalidation
+decision above: without a version component in both return hashes, nothing in this
+part changes a number on screen.
+
+Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 1b → 3 → 4 (rest) → 5**. Part 1c is **cut**.

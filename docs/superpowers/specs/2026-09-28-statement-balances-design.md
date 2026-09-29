@@ -117,4 +117,4 @@ Part 3's "derived balance diverging from the latest statement closing balance" s
 depends on this part, and therefore covers **only accounts whose source prints a
 balance**. Part 3 must say so rather than implying whole-ledger coverage.
 
-Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 3 → 1b → 5**. Part 1c is **cut**.
+Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 1b → 3 → 4 (rest) → 5**. Part 1c is **cut**.

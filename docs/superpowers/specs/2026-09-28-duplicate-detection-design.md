@@ -140,8 +140,9 @@ A superseded Transaction is excluded from: every tax computation
 It **remains** visible in the transaction list, flagged, and remains attached to its
 `ImportHistory`.
 
-The implementation plan must enumerate the call sites it edits. The exclusion is the
-bulk of this part's work, not an afterthought.
+*(Deferred with the supersession half. When it is reinstated, the implementation
+plan must enumerate the call sites it edits — that exclusion is the bulk of that
+work, not an afterthought.)*
 
 ### Rollback
 
@@ -154,16 +155,22 @@ is 20 KB with a TOCTOU re-preview inside the SQL transaction; this is not a one-
 
 ### Primitives check
 
-Duplicate suspicion is **derived** — no table. The supersession marker is two
-nullable columns on **Transaction**, an existing primitive. One migration, two
-`addColumn` calls, nullable with no default, so no backfill and no table rewrite on
-Postgres; a null marker means "not superseded". No new status machine.
+Duplicate suspicion is **derived** — no table, no column, no migration, nothing
+persisted. As scoped this part is a query and a report.
+
+*(Deferred design, if supersession is later reinstated: two nullable columns on
+**Transaction**, an existing primitive — one migration, two `addColumn` calls,
+nullable with no default, so no backfill and no table rewrite on Postgres.)*
 
 ## Scope
 
-**In:** a new detector module under `backend/src/import/`, a script wrapper following
-`backend/scripts/migrate-ws-deposit-activities.ts`, `models/Transaction.ts`, one
-migration, `rollbackImportBatch.ts`, and the enumerated exclusion sites.
+**In:** a new detector module under `backend/src/import/`, exposed so part 3 can call
+it per request, plus a script wrapper following
+`backend/scripts/migrate-ws-deposit-activities.ts`.
+
+**Out, per the scope decision at the top of this file:** `models/Transaction.ts`, the
+migration, `rollbackImportBatch.ts`, and the exclusion sweep. The sections below that
+describe them are the deferred design, not this part's work.
 
 **Out:** the fingerprint divergence itself — diagnosed above as largely
 unpreventable, and explicitly **not** on this part's critical path. Also out:
@@ -178,9 +185,11 @@ Backend `node:test` via `tsx`, colocated.
   on one day).
 - A row classified only by an inherited category, with a null override, is **not**
   auto-merged.
-- A superseded row is excluded from `buildPersonalFacts`, from derived-balance
-  arithmetic and from the classification queue, and **is** still returned by the
-  transaction list.
-- Rollback of the batch holding the surviving row clears the dangling
-  `superseded_by_transaction_id`.
 - The detector is period-bounded: a call for 2026 does not scan 2023.
+- The detector returns pairs classified **certain** or **for review**, and changes
+  no row.
+- It is callable from part 3's completeness path within that part's latency budget.
+
+*(Deferred, with supersession: exclusion from `buildPersonalFacts`, derived-balance
+arithmetic and the classification queue while remaining in the transaction list; and
+rollback clearing a dangling `superseded_by_transaction_id`.)*

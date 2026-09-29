@@ -69,14 +69,14 @@ stayed stalled until September.
 
 | Gap | Worth |
 |---|---|
-| $42,000 of corp draws untagged (May–Aug, found 2026-09-16) | **~$4,430** of tax |
+| $42,000 of corp draws untagged (May–Aug, found 2026-09-16) | **~$4,239** of tax |
 | $15,000 draw whose corp leg was never written (brokerage cash leg, spec 1) | **~$3,040** of tax |
 | WS Corporate Chequing (account 24) uncovered 2026-08-14 → 2026-09-28 | est. $8–14k of draws, **~$1,700–$3,000** of tax |
 | ~25 duplicate pairs, $28,848 phantom corp inflow | corrupts every balance |
 | No 2026 carryforward roll (personal stops at `as_of_year 2025`) | RRSP/FHSA room wrong |
 
 Note how unevenly those scale. The $42,000 backlog was worth $4,430 because it
-spanned a near-zero base (total payable $300 → $4,731); the $15,000 draw is worth
+spanned a near-zero base (total payable $300.00 → $4,538.85, measured in part 2); the $15,000 draw is worth
 only $3,040 because it lands on top of it, at a ~20% marginal rate on cash
 non-eligible dividends. **A gap's tax impact depends on what is already counted,
 so the estimate must be computed against the current return, not from a stored
@@ -90,7 +90,6 @@ None of these produced a single character of warning on the T1.
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Provenance | The number always states whether it is actuals, actuals + overrides, or a projection; a projection is never the default for a year with actuals | The tab currently defaults to a projection with no cue, which is a worse failure than an incomplete total: an incomplete actual is wrong by the gap, a projection is not the year at all. |
 | Gate hardness | **Show the number, never bare** | Connor's call. A refused total is hostile when you want a rough mid-year sense; a bare total is what caused this three times. |
 | Shape | Typed `completeness: { status, blockers[], gaps[] }` on the return DTO | A first-class field, not a warning string. The UI can treat it structurally; a string forces re-parsing. |
 | Where it is computed | A dedicated `buildCompletenessReport(entityId, year)` module | Keeps `buildPersonalFacts` focused on facts. Completeness needs import history and statement coverage, outside that builder's remit. |
@@ -226,13 +225,6 @@ Backend `node:test` via `tsx`, colocated. Frontend vitest.
 - Frontend: the total never renders without the completeness block; blockers link
   to their fix surface; bulk-classify applies one treatment to a multi-row
   selection and reflects the result without a full refetch.
-- **Provenance:** with a baseline and a later-created `projection_root` both
-  present for a year, the tab selects the baseline. A projection, when chosen,
-  renders labelled as a projection and states that it holds no transactions from
-  the displayed year. `ScenarioTree` renders all three kinds distinguishably.
-- Overview and Personal T1 report the same figure for a year whose selected
-  scenario is the actuals baseline. This is the regression guard for the two tabs
-  drifting apart again.
 
 ## Relationship to the other specs
 
@@ -244,4 +236,4 @@ Backend `node:test` via `tsx`, colocated. Frontend vitest.
    is finished. The gate reaching `complete` for 2026 **is** part 4's exit
    condition.
 
-Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 3 → 1b → 5**. Part 1c is **cut**.
+Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 1b → 3 → 4 (rest) → 5**. Part 1c is **cut**.
