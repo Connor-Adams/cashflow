@@ -19,11 +19,24 @@ indexed amounts, November 2025; CPP/EI, November–December 2025). Every *indexe
 constant in it is therefore wrong.
 
 The file applied **2.7%** (`:2` — "2025 thresholds x 1.027"); the published
-federal factor was 2.0% and Ontario's was 1.9%. It applied that 2.7% to exactly
-one Ontario item, the surtax bands (`:74`), and copied every other Ontario amount
-verbatim from 2025 with a comment saying so (`:21,:34,:41,:46,:109,:115`). So the
-treatment is inconsistent, but in the opposite direction to indexing Ontario
-federally: Ontario is frozen everywhere except the surtax.
+federal factor was 2.0% and Ontario's was 1.9%.
+
+**The Ontario amounts are worse than the file's own comments admit.** Several carry
+`// 2025 value reused` (`:37`, `:109`, `:115`) but hold neither the 2025 value nor
+anything derived from it — they are **2024 values indexed by 1.027**:
+
+| Field | 2024 | 2025 | in `rates-2026.ts` | 2024 × 1.027 |
+|---|---|---|---|---|
+| `spousalAmountOntario` | 10,527 | 10,823 | **10,818** | 10,811 |
+| `ageAmountOntario` | 5,916 | 6,223 | **6,078** | 6,076 |
+| `dtcBaseOntario` | 9,586 | 10,298 | **9,852** | 9,845 |
+| `pensionIncomeAmountCapOntario` | 1,641 | 1,762 | **1,686** | 1,685 |
+
+Only `basicPersonalAmountOntario` (12,747) and the Ontario brackets genuinely match
+2025. So those four amounts are two years stale *and* indexed by the wrong factor,
+and the comments claiming otherwise cannot be trusted as documentation. An earlier
+draft of this spec repeated "Ontario is frozen at 2025"; that is true of the BPA and
+the brackets only.
 
 Not every constant is wrong. The gross-ups, the federal and Ontario DTC rates, the
 CPP basic exemption and rates, the non-indexed Ontario brackets, the $2,000 pension
@@ -146,9 +159,10 @@ This paragraph exists so the next audit does not re-raise it.
 | Source of 2026 constants | CRA / Service Canada / Ontario published figures, one citation per value | Ends the "LLM-generated, not cross-checked" provenance flagged in the 2026-06-08 audit. |
 | Values with only secondary-source support | Ship them, annotate `@low-confidence` with the source | Better than a projection, honest about what is not primary-sourced. |
 | `rates-2027.ts` | Leave as a projection; mark it `provenance: 'projected'` | 2027 figures are not published. A projection is fine for scenario planning and wrong for a return, and the provenance field is what expresses that. |
+| T2 scope | The corporate inclusion-rate change is **in scope and intended**; corp tests must be updated to expect 50% for 2026/2027 | It is the same cancellation, and leaving corporations at a repealed 66⅔% to keep this spec "backend-personal-only" would be preserving a known error for tidiness. |
 | Guard against recurrence | `ratesFor(year)` must refuse to serve a table flagged as projected to a filing-grade caller | The header at `rates-2026.ts:1-4` **does** disclose that it is "encoded from indexation projection… engineer MUST update once CRA publishes". It told the truth and was served anyway. A citation test would not have caught it; the real failure is that `ratesFor(2026)` (`brackets.ts:27-31`, called unconditionally at `routes/tax.ts:394`) has no notion of provenance. |
 | What "filing-grade" means | A `provenance: 'published' \| 'projected'` field on the rate table; the return route refuses `projected` for a year that has closed, and surfaces it as a completeness gap otherwise | The codebase has no such concept today. Naming the mechanism here stops three implementers building three different guards. |
-| `capitalGainsInclusionHigh` | **Retain the field, set it to 0.5** for 2026/2027 | Removing it changes T2: it is read as the *corporate* inclusion rate with a `?? capitalGainsInclusion` fallback (`engine/t2.ts:65`, `integration.ts:106`, `aaii.ts:16`), so dropping it would silently flip corp capital gains from 66.67% to 50% — a T2 behaviour change this spec does not own. `rates-2025.ts:59-65` already established this convention: retain at 50% so downstream code compiles and computes correctly. An earlier draft proposed removal and contradicted that precedent without engaging it. |
+| `capitalGainsInclusionHigh` | **Set it to 0.5**, and accept that this changes T2 — because the change is correct | Two earlier drafts got this wrong in opposite directions. The field is read as the *corporate* inclusion rate at `engine/t2.ts:65`, `integration.ts:106` and `aaii.ts:16`, always as `r.capitalGainsInclusionHigh ?? r.capitalGainsInclusion` — and `capitalGainsInclusion` is `0.5`. So **setting the field to 0.5 and deleting it are behaviourally identical**; a draft that argued "retain it so T2 does not change" was self-defeating. More importantly, T2 *should* change: the cancelled 2024 measure put corporations at 66⅔% on **all** capital gains with no threshold, and its cancellation returns them to 50% for 2026 exactly as it does individuals. `t2.ts:63`'s comment ("corps use the high rate (66.67%) on ALL gains") describes a regime that no longer exists. Retain the field for `rates-2024.ts`, where 0.666667 is legitimate. |
 | Slip box fix | Read box 11 / box 50, and re-gate `hasXSlips` off those boxes | Fixing the box without fixing the predicate leaves failure mode A in place. |
 | AMT donation fraction | New rate-table field, `amtDonationCreditFraction: 0.80` | Distinct statutory fraction; folding it into the 50% is simply wrong. |
 | `amtExemption` | Derive from the 4th federal bracket, don't store independently | Removes a class of drift and the inherited transposition. |
@@ -250,8 +264,8 @@ gains inclusion 100%; non-refundable credits allowed 50%; **donation credit allo
 ## Materiality
 
 Direction is **not** uniform. Every federal bracket sits too high (understates
-federal tax). Every Ontario amount except the surtax is frozen at 2025 (overstates
-Ontario tax). But the surtax thresholds were indexed *up* — 5,864/7,504 against a
+federal tax). The Ontario BPA and brackets are frozen at 2025, and four Ontario credit
+amounts are 2024 values mis-indexed (both overstate Ontario tax). But the surtax thresholds were indexed *up* — 5,864/7,504 against a
 published 5,818/7,446 — which **understates** surtax.
 
 **Measured, not estimated.** `buildT1` was run against Connor's 2026 fact shape

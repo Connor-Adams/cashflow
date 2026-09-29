@@ -15,13 +15,20 @@ Three findings, measured against prod on 2026-09-28.
 
 ### 1. A brokerage cash movement is recorded on only one side
 
-`backend/src/import/pdf/wealthsimpleActivityCodes.ts` routes by **code**, not by
-account kind — `routeRow` is `depositRouting(…) ?? brokerageRouting(…)`.
+Routing dispatches on **account kind first, then by code** —
+`routeRow(ctx, isDepositAccount)` in `pdf/wealthsimpleBrokerage.ts:479-482` is
+`depositRouting(ctx, isDepositAccount) ?? brokerageRouting(ctx)`, and
+`depositRouting` returns `null` immediately when `!isDepositAccount` (`:460-464`).
+(Two earlier drafts of this spec got this backwards in both directions. The
+colocated test comment at `pdfWealthsimpleBrokerage.test.ts:649-650` settles it:
+"Routing keys off the account type the caller supplies, not off a code list WS can
+rename again.")
 
 On a **deposit** account (WS Cash / Chequing / Save) every row goes through
-`DEPOSIT_CODE_TXN_TYPE` (`:104-126`) into the cash ledger as `transactions`; the
-comment at `:94-96` is explicit that "on a deposit account EVERY row is a
-cash-ledger event, so this covers the brokerage-taxonomy codes too".
+`DEPOSIT_CODE_TXN_TYPE` (`wealthsimpleActivityCodes.ts:104-126`) into the cash
+ledger as `transactions`; the comment at `:94-96` is explicit that "on a deposit
+account EVERY row is a cash-ledger event, so this covers the brokerage-taxonomy
+codes too".
 
 A **brokerage** account writes `transactions` too — but only for twelve cash codes
 (`SPEND`, `DCTFEE`, `OBP`, `CASHBACK`, `GIVEAWAY`, `AFT_IN/OUT`, `P2P_IN/OUT`,
@@ -147,10 +154,15 @@ A pair auto-merges only when **all** hold:
      (`models/ImportHistory.ts:15-51`), so this prefix is the only period signal
      available and parsing it is the mechanism — not a placeholder for one.
 3. Neither row has been manually edited. Concretely: `business_override` is false,
-   `tax_treatment_override` is null, `final_split_type` equals its column default
+   `tax_treatment_override` is null **and** neither an inherited
+   `Category.taxTreatment` nor a legacy `finalCategory` classifies the row — the
+   override is only one of three classification routes (`buildPersonalFacts.ts:139-147`),
+   so testing it alone would auto-merge a categorised row; `final_split_type`
+   equals its column default
    (every Transaction has one — `models/Transaction.ts:72` — so "no split" needs
-   this predicate, not a null check), and no receipt joins to it (receipts are a
-   separate primitive; the join must be named in the implementation plan).
+   this predicate, not a null check), and no receipt joins to it via
+   `Transaction.hasMany(Receipt, { foreignKey: 'transaction_id', as: 'receipts' })`
+   — declared in `models/index.ts:507-508`, not in `models/Transaction.ts`.
 
 **Why the fingerprints did not already catch these.** `dedupExisting.ts:136,161-185`
 queries *all* existing rows in the account by `sourceIdentityFingerprint`, at import
@@ -252,9 +264,10 @@ Backend `node:test` via `tsx`, colocated.
 
   That is this spec's honest exit condition. An earlier draft asserted the draw
   ends up "visible to `buildPersonalFacts`", which this spec cannot deliver:
-  `buildPersonalFacts` is entity-scoped and reaches `nonEligibleDividends` only via
-  a *personal* transaction's `taxTreatmentOverride`
-  (`buildPersonalFacts.ts:139-154`). The bridge row is on the corp side, and
+  `buildPersonalFacts` is entity-scoped and reaches `nonEligibleDividends` only
+  from a *personal* transaction — by `taxTreatmentOverride`, by an inherited
+  `Category.taxTreatment`, or by a legacy snake_case `finalCategory`
+  (`buildPersonalFacts.ts:139-147,154`). All three routes are personal-side. The bridge row is on the corp side, and
   nothing here classifies either leg — that is a human decision, made through the
   queue, and it belongs to spec 4.
 

@@ -126,15 +126,15 @@ Transaction, through the existing patch route. No new status machine.
 ## Scope
 
 **In:** a new `backend/src/tax/completeness/` module; the return route
-(`backend/src/routes/tax.ts:361-425`) merging the report into **both** of its
-response constructions — note the cache-hit path returns early at `:391` with a
-separately-built object, so editing only the miss path ships a gate that vanishes
+(`backend/src/routes/tax.ts:361-444`) merging the report into **both** of its
+response constructions — note the cache-hit path builds its response at `:384-390` and
+returns early at `:391`, while the miss path responds separately at `:433`, so editing only the miss path ships a gate that vanishes
 whenever the cache is warm; a shared return DTO; `useTaxReturn`;
 `PersonalT1Tab.tsx`; and bulk selection + multi-apply in `ClassifyTab.tsx`.
 
 **There is no `TaxReturnDto` in `shared/api-types.ts` today** — `grep TaxReturn`
 returns nothing there. The return shape lives frontend-side in
-`frontend/src/hooks/useTaxReturn.ts:20` and the route builds its response ad hoc.
+`frontend/src/hooks/useTaxReturn.ts:12-18` and the route builds its response ad hoc.
 Promoting it to the shared contract is part of this work, not a given.
 
 **Bulk classification semantics**, which must be decided rather than discovered:
