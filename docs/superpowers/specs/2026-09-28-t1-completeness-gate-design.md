@@ -221,8 +221,10 @@ The completeness block sits **above** the total, always rendered. When
 — absence of warning must itself be affirmative, or "no warnings" and "nobody
 checked" look identical.
 
-When not complete it lists each blocker and gap with its dollar estimate and a
-link to where it is fixed (the classify tab, the import page, the duplicate review).
+When not complete it lists each blocker and gap with a link to where it is fixed,
+and with a figure **only where one is honest** — every blocker shows its amount, a
+tax estimate appears where the character is known, and the three gaps that must
+render none show none (the classify tab, the import page, the duplicate review).
 The total renders below, normally, with a marker tying it to the block.
 
 No modal, no blocking interstitial. The number stays readable; it just never

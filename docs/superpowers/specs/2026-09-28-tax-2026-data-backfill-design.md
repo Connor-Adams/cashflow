@@ -101,7 +101,7 @@ $20.73 — the duplicated RAILWAY row 11748/11559.)
 | Source | Window | Why |
 |---|---|---|
 | WS Corporate Chequing (WK79NVW07CAD) | 2026-08-14 → 2026-09-28 | Settles the $8–14k estimate. The CSV export can be pulled today; the monthly statement lands ~2026-10-01. |
-| WS Corporate Investing (HQ8H0GZ07CAD) | 2026-08, 2026-09 | Needs part 1a's forward fix to `brokerageRouting` first — with it, rows this import creates arrive **with** their cash leg and need no conversion. Do **not** blanket re-run the converter afterwards: on account 13 each new activity now pairs with its own mirror at one `pairKey`, so the converter sees *shadows*, and 1a's opt-in gate reports those for `--confirm-shadows` rather than acting on them. A re-run is for activities imported **before** the forward fix landed. |
+| WS Corporate Investing (HQ8H0GZ07CAD) | 2026-08, 2026-09 | Needs part 1a's forward fix to `brokerageRouting` first — with it, rows this import creates arrive **with** their cash leg and need no conversion. Do **not** blanket re-run the converter afterwards: on account 13 each new activity now pairs with its own mirror at one `pairKey`, so the converter sees *shadows* — and under 1a's insert-only rule it reports them and removes nothing, so a re-run is merely noise. A re-run is for activities imported **before** the forward fix landed. |
 | Personal WS Chequing (WK3DD9X35CAD) | 2026-09 | Ledger stops 2026-08-27; September draws need a personal leg to link to. |
 | RBC Digital Choice Business (account 28) | **2026-09-02 → 2026-10-05** | Ledger stops 2026-09-01. An earlier draft started this window at 2026-09-05 and left 09-02 → 09-04 uncovered by the plan. |
 
