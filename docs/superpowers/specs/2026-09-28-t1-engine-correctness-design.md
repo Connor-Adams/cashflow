@@ -195,7 +195,7 @@ This paragraph exists so the next audit does not re-raise it.
 | Unknown dividend eligibility | Default to **non-eligible**, and warn | `buildPersonalFacts.ts:205-209` is `security?.dividendEligibility ?? 'eligible'`, and the txnType pass at `:307` pushes to `eligibleDividends` unconditionally. So an XEQT or VFV distribution in non-registered account 15 collects the 15.0198% federal and 10% Ontario **eligible** DTC it is not entitled to — silently understating tax. Non-eligible is the conservative default; an unknown-eligibility dividend should also raise a warning, because the right answer is on a T5 the app does not have. |
 | Double-count guard | Exclude from the `txnType` pass any row the treatment pass already routed | Inverting the guard — skip rows already classified as income, rather than listing the four non-income treatments — is the fix that does not need maintaining as treatments are added. |
 | Guard against recurrence | A `provenance: 'published' \| 'projected'` field, enforced at **the return route** | The header at `rates-2026.ts:1-4` already discloses "encoded from indexation projection… engineer MUST update once CRA publishes". It told the truth and was served anyway, so a citation test would not have caught it. |
-| Where the guard lives | The return route, **not** `ratesFor` | `ratesFor` (`brackets.ts:27-31`) takes only a year and has no caller identity, so "filing-grade caller" is not expressible there — and `scenarios/computeScenario.ts:26`, `computeHouseholdPlan.ts:244` and `projectPersonalFactsFromPrevYear.ts:46` all legitimately want the 2027 projection. |
+| Where the guard lives | **Both** return paths — `routes/tax.ts` and `routes/tax-scenarios.ts` / `computeScenarioReturn` — and **not** `ratesFor` | `ratesFor` (`brackets.ts:27-31`) takes only a year and has no caller identity, so "filing-grade caller" is not expressible there — and `scenarios/computeScenario.ts:26`, `computeHouseholdPlan.ts:244` and `projectPersonalFactsFromPrevYear.ts:46` all legitimately want the 2027 projection. |
 | The "surface it as a gap" half | **Part 3 owns it** | It is part 3's `completeness.gaps` field. Keeping it here made this part depend on part 3 while claiming independence — and since 2026 does not close until 2026-12-31, the gap surface is the only live behaviour for the whole window Connor cares about. |
 | `capitalGainsInclusionHigh` | **Set it to 0.5**, and accept that this changes T2 — because the change is correct | Two earlier drafts got this wrong in opposite directions. The field is read as the *corporate* inclusion rate at `engine/t2.ts:65`, `integration.ts:106` and `aaii.ts:16`, always as `r.capitalGainsInclusionHigh ?? r.capitalGainsInclusion` — and `capitalGainsInclusion` is `0.5`. So **setting the field to 0.5 and deleting it are behaviourally identical**; a draft that argued "retain it so T2 does not change" was self-defeating. More importantly, T2 *should* change: the cancelled 2024 measure put corporations at 66⅔% on **all** capital gains with no threshold, and its cancellation returns them to 50% for 2026 exactly as it does individuals. `t2.ts:63`'s comment ("corps use the high rate (66.67%) on ALL gains") describes a regime that no longer exists. Retain the field for `rates-2024.ts`, where 0.666667 is legitimate. |
 | Slip box fix | Read box 11 / box 50, and re-gate `hasXSlips` off those boxes | Fixing the box without fixing the predicate leaves failure mode A in place. |
@@ -352,8 +352,10 @@ the AMT call site), `backend/src/tax/engine/amt.ts` (donation fraction, plus an
 `AmtInput` field for the donation credit — `amt.ts:4-14` has none today, so the
 rate-table field is inert without it), `backend/src/tax/engine/types.ts` (two new
 rate-table fields: the AMT donation fraction and `provenance`),
-`backend/src/tax/engine/brackets.ts` (the `provenance` field) and the return route
-(the guard),
+`backend/src/tax/engine/brackets.ts` (the `provenance` field), **both** return paths
+for the guard — `routes/tax.ts` and `routes/tax-scenarios.ts` /
+`tax/scenarios/computeScenarioReturn.ts`, since `routes/tax.ts` feeds only the
+Overview tab (part 0) —
 `backend/src/tax/services/rollPersonalCarryforwards.ts` (FHSA room accumulation),
 `backend/src/tax/builders/buildPersonalFacts.ts` (dividend-eligibility default, the
 double-count guard),
@@ -399,10 +401,17 @@ Backend `node:test` via `tsx`, colocated per house convention.
   spec — a table-driven test, one case per value, so a regression names the value.
   Values this spec marks "verify — not researched" must be researched before the
   plan is written; the test cannot be written against a blank.
-- A table marked `provenance: 'projected'` is refused by the return route for a
-  closed year and surfaced as a completeness gap otherwise. This is the guard
-  against the exact failure being fixed — not a citation test, which the honest
-  header at `rates-2026.ts:1-4` would already have passed.
+- A table marked `provenance: 'projected'` is refused for a **closed** year, on
+  **both** return paths, using an injected table. This is the guard against the exact
+  failure being fixed — not a citation test, which the honest header at
+  `rates-2026.ts:1-4` would already have passed.
+
+  Note what this test can and cannot cover when it ships. 2026 does not close until
+  2026-12-31, so the refusal branch is **dormant** for the whole window Connor works
+  in, and the only live behaviour — surfacing a projected table as a completeness gap
+  — belongs to part 3 and is tested there. That is a real limitation of shipping this
+  part before part 3, stated rather than papered over: at part 2's ship time the guard
+  is exercised only against a synthetic closed year.
 - `capitalGainsInclusionHigh` stays present at 0.5: assert `t2.ts`, `integration.ts`
   and `aaii.ts` still compute corporate capital gains unchanged.
 - The corrected T3 form and the corrected engine boxes agree: a T3 entered through

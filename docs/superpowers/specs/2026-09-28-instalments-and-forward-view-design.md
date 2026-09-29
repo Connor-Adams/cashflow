@@ -68,7 +68,7 @@ exceeds $3,000 in the current year **and** in either of the two preceding years.
 |---|---|---|---|
 | 2024 | **$0.00** | prod `tax_return_snapshots` id 3: totalIncome 98.79, totalPayable 0.00 | No |
 | 2025 | **≈ $0** — a refund of $47.35 | prod id 2: totalPayable 3,727.81 less T4 withholding 3,775.16 | No |
-| 2026 | ~$8,400–$16,600 depending on final draws (part 4) | — | **Not required**, because both 2024 and 2025 were under $3,000 |
+| 2026 | ~$8,400–$16,610 depending on final draws (part 4) | — | **Not required**, because both 2024 and 2025 were under $3,000 |
 | 2027 | well over $3,000 on any similar draw pattern | — | **Required**, first payment 2027-03-15 |
 
 An earlier draft of this table wrote 2025 as "~$300" — that figure is actually

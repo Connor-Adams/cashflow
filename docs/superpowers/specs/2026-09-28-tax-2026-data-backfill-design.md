@@ -174,8 +174,7 @@ dividend draws and climbs quickly after that.
 year end, and `instalment_payments` is empty. `shareholder_loans` is also empty
 despite $68,000+ of corp→personal flow.
 
-These figures are hand calculations for sizing. The app's own number, once specs
-1–3 land and this data is in, is the one to file against — and if it disagrees
+These figures are hand calculations for sizing. The app's own number, once parts 0–3 land and this data is in, is the one to file against — and if it disagrees
 with these, that disagreement is itself a finding.
 
 ## Out of scope
