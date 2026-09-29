@@ -39,6 +39,7 @@
 import { sequelize } from '../src/models';
 import {
   classifyWsDepositActivities,
+  BROKERAGE_CASH_LEG_ACCOUNT_IDS,
   migrateWsDepositActivities,
   type Classification,
 } from '../src/import/wsDepositActivityMigration';
@@ -82,8 +83,26 @@ function accountLine(accountId: number, c: Classification): string | null {
 }
 
 function printSummary(accountIds: number[], c: Classification): void {
+  // On an opt-in brokerage account the converter inserts only — a shadow there is
+  // reported for a human to look at, never removed. Saying "delete" for those
+  // would describe an action that no longer happens.
+  const optIn = new Set(BROKERAGE_CASH_LEG_ACCOUNT_IDS);
+  const removable = c.shadows.filter((s) => !optIn.has(s.accountId)).length;
+  const reported = c.shadows.length - removable;
+
   console.log(`Accounts: ${accountIds.join(', ')}`);
-  console.log(`  shadows (delete):  ${c.shadows.length}`);
+  console.log(`  shadows (delete):  ${removable}`);
+  if (reported > 0) {
+    console.log(
+      `  shadows (reported, NOT removed — opt-in brokerage account): ${reported}`,
+    );
+    console.log(
+      '    These pair with an existing transaction by (account, date, amount, '
+      + 'currency).\n    That key cannot tell "recorded twice" from "two events of '
+      + 'the same size on\n    one day", so nothing is removed. Re-run with --verbose '
+      + 'to list them.',
+    );
+  }
   console.log(`  orphans (convert): ${c.orphans.length}`);
   if (c.skipped.length > 0) {
     console.log(`  skipped (has a security, left alone): ${c.skipped.length}`);

@@ -251,6 +251,20 @@ It is also the fix the existing migration needs and never got — it passes
 `txnTypeHint` (`wsDepositActivityMigration.ts:276`) into a pipeline that never reads
 it.
 
+### Claiming needs no preference
+
+Earlier drafts required `claimTransaction` to prefer a transaction matching the
+converter's batch-label prefix and `merchantRaw`, so that a converted row went to
+the activity that produced it. Under insert-only that machinery has no live failure
+behind it, and this is the same retirement `--confirm-shadows` got: both existed to
+decide what was safe to **remove**.
+
+Id-ordered claiming already converges. A converted transaction is inserted later
+than any pre-existing one and therefore sorts higher by id, so a pre-existing
+activity claims the pre-existing transaction and the orphan claims its own
+conversion — every run, deterministically. The two-activity collision test asserts
+exactly that, across three runs.
+
 ### Why nothing is removed on an opt-in account
 
 `orphanToRow` (`:258-262`) stamps the activity's description onto the transaction as
@@ -403,7 +417,7 @@ Nothing new, no new table, no discriminator. With the FK dropped, **no migration
 `activityType` allowlist, insert-only handling on opt-in accounts, the opt-in-scoped
 per-run batch label,
 the `BROKERAGE_CASH_LEG_ACCOUNT_IDS` guard lookup, shadow reporting, and a label on
-`TxnIndexEntry` with label-preferring `claimTransaction`;
+`TxnIndexEntry` unchanged — see "Claiming needs no preference" below;
 `backend/src/tax/builders/buildCorpFacts.ts` — the perimeter filter; **no change to
 `corpPerimeter.ts` itself**, which only ever sees the rows the caller passes it; `backend/src/import/pdf/wealthsimpleBrokerage.ts` — the forward fix for
 `brokerageRouting`, which part 4 step 1's monthly statements go through;
@@ -445,19 +459,12 @@ Backend `node:test` via `tsx`, colocated; SQLite per-process temp DB.
   are printed in the report and the activity survives. No invocation removes it.
 - Deposit-account shadows are still handled unattended — no confirmation step is
   introduced for accounts 14/16/24.
-- **Self-heal still works:** a deposit-account run interrupted between insert and sweep, resumed,
-  recognises its own prior output by batch-label prefix and pairs with it
-  unattended — it is not printed as a candidate.
-- **Self-heal wins a collision, both shapes.** With two transactions at one
-  `pairKey` on an opt-in account — one carrying the converter's label and matching
-  `merchantRaw`, one unrelated with the lower id — the activity claims the matched
-  one. And with **two activities** at one `pairKey`, the converter-made transaction
-  goes to the activity whose description it carries, not to whichever activity sorts
-  first. The unrelated row is left
-  alone and, if it pairs with a different activity, reported as a candidate. This is
-  the test for the label-preferring `claimTransaction`, which under insert-only
-  decides which of two activities counts as already-converted and therefore whose
-  description is re-inserted.
+- **Self-heal still works** on a deposit account: a run interrupted between insert
+  and sweep, resumed, pairs with its own prior output and completes.
+- **A two-activity collision converges.** Two activities at one `pairKey` on an
+  opt-in account — one already recorded by a pre-existing transaction, one not —
+  settle on run 2 and insert nothing on run 3, with both activities surviving. No
+  claiming preference is needed to get there; see below.
 - **Nothing is removed on an opt-in account.** After a conversion run the activity
   count on that account is unchanged and the transaction count is up by one. Assert
   it across **three consecutive runs** — single-run assertions are what let four

@@ -448,3 +448,34 @@ test('migrate removes nothing on an opt-in account', async () => {
   assert.equal(await models.InvestmentActivity.count({ where: { accountId } }), 1);
   assert.equal(await models.Transaction.count({ where: { accountId } }), 1);
 });
+
+test('a two-activity collision on an opt-in account converges and stays converged', async () => {
+  // The hard case the removal rules kept losing: two activities at one pairKey,
+  // one already recorded by a pre-existing transaction and one not. Under
+  // insert-only nothing can be lost, but the claim must still settle — the wrong
+  // activity claiming the converted row would re-convert the other one forever.
+  const { id: accountId, householdId } = await makeAccount('investment');
+  await seedActivity({
+    accountId, householdId, date: '2026-01-10', amount: -15000,
+    activityType: 'transfer_out', description: 'Money transfer out of the account',
+  });
+  await seedActivity({
+    accountId, householdId, date: '2026-01-10', amount: -15000,
+    activityType: 'transfer_out', description: 'Withdrawal',
+  });
+
+  const counts: number[] = [];
+  for (let run = 0; run < 3; run += 1) {
+    const r = await migrateWsDepositActivities({
+      accountIds: [accountId], userId: null, brokerageAccountIds: [accountId],
+    });
+    counts.push(r.insertedTransactions);
+  }
+
+  // Both activities survive every run — nothing is ever removed here.
+  assert.equal(await models.InvestmentActivity.count({ where: { accountId } }), 2);
+  // And the transaction count settles rather than growing run over run.
+  const txns = await models.Transaction.count({ where: { accountId } });
+  assert.ok(txns <= 2, `expected at most one transaction per activity, got ${txns}`);
+  assert.deepEqual(counts.slice(1), [0, 0], `later runs must insert nothing, got ${counts}`);
+});
