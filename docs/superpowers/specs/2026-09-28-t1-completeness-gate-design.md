@@ -268,8 +268,13 @@ should not be shaped so that extending to T2 means rewriting it.
 
 Backend `node:test` via `tsx`, colocated. Frontend vitest.
 
-- Each blocker and gap type: detected when present, absent when not, with the
-  right dollar estimate. Table-driven, one case per type.
+- Each blocker and gap type: detected when present, absent when not. Table-driven,
+  one case per type.
+- **Every blocker carries the right dollar estimate. A gap carries one only where
+  the Decisions table says it is honest to** — and the three that must not
+  (truncated import, missing T5, uncounted transfer-in) assert that they render
+  **no** figure. A test demanding an estimate per gap type is the instruction that
+  manufactures the fabricated numbers this spec twice demoted an item for.
 - Worst-wins `status` across mixed inputs.
 - A genuinely complete year yields `status: 'complete'` with an affirmative line —
   the "nobody checked looks like no problems" failure.
