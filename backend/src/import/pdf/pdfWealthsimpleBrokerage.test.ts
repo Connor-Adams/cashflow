@@ -852,3 +852,74 @@ test('deposit account: INT stays authoritative', () => {
   assert.equal(result.transactions[0].overrideTxnType, 'interest');
   assert.equal(result.transactions[0].txnTypeHint, undefined);
 });
+
+// ---------------------------------------------------------------------------
+// Forward fix (part 1a): a cash crossing on a BROKERAGE account must produce its
+// cash leg at import time, not only an InvestmentActivity.
+//
+// Without this the converter is a permanent cleanup job rather than a one-off:
+// every new statement re-creates the hole that lost a $15,000 owner draw. The
+// mirror also has to carry an authoritative txnType, because the allowlisted codes
+// are absent from CASH_CODE_TXN_TYPE, so it would otherwise be typed 'unknown' for
+// a positive row — and because the narrative detector matches "transfer out of the
+// account" but not "transfer into the account".
+// ---------------------------------------------------------------------------
+
+test('brokerage TRFOUT emits both an activity and a typed cash mirror', () => {
+  const lines: PdfLine[] = [
+    mk('ORDER EXECUTION ONLY ACCOUNT', 1, 798.8),
+    mk(' Account No.   Owner   Statement Period', 1, 762.2),
+    mk(' HQ8H0GZ07CAD   Connor Adams   2026-01-01 - 2026-01-31', 1, 749.6),
+    mk('Phone: (416) 595-7200 Fax: (647) 245-1002', 1, 713.2),
+    mk(' Margin Account', 1, 699.9),
+    mk(' Activity - Current period', 2, 786.3),
+    mk(' Date   Transaction   Description   Debit ($)   Credit ($)   Balance ($)', 2, 769.6),
+    mk('2026-01-10   TRFOUT   Money transfer out of the account   $15,000.00   $0.00   $0.00', 2, 758.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, { defaultCurrency: 'CAD' });
+
+  // The investment side is unchanged — this is the account's own ledger.
+  assert.equal(result.investmentActivities!.length, 1);
+  assert.equal(result.investmentActivities![0].activityType, 'transfer_out');
+
+  // And the cash side now exists, so the tax engine can see the draw.
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].amount, -15000);
+  // Authoritative, not a hint: the narrative cannot be relied on for the
+  // symmetric "transfer into the account" wording.
+  assert.equal(result.transactions[0].overrideTxnType, 'transfer');
+});
+
+test('brokerage TRFIN — the wording the narrative detector misses — also mirrors', () => {
+  const lines: PdfLine[] = [
+    mk('ORDER EXECUTION ONLY ACCOUNT', 1, 798.8),
+    mk(' Account No.   Owner   Statement Period', 1, 762.2),
+    mk(' HQ8H0GZ07CAD   Connor Adams   2026-07-01 - 2026-07-31', 1, 749.6),
+    mk('Phone: (416) 595-7200 Fax: (647) 245-1002', 1, 713.2),
+    mk(' Margin Account', 1, 699.9),
+    mk(' Activity - Current period', 2, 786.3),
+    mk(' Date   Transaction   Description   Debit ($)   Credit ($)   Balance ($)', 2, 769.6),
+    mk('2026-07-06   TRFIN   Money transfer into the account   $0.00   $10,000.00   $10,000.00', 2, 758.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.equal(result.investmentActivities!.length, 1);
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].amount, 10000);
+  assert.equal(result.transactions[0].overrideTxnType, 'transfer');
+});
+
+test('a brokerage BUY still produces no cash mirror', () => {
+  const lines: PdfLine[] = [
+    mk('ORDER EXECUTION ONLY ACCOUNT', 1, 798.8),
+    mk(' Account No.   Owner   Statement Period', 1, 762.2),
+    mk(' HQ8H0GZ07CAD   Connor Adams   2026-01-01 - 2026-01-31', 1, 749.6),
+    mk('Phone: (416) 595-7200 Fax: (647) 245-1002', 1, 713.2),
+    mk(' Margin Account', 1, 699.9),
+    mk(' Activity - Current period', 2, 786.3),
+    mk(' Date   Transaction   Description   Debit ($)   Credit ($)   Balance ($)', 2, 769.6),
+    mk('2026-01-02   BUY   XEQT - iShares: Bought 100 shares (executed at 2026-01-02)   $7,500.51   $0.00   $0.00', 2, 758.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.equal(result.investmentActivities!.length, 1);
+  assert.equal(result.transactions.length, 0);
+});

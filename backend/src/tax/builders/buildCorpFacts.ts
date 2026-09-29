@@ -87,8 +87,71 @@ export async function buildCorpFacts(
     currency: (a as unknown as { currency?: string }).currency ?? 'CAD',
   }));
 
+  // The brokerage cash mirror (part 1a) is a plain transaction on an investment
+  // account that exists only because an InvestmentActivity exists. The perimeter
+  // split has never seen such a row: a POSITIVE one cannot be claimed by
+  // `claimMatchingCashMove` — that needs an opposite sign and the activity is
+  // positive too — so it falls through to `revenue.push` as phantom active
+  // business income. A negative one lands in `expenses` as a phantom deduction.
+  //
+  // Keyed on the activity feed rather than on `txnType`, because the allowlisted
+  // Wealthsimple codes are absent from CASH_CODE_TXN_TYPE and a forward-fix mirror
+  // carries the statement's own import batch, not the converter's label — so
+  // neither type nor provenance identifies it. An activity at the same account,
+  // date, amount and currency does, whatever produced the mirror.
+  //
+  // Its own query, deliberately: `cashMoves` above omits `cash_movement`, and
+  // widening it would also widen `internalCashMoves` and move corp totals for
+  // unrelated reasons.
+  const mirrorActivities = accountIds.length
+    ? await InvestmentActivity.findAll({
+      where: {
+        accountId: accountIds,
+        activityType: ['transfer_in', 'transfer_out', 'cash_movement'],
+        tradeDate: { [Op.between]: [startDate, endDate] },
+      },
+    })
+    : [];
+  const mirrorKey = (accountId: number, date: string, amount: string, currency: string) =>
+    `${accountId}|${String(date).slice(0, 10)}|${Number(amount).toFixed(4)}|${(currency || 'CAD').toUpperCase()}`;
+  const unclaimedMirrors = new Map<string, number>();
+  for (const a of mirrorActivities) {
+    const k = mirrorKey(
+      a.accountId as number,
+      a.tradeDate as unknown as string,
+      String(a.amount ?? 0),
+      (a as unknown as { currency?: string }).currency ?? 'CAD',
+    );
+    unclaimedMirrors.set(k, (unclaimedMirrors.get(k) ?? 0) + 1);
+  }
+
+  // Claim 1:1. A bare match would let one activity drop every transaction at that
+  // key, which on a brokerage account is exactly the collision this codebase
+  // declines to act on elsewhere — and dropping a real corp revenue row silently
+  // would be that same mistake with the sign flipped. A surplus stays in.
+  const mirrorWarnings: string[] = [];
+  const perimeterTxns = txns.filter((t) => {
+    if ((accountTypeById.get(t.accountId) ?? null) !== 'investment') return true;
+    const k = mirrorKey(
+      t.accountId,
+      t.date as unknown as string,
+      String(t.amount),
+      t.currency ?? 'CAD',
+    );
+    const left = unclaimedMirrors.get(k) ?? 0;
+    if (left <= 0) {
+      mirrorWarnings.push(
+        `Txn #${t.id} on investment account ${t.accountId} was counted by the corp `
+        + 'perimeter: no matching investment activity explains it.',
+      );
+      return true;
+    }
+    unclaimedMirrors.set(k, left - 1);
+    return false;
+  });
+
   const perimeter = partitionCorpPerimeter(
-    txns.map((t) => ({
+    perimeterTxns.map((t) => ({
       id: t.id,
       amount: String(t.amount),
       currency: t.currency ?? 'CAD',
@@ -400,6 +463,6 @@ export async function buildCorpFacts(
     dividendsPaid,
     salaryPaid,
     carryforwards,
-    factWarnings: [...perimeter.warnings, ...ownerPaidWarnings],
+    factWarnings: [...perimeter.warnings, ...ownerPaidWarnings, ...mirrorWarnings],
   };
 }

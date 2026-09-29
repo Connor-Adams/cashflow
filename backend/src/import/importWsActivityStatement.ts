@@ -5,6 +5,16 @@ import { commitStatementImport } from './commitStatementImport';
 import { parseWsActivityStatement } from './pdf/wsActivityStatement';
 import type { PdfLine } from './pdf/types';
 import type { StatementPreview } from './statementTypes';
+import { normalizeMerchant } from './normalizeMerchant';
+
+/**
+ * Activity types that cross the account boundary and therefore need a cash leg.
+ * A bare `transfer` is excluded — `CONT` maps to it and a contribution is not
+ * unambiguously a crossing; buys, sells and dividends settle inside the account.
+ */
+const CASH_CROSSING_ACTIVITY_TYPES: ReadonlySet<string> = new Set([
+  'transfer_in', 'transfer_out', 'cash_movement',
+]);
 
 /**
  * Import Wealthsimple's multi-account Custom Activity Statement.
@@ -89,7 +99,26 @@ export async function importWsActivityStatement(opts: {
       householdId: opts.householdId,
       importBatch,
       usedParser: 'pdf',
-      transactions: [],
+      // A cash crossing is two things: an event in the account's own ledger, and
+      // money entering or leaving the entity. This path used to emit only the
+      // first, which is how a $15,000 owner draw never reached the tax engine —
+      // it reads `transactions`. The mirror's type is stamped authoritative
+      // because the narrative detector matches "transfer out of the account" and
+      // not "transfer into the account", so the symmetric case would never link.
+      transactions: slice.activities
+        .filter((a) => CASH_CROSSING_ACTIVITY_TYPES.has(a.activityType))
+        .map((a) => ({
+          date: a.tradeDate,
+          merchantRaw: a.description,
+          merchantClean: normalizeMerchant(a.description),
+          amount: a.amount ?? 0,
+          currency: a.currency,
+          sourceReference: null,
+          overrideTxnType: 'transfer' as const,
+          // Derived from the activity's own fingerprint, so the mirror is stable
+          // across re-imports and dedups rather than doubling.
+          sourceRowFingerprint: `${a.sourceRowFingerprint}:cash`,
+        })),
       investmentActivities: slice.activities,
       holdings: [],
       warnings: [],

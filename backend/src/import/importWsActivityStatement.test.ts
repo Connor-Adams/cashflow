@@ -102,3 +102,31 @@ test('an empty section reports the account without importing anything', async ()
   assert.equal(margin?.unmatched, undefined);
   assert.equal(margin?.insertedActivities, 0);
 });
+
+// The activity statement is the ONGOING Wealthsimple brokerage ingest path — the
+// one that hardcoded `transactions: []` and so lost a $15,000 owner draw. A cash
+// crossing here must produce its cash leg too, or every new statement re-creates
+// the hole the converter exists to clean up.
+test('a transfer_out emits a cash leg as well as the activity', async () => {
+  const lines: PdfLine[] = [
+    mk([43, 'Custom Activity Statement']),
+    mk([43, 'TFSA (HQ6LMLTK8CAD)']),
+    mk([51, 'Transaction'], [112, 'Settlement']),
+    mk([172, 'Transaction Description Debit Credit Currency']),
+    mk([51, '2026-01-10 TRFOUT Money transfer out of the account $15,000.00 CAD']),
+  ];
+  const result = await importWsActivityStatement({
+    lines,
+    fileName: 'ACTIVITY_STATEMENT_2026-01-01_2026-01-31.pdf',
+    contentHash: 'transfer-out-hash',
+    householdId: household.id,
+    userId: 1,
+  });
+  assert.deepEqual(result.parseErrors, []);
+  assert.equal(await models.InvestmentActivity.count({ where: { accountId: tfsaId } }), 1);
+  assert.equal(
+    await models.Transaction.count({ where: { accountId: tfsaId } }),
+    1,
+    'the cash leg must exist, or the tax engine never sees the movement',
+  );
+});
