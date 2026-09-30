@@ -1,17 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { validateBudgetInput, validateBudgetPatch } from './budgets';
 import {
-  validateBudgetInput,
-  validateBudgetPatch,
   aggregateSpendByCategory,
   computeBudgetProgress,
   categoryAndDescendantNames,
   netRefundsFromSpend,
+} from '../budgets/budgetSpendMath';
+import {
   currentMonthBounds,
   currentPeriodBounds,
   periodElapsedPercent,
   pacingState,
-} from './budgets';
+} from '../budgets/budgetPeriods';
 
 // ---- validateBudgetInput ------------------------------------------------
 

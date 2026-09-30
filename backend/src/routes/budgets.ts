@@ -17,34 +17,6 @@ import {
   type BudgetStatusItem,
 } from '../budgets/budgetSpend';
 
-/**
- * The budget domain math used to live in this file; it now lives under
- * `budgets/` so the route layer, the shared spend pipeline and the breach cron
- * form a one-way dependency instead of a cycle. These re-exports keep every
- * existing importer — `routes/reports.ts`, the colocated unit tests — working
- * against the original paths.
- */
-export {
-  currentMonthBounds,
-  currentWeekBounds,
-  currentYearBounds,
-  currentPeriodBounds,
-  previousPeriodBounds,
-  periodElapsedPercent,
-  pacingState,
-  periodKey,
-  type BudgetPacingState,
-} from '../budgets/budgetPeriods';
-export {
-  aggregateSpendByCategory,
-  categoryAndDescendantNames,
-  computeBudgetProgress,
-  netRefundsFromSpend,
-  resolveRefundNets,
-  scopeWhereClause,
-  type RefundNet,
-} from '../budgets/budgetSpendMath';
-
 const router = Router();
 
 type NormalizedBudgetInput = {

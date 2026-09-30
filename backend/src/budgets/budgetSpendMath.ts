@@ -4,9 +4,7 @@
  *
  * Moved here out of `routes/budgets.ts` so the route layer, the shared spend
  * loader (`budgetSpend.ts`) and the breach cron all depend on one module in one
- * direction. `routes/budgets.ts` re-exports every name below, so existing
- * importers (and the colocated tests that import from `./budgets`) are
- * unaffected.
+ * direction rather than the route module importing back from the loader.
  */
 import { Op, type WhereOptions } from 'sequelize';
 import type { BudgetTargetScope } from '../models/BudgetTarget';
@@ -68,6 +66,55 @@ export type SpendByCategory = Map<
   { currency: string; category: string | null; categoryId: number | null; spent: number }
 >;
 
+type RowAllocation = {
+  category: string | null;
+  categoryId: number | null;
+  amount: number;
+  currency: string;
+};
+
+/**
+ * How one transaction row's amount is distributed across categories: per line
+ * item when the row is linked to an itemized order, otherwise the whole amount
+ * in the row's own category.
+ *
+ * Split out of {@link aggregateSpendByCategory} so the aggregation loop reads as
+ * a loop. The `splitTxnByItems` argument literal it builds is also assembled in
+ * `summary/aggregateMonthly.ts` and `summary/aggregateDashboard.ts`; naming it
+ * here keeps this module from carrying a third inline copy.
+ */
+function allocationsForRow(
+  row: SpendRow,
+  amount: number,
+  itemContext?: ItemAllocationContext,
+): RowAllocation[] {
+  if (!itemContext) {
+    return [
+      {
+        category: row.finalCategory,
+        categoryId: row.finalCategoryId ?? null,
+        amount,
+        currency: row.currency,
+      },
+    ];
+  }
+  return splitTxnByItems({
+    txn: {
+      id: row.id,
+      amount: String(row.amount),
+      currency: row.currency,
+      finalCategory: row.finalCategory,
+      finalCategoryId: row.finalCategoryId ?? null,
+      finalBusiness: row.finalBusiness,
+      finalSplitType: row.finalSplitType,
+      businessAmount: row.businessAmount,
+    },
+    links: itemContext.linksByTxn.get(row.id) ?? [],
+    ordersById: itemContext.ordersById,
+    itemsByOrder: itemContext.itemsByOrder,
+  });
+}
+
 /**
  * Aggregate raw transaction rows into spend per (currency, category).
  *
@@ -87,32 +134,7 @@ export function aggregateSpendByCategory(
   for (const row of rows) {
     const amount = num(row.amount);
     if (amount == null || amount >= 0) continue;
-    const allocations = itemContext
-      ? splitTxnByItems({
-          txn: {
-            id: row.id,
-            amount: String(row.amount),
-            currency: row.currency,
-            finalCategory: row.finalCategory,
-            finalCategoryId: row.finalCategoryId ?? null,
-            finalBusiness: row.finalBusiness,
-            finalSplitType: row.finalSplitType,
-            businessAmount: row.businessAmount,
-          },
-          links: itemContext.linksByTxn.get(row.id) ?? [],
-          ordersById: itemContext.ordersById,
-          itemsByOrder: itemContext.itemsByOrder,
-        })
-      : [
-          {
-            category: row.finalCategory,
-            categoryId: row.finalCategoryId ?? null,
-            amount,
-            businessAmount: 0,
-            currency: row.currency,
-          },
-        ];
-    for (const alloc of allocations) {
+    for (const alloc of allocationsForRow(row, amount, itemContext)) {
       if (alloc.amount >= 0) continue;
       const spend = -alloc.amount;
       const key = `${alloc.currency}\0${alloc.category ?? ''}`;
@@ -280,29 +302,7 @@ export function computeBudgetProgress(
     const baseTarget = Number(budget.amount);
     const carriedIn = budget.carriedIn ?? 0;
     const effectiveTarget = baseTarget + carriedIn;
-    let spent: number;
-    if (budget.category == null) {
-      spent = totalsByCurrency.get(budget.currency) ?? 0;
-    } else if (budget.categoryNames && budget.categoryNames.length > 0) {
-      // Roll the subtree up: sum this category's bucket plus every descendant's.
-      const seen = new Set<string>();
-      spent = 0;
-      for (const name of budget.categoryNames) {
-        if (seen.has(name)) continue;
-        seen.add(name);
-        spent += spendByCategory.get(`${budget.currency}\0${name}`)?.spent ?? 0;
-      }
-    } else {
-      const key = `${budget.currency}\0${budget.category}`;
-      spent = spendByCategory.get(key)?.spent ?? 0;
-    }
-    const remaining = effectiveTarget - spent;
-    const percentUsed =
-      effectiveTarget > 0
-        ? (spent / effectiveTarget) * 100
-        : baseTarget > 0
-          ? 100 + (spent / baseTarget) * 100
-          : 0;
+    const spent = spendForBudget(budget, spendByCategory, totalsByCurrency);
     return {
       budgetId: budget.id,
       category: budget.category,
@@ -311,12 +311,57 @@ export function computeBudgetProgress(
       baseTarget,
       carriedIn,
       spent,
-      remaining,
-      percentUsed,
+      remaining: effectiveTarget - spent,
+      percentUsed: percentUsedFor(spent, effectiveTarget, baseTarget),
       periodStart: bounds.periodStart,
       periodEnd: bounds.periodEnd,
     };
   });
+}
+
+/**
+ * Which spend counts toward one budget: everything in its currency for an
+ * overall budget, the category's whole subtree when `categoryNames` is present,
+ * otherwise just its own bucket.
+ */
+function spendForBudget(
+  budget: BudgetForProgress,
+  spendByCategory: Map<
+    string,
+    { currency: string; category: string | null; spent: number }
+  >,
+  totalsByCurrency: Map<string, number>,
+): number {
+  if (budget.category == null) {
+    return totalsByCurrency.get(budget.currency) ?? 0;
+  }
+  if (budget.categoryNames && budget.categoryNames.length > 0) {
+    // Roll the subtree up: sum this category's bucket plus every descendant's.
+    const seen = new Set<string>();
+    let spent = 0;
+    for (const name of budget.categoryNames) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      spent += spendByCategory.get(`${budget.currency}\0${name}`)?.spent ?? 0;
+    }
+    return spent;
+  }
+  return spendByCategory.get(`${budget.currency}\0${budget.category}`)?.spent ?? 0;
+}
+
+/**
+ * Spend as a percentage of the carry-adjusted target — see the note on
+ * {@link computeBudgetProgress} for why the non-positive-target branch is
+ * defined the way it is.
+ */
+function percentUsedFor(
+  spent: number,
+  effectiveTarget: number,
+  baseTarget: number,
+): number {
+  if (effectiveTarget > 0) return (spent / effectiveTarget) * 100;
+  if (baseTarget > 0) return 100 + (spent / baseTarget) * 100;
+  return 0;
 }
 
 /**
