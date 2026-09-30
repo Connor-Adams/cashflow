@@ -5,13 +5,13 @@ import { extractCounterparty } from './extractCounterparty.js';
 test('person pattern -> kind person', () => {
   assert.deepEqual(
     extractCounterparty('INTERAC E-TRANSFER FROM JANE DOE REF 8842', 'checking'),
-    { name: 'JANE DOE', kind: 'person' },
+    { name: 'JANE DOE', kind: 'person', direction: 'received' },
   );
 });
 test('payroll pattern -> kind payroll', () => {
   assert.deepEqual(
     extractCounterparty('PAYROLL DEPOSIT ACME CORP', 'checking'),
-    { name: 'ACME CORP', kind: 'payroll' },
+    { name: 'ACME CORP', kind: 'payroll', direction: 'received' },
   );
 });
 test('out-of-scope account -> null', () => {
