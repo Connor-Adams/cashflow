@@ -1,6 +1,7 @@
 // backend/src/tax/scenarios/computeScenarioReturn.ts
 import crypto from 'node:crypto';
 import { Scenario, ScenarioReturn } from '../../models';
+import { returnCacheKey } from '../engine/engineVersion';
 
 export interface ComputeScenarioReturnOptions {
   /** If true, skip the cache check and always re-run the engine. */
@@ -41,7 +42,9 @@ export async function computeScenarioReturn<F>(
   if (!scenario) throw new Error(`scenario id=${scenarioId} not found`);
 
   const facts = await resolveFacts(scenarioId);
-  const factsHash = hashFacts(facts);
+  // Versioned: the facts digest alone would serve a row computed by an older
+  // engine, which is how every rate and slip-box correction stayed invisible.
+  const factsHash = returnCacheKey(hashFacts(facts));
 
   if (!options.force) {
     const cached = await ScenarioReturn.findOne({
@@ -122,8 +125,12 @@ export function synthesizeScenarioReturn(
  * Canonical hash of a facts struct. Identical inputs always produce the same
  * hash. JSON.stringify with a replacer keeps Decimal values (which serialise as
  * objects) stable.
+ *
+ * Exported because the stored cache key is defined as
+ * `returnCacheKey(hashFacts(facts))` — the facts component is half of a
+ * two-part contract, not an internal detail.
  */
-function hashFacts(facts: unknown): string {
+export function hashFacts(facts: unknown): string {
   const canonical = JSON.stringify(facts, replacer);
   return crypto.createHash('sha256').update(canonical).digest('hex');
 }

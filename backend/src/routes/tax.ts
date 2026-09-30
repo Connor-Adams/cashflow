@@ -8,7 +8,7 @@ import { buildCorpFacts } from '../tax/builders/buildCorpFacts';
 import { buildT1 } from '../tax/engine/t1';
 import { buildT2 } from '../tax/engine/t2';
 import { ratesFor, supportedYears, RateTableMissingError } from '../tax/engine/brackets';
-import { factsHash } from '../tax/util/factsHash';
+import { computeEntityReturn } from '../tax/services/computeEntityReturn';
 import type { CorpFiscalYear } from '../tax/engine/types';
 import { rollPersonalCarryforwards } from '../tax/services/rollPersonalCarryforwards';
 import { buildReconciliationReport } from '../tax/reconciliation/buildReport';
@@ -377,60 +377,42 @@ router.get('/personal/:year/return', async (req, res, next) => {
     }
 
     const facts = await buildPersonalFacts(entity.id, year);
-    const hash = factsHash(serializeFacts(facts));
+    const rates = ratesFor(year);
+    const result = await computeEntityReturn({
+      entityId: entity.id,
+      cacheYear: year,
+      facts,
+      run: (f) => buildT1(f, rates),
+    });
 
-    const cached = await TaxReturn.findOne({ where: { entityId: entity.id, year } });
-    if (cached && cached.factsHash === hash) {
+    if (result.cached) {
       res.json({
         cached: true,
-        computedAt: cached.computedAt,
-        lines: cached.lines,
-        totals: cached.totals,
-        warnings: cached.warnings,
+        computedAt: result.computedAt,
+        lines: result.lines,
+        totals: result.totals,
+        warnings: result.warnings,
       });
       return;
-    }
-
-    const ret = buildT1(facts, ratesFor(year));
-    const lines = serializeLines(ret.lines);
-    const totals = serializeTotals(ret.totals);
-    const computedAt = new Date();
-
-    if (cached) {
-      await cached.update({
-        factsHash: hash,
-        computedAt,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        lines: lines as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        totals: totals as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        warnings: ret.warnings as any,
-      });
-    } else {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (TaxReturn.create as any)({
-        entityId: entity.id,
-        year,
-        factsHash: hash,
-        computedAt,
-        lines,
-        totals,
-        warnings: ret.warnings,
-      });
     }
 
     // Optional ?roll=true: after snapshot, auto-roll carryforwards for this year
     if (req.query.roll === 'true') {
       try {
-        await rollPersonalCarryforwards(entity.id, year, ret, facts, ratesFor(year));
+        await rollPersonalCarryforwards(entity.id, year, result.engineReturn, facts, rates);
       } catch {
         // Roll failure is non-fatal; include a warning but still return the return
-        ret.warnings.push('carryforward_roll_failed');
+        result.warnings.push('carryforward_roll_failed');
       }
     }
 
-    res.json({ cached: false, computedAt, lines, totals, warnings: ret.warnings });
+    res.json({
+      cached: false,
+      computedAt: result.computedAt,
+      lines: result.lines,
+      totals: result.totals,
+      warnings: result.warnings,
+    });
   } catch (err) {
     if (err instanceof RateTableMissingError) {
       res.status(409).json({
@@ -800,52 +782,24 @@ router.get('/corp/:fiscalYear/return', async (req, res, next) => {
     }
 
     const facts = await buildCorpFacts(entity.id, fiscalYear);
-    const hash = factsHash(serializeFacts(facts));
-
+    // Keyed on the fiscal year's START year, which is not always the calendar
+    // year the facts cover — an off-calendar year end straddles two.
     const snapshotYear = Number(fiscalYear.startDate.slice(0, 4));
-    const cached = await TaxReturn.findOne({ where: { entityId: entity.id, year: snapshotYear } });
-    if (cached && cached.factsHash === hash) {
-      res.json({
-        cached: true,
-        computedAt: cached.computedAt,
-        lines: cached.lines,
-        totals: cached.totals,
-        warnings: cached.warnings,
-      });
-      return;
-    }
-
     const rateTable = ratesFor(snapshotYear);
-    const ret = buildT2(facts, rateTable);
-    const lines = serializeLines(ret.lines);
-    const totals = serializeTotals(ret.totals);
-    const computedAt = new Date();
+    const result = await computeEntityReturn({
+      entityId: entity.id,
+      cacheYear: snapshotYear,
+      facts,
+      run: (f) => buildT2(f, rateTable),
+    });
 
-    if (cached) {
-      await cached.update({
-        factsHash: hash,
-        computedAt,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        lines: lines as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        totals: totals as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        warnings: ret.warnings as any,
-      });
-    } else {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (TaxReturn.create as any)({
-        entityId: entity.id,
-        year: snapshotYear,
-        factsHash: hash,
-        computedAt,
-        lines,
-        totals,
-        warnings: ret.warnings,
-      });
-    }
-
-    res.json({ cached: false, computedAt, lines, totals, warnings: ret.warnings });
+    res.json({
+      cached: result.cached,
+      computedAt: result.computedAt,
+      lines: result.lines,
+      totals: result.totals,
+      warnings: result.warnings,
+    });
   } catch (err) {
     if (err instanceof RateTableMissingError) {
       res.status(409).json({
@@ -857,50 +811,6 @@ router.get('/corp/:fiscalYear/return', async (req, res, next) => {
     next(err);
   }
 });
-
-// ---------------------------------------------------------------------------
-// Serialization helpers: convert Decimal → string before DB storage / response.
-// ---------------------------------------------------------------------------
-
-/**
- * Deep-serialize facts: converts Decimal instances to fixed-precision strings
- * so that `factsHash` produces a stable, JSON-encodable representation.
- */
-function serializeFacts(facts: unknown): unknown {
-  return JSON.parse(
-    JSON.stringify(facts, (_k, v) => {
-      if (
-        v !== null &&
-        typeof v === 'object' &&
-        typeof (v as { toFixed?: unknown }).toFixed === 'function' &&
-        (v as { constructor?: { name?: string } }).constructor?.name === 'Decimal'
-      ) {
-        return (v as { toFixed: (n: number) => string }).toFixed(8);
-      }
-      return v;
-    })
-  );
-}
-
-function serializeLines(lines: Array<{
-  code: string;
-  label: string;
-  amount: { toFixed: (n: number) => string };
-  inputs: Array<{ source: string; amount: { toFixed: (n: number) => string } }>;
-  formula?: string;
-}>): unknown {
-  return lines.map((l) => ({
-    ...l,
-    amount: l.amount.toFixed(2),
-    inputs: l.inputs.map((i) => ({ ...i, amount: i.amount.toFixed(2) })),
-  }));
-}
-
-function serializeTotals(totals: Record<string, { toFixed: (n: number) => string }>): unknown {
-  return Object.fromEntries(
-    Object.entries(totals).map(([k, v]) => [k, v.toFixed(2)])
-  );
-}
 
 // POST /api/tax/corp/:fiscalYear/roll-forward
 // Triggers rollCorpCarryforwards from the most recent snapshot for the fiscal year.
