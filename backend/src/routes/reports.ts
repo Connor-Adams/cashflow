@@ -41,7 +41,7 @@ import {
   savingsRate,
   type SavingsRateTxnRow,
 } from '../summary/savingsRate';
-import { scopeWhereClause } from './budgets';
+import { scopeWhereClause } from '../budgets/budgetSpendMath';
 import { getOpenAiConfig } from '../config/openai';
 import { openaiJson } from '../ai/openaiJson';
 import { logger } from '../observability/logger';

@@ -281,3 +281,77 @@ test('validateAlertThresholds: rejects NaN / non-numeric strings', () => {
   const result = validateAlertThresholds(['abc']);
   assert.equal(result.ok, false);
 });
+
+// ---- overdrawn rollover envelopes -------------------------------------------
+//
+// A rollover budget carries an overspend forward with no floor, so its effective
+// target can reach zero or go negative. These cases only became reachable when
+// rollover behavior landed.
+
+test('budgetBreachTitle: an overdrawn envelope says so instead of quoting a threshold', () => {
+  assert.equal(
+    budgetBreachTitle('Dining', 120, { envelopeExhausted: true }),
+    'Dining budget is overdrawn',
+  );
+  // The threshold is irrelevant in this state.
+  assert.equal(
+    budgetBreachTitle('Dining', 80, { envelopeExhausted: true }),
+    'Dining budget is overdrawn',
+  );
+  assert.equal(
+    budgetBreachTitle(null, 100, { envelopeExhausted: true }),
+    'Overall budget is overdrawn',
+  );
+});
+
+test('budgetBreachTitle: unchanged when the envelope is not exhausted', () => {
+  assert.equal(budgetBreachTitle('Dining', 120), 'Dining budget exceeded by 20%');
+  assert.equal(budgetBreachTitle('Dining', 100), 'Dining budget reached');
+  assert.equal(budgetBreachTitle('Dining', 80), "You've used 80% of your Dining budget");
+  // The option object defaults to "not exhausted".
+  assert.equal(
+    budgetBreachTitle('Dining', 120, {}),
+    'Dining budget exceeded by 20%',
+  );
+});
+
+test('budgetBreachBody: a negative target is never printed as "$-500.00"', () => {
+  const body = budgetBreachBody({
+    spent: 300,
+    target: -500,
+    currency: 'CAD',
+    period: 'monthly',
+    remainingDays: 15,
+  });
+  assert.ok(!body.includes('-'), `body must not contain a negative amount: ${body}`);
+  assert.equal(
+    body,
+    '$300.00 spent this month, carried over $500.00 overdrawn. 15 days left.',
+  );
+});
+
+test('budgetBreachBody: an exactly-exhausted envelope reads as having nothing left', () => {
+  assert.equal(
+    budgetBreachBody({
+      spent: 0,
+      target: 0,
+      currency: 'CAD',
+      period: 'weekly',
+      remainingDays: 1,
+    }),
+    '$0.00 spent this week, carried over with nothing left. 1 day left.',
+  );
+});
+
+test('budgetBreachBody: a positive target keeps the original copy', () => {
+  assert.equal(
+    budgetBreachBody({
+      spent: 900,
+      target: 1400,
+      currency: 'CAD',
+      period: 'monthly',
+      remainingDays: 3,
+    }),
+    '$900.00 of $1,400.00 this month. 3 days left.',
+  );
+});

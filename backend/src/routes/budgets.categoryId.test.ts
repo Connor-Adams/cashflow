@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { aggregateSpendByCategory } from './budgets';
+import { aggregateSpendByCategory } from '../budgets/budgetSpendMath';
 
 test('spend buckets carry finalCategoryId', () => {
   const rows = [

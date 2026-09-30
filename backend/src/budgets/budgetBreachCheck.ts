@@ -21,71 +21,20 @@
  * MUST NOT prevent other households from being processed (AC #6). We catch
  * and log per-budget so a bad row in one household doesn't tank the rest.
  */
-import { Op } from 'sequelize';
-import {
-  BudgetAlertState,
-  BudgetExclusion,
-  BudgetTarget,
-  HouseholdMember,
-  Transaction,
-} from '../models';
+import { BudgetAlertState, BudgetTarget, HouseholdMember } from '../models';
 import {
   BUDGET_TARGET_DEFAULT_ALERT_THRESHOLDS,
   type BudgetTargetPeriod,
 } from '../models/BudgetTarget';
 import { enqueueNotification } from '../notifications';
 import { logger } from '../observability/logger';
-import {
-  aggregateSpendByCategory,
-  categoryAndDescendantNames,
-  computeBudgetProgress,
-  currentPeriodBounds,
-  netRefundsFromSpend,
-  resolveRefundNets,
-  scopeWhereClause,
-} from '../routes/budgets';
+import { loadBudgetSpend, toBudgetSpendInput } from './budgetSpend';
+import { periodKey } from './budgetPeriods';
 import { loadCategoryTree } from '../categories/rollup';
-import { loadItemAllocationContext } from '../summary/loadItemAllocations';
 
-/**
- * Compute the period-key string used to dedup notifications. One key per
- * recurrence-period instance — i.e. the same monthly budget gets a fresh
- * key on the first day of every month, so prior-month alert states no
- * longer match and new alerts can fire.
- *
- * Format:
- *   monthly → 'YYYY-MM'   (e.g. '2026-05')
- *   weekly  → 'YYYY-Www'  (e.g. '2026-W21', ISO-week with Mon as first day)
- *   annual  → 'YYYY'      (e.g. '2026')
- *
- * Pure so the cron logic is unit-testable without a clock.
- */
-export function periodKey(period: BudgetTargetPeriod, now: Date): string {
-  const y = now.getFullYear();
-  switch (period) {
-    case 'annual':
-      return String(y);
-    case 'weekly': {
-      // ISO week: week containing the year's first Thursday is week 1; weeks
-      // start on Monday. Computed via the standard trick (shift to Thursday,
-      // diff from Jan 4).
-      const date = new Date(Date.UTC(y, now.getMonth(), now.getDate()));
-      // getUTCDay: Sun=0..Sat=6. ISO uses Mon=1..Sun=7.
-      const dayNum = date.getUTCDay() || 7;
-      date.setUTCDate(date.getUTCDate() + 4 - dayNum);
-      const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-      const weekNo = Math.ceil(
-        ((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7,
-      );
-      return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
-    }
-    case 'monthly':
-    default: {
-      const m = String(now.getMonth() + 1).padStart(2, '0');
-      return `${y}-${m}`;
-    }
-  }
-}
+// `periodKey` moved to `budgetPeriods` alongside the rest of the period
+// arithmetic; re-exported here because it is part of this module's tested API.
+export { periodKey };
 
 /**
  * Decide which thresholds the user should be alerted at this period given:
@@ -141,8 +90,15 @@ export function remainingDaysInPeriod(
 export function budgetBreachTitle(
   category: string | null,
   threshold: number,
+  opts: { envelopeExhausted?: boolean } = {},
 ): string {
   const label = category ?? 'Overall';
+  // A rollover budget whose carried debt has consumed the whole allowance isn't
+  // "exceeded by 20%" — the envelope itself is gone, and quoting a threshold
+  // percentage against a non-positive target would read as nonsense.
+  if (opts.envelopeExhausted) {
+    return `${label} budget is overdrawn`;
+  }
   if (threshold >= 120) {
     const overBy = threshold - 100;
     return `${label} budget exceeded by ${overBy}%`;
@@ -169,14 +125,24 @@ export function budgetBreachBody(args: {
   const { spent, target, currency, period, remainingDays } = args;
   const periodWord = period === 'weekly' ? 'week' : period === 'annual' ? 'year' : 'month';
   const spentStr = formatCurrency(spent, currency);
-  const targetStr = formatCurrency(target, currency);
   const tail =
     remainingDays === 0
       ? `Period ends today.`
       : remainingDays === 1
         ? `1 day left.`
         : `${remainingDays} days left.`;
-  return `${spentStr} of ${targetStr} this ${periodWord}. ${tail}`;
+  // A rollover budget can carry enough debt to drive the effective target to
+  // zero or below. "of $-500.00" is not something to show a user, so that state
+  // gets its own sentence and the magnitude is formatted from the absolute
+  // value.
+  if (target <= 0) {
+    const head =
+      target < 0
+        ? `carried over ${formatCurrency(Math.abs(target), currency)} overdrawn`
+        : `carried over with nothing left`;
+    return `${spentStr} spent this ${periodWord}, ${head}. ${tail}`;
+  }
+  return `${spentStr} of ${formatCurrency(target, currency)} this ${periodWord}. ${tail}`;
 }
 
 /**
@@ -238,101 +204,17 @@ export async function processBudget(
     return { budgetId: budget.id, thresholdsFired: [], status: 'no_recipient' };
   }
 
-  // Reuse the same per-budget spend math the /status route uses. Building
-  // the where-clause directly off `householdId` (not `req`) keeps the cron
-  // independent of express; everything else mirrors the route 1:1.
-  const bounds = currentPeriodBounds(budget.period, now);
-  const explicitExcluded = await BudgetExclusion.findAll({
-    where: { budgetId: budget.id },
-    attributes: ['transactionId'],
-    raw: true,
-  });
-  const explicitExcludedIds = explicitExcluded.map((row) => row.transactionId);
-
-  // When excludeRefundedPurchases is set we fetch the refund rows so we can
-  // net their amount back out below — keeping the original purchase counted
-  // and subtracting only the refunded amount. Dropping the whole original
-  // purchase understated spend on partial refunds (mirrors the /status route).
-  let refundRows: Array<{ linkedTransactionId: number; amount: unknown }> = [];
-  if (budget.excludeRefundedPurchases) {
-    const refunds = await Transaction.findAll({
-      where: {
-        householdId: budget.householdId,
-        currency: budget.currency,
-        txnType: 'refund',
-        linkedTransactionId: { [Op.ne]: null },
-        date: {
-          [Op.gte]: bounds.periodStart,
-          [Op.lte]: bounds.periodEnd,
-        },
-      },
-      attributes: ['linkedTransactionId', 'amount'],
-      raw: true,
-    });
-    refundRows = refunds
-      .filter(
-        (r): r is typeof r & { linkedTransactionId: number } =>
-          typeof r.linkedTransactionId === 'number',
-      )
-      .map((r) => ({
-        linkedTransactionId: r.linkedTransactionId,
-        amount: r.amount,
-      }));
-  }
-
-  const allExcludedIds = Array.from(new Set<number>(explicitExcludedIds));
-
-  const rows = await Transaction.findAll({
-    where: {
-      householdId: budget.householdId,
-      currency: budget.currency,
-      date: {
-        [Op.gte]: bounds.periodStart,
-        [Op.lte]: bounds.periodEnd,
-      },
-      ...scopeWhereClause(budget.scope),
-      ...(allExcludedIds.length > 0
-        ? { id: { [Op.notIn]: allExcludedIds } }
-        : {}),
-    },
-    attributes: [
-      'id',
-      'currency',
-      'finalCategory',
-      'finalBusiness',
-      'finalSplitType',
-      'amount',
-      'businessAmount',
-    ],
-    raw: true,
-  });
-  const ids = (rows as unknown as Array<{ id: number }>).map((r) => r.id);
-  const itemContext = await loadItemAllocationContext(ids);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const spendByCategory = aggregateSpendByCategory(rows as any, itemContext);
-  // Net the refunded amount out of the original purchase's bucket.
-  netRefundsFromSpend(
-    spendByCategory,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    resolveRefundNets(rows as any, refundRows),
-  );
+  // One shared pipeline with the /status route — see `budgets/budgetSpend.ts`.
+  // This used to be a ~90-line copy of the route's query sequence, and had
+  // already drifted from it. `loadBudgetSpend` scopes itself by
+  // `budget.householdId`, so the route and this cron now agree for every caller
+  // role.
   const tree = await loadCategoryTree(budget.householdId);
-  const [progress] = computeBudgetProgress(
-    [
-      {
-        id: budget.id,
-        category: budget.category,
-        currency: budget.currency,
-        amount: String(budget.amount),
-        categoryNames:
-          budget.categoryId != null
-            ? categoryAndDescendantNames(tree, budget.categoryId)
-            : null,
-      },
-    ],
-    spendByCategory,
-    bounds,
-  );
+  const { bounds, progress } = await loadBudgetSpend({
+    budget: toBudgetSpendInput(budget),
+    tree,
+    now,
+  });
   const percentUsed = progress.percentUsed;
   const periodKeyValue = periodKey(budget.period, now);
 
@@ -354,9 +236,23 @@ export async function processBudget(
     return { budgetId: budget.id, thresholdsFired: [], status: 'no_thresholds' };
   }
 
+  // A rollover budget carrying a period or more of debt has an effective target
+  // of zero or less, which puts `percentUsed` at 100% before a dollar is spent —
+  // so every configured threshold is crossed on the first tick of every period,
+  // forever. That is true but it is three notifications on the 1st of each
+  // month. Dedup rows are still written for all of them (they ARE crossed, and
+  // writing them keeps a later tick in the same period quiet), but only the
+  // highest is dispatched: one "the envelope is empty" alert instead of a
+  // cascade. If the envelope recovers to a positive target, `percentUsed` drops
+  // back below the thresholds and nothing fires.
+  const envelopeExhausted = progress.target <= 0;
+  const toNotify = envelopeExhausted ? toFire.slice(-1) : toFire;
+
   const remainingDays = remainingDaysInPeriod(now, bounds);
   for (const threshold of toFire) {
-    const title = budgetBreachTitle(budget.category, threshold);
+    const title = budgetBreachTitle(budget.category, threshold, {
+      envelopeExhausted,
+    });
     const body = budgetBreachBody({
       spent: progress.spent,
       target: progress.target,
@@ -374,6 +270,7 @@ export async function processBudget(
         periodKey: periodKeyValue,
         threshold,
       });
+      if (!toNotify.includes(threshold)) continue;
       await enqueueNotification(recipientUserId, 'budget.breach', {
         severity: threshold >= 100 ? 'warn' : 'info',
         title,
@@ -398,7 +295,7 @@ export async function processBudget(
     }
   }
 
-  return { budgetId: budget.id, thresholdsFired: toFire, status: 'ok' };
+  return { budgetId: budget.id, thresholdsFired: toNotify, status: 'ok' };
 }
 
 /**

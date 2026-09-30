@@ -30,6 +30,7 @@ import { ActivationCardDeck } from '@/components/dashboard/ActivationCardDeck'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
 
 import { formatCurrency } from '../lib/formatCurrency'
+import { BudgetCarryNote } from '../components/dashboard/BudgetCarryNote'
 import { DeltaBadge } from '../components/ui/DeltaBadge'
 import { rankByNetSpend } from '../lib/rankByNetSpend'
 import { businessIncomeSpend } from '../lib/businessIncomeSpend'
@@ -1000,6 +1001,11 @@ export function DashboardPage() {
                       {/* formerly .budgetPill__currency */}
                       <span className="ml-1 opacity-70">{item.currency}</span>
                     </p>
+                    <BudgetCarryNote
+                      carriedIn={item.carriedIn}
+                      currency={item.currency}
+                      periodWord={periodWord}
+                    />
                     {item.pacingState && elapsedRounded !== null && (
                       <p className="mt-1">
                         <span

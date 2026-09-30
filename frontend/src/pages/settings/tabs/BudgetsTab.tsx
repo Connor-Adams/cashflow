@@ -540,7 +540,7 @@ export function BudgetsTab() {
                                 <span>
                                   Roll unused budget forward
                                   <span className="muted block text-xs">
-                                    (toggle saved; carry-over behavior is a planned follow-up)
+                                    Unspent budget raises the next period's target; an overspend lowers it. Accumulates over up to 12 periods.
                                   </span>
                                 </span>
                               </Label>
@@ -722,7 +722,7 @@ export function BudgetsTab() {
               <span>
                 Roll unused budget forward
                 <span className="muted block text-xs">
-                  (toggle saved; carry-over behavior is a planned follow-up)
+                  Unspent budget raises the next period's target; an overspend lowers it. Accumulates over up to 12 periods.
                 </span>
               </span>
             </Label>
