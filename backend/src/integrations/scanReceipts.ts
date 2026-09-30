@@ -57,6 +57,7 @@ import { logger } from '../observability/logger';
 import { runInteracCounterpartySync } from './interacCounterparty';
 import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
 import { categorizeAndApplyReceiptItems } from '../import/categorizeReceiptItems';
+import { buildExternalOrderItemRows } from '../import/externalOrderItemRows';
 import { openDailyAiBudget, type AiExtractionBudget } from './aiExtractionBudget';
 
 /**
@@ -896,18 +897,17 @@ export async function scanInbox(
           }
         }
         if (createdOrder && extracted!.items.length > 0) {
+          // buildExternalOrderItemRows resolves the category FK before the
+          // write — a static bulkCreate skips the model's beforeSave hook, so
+          // the id has to be supplied explicitly and the string has to be the
+          // leaf's FLAT name. The transaction goes with it so a rollback also
+          // unwinds any category the resolve created.
           await ExternalOrderItem.bulkCreate(
-            extracted!.items.map((it) => ({
+            (await buildExternalOrderItemRows({
               externalOrderId: order.id,
-              title: it.title,
-              quantity: it.quantity,
-              unitPrice: it.unitPrice != null ? String(it.unitPrice) : null,
-              totalPrice: it.totalPrice != null ? String(it.totalPrice) : null,
-              inferredCategory: it.inferredCategory,
-              businessUsePercent: it.businessUsePercent != null ? String(it.businessUsePercent) : null,
-              confidence: null,
-              itemNumber: it.vendorItemId ?? null,
-              rawPayload: it as unknown,
+              householdId: opts.householdId,
+              items: extracted!.items,
+              transaction: t,
             })) as never[],
             { transaction: t },
           );

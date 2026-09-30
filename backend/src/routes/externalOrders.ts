@@ -19,6 +19,7 @@ import {
   type ExtractedReceiptOrder,
 } from '../ai/extractReceiptItems';
 import { parsePurchaseHistoryCsv } from '../import/parsePurchaseHistoryCsv';
+import { buildExternalOrderItemRows } from '../import/externalOrderItemRows';
 import { extractPdfLines } from '../import/pdf/extractLines';
 import {
   findReceiptPdfParser,
@@ -197,18 +198,17 @@ export async function persistExtractedOrder(
       transaction: t,
     });
     if (created && extracted.items.length > 0) {
+      // buildExternalOrderItemRows resolves the category FK before the write —
+      // a static bulkCreate skips the model's beforeSave hook, so the id has to
+      // be supplied explicitly and the string has to be the leaf's FLAT name.
+      // The transaction goes with it so a rollback also unwinds any category
+      // the resolve created.
       await ExternalOrderItem.bulkCreate(
-        extracted.items.map((it) => ({
+        (await buildExternalOrderItemRows({
           externalOrderId: order.id,
-          title: it.title,
-          quantity: it.quantity,
-          unitPrice: it.unitPrice != null ? String(it.unitPrice) : null,
-          totalPrice: it.totalPrice != null ? String(it.totalPrice) : null,
-          inferredCategory: it.inferredCategory,
-          businessUsePercent: null,
-          confidence: null,
-          itemNumber: it.vendorItemId ?? null,
-          rawPayload: it as unknown,
+          householdId: opts.householdId,
+          items: extracted.items,
+          transaction: t,
         })) as never[],
         { transaction: t },
       );
