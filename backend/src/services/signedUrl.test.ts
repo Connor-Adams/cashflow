@@ -13,7 +13,7 @@ let buildSignedParams: (...args: any[]) => { exp: string; sig: string };
 let verifySignedParams: (...args: any[]) => any;
 
 before(async () => {
-  const mod = await import('../src/services/signedUrl.js');
+  const mod = await import('./signedUrl.js');
   buildSignedParams = mod.buildSignedParams;
   verifySignedParams = mod.verifySignedParams;
 });

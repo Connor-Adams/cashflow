@@ -7,21 +7,21 @@
  * grouping, per-currency scoping, spend math (negative-amount rows only),
  * dominant-category / dominant-canonical derivation, sort order, and
  * household isolation. The route-level auth / validation paths are covered by
- * the Postgres integration suite (`integration/merchantClusters.test.ts`).
+ * the Postgres integration suite (`backend/test/integration/merchantClusters.test.ts`).
  */
 import { before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-let models: typeof import('../src/models');
-let listMerchantClusters: typeof import('../src/merchants/clusters').listMerchantClusters;
+let models: typeof import('../models');
+let listMerchantClusters: typeof import('./clusters').listMerchantClusters;
 let householdId: number;
 let otherHouseholdId: number;
 let accountId: number;
 let seq = 0;
 
 before(async () => {
-  models = await import('../src/models');
-  ({ listMerchantClusters } = await import('../src/merchants/clusters'));
+  models = await import('../models');
+  ({ listMerchantClusters } = await import('./clusters'));
   await models.sequelize.sync({ force: true });
 });
 

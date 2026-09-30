@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runApplyRuleStage } from '../src/import/enrichment/applyRuleStage';
-import type { RuleRow } from '../src/import/applyRules';
+import { runApplyRuleStage } from './applyRuleStage';
+import type { RuleRow } from '../applyRules';
 
 function baseRule(overrides: Partial<RuleRow>): RuleRow {
   return {

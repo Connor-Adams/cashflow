@@ -10,7 +10,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getOpenAiConfig } from '../src/config/openai.js';
+import { getOpenAiConfig } from './openai.js';
 
 const ENV = ['OPENAI_API_KEY', 'OPENAI_BASE_URL'] as const;
 
