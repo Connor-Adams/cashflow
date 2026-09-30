@@ -15,6 +15,7 @@ import type { CorpFiscalYear } from '../tax/engine/types';
 import { rollPersonalCarryforwards } from '../tax/services/rollPersonalCarryforwards';
 import { buildReconciliationReport } from '../tax/reconciliation/buildReport';
 import { computeShareholderLoanBalance } from '../tax/services/shareholderLoanBalance';
+import { isTaxTreatment, type TaxTreatment } from '@cashflow/shared';
 
 const router = Router();
 
@@ -115,6 +116,113 @@ router.get('/classification-queue', async (req, res, next) => {
         corp: slim(d.corp as Transaction),
       })),
       payroll: payroll.map(slim),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/tax/classification-queue/bulk
+// Body: { ids: number[], taxTreatmentOverride: TaxTreatment | null }
+// Clears a slice of the classification queue in one request.
+//
+// A dedicated endpoint rather than N calls to PATCH
+// /api/transfers/:id/tax-treatment: the queue is worked in batches of dozens
+// (the 2026 corp-draw backlog was 50+ rows), and N independent requests can
+// half-apply — leaving the T1 and T2 sides of the same draws disagreeing
+// about what the money was. One transaction means the batch either lands or
+// does not.
+//
+// Response carries the updated rows so the caller can patch its list in
+// place; a refetch would re-run the whole queue derivation and lose the
+// user's scroll position mid-batch.
+router.post('/classification-queue/bulk', async (req, res, next) => {
+  try {
+    const body = (req.body || {}) as { ids?: unknown; taxTreatmentOverride?: unknown };
+    if (!Array.isArray(body.ids) || body.ids.length === 0) {
+      res.status(400).json({ error: 'ids must be a non-empty array' });
+      return;
+    }
+    if (body.ids.length > 200) {
+      res.status(400).json({ error: 'At most 200 ids per request' });
+      return;
+    }
+    const ids: number[] = [];
+    for (const raw of body.ids) {
+      const id = typeof raw === 'number' ? raw : Number(raw);
+      if (!Number.isInteger(id) || id < 1) {
+        res.status(400).json({ error: 'Each id must be a positive integer' });
+        return;
+      }
+      if (!ids.includes(id)) ids.push(id);
+    }
+
+    const raw = body.taxTreatmentOverride;
+    let treatment: TaxTreatment | null;
+    if (raw === null || raw === undefined || raw === '') {
+      treatment = null;
+    } else if (isTaxTreatment(raw)) {
+      treatment = raw;
+    } else {
+      res.status(400).json({ error: 'invalid taxTreatment' });
+      return;
+    }
+
+    const written = await sequelize.transaction(async (t) => {
+      const rows: Transaction[] = [];
+      const reviewedAt = new Date();
+      for (const id of ids) {
+        // visibleTransactionWhere is the household + visibility gate, so a row
+        // from another household simply isn't found — and throwing here rolls
+        // back every row already written in this transaction.
+        const txn = await Transaction.findOne({
+          where: { id, ...visibleTransactionWhere(req) },
+          transaction: t,
+        });
+        if (!txn) {
+          const err = new Error(`Transaction ${id} not found`) as Error & { status?: number };
+          err.status = 404;
+          throw err;
+        }
+        txn.set('taxTreatmentOverride', treatment);
+        txn.set('reviewedAt', reviewedAt);
+        await txn.save({ transaction: t });
+        rows.push(txn);
+
+        // Both legs of a transfer pair must carry the same treatment — the T1
+        // and T2 builders read whichever leg they own, and a one-sided write
+        // makes the personal return disagree with the corp return.
+        if (txn.linkedTransactionId != null) {
+          const sibling = await Transaction.findOne({
+            where: { id: txn.linkedTransactionId, ...visibleTransactionWhere(req) },
+            transaction: t,
+          });
+          if (sibling && sibling.taxTreatmentOverride !== treatment) {
+            sibling.set('taxTreatmentOverride', treatment);
+            sibling.set('reviewedAt', reviewedAt);
+            await sibling.save({ transaction: t });
+            rows.push(sibling);
+          }
+        }
+      }
+      return rows;
+    });
+
+    const acctIds = Array.from(new Set(written.map((r) => r.accountId)));
+    const accts = acctIds.length ? await Account.findAll({ where: { id: acctIds } }) : [];
+    const acctName = new Map(accts.map((a) => [a.id, a.name]));
+    res.json({
+      updated: written.map((r) => ({
+        id: r.id,
+        date: r.date,
+        amount: r.amount,
+        currency: r.currency,
+        merchantClean: r.merchantClean,
+        accountId: r.accountId,
+        accountName: acctName.get(r.accountId) ?? null,
+        txnType: r.txnType,
+        taxTreatmentOverride: r.taxTreatmentOverride,
+      })),
     });
   } catch (e) {
     next(e);
