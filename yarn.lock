@@ -5865,6 +5865,7 @@ __metadata:
     date-fns: "npm:^4.1.0"
     decimal.js: "npm:^10.4.3"
     dotenv: "npm:^16.4.7"
+    eslint: "npm:^9.39.4"
     express: "npm:^4.21.2"
     express-rate-limit: "npm:^8.3.2"
     gray-matter: "npm:^4.0.3"
