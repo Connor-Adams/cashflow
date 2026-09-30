@@ -434,3 +434,13 @@ test('every item has a fix surface and a non-empty detail', () => {
     assert.ok(i.detail.length > 20, `${i.kind} detail is too thin: ${i.detail}`);
   }
 });
+
+test('the priced blocker states the assumption behind its figure', () => {
+  // The figure assumes non-eligible dividend treatment. A loan advance or an expense
+  // reimbursement is not income at all, so an unqualified number here would be the
+  // same sin that leaves the other two blockers unpriced — a figure without its basis.
+  const item = only(UNCLASSIFIED_DRAW, 'unclassified_corp_draws');
+  assert.ok(item.taxEstimate !== null);
+  assert.match(item.detail, /assumes/i);
+  assert.match(item.detail, /upper bound/i);
+});

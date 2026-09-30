@@ -30,9 +30,15 @@ function sumAbsCad(rows: readonly { cadAmount: Decimal }[]): string {
  * counterpart belongs to a corp entity. The classified half is NOT the queue's —
  * see `CompletenessTxn.isTaxClassified`.
  *
- * Priced, because the character IS known: money moved from the corp to Connor is a
- * distribution, and every classified draw in prod resolves to a non-eligible
- * dividend. This is the $42,000 backlog that was worth ~$4,227 of tax.
+ * Priced, unlike the other two blockers, because the money demonstrably reached
+ * Connor — that is what a linked personal leg means. This is the $42,000 backlog that
+ * was worth ~$4,227 of tax.
+ *
+ * But the estimate assumes non-eligible dividend treatment, and the assumption is
+ * stated in the detail rather than left implicit. An unclassified draw could be a
+ * loan advance or an expense reimbursement, neither of which is income, so the figure
+ * is an upper bound. That disclosure is the same discipline that leaves the other two
+ * blockers unpriced: a number is allowed only with its basis attached.
  */
 export function detectUnclassifiedCorpDraws(ctx: CompletenessContext): CompletenessItem[] {
   const rows = ctx.personalTxns.filter(
@@ -50,7 +56,10 @@ export function detectUnclassifiedCorpDraws(ctx: CompletenessContext): Completen
     title: `${rows.length} corp→personal transfer${rows.length === 1 ? '' : 's'} not classified`,
     detail:
       `$${amount} moved from the corporation to you in ${ctx.year} and is not on the return. `
-      + 'Classify each as a dividend, salary, loan or reimbursement.',
+      + 'Classify each as a dividend, salary, loan or reimbursement. The tax figure '
+      + 'assumes all of it is a non-eligible dividend, which is what every classified '
+      + 'draw resolves to — a loan advance or an expense reimbursement is not income at '
+      + 'all, so the figure is an upper bound until these are classified.',
     amount,
     taxEstimate: estimateTaxImpact(ctx.facts, ctx.rates, addNonEligibleDividend(amount)),
     fix: { surface: 'classify', label: 'Classify these draws' },
