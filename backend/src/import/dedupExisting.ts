@@ -5,7 +5,18 @@ import { logger } from '../observability/logger';
 import type { TransactionStatus } from '../transactions/types';
 
 export type DedupOutcome =
-  | { kind: 'no-match' }
+  | {
+      kind: 'no-match';
+      /**
+       * Existing rows that look like this row under the narrative-rename key
+       * but sit one day off, so dedup deliberately declined them. Live dedup
+       * stays on an exact date match — a ±1-day window would also collapse two
+       * genuine consecutive-day movements of equal size, which on a deposit
+       * account carry a generic narrative on both sides and so pass the gate.
+       * Reporting them lets the import warn instead of losing the signal.
+       */
+      nearMissCandidateIds?: number[];
+    }
   | { kind: 'duplicate'; existingId: number }
   | { kind: 'duplicate-backfilled'; existingId: number }
   | { kind: 'pending-promoted'; existingId: number };
@@ -55,10 +66,56 @@ function normalizePendingMatchText(v: string | null | undefined): string {
  * "DAIRY QUEEN #1 1989 GRI" both → "dairyqueen11989gri". Genuinely distinct
  * merchants ("starbucks" vs "mcdonalds") stay distinct.
  */
-function aggressiveMerchantKey(v: string | null | undefined): string {
+export function aggressiveMerchantKey(v: string | null | undefined): string {
   return String(v ?? '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '');
+}
+
+/**
+ * Statement narratives that carry no merchant identity — a provider's own
+ * bookkeeping label for a cash movement rather than a payee. Wealthsimple's
+ * brokerage-layout statements word every cash row this way, which is why the
+ * same charge reads "Pre-authorized Debit to AMEX BILL PYMT" in the activities
+ * export and "Cash correction (executed at 2026-02-17)" in the monthly PDF.
+ *
+ * The list is CLOSED on purpose. It gates the narrative-rename dedup tier, and
+ * that tier matches without regard to merchant text, so the gate is the only
+ * thing standing between it and a false positive: two genuinely distinct $5
+ * charges on one card on one day share (account, date, amount, currency), and
+ * "STARBUCKS #123" beside "MCDONALDS #99" must never collapse into one row.
+ * Two specific merchants never describe one event; a generic narrative beside
+ * anything is the rename case. Every entry here was observed on one side of a
+ * confirmed duplicate pair in prod (2026-09-29 audit) — adding a string that a
+ * real merchant could also produce would reopen the hole, so extend it only
+ * from evidence.
+ */
+const GENERIC_STATEMENT_NARRATIVES = new Set<string>([
+  'withdrawal',
+  'deposit',
+  'contribution',
+  'cash correction',
+  'cash received',
+  'cash sent',
+  'transfer in',
+  'transfer out',
+  'money transfer into the account',
+  'money transfer out of the account',
+]);
+
+/**
+ * True when the text is a bare provider bookkeeping label. Wealthsimple suffixes
+ * most of them with "(executed at YYYY-MM-DD)", which is stripped first; a
+ * narrative carrying any OTHER trailing text (a merchant name, a reference)
+ * fails the check, so only the pure labels qualify.
+ */
+export function isGenericStatementNarrative(v: string | null | undefined): boolean {
+  const s = String(v ?? '')
+    .toLowerCase()
+    .replace(/\s*\(executed at \d{4}-\d{2}-\d{2}\)\s*$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return GENERIC_STATEMENT_NARRATIVES.has(s);
 }
 
 function addDays(isoDate: string, days: number): string {
@@ -111,6 +168,22 @@ async function promotePending(
 }
 
 /**
+ * Render the date-shifted near-misses an import collected into a warning for
+ * the caller's result. Live dedup declines these on purpose (see
+ * `nearMissCandidateIds`), so the rows DO import — the warning is what keeps a
+ * re-import of an already-covered range from passing silently.
+ */
+export function nearDuplicateWarnings(candidateIdsPerRow: number[][]): string[] {
+  if (candidateIdsPerRow.length === 0) return [];
+  const ids = [...new Set(candidateIdsPerRow.flat())].sort((a, b) => a - b);
+  return [
+    `${candidateIdsPerRow.length} imported row(s) match an existing transaction on an ` +
+      `adjacent date (transaction id(s) ${ids.join(', ')}). The same charge may already be ` +
+      'present under a different narrative — review these before trusting period totals.',
+  ];
+}
+
+/**
  * Look for an already-imported transaction that should be considered the same
  * as the incoming row, using `sourceIdentityFingerprint` (a hash over
  * accountId + date + amount + currency + merchantRaw) as the dedup key.
@@ -143,6 +216,15 @@ export async function findExistingForDedup(args: {
   incomingAmount?: number;
   incomingCurrency?: string;
   incomingMerchantRaw?: string;
+  /**
+   * Existing transaction ids already claimed by an earlier row of this same
+   * import. Only the narrative-rename tier honours it: that tier matches on
+   * (account, date, amount, currency) alone, so without a consumed set two
+   * incoming rows sharing that key would both absorb into the SAME existing
+   * row and the second — a genuinely distinct charge — would be silently
+   * dropped. Same reason `fuzzyDedupInvestmentActivity` takes `excludeIds`.
+   */
+  consumedExistingIds?: ReadonlySet<number>;
 }): Promise<DedupOutcome> {
   const incomingRef = normalizeRef(args.sourceReference);
 
@@ -299,5 +381,86 @@ export async function findExistingForDedup(args: {
     }
   }
 
-  return { kind: 'no-match' };
+
+  // Tier 5 — cross-source NARRATIVE RENAME. Every tier above is anchored on the
+  // merchant text (the drift tier included: `aggressiveMerchantKey` only
+  // survives punctuation drift), and tier 0 needs a bank-issued reference the
+  // provider may not supply — no Wealthsimple batch populates `source_reference`
+  // at all. So when two exports of the same account word the same cash event
+  // with unrelated strings -- WS bills one charge as "Pre-authorized Debit to
+  // AMEX BILL PYMT" in the activities export and "Cash correction (executed at
+  // ...)" in the brokerage PDF -- nothing above matches, and a re-import of an
+  // already-covered range inserts the whole range again. That happened in prod:
+  // 40 pairs, Feb-Mar 2026 spend inflated ~$19k and inflow ~$79k.
+  //
+  // This tier therefore ignores the merchant text and keys on
+  // (account, date, amount, currency). That key is NOT unique on its own -- two
+  // genuinely distinct $5 charges on one card on one day share it -- so it
+  // carries two guards:
+  //
+  //   GATE       at least one side must be a bare provider bookkeeping label
+  //              (GENERIC_STATEMENT_NARRATIVES). Two specific merchants never
+  //              describe one event, so "STARBUCKS #123" beside "MCDONALDS #99"
+  //              can never collapse.
+  //   AMBIGUITY  exactly ONE unconsumed row may hold the key. 0 or 2+ declines.
+  //              Declining leaves a duplicate, recoverable by deleting a row;
+  //              guessing wrong absorbs a real transaction into an unrelated
+  //              one, which is not. That asymmetry sets the direction.
+  let nearMissCandidateIds: number[] | undefined;
+  if (
+    args.incomingStatus === 'posted' &&
+    args.incomingDate &&
+    typeof args.incomingAmount === 'number'
+  ) {
+    const renameWhere: Record<string, unknown> = {
+      accountId: args.accountId,
+      status: 'posted',
+      // One day either side, so the same scan yields both the exact-date
+      // matches this tier acts on and the date-shifted near-misses it reports.
+      date: { [Op.between]: [addDays(args.incomingDate, -1), addDays(args.incomingDate, 1)] },
+    };
+    if (args.incomingCurrency != null) {
+      renameWhere.currency = String(args.incomingCurrency).toUpperCase();
+    }
+    const incomingIsGeneric = isGenericStatementNarrative(args.incomingMerchantRaw);
+    const inWindow = (
+      await Transaction.findAll({ where: renameWhere, transaction: args.t })
+    ).filter(
+      (row) =>
+        Number(row.amount) === args.incomingAmount &&
+        !(args.consumedExistingIds?.has(row.id) ?? false) &&
+        (incomingIsGeneric ||
+          isGenericStatementNarrative(row.merchantRaw) ||
+          isGenericStatementNarrative(row.merchantClean)) &&
+        // Two populated, differing bank references mean the provider itself
+        // calls these distinct charges. Same rule as the drift tier.
+        (incomingRef == null ||
+          normalizeRef(row.sourceReference) == null ||
+          normalizeRef(row.sourceReference) === incomingRef),
+    );
+    const sameDate = inWindow.filter((row) => row.date === args.incomingDate);
+    if (sameDate.length === 1) {
+      return { kind: 'duplicate', existingId: sameDate[0].id };
+    }
+    if (sameDate.length > 1) {
+      // Flag rather than guess. The row gets inserted (the caller treats
+      // no-match as "insert"), so nothing is lost, and this log is how an
+      // ambiguous re-import surfaces for review.
+      logger.warn(
+        {
+          accountId: args.accountId,
+          date: args.incomingDate,
+          amount: args.incomingAmount,
+          currency: args.incomingCurrency ?? null,
+          candidateIds: sameDate.map((row) => row.id),
+        },
+        'import_narrative_rename_dedup_ambiguous',
+      );
+    } else {
+      const shifted = inWindow.filter((row) => row.date !== args.incomingDate);
+      if (shifted.length > 0) nearMissCandidateIds = shifted.map((row) => row.id);
+    }
+  }
+
+  return nearMissCandidateIds ? { kind: 'no-match', nearMissCandidateIds } : { kind: 'no-match' };
 }

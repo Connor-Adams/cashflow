@@ -17,7 +17,7 @@ import {
   stableFingerprint,
   stableIdentityFingerprint,
 } from './fingerprint';
-import { findExistingForDedup } from './dedupExisting';
+import { findExistingForDedup, nearDuplicateWarnings } from './dedupExisting';
 import { loadAllRules } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { resolveProfileIdForImport } from './inferProfile';
@@ -399,6 +399,20 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   // decide how ambiguous ones ('03/04') parse instead of per-row fallback.
   const dateOrdering = inferCsvDateOrdering(records, headers, profileId);
 
+  /**
+   * Existing transaction ids the narrative-rename dedup tier may no longer
+   * claim: rows an earlier incoming row already matched, plus rows this commit
+   * inserted. That tier keys on (account, date, amount, currency) with the
+   * merchant text excluded, and the key is not unique, so without this set two
+   * incoming rows sharing it would both absorb the SAME existing row (or the
+   * second would absorb the first, freshly inserted, row) and a real cash event
+   * would be silently dropped. Same role as `excludeIds` in the investment
+   * fuzzy matcher.
+   */
+  const consumedExistingIds = new Set<number>();
+  /** Date-shifted near-misses dedup declined, one entry per incoming row. */
+  const nearDuplicates: number[][] = [];
+
   await sequelize.transaction(async (t) => {
     for (let i = 0; i < records.length; i++) {
       const row = records[i];
@@ -440,11 +454,14 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         incomingAmount: v.amount,
         incomingCurrency: v.currency,
         incomingMerchantRaw: v.merchantRaw,
+        consumedExistingIds,
       });
       if (dedup.kind !== 'no-match') {
+        consumedExistingIds.add(dedup.existingId);
         skippedDup += 1;
         continue;
       }
+      if (dedup.nearMissCandidateIds) nearDuplicates.push(dedup.nearMissCandidateIds);
 
       // All three reads thread `t`: on Postgres an un-threaded raw query runs
       // on a separate pooled connection and cannot see rows inserted earlier
@@ -583,6 +600,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
           }
         });
         inserted += 1;
+        consumedExistingIds.add(txn.id);
         if (enriched.fields.reviewFlag) {
           const key = (f.merchantCanonical ?? '').trim() || f.merchantClean.trim();
           if (key.length > 0) {
@@ -696,6 +714,8 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   // as the statement path, from the same shared builder.
   const fallbackWarnings = coldRowFallbackWarnings(embeddingMatch.summary, aiEnhanced);
   if (fallbackWarnings.length > 0) out.enrichmentWarnings = fallbackWarnings;
+  const nearDuplicateNotes = nearDuplicateWarnings(nearDuplicates);
+  if (nearDuplicateNotes.length > 0) out.nearDuplicateWarnings = nearDuplicateNotes;
   if (aiEnhanced.attempted) {
     out.aiBatch = {
       coldRows: aiEnhanced.coldRowCount,
