@@ -60,7 +60,10 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
     push('L320', 'Taxable dividends deductible under s.112 (connected corps)', connectedDivsReceived);
   }
 
-  // Taxable capital gains — corps use the high rate (66.67%) on ALL gains
+  // Taxable capital gains — corps use the HIGH inclusion rate on ALL gains, with
+  // no 250,000 threshold. That rate is not always 66.67%: the June 2024 increase
+  // was never enacted, so 2025 and 2026 carry 0.5 and only 2024 still holds
+  // 0.666667. Read the field, never the era.
   const grossGains = sumD(facts.capitalGainEvents.map(e => e.proceeds.minus(e.acb).minus(e.outlays)));
   const corpInclusionRate = r.capitalGainsInclusionHigh ?? r.capitalGainsInclusion;
   const includableGains = maxZero(grossGains.times(corpInclusionRate));
