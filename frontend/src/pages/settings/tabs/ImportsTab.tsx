@@ -67,11 +67,13 @@ type ReceiptImportResult = {
 type BulkReceiptImportResult = {
   total: number
   imported: number
+  /** Already on file, and this re-import corrected parser-owned fields. */
+  refreshed: number
   duplicates: number
   failed: number
   results: Array<{
     filename: string
-    status: 'imported' | 'duplicate' | 'failed'
+    status: 'imported' | 'refreshed' | 'duplicate' | 'failed'
     parserId?: string
     orderId?: number
     warnings?: string[]
@@ -541,6 +543,7 @@ export function ImportsTab() {
                 <strong>
                   {bulkReceiptResult.imported} imported
                 </strong>
+                {bulkReceiptResult.refreshed > 0 && ` · ${bulkReceiptResult.refreshed} repaired`}
                 {bulkReceiptResult.duplicates > 0 && ` · ${bulkReceiptResult.duplicates} already on file`}
                 {bulkReceiptResult.failed > 0 && ` · ${bulkReceiptResult.failed} failed`}
                 {` · ${bulkReceiptResult.total} file(s)`}

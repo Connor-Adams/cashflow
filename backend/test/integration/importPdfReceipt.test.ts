@@ -290,3 +290,61 @@ test('POST /import-pdf-bulk: one unparseable file does not stop the others', {
   assert.ok(res.body.results[0].error, 'failed entry carries an error message');
   assert.notEqual(res.body.results[1].status, 'failed');
 });
+
+test('POST /import-pdf: re-uploading repairs parser-owned fields but preserves AI/user columns', {
+  skip: skipNoFixtures,
+}, async () => {
+  // R2 was imported by an earlier test in this file. Simulate an order that an
+  // older parser ingested: blank item numbers, quantity collapsed to 1, and an
+  // AI category that must survive the refresh.
+  const order = await models.ExternalOrder.findOne({
+    where: { vendorOrderId: '1168-7-285-17-20251226-1546' },
+  });
+  assert.ok(order, 'R2 order not found — earlier test did not run');
+
+  const items = await models.ExternalOrderItem.findAll({
+    where: { externalOrderId: order.id },
+    order: [['id', 'ASC']],
+  });
+  assert.ok(items.length > 0);
+  const victim = items[0];
+  await victim.update({
+    itemNumber: null,
+    quantity: 1,
+    title: 'STALE TITLE',
+    inferredCategory: 'Groceries',
+    businessUsePercent: '42.00',
+  });
+
+  const res = await authed
+    .post('/api/external-orders/import-pdf')
+    .attach('file', fs.readFileSync(r2Path), { filename: 'r2.pdf', contentType: 'application/pdf' });
+
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.created, false, 'must dedupe, not create a second order');
+  assert.equal(res.body.refreshed, true, 'the mangled row should have been repaired');
+
+  await victim.reload();
+  // parser-owned: restored
+  assert.notEqual(victim.title, 'STALE TITLE');
+  assert.ok(victim.itemNumber, 'item number should be repopulated');
+  // AI/user-owned: untouched
+  assert.equal(victim.inferredCategory, 'Groceries');
+  assert.equal(Number(victim.businessUsePercent), 42);
+
+  // No duplicate rows were introduced by the refresh.
+  const after = await models.ExternalOrderItem.count({ where: { externalOrderId: order.id } });
+  assert.equal(after, items.length);
+});
+
+test('POST /import-pdf: an unchanged re-upload reports refreshed=false', {
+  skip: skipNoFixtures,
+}, async () => {
+  const res = await authed
+    .post('/api/external-orders/import-pdf')
+    .attach('file', fs.readFileSync(r2Path), { filename: 'r2.pdf', contentType: 'application/pdf' });
+
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.created, false);
+  assert.equal(res.body.refreshed, false, 'nothing changed, so nothing should be reported as repaired');
+});
