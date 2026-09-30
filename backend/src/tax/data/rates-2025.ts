@@ -9,6 +9,8 @@ import { D } from '../util/decimal';
 import type { RateTable } from '../engine/types';
 
 export const RATES_2025: RateTable = {
+  // cross-checked against CRA T1-2025 / Ontario Finance on 2026-06-08
+  provenance: 'published',
   year: 2025,
   federalBrackets: [
     { upTo: D('57375'), rate: D('0.145') },

@@ -27,6 +27,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { D } from '../util/decimal';
+import { ratesFor } from '../engine/brackets';
 
 let entityId: number;
 
@@ -203,9 +204,11 @@ test('age-72 senior — $144.5k retirement income → OAS clawback fires (L23500
     `expected totalIncome 144500.00, got ${computed.totals.totalIncome}`,
   );
 
-  // L23500 clawback IS emitted: 15% × (netIncome − $95,977).
-  // netIncome ≈ totalIncome = $144,500 (no RRSP/FHSA deduction).
-  // clawback ≈ (144500 − 95977) × 0.15 = $7,278.45.
+  // L23500 clawback IS emitted: the clawback rate × (netIncome − threshold).
+  // netIncome ≈ totalIncome = $144,500 (no RRSP/FHSA deduction). Threshold and
+  // rate are read from the rate table rather than written as literals — an
+  // earlier version hardcoded $95,977, so correcting the 2026 table to the
+  // published $95,323 broke this test for the right reason but the wrong file.
   const lines = computed.lines as { code: string; amount: string }[];
   const l23500 = lines.find((l) => l.code === 'L23500');
   assert.ok(
@@ -216,8 +219,10 @@ test('age-72 senior — $144.5k retirement income → OAS clawback fires (L23500
     D(l23500.amount).greaterThan(0),
     `expected L23500 > 0, got ${l23500.amount}`,
   );
-  // Sanity: exactly (144500 − 95977) × 0.15 = 7,278.45
-  const expectedClawback = D('144500').minus(D('95977')).times(D('0.15'));
+  const r = ratesFor(2026);
+  const expectedClawback = D('144500')
+    .minus(r.oasClawbackThreshold)
+    .times(r.oasClawbackRate);
   assert.equal(
     D(l23500.amount).toFixed(2),
     expectedClawback.toFixed(2),

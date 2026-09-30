@@ -196,7 +196,20 @@ export type Bracket = {
   rate: Decimal;
 };
 
+/**
+ * Where a rate table's numbers came from.
+ *
+ * `published` means every indexed value was taken from CRA / Service Canada /
+ * Ontario after they announced it. `projected` means the table was derived by
+ * indexing a prior year — fine for scenario planning, wrong for a return. A field
+ * rather than a comment because the 2026 table once carried a "VERIFIED" header
+ * over a projection and was served anyway; a header cannot be enforced.
+ */
+export type RateProvenance = 'published' | 'projected';
+
 export type RateTable = {
+  /** Whether these numbers were published or projected. See RateProvenance. */
+  provenance: RateProvenance;
   year: number;
   federalBrackets: Bracket[];
   provincialBrackets: Bracket[];
