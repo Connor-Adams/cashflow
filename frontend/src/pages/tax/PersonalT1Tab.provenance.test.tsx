@@ -12,6 +12,8 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
+import type { CompletenessReportDto } from '@cashflow/shared'
 import type { Scenario } from '../../hooks/useScenarios'
 
 const NOW = new Date().toISOString()
@@ -40,6 +42,7 @@ const PROJECTION = scenario({ id: 18, kind: 'projection_root', parentId: 2, name
 let scenarioList: Scenario[] = []
 const detailIds: (number | null)[] = []
 let detailFor: Scenario = BASELINE
+let completeness: CompletenessReportDto | undefined
 
 vi.mock('../../hooks/useTaxEntities', () => ({
   useTaxEntities: () => ({ entities: [{ id: 1, kind: 'personal' }], error: null }),
@@ -74,6 +77,7 @@ vi.mock('../../hooks/useScenarios', async (orig) => ({
           totals: { totalPayable: '300.00', refundOrOwing: '300.00', totalIncome: '27035.16', taxableIncome: '27035.16' },
           warnings: [],
           cached: true,
+          completeness,
         },
       },
       error: null,
@@ -113,5 +117,50 @@ describe('PersonalT1Tab provenance', () => {
     render(<PersonalT1Tab year={2026} />)
     expect(screen.getByText(/Actuals/)).toBeInTheDocument()
     expect(screen.queryByText(/Contains no transactions/)).not.toBeInTheDocument()
+  })
+})
+
+describe('PersonalT1Tab completeness', () => {
+  beforeEach(() => {
+    detailIds.length = 0
+    detailFor = BASELINE
+    scenarioList = [BASELINE]
+  })
+
+  it('renders the completeness block above the total', () => {
+    // The ordering is the point: three investigations of "my tax looks too low" each
+    // ended at incomplete data while this tab showed a clean number first.
+    completeness = {
+      status: 'blocked',
+      checkedAt: '2026-09-29T00:00:00.000Z',
+      coverageThrough: '2026-09-25',
+      blockers: [{
+        kind: 'unclassified_corp_draws',
+        severity: 'blocker',
+        title: '3 corp→personal transfers not classified',
+        detail: 'Classify each as a dividend, salary, loan or reimbursement.',
+        amount: '42000.00',
+        taxEstimate: '4227.00',
+        fix: { surface: 'classify', label: 'Classify these draws' },
+        references: [1, 2, 3],
+      }],
+      gaps: [],
+    }
+    render(<MemoryRouter><PersonalT1Tab year={2026} /></MemoryRouter>)
+    const block = screen.getByText(/This total is incomplete/)
+    // "Total payable" appears twice — the headline StatCard and the humanized totals
+    // list below it. The headline is the first, and it is the one that must not come
+    // before the caveat.
+    const total = screen.getAllByText(/Total payable/)[0]
+    expect(block.compareDocumentPosition(total) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('renders the total with no block when the backend sends none', () => {
+    // Corp scenarios carry no report, and an older cached client response may not
+    // either. The tab must still render rather than blanking.
+    completeness = undefined
+    render(<MemoryRouter><PersonalT1Tab year={2026} /></MemoryRouter>)
+    expect(screen.getAllByText(/Total payable/).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/This total is incomplete/)).not.toBeInTheDocument()
   })
 })

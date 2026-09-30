@@ -12,6 +12,7 @@ import { YearStripNav } from './scenarios/YearStripNav';
 import { AssumptionsEditor } from './scenarios/AssumptionsEditor';
 import { RrifMinCalc } from './scenarios/RrifMinCalc';
 import { fmtCurrency } from './util/format';
+import { CompletenessPanel } from './CompletenessPanel';
 import { labelForTotal } from './util/labels';
 import { TaxLineBreakdownTable } from './components/TaxLineBreakdownTable';
 import { ScenarioCompareBar } from './components/ScenarioCompareBar';
@@ -22,7 +23,20 @@ import { CollapsibleCard } from '@/components/ui/collapsible-card';
 import { Alert } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
 
-export function PersonalT1Tab({ year }: { year: number }) {
+export interface PersonalT1TabProps {
+  year: number;
+  /**
+   * Switches the enclosing TaxPage tab. Completeness items whose fix lives on
+   * another tab — Classify, Slips — call it; TaxPage owns that state, not this tab.
+   *
+   * Optional so existing callers and tests need not supply it; a completeness item
+   * with a tab destination then simply renders no action, which is the same
+   * behaviour as an item with no destination at all.
+   */
+  onNavigate?: (tab: string) => void;
+}
+
+export function PersonalT1Tab({ year, onNavigate = () => {} }: PersonalT1TabProps) {
   const { entities, error: entitiesError } = useTaxEntities();
 
   if (entitiesError) return <p className="error">Failed to load entities: {entitiesError}</p>;
@@ -38,15 +52,22 @@ export function PersonalT1Tab({ year }: { year: number }) {
     );
   }
 
-  return <PersonalT1ScenarioWorkspace year={year} entityId={personalEntity.id} />;
+  return (
+    <PersonalT1ScenarioWorkspace
+      year={year}
+      entityId={personalEntity.id}
+      onNavigate={onNavigate}
+    />
+  );
 }
 
 interface WorkspaceProps {
   year: number;
   entityId: number;
+  onNavigate: (tab: string) => void;
 }
 
-function PersonalT1ScenarioWorkspace({ year: yearProp, entityId }: WorkspaceProps) {
+function PersonalT1ScenarioWorkspace({ year: yearProp, entityId, onNavigate }: WorkspaceProps) {
   // Local `selectedYear` overlays the prop so the YearStripNav can pivot to a
   // chained year (year+1 projection, etc.) without round-tripping through
   // TaxPage's year selector. When the prop changes (user picks a year in the
@@ -246,6 +267,7 @@ function PersonalT1ScenarioWorkspace({ year: yearProp, entityId }: WorkspaceProp
               onAssumptionsChange={handleAssumptionsChange}
               onAddToCompare={() => toggleCompare(active.data!.scenario.id)}
               inCompare={compareIds.includes(active.data.scenario.id)}
+              onNavigate={onNavigate}
             />
           ) : null}
           {compareIds.length > 0 && (
@@ -266,6 +288,8 @@ function PersonalT1ScenarioWorkspace({ year: yearProp, entityId }: WorkspaceProp
 }
 
 interface ActiveScenarioPanelProps {
+  /** Switches the enclosing TaxPage tab, for completeness items fixed elsewhere. */
+  onNavigate: (tab: string) => void;
   data: ScenarioWithComputed;
   onOverridesChange: (next: Record<string, unknown>) => void;
   onAssumptionsChange: (next: { inflation?: number; investmentReturn?: number }) => void;
@@ -279,6 +303,7 @@ function ActiveScenarioPanel({
   onAssumptionsChange,
   onAddToCompare,
   inCompare,
+  onNavigate,
 }: ActiveScenarioPanelProps) {
   const { scenario, computed } = data;
   // Backend serialises Decimal via toJSON → string, matching TaxLineDto. The
@@ -316,6 +341,13 @@ function ActiveScenarioPanel({
         </details>
       )}
       <OverrideEditor overrides={scenario.overrides} onChange={onOverridesChange} />
+
+      {/* Above the total, always. The three prior investigations of "my tax looks
+          too low" each ended at incomplete data while this tab rendered a clean
+          number, so the number does not appear without its caveat. */}
+      {computed.completeness && (
+        <CompletenessPanel report={computed.completeness} onNavigate={onNavigate} />
+      )}
 
       {/* Headline */}
       <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
