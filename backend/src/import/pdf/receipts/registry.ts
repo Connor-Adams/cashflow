@@ -30,5 +30,8 @@ export function registerBuiltInReceiptPdfParsers(): void {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { costcoTillReceiptParser } = require('./costcoTillReceipt');
   registerReceiptPdfParser(costcoTillReceiptParser);
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { costcoGasReceiptParser } = require('./costcoGasReceipt');
+  registerReceiptPdfParser(costcoGasReceiptParser);
   builtInsRegistered = true;
 }
