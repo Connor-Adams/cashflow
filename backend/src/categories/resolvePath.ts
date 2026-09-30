@@ -10,13 +10,22 @@ export interface ResolvedPath {
   createdIds: number[];
 }
 
-async function findSibling(
+/**
+ * Find an existing node for this name ANYWHERE in the household.
+ *
+ * Category names are unique per household (categories_household_name_key_unique),
+ * so a path is a hint about where a NEW category belongs, not an address: if the
+ * name already exists the walk reuses that node whatever its parent, and never
+ * reparents it. Resolving parent-scoped is what let the nightly enrichment job
+ * fork 15 categories into duplicate roots on 2026-09-29 — see
+ * docs/superpowers/specs/2026-09-30-cashflow-duplicate-categories-design.md.
+ */
+async function findByName(
   householdId: number,
-  parentId: number | null,
   nameKey: string,
   transaction: Transaction,
 ): Promise<Category | null> {
-  return Category.findOne({ where: { householdId, parentId, nameKey }, transaction });
+  return Category.findOne({ where: { householdId, nameKey }, transaction });
 }
 
 export async function resolveCategoryPath(
@@ -32,7 +41,7 @@ export async function resolveCategoryPath(
     let leafId = 0;
     for (const segment of segments) {
       const nameKey = normalizeCategoryName(segment);
-      let node = await findSibling(householdId, parentId, nameKey, transaction);
+      let node = await findByName(householdId, nameKey, transaction);
       if (!node) {
         try {
           node = await Category.create(
@@ -42,7 +51,7 @@ export async function resolveCategoryPath(
           createdIds.push(node.id);
         } catch (err) {
           if (err instanceof UniqueConstraintError) {
-            node = await findSibling(householdId, parentId, nameKey, transaction);
+            node = await findByName(householdId, nameKey, transaction);
           }
           if (!node) throw err;
         }
