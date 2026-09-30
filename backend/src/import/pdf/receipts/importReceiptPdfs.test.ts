@@ -9,13 +9,14 @@ function pdf(name: string): ReceiptFile {
 /** Per-file worker stub. The real one parses + persists + matches; the batching
  *  logic under test must not care which. */
 function worker(
-  behaviour: Record<string, 'created' | 'duplicate' | Error>,
+  behaviour: Record<string, 'created' | 'duplicate' | 'refreshed' | Error>,
 ): (f: ReceiptFile) => Promise<ImportOneResult> {
   return async (f) => {
     const b = behaviour[f.originalname];
     if (b instanceof Error) throw b;
     return {
       created: b === 'created',
+      refreshed: b === 'refreshed',
       parserId: 'costco_till_receipt',
       orderId: Object.keys(behaviour).indexOf(f.originalname) + 100,
       warnings: [],
@@ -77,7 +78,7 @@ test('a non-PDF fails only its own entry', async () => {
 
 test('an empty upload is a valid empty batch, not an error', async () => {
   const summary = await importReceiptPdfsBulk([], worker({}));
-  assert.deepEqual(summary, { total: 0, imported: 0, duplicates: 0, failed: 0, results: [] });
+  assert.deepEqual(summary, { total: 0, imported: 0, refreshed: 0, duplicates: 0, failed: 0, results: [] });
 });
 
 test('files are processed sequentially so dedupe of two identical receipts is deterministic', async () => {
@@ -88,7 +89,7 @@ test('files are processed sequentially so dedupe of two identical receipts is de
       order.push(`start:${f.originalname}`);
       await new Promise((r) => setTimeout(r, f.originalname === '1.pdf' ? 15 : 0));
       order.push(`end:${f.originalname}`);
-      return { created: true, parserId: 'costco_till_receipt', orderId: 1, warnings: [], linksCreated: 0, linksUpdated: 0 };
+      return { created: true, refreshed: false, parserId: 'costco_till_receipt', orderId: 1, warnings: [], linksCreated: 0, linksUpdated: 0 };
     },
   );
   assert.equal(summary.imported, 3);
@@ -97,4 +98,17 @@ test('files are processed sequentially so dedupe of two identical receipts is de
     'start:2.pdf', 'end:2.pdf',
     'start:3.pdf', 'end:3.pdf',
   ]);
+});
+
+test('a re-upload that repairs an existing order reports refreshed, not duplicate', async () => {
+  const summary = await importReceiptPdfsBulk(
+    [pdf('repaired.pdf'), pdf('unchanged.pdf'), pdf('brand-new.pdf')],
+    worker({ 'repaired.pdf': 'refreshed', 'unchanged.pdf': 'duplicate', 'brand-new.pdf': 'created' }),
+  );
+
+  assert.deepEqual(summary.results.map((r) => r.status), ['refreshed', 'duplicate', 'imported']);
+  assert.equal(summary.refreshed, 1);
+  assert.equal(summary.duplicates, 1);
+  assert.equal(summary.imported, 1);
+  assert.equal(summary.total, 3);
 });

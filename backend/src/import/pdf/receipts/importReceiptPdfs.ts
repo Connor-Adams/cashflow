@@ -17,9 +17,14 @@ export type ReceiptFile = {
   buffer: Buffer;
 };
 
-/** What the per-file worker returns. `created: false` means dedupe matched an existing order. */
+/**
+ * What the per-file worker returns. `created: false` means dedupe matched an
+ * existing order; `refreshed: true` means that existing order's parser-owned
+ * fields were repaired by this re-import.
+ */
 export type ImportOneResult = {
   created: boolean;
+  refreshed: boolean;
   parserId: string;
   orderId: number;
   warnings: string[];
@@ -27,7 +32,7 @@ export type ImportOneResult = {
   linksUpdated: number;
 };
 
-export type ReceiptImportStatus = 'imported' | 'duplicate' | 'failed';
+export type ReceiptImportStatus = 'imported' | 'refreshed' | 'duplicate' | 'failed';
 
 export type ReceiptImportResult = {
   filename: string;
@@ -43,6 +48,8 @@ export type ReceiptImportResult = {
 export type ReceiptImportSummary = {
   total: number;
   imported: number;
+  /** Already on file, and this re-import corrected parser-owned fields. */
+  refreshed: number;
   duplicates: number;
   failed: number;
   results: ReceiptImportResult[];
@@ -81,7 +88,7 @@ export async function importReceiptPdfsBulk(
       const r = await importOne(file);
       results.push({
         filename: file.originalname,
-        status: r.created ? 'imported' : 'duplicate',
+        status: r.created ? 'imported' : r.refreshed ? 'refreshed' : 'duplicate',
         parserId: r.parserId,
         orderId: r.orderId,
         warnings: r.warnings,
@@ -96,6 +103,7 @@ export async function importReceiptPdfsBulk(
   return {
     total: results.length,
     imported: results.filter((r) => r.status === 'imported').length,
+    refreshed: results.filter((r) => r.status === 'refreshed').length,
     duplicates: results.filter((r) => r.status === 'duplicate').length,
     failed: results.filter((r) => r.status === 'failed').length,
     results,

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { Op } from 'sequelize';
+import { Op, type Transaction } from 'sequelize';
 import {
   sequelize,
   ExternalOrder,
@@ -9,6 +9,7 @@ import {
   TransactionOrderLink,
 } from '../models';
 import { findOrCreateExternalOrderForDedupe } from '../models/externalOrderDedupe';
+import { planItemRefresh, planTenderRefresh } from '../import/planOrderRefresh';
 import { currentAuth } from '../auth/middleware';
 import { defaultCurrency } from '../config/env';
 import { logger } from '../observability/logger';
@@ -146,7 +147,7 @@ function requireUploadedFile(req: import('express').Request, res: import('expres
 export async function persistExtractedOrder(
   extracted: ExtractedReceiptOrder,
   opts: { userId: number | null; householdId: number | null; source: string },
-): Promise<{ order: ExternalOrder; created: boolean }> {
+): Promise<{ order: ExternalOrder; created: boolean; refreshed: boolean }> {
   if (extracted.total == null && extracted.items.length === 0) {
     const err = new Error('Receipt extraction returned no usable data') as Error & {
       status?: number;
@@ -224,8 +225,85 @@ export async function persistExtractedOrder(
         { transaction: t },
       );
     }
-    return { order, created };
+    // Already on file: refresh the parser-owned fields so an order ingested by
+    // an older parser picks up fixes, without disturbing AI/user-owned columns.
+    const refreshed = created
+      ? false
+      : await refreshExistingOrder(order, extracted, t);
+
+    return { order, created, refreshed };
   });
+}
+
+/**
+ * Update parser-owned columns on an order that already existed. Returns whether
+ * anything actually changed. See planOrderRefresh for the safety rules.
+ */
+async function refreshExistingOrder(
+  order: ExternalOrder,
+  extracted: ExtractedReceiptOrder,
+  t: Transaction,
+): Promise<boolean> {
+  const [storedItems, storedTenders] = await Promise.all([
+    ExternalOrderItem.findAll({
+      where: { externalOrderId: order.id },
+      order: [['id', 'ASC']],
+      transaction: t,
+    }),
+    ExternalOrderTender.findAll({
+      where: { externalOrderId: order.id },
+      order: [['sequence', 'ASC'], ['id', 'ASC']],
+      transaction: t,
+    }),
+  ]);
+
+  const itemPlan = planItemRefresh(
+    extracted.items,
+    storedItems.map((i) => ({
+      id: i.id,
+      title: i.title,
+      quantity: i.quantity,
+      unitPrice: i.unitPrice,
+      totalPrice: i.totalPrice,
+      itemNumber: i.itemNumber,
+    })),
+  );
+  const tenderPlan = planTenderRefresh(
+    extracted.tenders,
+    storedTenders.map((x) => ({
+      id: x.id,
+      paymentLast4: x.paymentLast4,
+      network: x.network,
+      amount: x.amount,
+    })),
+  );
+
+  if (itemPlan.skipped || tenderPlan.skipped) {
+    logger.info({
+      orderId: order.id,
+      itemsSkipped: itemPlan.skipped,
+      tendersSkipped: tenderPlan.skipped,
+      parsedItems: extracted.items.length,
+      storedItems: storedItems.length,
+    }, 'external_order_refresh_skipped');
+  }
+
+  for (const u of itemPlan.updates) {
+    await ExternalOrderItem.update(u.fields as never, { where: { id: u.id }, transaction: t });
+  }
+  for (const u of tenderPlan.updates) {
+    await ExternalOrderTender.update(u.fields as never, { where: { id: u.id }, transaction: t });
+  }
+
+  const changed = itemPlan.updates.length + tenderPlan.updates.length;
+  if (changed > 0) {
+    logger.info({
+      orderId: order.id,
+      itemsUpdated: itemPlan.updates.length,
+      tendersUpdated: tenderPlan.updates.length,
+    }, 'external_order_refreshed');
+  }
+  return changed > 0;
 }
 
 /**
@@ -545,6 +623,7 @@ router.post(
 type ReceiptImportOutcome = {
   order: ExternalOrder;
   created: boolean;
+  refreshed: boolean;
   extracted: Awaited<ReturnType<ReceiptPdfParser['parse']>>['extracted'];
   warnings: string[];
   parser: ReceiptPdfParser;
@@ -567,7 +646,7 @@ async function importOneReceiptPdf(
 
   const { extracted, warnings } = parser.parse(lines, { defaultCurrency: 'CAD' });
 
-  const { order, created } = await persistExtractedOrder(extracted, {
+  const { order, created, refreshed } = await persistExtractedOrder(extracted, {
     userId: ctx.userId,
     householdId: ctx.householdId,
     source: `${parser.id}-pdf`,
@@ -586,7 +665,7 @@ async function importOneReceiptPdf(
     kickCostcoProductResolution(order);
   }
 
-  return { order, created, extracted, warnings, parser, matchSummary };
+  return { order, created, refreshed, extracted, warnings, parser, matchSummary };
 }
 
 /**
@@ -621,12 +700,13 @@ router.post(
         res.status(422).json({ error: 'no receipt parser matched this PDF' });
         return;
       }
-      const { order, created, extracted, warnings, parser, matchSummary } = outcome;
+      const { order, created, refreshed, extracted, warnings, parser, matchSummary } = outcome;
 
       logger.info({
         source: `${parser.id}-pdf`,
         orderId: order.id,
         created,
+        refreshed,
         vendor: extracted.vendor,
         items: extracted.items.length,
         tenders: extracted.tenders.length,
@@ -639,6 +719,7 @@ router.post(
       res.json({
         order: order.toJSON(),
         created,
+        refreshed,
         extracted,
         warnings,
         parserId: parser.id,
@@ -681,6 +762,7 @@ router.post(
         if (!outcome) throw new Error('no receipt parser matched this PDF');
         return {
           created: outcome.created,
+          refreshed: outcome.refreshed,
           parserId: outcome.parser.id,
           orderId: outcome.order.id,
           warnings: outcome.warnings,
@@ -693,6 +775,7 @@ router.post(
         householdId: auth.household.id,
         total: summary.total,
         imported: summary.imported,
+        refreshed: summary.refreshed,
         duplicates: summary.duplicates,
         failed: summary.failed,
       }, 'external_orders_bulk_imported');
