@@ -335,6 +335,93 @@ test('GET /api/me/exports only returns own exports (AC #13)', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// buildDataExportArchive — receipts path (regression: schema drift)
+//
+// The receipts SELECT once listed columns `content_type`/`byte_size` that do
+// not exist on the `receipts` table (real columns: `mime_type`/`size_bytes`),
+// so any household WITH a receipt made the export throw Postgres 42703 and
+// `runUserDataExport` logged `user_data_export_failed`. No prior test seeded a
+// receipt, so CI stayed green while the export was broken. This exercises that
+// path end-to-end and asserts the receipt row lands in the archive.
+// ---------------------------------------------------------------------------
+
+test('buildDataExportArchive includes receipts for a household with a receipt', async () => {
+  const models = await import('../../src/models/index.js');
+  const { buildDataExportArchive } = await import('../../src/services/dataExportArchive.js');
+  const { readZipEntry } = await import('./_setup/readZipEntry.js');
+
+  // UserA's household (seed() created it + an owner membership).
+  const membership = await models.HouseholdMember.findOne({ where: { userId: userAId } });
+  assert.ok(membership, 'UserA should belong to a household');
+  const householdId = membership.householdId;
+
+  const acct = await models.Account.create({
+    householdId,
+    ownerUserId: userAId,
+    owner: 'me',
+    visibility: 'shared',
+    name: 'A Visa',
+    accountType: 'credit_card',
+    defaultCurrency: 'CAD',
+    shortCode: `EXP-${crypto.randomBytes(3).toString('hex')}`,
+  } as never);
+
+  const txn = await models.Transaction.create({
+    accountId: acct.id,
+    householdId,
+    createdByUserId: userAId,
+    visibility: 'shared',
+    ownershipType: 'me',
+    importBatch: 'data-export-receipts-test',
+    date: '2026-05-15',
+    merchantRaw: 'AMAZON.CA',
+    merchantClean: 'Amazon',
+    amount: '-50.00',
+    currency: 'CAD',
+    finalSplitType: 'me',
+    myShareAmount: '-50.00',
+    partnerShareAmount: '0',
+    businessAmount: '0',
+    txnType: 'purchase',
+    sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
+    finalBusiness: false,
+    isRecurring: false,
+    reviewFlag: false,
+  } as never);
+
+  const receipt = await models.Receipt.create({
+    transactionId: txn.id,
+    storedFilename: `fake-${crypto.randomUUID()}.jpg`,
+    originalName: 'receipt.jpg',
+    mimeType: 'image/jpeg',
+    sizeBytes: 1024,
+    extractedNote: null,
+    externalOrderId: null,
+  });
+
+  // Must resolve — pre-fix this rejected with Postgres 42703 (undefined column).
+  const exportId = 987654;
+  const result = await buildDataExportArchive(userAId, householdId, exportId);
+  assert.ok(result.byteSize > 0, 'archive should be non-empty');
+
+  // receipts.json must contain the seeded row, with export field names preserved
+  // via the `mime_type AS content_type` / `size_bytes AS byte_size` aliases.
+  const receiptsJson = JSON.parse(readZipEntry(result.absolutePath, 'receipts.json').toString('utf8'));
+  assert.equal(receiptsJson.length, 1, 'receipts.json should hold exactly one row');
+  const row = receiptsJson[0];
+  assert.equal(row.id, receipt.id);
+  assert.equal(row.transaction_id, txn.id);
+  assert.equal(row.original_name, 'receipt.jpg');
+  assert.equal(row.content_type, 'image/jpeg', 'mime_type aliased to content_type');
+  assert.equal(row.byte_size, 1024, 'size_bytes aliased to byte_size');
+
+  // meta.json should report the receipt in its counts.
+  const meta = JSON.parse(readZipEntry(result.absolutePath, 'meta.json').toString('utf8'));
+  assert.equal(meta.modelCounts.receipts, 1);
+});
+
+// ---------------------------------------------------------------------------
 // Unauthenticated requests are rejected
 // ---------------------------------------------------------------------------
 
