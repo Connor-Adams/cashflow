@@ -261,3 +261,30 @@ test('parser produces a deterministic merchantClean (uppercased, collapsed white
   assert.ok(!/\s{2,}/.test(costco!.merchantRaw));
   assert.ok(typeof costco!.merchantClean === 'string' && costco!.merchantClean.length > 0);
 });
+
+// ─── Header contract (synthetic lines, no fixtures needed) ────────────────────
+//
+// Both bundle entry points (runImport.ts pdfBundle* and the async
+// pdfImportProcessor worker) hard-require `parseOut.header` to resolve the
+// account, and throw "produced no header for account match" without it. This
+// parser predates that contract by one day (parser 2026-05-23, contract
+// b6df539f 2026-05-24) and `PdfParseResult.header` is optional, so the omission
+// compiled fine and silently failed every CIBC import from then on.
+
+test('parse() returns a PdfStatementHeader — bundle/processor account match needs it', () => {
+  const out = cibcCostcoMastercardParser.parse(
+    [
+      ...SYN_HEADER,
+      mkSyn('Your payments', 2),
+      mkSyn('Dec 24           Dec 29          PAYMENT THANK YOU/PAIEMENT MERCI            577.04', 2),
+      mkSyn('Total payments   $577.04', 2),
+    ],
+    { defaultCurrency: 'CAD' },
+  );
+  assert.ok(out.header, 'parser must return a header or every bundle import throws');
+  assert.equal(out.header.accountSuffix, '3114');
+  assert.equal(out.header.productLabel, 'CIBC Costco Mastercard');
+  assert.equal(out.header.accountType, 'credit_card');
+  assert.equal(out.header.periodStart, '2025-12-13');
+  assert.equal(out.header.periodEnd, '2026-01-12');
+});
