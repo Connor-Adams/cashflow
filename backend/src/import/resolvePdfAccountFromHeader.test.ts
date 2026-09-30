@@ -255,3 +255,43 @@ test('re-importing the same statement does not duplicate the identifier row', as
   const rows = await AccountCardIdentifier.findAll({ where: { accountId: first.account.id } });
   assert.equal(rows.length, 1, 'upsert must not duplicate on repeat import');
 });
+
+/** A CIBC Costco Mastercard PDF header. accountSuffix = card last-4 from the statement body. */
+function cibcCostcoHeader(last4: string): import('./pdf/types').PdfStatementHeader {
+  return {
+    accountSuffix: last4,
+    productLabel: 'CIBC Costco Mastercard',
+    accountType: 'credit_card',
+    periodStart: '2026-05-13',
+    periodEnd: '2026-06-12',
+    currency: 'CAD',
+  };
+}
+
+test('CIBC Costco statement reuses the existing "Costco MC" account instead of forking', async () => {
+  // Prod state: the account was created by the pre-header import path in May
+  // 2026 and carries the opaque short_code 'costco', so the shortCode lookup on
+  // the body last-4 ('3114') misses. Without a PDF_ACCOUNT_TEMPLATES entry
+  // mapping the product label to this display name, the name fallback misses
+  // too and every CIBC statement forks a second credit-card account, splitting
+  // the card's history in half.
+  const existing = await Account.create({
+    householdId, name: 'Costco MC', accountType: 'credit_card',
+    owner: 'me', visibility: 'private', defaultCurrency: 'CAD', shortCode: 'costco',
+    ownerUserId: userId, entityId: null,
+  });
+
+  const r = await resolvePdfAccountFromHeader(
+    cibcCostcoHeader('3114'), householdId, userId, 'onlineStatement.pdf',
+  );
+
+  assert.equal(r.accountCreated, false, 'must reuse the existing Costco MC account, not fork a new one');
+  assert.equal(r.account.id, existing.id);
+  assert.equal(
+    (await Account.findAll({ where: { householdId, accountType: 'credit_card' } })).length,
+    1,
+    'no duplicate credit-card account created',
+  );
+  // The name fallback promotes the opaque short_code to the real card key.
+  assert.equal(r.account.shortCode, '3114');
+});
