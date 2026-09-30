@@ -13,7 +13,7 @@ before(async () => {
 });
 after(async () => { await teardownPgTestDb(testDb); });
 
-test('rename updates the node and is rejected on sibling conflict', async () => {
+test('rename updates the node and is rejected on a household-wide name conflict', async () => {
   const work = await authed.post('/api/categories').send({ name: 'Work', parentId: null });
   const internet = await authed.post('/api/categories').send({ name: 'Internet', parentId: work.body.id });
   await authed.post('/api/categories').send({ name: 'Phone', parentId: work.body.id });
@@ -22,7 +22,10 @@ test('rename updates the node and is rejected on sibling conflict', async () => 
   assert.equal(ok.status, 200);
   assert.equal(ok.body.name, 'WiFi');
 
+  // Names are unique per household now, not per parent, so this rejects even
+  // though "Phone" is a sibling — it would also reject against any same-named
+  // node anywhere else in the household.
   const conflict = await authed.patch(`/api/categories/${internet.body.id}`).send({ name: 'Phone' });
   assert.equal(conflict.status, 409);
-  assert.equal(conflict.body.code, 'sibling_conflict');
+  assert.equal(conflict.body.code, 'name_conflict');
 });

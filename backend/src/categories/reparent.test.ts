@@ -34,12 +34,21 @@ test('rejects a cycle', async () => {
   );
 });
 
-test('rejects a sibling name collision under the new parent', async () => {
-  // home already has a child "Expenses" (case variant) -> collision when moving work's Expenses under home
-  await Category.create({ householdId, name: 'expenses', icon: null, parentId: home.id });
+test('rejects a name collision anywhere in the household, not just under the new parent', async () => {
+  // A third, unrelated branch ("Family") already has a same-named "expenses"
+  // (case variant) — NOT under the new parent (home) and NOT under the old
+  // parent (work). The old parentId-scoped check would have missed this and
+  // let the move through; the household-wide guard still catches it. This
+  // state (two nodes sharing a nameKey) is only reachable by bypassing
+  // createCategory/reparent (as here, via direct Category.create) — the
+  // household-wide unique index arriving in Task 6 forbids it via the app.
+  // That's the guard's whole remaining job: catching a pre-existing
+  // inconsistency, not a parent-local one.
+  const family = await Category.create({ householdId, name: 'Family', icon: null, parentId: null });
+  await Category.create({ householdId, name: 'expenses', icon: null, parentId: family.id });
   await assert.rejects(
     () => reparentCategory(householdId, expenses.id, home.id),
-    (e: unknown) => e instanceof CategoryError && e.code === 'sibling_conflict',
+    (e: unknown) => e instanceof CategoryError && e.code === 'name_conflict',
   );
 });
 
