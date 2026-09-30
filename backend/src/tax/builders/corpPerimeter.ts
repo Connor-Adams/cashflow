@@ -74,6 +74,19 @@ export interface PerimeterPartition {
   /** Passive dividends on non-investment accounts. Same reasoning. */
   dividendIncome: PerimeterTxn[];
   /**
+   * Outbound transfers whose matching leg was never imported — reported, and
+   * deliberately in NO other bucket: deducting them would understate income.
+   *
+   * Exposed structurally because part 3's completeness gate needs exactly this
+   * population as a blocker, and the two obvious ways to re-derive it are both
+   * wrong. "Unlinked" fails because the pointer is one-directional, so every
+   * arrival leg qualifies. "Neither a link source nor a link target" — which reads
+   * like the right condition — means *is real revenue or a real expense* in this
+   * file: the healthy outcome, so it would flag every third-party corp outgoing.
+   * Reading this function's own verdict is the only way to agree with it.
+   */
+  unimportedOutboundTransfers: PerimeterTxn[];
+  /**
    * Receipts counted as revenue whose external-ness could not be corroborated —
    * see `looksLikeOrphanedArrival`. They ARE included in `revenue`; the warning
    * exists so the number's shakiest inputs are visible on the return.
@@ -209,6 +222,7 @@ export function partitionCorpPerimeter(
   const expenses: PerimeterTxn[] = [];
   const interestIncome: PerimeterTxn[] = [];
   const dividendIncome: PerimeterTxn[] = [];
+  const unimportedOutboundTransfers: PerimeterTxn[] = [];
   const warnings: string[] = [];
 
   for (const t of txns) {
@@ -254,6 +268,7 @@ export function partitionCorpPerimeter(
         // The far side is in the brokerage ledger — accounted for, so there is
         // nothing to flag.
         if (claimMatchingCashMove(t, amount)) continue;
+        unimportedOutboundTransfers.push(t);
         warnings.push(
           `Txn #${t.id} (${t.date}, ${amount.toFixed(2)} ${t.currency}) was NOT deducted as a `
           + 'business expense: it is an outbound transfer whose matching leg is not imported, '
@@ -265,5 +280,8 @@ export function partitionCorpPerimeter(
     }
   }
 
-  return { revenue, expenses, interestIncome, dividendIncome, warnings };
+  return {
+    revenue, expenses, interestIncome, dividendIncome,
+    unimportedOutboundTransfers, warnings,
+  };
 }
