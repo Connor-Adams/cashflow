@@ -13,6 +13,7 @@ export class ProjectedRatesError extends Error {
    * bare 500. The scenario routes rely on exactly that — they have no local
    * rate-error branch, and the T1 tab reads its numbers from them.
    */
+  // fallow-ignore-next-line unused-class-member
   readonly status = 409;
   constructor(year: number, periodEnd: string) {
     super(
