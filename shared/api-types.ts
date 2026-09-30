@@ -2377,3 +2377,97 @@ export interface TaxReturnDto {
    */
   completeness?: CompletenessReportDto
 }
+
+// ---------------------------------------------------------------------------
+// Tax outlook — what is coming, rather than what happened
+// ---------------------------------------------------------------------------
+
+/** Which of CRA's three instalment calculations an option follows. */
+export type InstalmentBasis = 'no_calculation' | 'prior_year' | 'current_year'
+
+/** One dated payment. `amount` is a fixed-2 string like every money value here. */
+export interface InstalmentDueDto {
+  /** `YYYY-MM-DD`. */
+  dueOn: string
+  amount: string
+}
+
+export interface InstalmentOptionDto {
+  basis: InstalmentBasis
+  /** The sum of this option's own four instalments — always, so the two agree. */
+  total: string
+  /**
+   * What is left to pay with the return if this option is followed: the year's
+   * projected net owing less what these instalments cover, floored at zero.
+   *
+   * Server-computed, because finding it in the client would mean subtracting fixed-2
+   * money strings — and it is the largest number in the picture.
+   */
+  balanceWithReturn: string
+  /**
+   * True only for the current-year estimate. It is the one option that can leave a
+   * shortfall CRA charges interest on, and the backend surfaces the trade-off rather
+   * than deciding it, so the UI must show it rather than silently ranking it last.
+   */
+  carriesInterestRisk: boolean
+  instalments: InstalmentDueDto[]
+}
+
+export interface InstalmentObligationDto {
+  year: number
+  required: boolean
+  /** Plain-language statement of which conjunct of CRA's test decided it. */
+  reason: string
+  /**
+   * When the year's remaining balance is due — April 30 of the following year.
+   *
+   * Present even when no instalments are required, because it is then the whole
+   * obligation. Nothing in the app named this date before.
+   */
+  balanceDueOn: string
+  recommended: InstalmentBasis
+  /** The recommended option's payments, or empty when none are required. */
+  instalments: InstalmentDueDto[]
+  options: InstalmentOptionDto[]
+}
+
+export interface ForwardDrawsDto {
+  actualToDate: string
+  monthlyRunRate: string
+  projectedRemainder: string
+  projectedTotal: string
+  coveredMonths: number
+  /** Elapsed months (1-12) with no transactions at all, i.e. probably unimported. */
+  uncoveredMonths: number[]
+  /** The assumption in words, including any uncovered months it names. */
+  basis: string
+}
+
+export interface ForwardViewDto {
+  year: number
+  /** Always true. Stated so the figure can never be mistaken for a filed number. */
+  isProjection: boolean
+  /** Total payable on the return as it stands. */
+  currentTotalPayable: string
+  /** Total payable if the projected remainder is drawn as it has been so far. */
+  projectedTotalPayable: string
+  /** The difference — what the rest of the year is expected to add. */
+  projectedAdditionalTax: string
+  draws: ForwardDrawsDto
+}
+
+/** `GET /api/tax/personal/:year/outlook`. Every money value is a fixed-2 string. */
+export interface TaxOutlookDto {
+  year: number
+  /**
+   * Net tax owing for each year of CRA's three-year threshold window, keyed by year.
+   * The current year's entry is year-to-date; `projectedCurrentYearNetOwing` is the
+   * figure the threshold test actually used.
+   */
+  netOwingByYear: Record<string, string>
+  projectedCurrentYearNetOwing: string
+  /** Years in the window whose rate table is a projection rather than published. */
+  provenanceWarnings: string[]
+  obligation: InstalmentObligationDto
+  forward: ForwardViewDto
+}

@@ -13,6 +13,7 @@ import { AssumptionsEditor } from './scenarios/AssumptionsEditor';
 import { RrifMinCalc } from './scenarios/RrifMinCalc';
 import { fmtCurrency } from './util/format';
 import { CompletenessPanel } from './CompletenessPanel';
+import { OutlookPanel } from './OutlookPanel';
 import { labelForTotal } from './util/labels';
 import { TaxLineBreakdownTable } from './components/TaxLineBreakdownTable';
 import { ScenarioCompareBar } from './components/ScenarioCompareBar';
@@ -356,6 +357,12 @@ function ActiveScenarioPanel({
         <StatCard label="Total income" value={fmtCurrency(computed.totals.totalIncome)} />
         <StatCard label="Taxable income" value={fmtCurrency(computed.totals.taxableIncome)} />
       </div>
+
+      {/* Below the total, deliberately: completeness qualifies the number above it,
+          this answers what the number means for the next cash obligation. Keyed on
+          the scenario's year — the outlook reads actuals, not this scenario's
+          overrides. */}
+      <OutlookPanel year={scenario.year} />
 
       {/* All totals, humanized */}
       <Card className="mb-4">

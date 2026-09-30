@@ -13,7 +13,7 @@ import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import type { CompletenessReportDto } from '@cashflow/shared'
+import type { CompletenessReportDto, TaxOutlookDto } from '@cashflow/shared'
 import type { Scenario } from '../../hooks/useScenarios'
 
 const NOW = new Date().toISOString()
@@ -43,12 +43,18 @@ let scenarioList: Scenario[] = []
 const detailIds: (number | null)[] = []
 let detailFor: Scenario = BASELINE
 let completeness: CompletenessReportDto | undefined
+let outlook: TaxOutlookDto | null = null
 
 vi.mock('../../hooks/useTaxEntities', () => ({
   useTaxEntities: () => ({ entities: [{ id: 1, kind: 'personal' }], error: null }),
 }))
 vi.mock('../../hooks/useScenarioChain', () => ({
   useScenarioChain: () => ({ chain: [], error: null, loading: false }),
+}))
+// Kept out of the network so these cases stay about the tab's own composition. The
+// outlook's contents are pinned in OutlookPanel.test.tsx.
+vi.mock('../../hooks/useTaxOutlook', () => ({
+  useTaxOutlook: () => ({ data: outlook, loading: false, error: null, reload: vi.fn() }),
 }))
 vi.mock('../../hooks/useScenarios', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
@@ -162,5 +168,66 @@ describe('PersonalT1Tab completeness', () => {
     render(<MemoryRouter><PersonalT1Tab year={2026} /></MemoryRouter>)
     expect(screen.getAllByText(/Total payable/).length).toBeGreaterThan(0)
     expect(screen.queryByText(/This total is incomplete/)).not.toBeInTheDocument()
+  })
+})
+
+describe('PersonalT1Tab outlook', () => {
+  beforeEach(() => {
+    detailIds.length = 0
+    detailFor = BASELINE
+    scenarioList = [BASELINE]
+    completeness = undefined
+    outlook = {
+      year: 2026,
+      netOwingByYear: { 2024: '0.00', 2025: '0.00', 2026: '8400.00' },
+      projectedCurrentYearNetOwing: '16610.00',
+      provenanceWarnings: [],
+      obligation: {
+        year: 2026,
+        required: false,
+        reason: 'No instalments are owed for 2026 — the whole amount is due with the return.',
+        balanceDueOn: '2027-04-30',
+        recommended: 'prior_year',
+        instalments: [],
+        options: [
+          { basis: 'no_calculation', total: '0.00', carriesInterestRisk: false, instalments: [] },
+          { basis: 'prior_year', total: '0.00', carriesInterestRisk: false, instalments: [] },
+          { basis: 'current_year', total: '16610.00', carriesInterestRisk: true, instalments: [] },
+        ],
+      },
+      forward: {
+        year: 2026,
+        isProjection: true,
+        currentTotalPayable: '8400.00',
+        projectedTotalPayable: '16610.00',
+        projectedAdditionalTax: '8210.00',
+        draws: {
+          actualToDate: '84000.00',
+          monthlyRunRate: '14000.00',
+          projectedRemainder: '84000.00',
+          projectedTotal: '168000.00',
+          coveredMonths: 6,
+          uncoveredMonths: [],
+          basis: 'Projected from 6 months of 2026 actuals.',
+        },
+      },
+    }
+  })
+
+  it('renders the outlook below the headline total, not above it', () => {
+    // The ordering is the point and it is the opposite of completeness': completeness
+    // qualifies the number, so it precedes it; the outlook says what the number means
+    // next, so it follows it.
+    render(<MemoryRouter><PersonalT1Tab year={2026} /></MemoryRouter>)
+    const total = screen.getAllByText(/Total payable/)[0]
+    const balanceDue = screen.getByText('2027-04-30')
+    expect(total.compareDocumentPosition(balanceDue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('renders nothing of the outlook when the endpoint gave nothing', () => {
+    outlook = null
+    render(<MemoryRouter><PersonalT1Tab year={2026} /></MemoryRouter>)
+    expect(screen.getAllByText(/Total payable/).length).toBeGreaterThan(0)
+    expect(screen.queryByText('Balance due')).not.toBeInTheDocument()
   })
 })
