@@ -226,12 +226,20 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   // limit here lost a carried-forward year: a contributor who skipped 2026 has
   // $16,000 available in 2027 and could only ever deduct $8,000.
   //
-  // A zero room with contributions present means the roll has not run for this
-  // entity yet, so fall back to the annual limit rather than deducting nothing —
-  // under-deducting silently would be worse than the old behaviour.
+  // A zero stored room is ambiguous: it is what the roll writes when it has never run
+  // for this entity, AND what it writes once the $40,000 lifetime cap is exhausted
+  // (`rollPersonalCarryforwards` bounds room by `lifetimeRemaining`). Falling back to
+  // the annual limit on both readings re-granted $8,000 a year to a contributor who
+  // had no room left — understating tax by $8,000 x marginal rate, every year.
+  //
+  // Lifetime contributions disambiguate it, and the fallback is bounded by whatever
+  // remains of the cap rather than by the annual limit alone.
+  const lifetimeRemaining = maxZero(
+    r.fhsaLifetimeLimit.minus(facts.carryforwards.fhsaLifetimeContributions),
+  );
   const fhsaRoom = facts.carryforwards.fhsaRoom.greaterThan(0)
     ? facts.carryforwards.fhsaRoom
-    : r.fhsaAnnualLimit;
+    : Decimal.min(r.fhsaAnnualLimit, lifetimeRemaining);
   const fhsa = Decimal.min(sumD(facts.fhsaContribs.map((c) => c.amount)), fhsaRoom);
   push('L20805', 'FHSA deduction', fhsa,
     facts.fhsaContribs.map((c) => ({ source: c.source, amount: c.amount })),

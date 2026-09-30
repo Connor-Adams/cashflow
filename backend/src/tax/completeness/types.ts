@@ -1,6 +1,5 @@
 import type { Decimal } from '../util/decimal';
 import type { RateTable, TaxYearFacts } from '../engine/types';
-import type { PerimeterTxn } from '../builders/corpPerimeter';
 import type { DuplicateReport } from '../../import/detectDuplicateTransactions';
 
 /** Worst-wins across every item. */
@@ -78,12 +77,32 @@ export interface CompletenessReport {
 export interface ActivityRow {
   id: number;
   accountId: number;
+  /**
+   * The owning account's type. Needed because the converter applies its activity
+   * allowlist ONLY on brokerage accounts — on a deposit account every security-less
+   * row is a cash event — so a detector scoped to the brokerage ids alone missed the
+   * population the converter exists for.
+   */
+  accountType: string;
   activityType: string;
   amount: string | null;
+  /** In CAD. `InvestmentActivity.currency` is non-null and need not be CAD. */
+  cadAmount: Decimal;
   date: string;
   securityId: number | null;
   /** True when a transaction already records this event. */
   hasTransaction: boolean;
+}
+
+/** A memoised, non-throwing CAD converter. See `createCadConverter`. */
+export type CadConverter = (amount: Decimal, currency: string, date: string) => Promise<Decimal>;
+
+/** An unimported corp outbound transfer, with its amount already in CAD. */
+export interface OutboundTransferRow {
+  id: number;
+  date: string;
+  /** In CAD. `PerimeterTxn.amount` is in the account's own currency. */
+  cadAmount: Decimal;
 }
 
 /** An account as the truncated-import detector needs it. */
@@ -117,7 +136,7 @@ export interface CompletenessContext {
   /** Personal-entity transactions in the period. */
   personalTxns: CompletenessTxn[];
   /** Outbound corp transfers with no imported counterpart, from `partitionCorpPerimeter`. */
-  unimportedOutboundTransfers: PerimeterTxn[];
+  unimportedOutboundTransfers: OutboundTransferRow[];
   accounts: AccountRow[];
   activities: ActivityRow[];
   duplicates: DuplicateReport;
@@ -126,7 +145,8 @@ export interface CompletenessContext {
   /** Slip types present for the year, e.g. `['T4', 'T5']`. */
   slipTypes: string[];
   /** Slips whose amounts reconcile against nothing computed. */
-  unreconciledSlips: { slipId: number; slipType: string; amount: string }[];
+  /** `amount` is null when no box on the slip parses to a non-zero figure. */
+  unreconciledSlips: { slipId: number; slipType: string; amount: string | null }[];
   /** Securities paying dividends this year whose eligibility was never verified. */
   unverifiedEligibility: { securityId: number; symbol: string; amount: string }[];
   /** Today, injected so the truncated-import detector is testable. */

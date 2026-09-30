@@ -1,6 +1,9 @@
-import { Entity } from '../../models';
+import { Op } from 'sequelize';
+import { Entity, Transaction } from '../../models';
 import { loadCorpPerimeterInputs } from '../builders/loadCorpPerimeterInputs';
-import { partitionCorpPerimeter, type PerimeterTxn } from '../builders/corpPerimeter';
+import { partitionCorpPerimeter } from '../builders/corpPerimeter';
+import { D } from '../util/decimal';
+import type { CadConverter, OutboundTransferRow } from './types';
 
 /**
  * Corp outbound transfers in the year whose matching leg was never imported.
@@ -24,7 +27,8 @@ import { partitionCorpPerimeter, type PerimeterTxn } from '../builders/corpPerim
 export async function loadUnimportedOutboundTransfers(
   householdId: number,
   year: number,
-): Promise<PerimeterTxn[]> {
+  toCadMemo: CadConverter,
+): Promise<OutboundTransferRow[]> {
   const corps = await Entity.findAll({
     where: { householdId, kind: 'corp' },
     attributes: ['id'],
@@ -32,11 +36,43 @@ export async function loadUnimportedOutboundTransfers(
   if (corps.length === 0) return [];
 
   const fiscalYear = { startDate: `${year}-01-01`, endDate: `${year}-12-31` };
-  const out: PerimeterTxn[] = [];
+
+  /**
+   * Link sources from the WHOLE household, not just the corp entity.
+   *
+   * `loadCorpPerimeterInputs` builds `linkTargetIds` from the corp entity's own rows,
+   * which is right for `buildCorpFacts` — there a misfiling is conservative, the row
+   * simply is not deducted. Here it is not: `linkedTransactionId` is one-directional,
+   * and the shape the classification queue depends on is *personal leg points at corp
+   * leg*. A corp leg that a personal leg points at therefore has no pointer of its own
+   * and is absent from a corp-scoped set, so it reached the unimported branch and
+   * raised a blocker for money whose other half is imported and linked — while the same
+   * dollars were also reported, and priced, as an unclassified draw.
+   *
+   * Latent rather than academic: part 4 step 2 backfills the 2026-01-10 corp leg and
+   * links it to personal txn 12139, which would have created exactly this false blocker.
+   */
+  const householdPointers = await Transaction.findAll({
+    where: { householdId, linkedTransactionId: { [Op.ne]: null } },
+    attributes: ['linkedTransactionId'],
+  });
+
+  const out: OutboundTransferRow[] = [];
   for (const corp of corps) {
     const inputs = await loadCorpPerimeterInputs(corp.id, fiscalYear);
-    const perimeter = partitionCorpPerimeter(inputs.perimeterInput, inputs.perimeterOptions);
-    out.push(...perimeter.unimportedOutboundTransfers);
+    const linkTargetIds = new Set(inputs.perimeterOptions.linkTargetIds);
+    for (const p of householdPointers) linkTargetIds.add(p.linkedTransactionId as number);
+    const perimeter = partitionCorpPerimeter(
+      inputs.perimeterInput,
+      { ...inputs.perimeterOptions, linkTargetIds },
+    );
+    for (const t of perimeter.unimportedOutboundTransfers) {
+      // `PerimeterTxn.amount` is in the account's own currency — the corp's Wise USD
+      // account is that file's own worked example — and this figure is a blocker's
+      // headline number.
+      const cadAmount = await toCadMemo(D(t.amount), t.currency, t.date);
+      out.push({ id: t.id, date: t.date, cadAmount });
+    }
   }
   return out;
 }

@@ -12,6 +12,19 @@ const DUE_DATES = ['03-15', '06-15', '09-15', '12-15'];
 export const INSTALMENT_THRESHOLD = D('3000');
 
 /**
+ * A year that ended in a refund is $0 of net tax owing for instalment purposes.
+ *
+ * `netTaxOwing` is signed deliberately — the sign is what the threshold test reads —
+ * and those values arrive here unfloored. Dividing a negative by four produced four
+ * NEGATIVE payments, and when the immediately prior year was the refund they landed on
+ * the recommended schedule, i.e. the one rendered as "instalments due". Connor's 2025
+ * was a $47.35 refund, so the shape is reachable from his own history.
+ */
+function owingFloor(value: Decimal): Decimal {
+  return Decimal.max(value, D('0'));
+}
+
+/**
  * Split an amount across the four CRA dates.
  *
  * Divide-by-four is exactly the prior-year option and exactly the current-year
@@ -23,8 +36,27 @@ export function quarterlyInstalments(
   annualOwing: Decimal,
   year: number = new Date().getUTCFullYear(),
 ): Instalment[] {
-  const per = annualOwing.dividedBy(4);
-  return DUE_DATES.map((md) => ({ dueOn: `${year}-${md}`, amount: per }));
+  return spreadToCents(annualOwing, DUE_DATES.map((md) => `${year}-${md}`));
+}
+
+/**
+ * Split an amount into whole cents across the given dates, the LAST payment absorbing
+ * the remainder.
+ *
+ * A schedule whose parts do not sum to its total is wrong on its face — and nobody can
+ * be asked to pay a third of a cent. `$38,224.31 / 4` is `9,556.0775`, and four of
+ * those rounded to cents come to $38,224.32, a cent more than the total. Real CRA
+ * reminders carry exact amounts, so the arithmetic is settled here rather than left
+ * for a renderer to round and a reader to notice.
+ */
+function spreadToCents(total: Decimal, dueDates: string[]): Instalment[] {
+  const per = total.dividedBy(dueDates.length).toDecimalPlaces(2);
+  return dueDates.map((dueOn, i) => ({
+    dueOn,
+    amount: i === dueDates.length - 1
+      ? total.minus(per.times(dueDates.length - 1))
+      : per,
+  }));
 }
 
 /**
@@ -40,14 +72,15 @@ export function noCalculationInstalments(
   twoYearsPriorOwing: Decimal,
   year: number,
 ): Instalment[] {
-  const firstHalf = twoYearsPriorOwing.dividedBy(4);
+  const firstHalf = twoYearsPriorOwing.dividedBy(4).toDecimalPlaces(2);
   const remainder = Decimal.max(priorYearOwing.minus(firstHalf.times(2)), D('0'));
-  const secondHalf = remainder.dividedBy(2);
+  const secondHalf = remainder.dividedBy(2).toDecimalPlaces(2);
   return [
     { dueOn: `${year}-${DUE_DATES[0]}`, amount: firstHalf },
     { dueOn: `${year}-${DUE_DATES[1]}`, amount: firstHalf },
     { dueOn: `${year}-${DUE_DATES[2]}`, amount: secondHalf },
-    { dueOn: `${year}-${DUE_DATES[3]}`, amount: secondHalf },
+    // The last absorbs the rounding, so the four sum to the option's stated total.
+    { dueOn: `${year}-${DUE_DATES[3]}`, amount: remainder.minus(secondHalf) },
   ];
 }
 
@@ -57,7 +90,25 @@ export type InstalmentBasis = 'no_calculation' | 'prior_year' | 'current_year';
 export interface InstalmentOption {
   basis: InstalmentBasis;
   instalments: Instalment[];
+  /**
+   * The sum of this option's own four instalments — always, so the total and the
+   * schedule cannot disagree.
+   *
+   * It was previously set to the prior year's owing for the no-calculation basis,
+   * which is right only while the floor does not bite: with the second prior year the
+   * larger, a quarter of it twice already exceeds the prior year, the remainder floors
+   * at zero, and the four amounts then sum to MORE than the reported total. A UI
+   * rendering the total beside the schedule showed figures that did not add up.
+   */
   total: Decimal;
+  /**
+   * What is left to pay with the return if this option is followed: the year's
+   * projected net owing less what the instalments cover, floored at zero.
+   *
+   * Computed here rather than in the client, which would mean arithmetic on
+   * fixed-2 money strings.
+   */
+  balanceWithReturn: Decimal;
   /**
    * True only for the current-year estimate: it is the one option that can leave a
    * shortfall, and CRA charges interest on the difference. Surfaced rather than
@@ -92,6 +143,23 @@ export interface InstalmentObligation {
   balanceDueOn: string;
 }
 
+/** Totals an option from its own schedule, so the two can never disagree. */
+function buildOption(
+  basis: InstalmentBasis,
+  instalments: Instalment[],
+  projectedNetOwing: Decimal,
+  carriesInterestRisk: boolean,
+): InstalmentOption {
+  const total = instalments.reduce((acc, i) => acc.plus(i.amount), D('0'));
+  return {
+    basis,
+    instalments,
+    total,
+    balanceWithReturn: Decimal.max(projectedNetOwing.minus(total), D('0')),
+    carriesInterestRisk,
+  };
+}
+
 /**
  * Whether instalments are required, and what the three CRA options come to.
  *
@@ -109,25 +177,31 @@ export function instalmentObligation(
   const overAPriorYear = netOwing.priorYear.greaterThan(INSTALMENT_THRESHOLD)
     || netOwing.twoYearsPrior.greaterThan(INSTALMENT_THRESHOLD);
 
+  // Floored before any division. The threshold test above still reads the SIGNED
+  // values, because a refund and a $0 owing are the same answer there but not here.
+  const currentForSchedule = owingFloor(netOwing.currentYear);
+  const priorForSchedule = owingFloor(netOwing.priorYear);
+  const twoYearsPriorForSchedule = owingFloor(netOwing.twoYearsPrior);
+
   const options: InstalmentOption[] = [
-    {
-      basis: 'no_calculation',
-      instalments: noCalculationInstalments(netOwing.priorYear, netOwing.twoYearsPrior, year),
-      total: netOwing.priorYear,
-      carriesInterestRisk: false,
-    },
-    {
-      basis: 'prior_year',
-      instalments: quarterlyInstalments(netOwing.priorYear, year),
-      total: netOwing.priorYear,
-      carriesInterestRisk: false,
-    },
-    {
-      basis: 'current_year',
-      instalments: quarterlyInstalments(netOwing.currentYear, year),
-      total: netOwing.currentYear,
-      carriesInterestRisk: true,
-    },
+    buildOption(
+      'no_calculation',
+      noCalculationInstalments(priorForSchedule, twoYearsPriorForSchedule, year),
+      currentForSchedule,
+      false,
+    ),
+    buildOption(
+      'prior_year',
+      quarterlyInstalments(priorForSchedule, year),
+      currentForSchedule,
+      false,
+    ),
+    buildOption(
+      'current_year',
+      quarterlyInstalments(currentForSchedule, year),
+      currentForSchedule,
+      true,
+    ),
   ];
 
   // Prior-year is the safe default for a rising-income year: pay what last year

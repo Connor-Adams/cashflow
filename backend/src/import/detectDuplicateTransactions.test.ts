@@ -165,7 +165,10 @@ test('the report totals the overstatement, counting surplus rows only', async ()
   await txn({ linkedTransactionId: counterpart.id });
   const report = await detectDuplicateTransactions(period());
   assert.equal(report.certain.length, 1);
-  assert.equal(report.totalDuplicatedAmount, '-4000.00');
+  // The TOTAL is a magnitude — "what the ledger overstates" cannot be negative. The
+  // group's own `duplicatedAmount` keeps its sign, where direction is information.
+  assert.equal(report.totalDuplicatedAmount, '4000.00');
+  assert.equal(report.certain[0].duplicatedAmount, '-4000.00');
 });
 
 test('accountIds narrows the scan', async () => {
@@ -207,4 +210,36 @@ test('groups are ordered by date then account, so the worklist is stable', async
   await txn({ date: '2026-01-15', amount: '-7' });
   const report = await detectDuplicateTransactions(period());
   assert.deepEqual(report.groups.map((g) => g.date), ['2026-01-15', '2026-03-01']);
+});
+
+test('a different currency is a different identity, not a duplicate', async () => {
+  // The group key omitted currency, and `currency` was not even loaded — so 100.00 USD
+  // and 100.00 CAD on one multi-currency account and date grouped as duplicates.
+  await txn({ date: '2026-04-01', amount: '-100', currency: 'CAD' });
+  await txn({ date: '2026-04-01', amount: '-100', currency: 'USD' });
+  const report = await detectDuplicateTransactions(period());
+  assert.equal(report.groups.length, 0);
+});
+
+test('same currency still groups', async () => {
+  await txn({ date: '2026-04-01', amount: '-100', currency: 'USD' });
+  await txn({ date: '2026-04-01', amount: '-100', currency: 'USD' });
+  const report = await detectDuplicateTransactions(period());
+  assert.equal(report.groups.length, 1);
+});
+
+test('opposite-direction groups do not cancel in the total', async () => {
+  // A signed total reported "$0.00 overstated" for a ledger overstated by $4,000 in
+  // both directions. Per-group amounts stay signed, where the direction is information.
+  await txn({ date: '2026-05-01', amount: '-2000' });
+  await txn({ date: '2026-05-01', amount: '-2000' });
+  await txn({ date: '2026-05-02', amount: '2000' });
+  await txn({ date: '2026-05-02', amount: '2000' });
+  const report = await detectDuplicateTransactions(period());
+  assert.equal(report.groups.length, 2);
+  assert.equal(report.totalDuplicatedAmount, '4000.00');
+  assert.deepEqual(
+    report.groups.map((g) => g.duplicatedAmount).sort(),
+    ['-2000.00', '2000.00'],
+  );
 });

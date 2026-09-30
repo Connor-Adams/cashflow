@@ -26,7 +26,14 @@ export interface DuplicateReport {
   groups: DuplicateGroup[];
   certain: DuplicateGroup[];
   review: DuplicateGroup[];
-  /** Signed sum of every group's surplus rows — what the ledger overstates. */
+  /**
+   * What the ledger overstates: the sum of every group's surplus rows by MAGNITUDE.
+   *
+   * A signed sum cancelled opposite-direction groups against each other — one
+   * duplicated $2,000 expense and one duplicated $2,000 deposit reported "$0.00
+   * overstated" for a ledger overstated by $4,000 in both directions. Per-group
+   * `duplicatedAmount` stays signed, because there the direction is information.
+   */
   totalDuplicatedAmount: string;
 }
 
@@ -65,8 +72,9 @@ export async function detectDuplicateTransactions(
       ...(accountIds ? { accountId: { [Op.in]: accountIds } } : {}),
     },
     attributes: [
-      'id', 'accountId', 'date', 'amount', 'linkedTransactionId', 'businessOverride',
-      'taxTreatmentOverride', 'finalCategoryId', 'finalCategory', 'finalSplitType',
+      'id', 'accountId', 'date', 'amount', 'currency', 'linkedTransactionId',
+      'businessOverride', 'taxTreatmentOverride', 'finalCategoryId', 'finalCategory',
+      'finalSplitType',
     ],
     order: [['date', 'ASC'], ['accountId', 'ASC'], ['id', 'ASC']],
   });
@@ -74,7 +82,9 @@ export async function detectDuplicateTransactions(
   // Key on the NORMALISED amount so dialect formatting cannot split a group.
   const byKey = new Map<string, typeof rows>();
   for (const r of rows) {
-    const key = `${r.accountId}|${String(r.date)}|${D(String(r.amount)).toFixed(2)}`;
+    // Currency is part of the identity. Without it, 100.00 USD and 100.00 CAD on one
+    // multi-currency account and date grouped as duplicates of each other.
+    const key = `${r.accountId}|${String(r.date)}|${r.currency ?? 'CAD'}|${D(String(r.amount)).toFixed(2)}`;
     const bucket = byKey.get(key);
     if (bucket) bucket.push(r);
     else byKey.set(key, [r]);
@@ -128,7 +138,7 @@ export async function detectDuplicateTransactions(
     a.date < b.date ? -1 : a.date > b.date ? 1 : a.accountId - b.accountId
   ));
 
-  const total = groups.reduce((acc, g) => acc.plus(D(g.duplicatedAmount)), D('0'));
+  const total = groups.reduce((acc, g) => acc.plus(D(g.duplicatedAmount).abs()), D('0'));
   return {
     period: { startDate, endDate },
     groups,

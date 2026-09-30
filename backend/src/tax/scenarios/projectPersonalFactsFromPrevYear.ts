@@ -101,7 +101,11 @@ export async function projectPersonalFactsFromPrevYear(
       ? instRows.reduce((sum, r) => sum.plus(D(r.amount as unknown as string)), D('0'))
       : D(cfRows.find(c => c.kind === 'instalments_paid')?.amount ?? '0'),
     fhsaLifetimeContributions: D(cfRows.find(c => c.kind === 'fhsa_lifetime_contribs')?.amount ?? '0'),
-    fhsaRoom: parentFacts.carryforwards.fhsaRoom,
+    // From `cfRows`, like every sibling above. Reading `parentFacts.carryforwards`
+    // here took the parent's own INPUT room — a year too early — so the projection
+    // discarded the new year's annual limit plus carried-forward unused room, and kept
+    // deducting FHSA even after the lifetime cap was reached.
+    fhsaRoom: D(cfRows.find(c => c.kind === 'fhsa_room')?.amount ?? '0'),
   };
 
   return {

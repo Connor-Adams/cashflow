@@ -125,3 +125,26 @@ test('a year with no rate table is 409, not 500', async () => {
   assert.equal(res.status, 409, JSON.stringify(res.body));
   assert.equal(res.body.error, 'rate_table_missing');
 });
+
+test('each option carries the balance left to pay with the return', async () => {
+  // The largest number in the picture. Serving it means the client never subtracts
+  // fixed-2 money strings to find it.
+  const res = await authed.get('/api/tax/personal/2026/outlook');
+  for (const o of res.body.obligation.options) {
+    assert.equal(typeof o.balanceWithReturn, 'string', JSON.stringify(o));
+    assert.match(o.balanceWithReturn, /^\d+\.\d{2}$/);
+  }
+});
+
+test("an option's total equals the sum of its own instalments", async () => {
+  const res = await authed.get('/api/tax/personal/2026/outlook');
+  for (const o of res.body.obligation.options) {
+    const summed = o.instalments.reduce(
+      (acc: number, i: { amount: string }) => acc + Number(i.amount), 0,
+    );
+    assert.ok(
+      Math.abs(summed - Number(o.total)) < 0.01,
+      `${o.basis}: schedule sums to ${summed} but total says ${o.total}`,
+    );
+  }
+});

@@ -188,3 +188,54 @@ test('FHSA deduction is still bounded — a contribution past the room is capped
   const l20805 = ret.lines.find((l) => l.code === 'L20805');
   assert.equal(l20805?.amount.toFixed(2), '4000.00');
 });
+
+test('FHSA: an EXHAUSTED lifetime cap deducts nothing, it does not re-grant the annual limit', () => {
+  // The fallback read "room is zero" as "the roll has not run yet". It is also what
+  // the roll writes once cumulative contributions reach the $40,000 lifetime cap —
+  // `rollPersonalCarryforwards` bounds room by `lifetimeRemaining`, which is zero
+  // then. So an exhausted contributor was re-granted $8,000 a year, every year,
+  // understating tax by $8,000 x their marginal rate.
+  const r = ratesFor(2026);
+  const facts = baseFacts();
+  facts.year = 2026;
+  facts.fhsaContribs = [{ source: 'WS FHSA', amount: D('8000'), date: '2026-03-01' }];
+  facts.carryforwards = {
+    ...facts.carryforwards,
+    fhsaRoom: D('0'),
+    fhsaLifetimeContributions: D('40000'),
+  };
+  const ret = buildT1(facts, r);
+  assert.equal(ret.lines.find((l) => l.code === 'L20805')?.amount.toFixed(2), '0.00');
+});
+
+test('FHSA: a zero room with NO lifetime contributions still falls back to the annual limit', () => {
+  // The case the fallback was written for — the roll has genuinely never run — must
+  // keep working, or fixing the above would silently under-deduct instead.
+  const r = ratesFor(2026);
+  const facts = baseFacts();
+  facts.year = 2026;
+  facts.fhsaContribs = [{ source: 'WS FHSA', amount: D('8000'), date: '2026-03-01' }];
+  facts.carryforwards = {
+    ...facts.carryforwards,
+    fhsaRoom: D('0'),
+    fhsaLifetimeContributions: D('0'),
+  };
+  const ret = buildT1(facts, r);
+  assert.equal(ret.lines.find((l) => l.code === 'L20805')?.amount.toFixed(2), '8000.00');
+});
+
+test('FHSA: a partially used lifetime cap falls back to what remains of it', () => {
+  // $37,000 contributed, room unrolled. The annual limit would allow $8,000; only
+  // $3,000 of lifetime room exists.
+  const r = ratesFor(2026);
+  const facts = baseFacts();
+  facts.year = 2026;
+  facts.fhsaContribs = [{ source: 'WS FHSA', amount: D('8000'), date: '2026-03-01' }];
+  facts.carryforwards = {
+    ...facts.carryforwards,
+    fhsaRoom: D('0'),
+    fhsaLifetimeContributions: D('37000'),
+  };
+  const ret = buildT1(facts, r);
+  assert.equal(ret.lines.find((l) => l.code === 'L20805')?.amount.toFixed(2), '3000.00');
+});

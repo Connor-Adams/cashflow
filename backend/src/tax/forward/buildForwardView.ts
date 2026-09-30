@@ -1,6 +1,6 @@
 import { Op } from 'sequelize';
 import { Entity, Transaction } from '../../models';
-import { toCad } from '../../fx/toCad';
+import { createCadConverter } from '../completeness/cadConverter';
 import { D } from '../util/decimal';
 import { buildT1 } from '../engine/t1';
 import { addNonEligibleDividend } from '../completeness/estimateTaxImpact';
@@ -44,7 +44,7 @@ export async function buildForwardView(
     now?: Date;
   },
 ): Promise<ForwardView> {
-  const months = await loadMonthlyDrawActivity(entityId, year);
+  const months = await loadMonthlyDrawActivity(entityId, year, createCadConverter());
   // Only elapsed months can be covered or uncovered. In a future year nothing has
   // elapsed, so there is nothing to project from and nothing to report as missing.
   const asOfMonth = asOfMonthWithin(year, now);
@@ -84,7 +84,11 @@ function asOfMonthWithin(year: number, now: Date): number {
  * `transactionCount` counts EVERY transaction, because that is what distinguishes an
  * unimported month from a month with no draws taken.
  */
-async function loadMonthlyDrawActivity(entityId: number, year: number): Promise<MonthlyActivity[]> {
+async function loadMonthlyDrawActivity(
+  entityId: number,
+  year: number,
+  toCadMemo: (a: ReturnType<typeof D>, c: string, d: string) => Promise<ReturnType<typeof D>>,
+): Promise<MonthlyActivity[]> {
   const entity = await Entity.findByPk(entityId);
   if (!entity) throw new Error(`buildForwardView: entity ${entityId} not found`);
 
@@ -125,9 +129,7 @@ async function loadMonthlyDrawActivity(entityId: number, year: number): Promise<
     if (isDraw) {
       // 2026 holds 30 USD transfers. A run rate summed across currencies would be a
       // meaningless average, and it feeds a tax estimate.
-      const currency = t.currency ?? 'CAD';
-      const raw = D(String(t.amount));
-      const cad = currency === 'CAD' ? raw : (await toCad(raw, currency, String(t.date))).cad;
+      const cad = await toCadMemo(D(String(t.amount)), t.currency ?? 'CAD', String(t.date));
       entry.draws = entry.draws.plus(cad);
     }
     byMonth.set(month, entry);

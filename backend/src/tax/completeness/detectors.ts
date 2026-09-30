@@ -3,10 +3,29 @@ import { addNonEligibleDividend, estimateTaxImpact } from './estimateTaxImpact';
 import {
   BROKERAGE_CASH_LEG_ACCOUNT_IDS,
   BROKERAGE_CASH_LEG_ACTIVITY_TYPES,
+  DEPOSIT_ACCOUNT_TYPES,
 } from '../../import/wsDepositActivityMigration';
 import type { ActivityRow, CompletenessContext, CompletenessItem } from './types';
 
 const OPT_IN_ACCOUNTS = new Set<number>(BROKERAGE_CASH_LEG_ACCOUNT_IDS);
+
+/**
+ * Would the cash-leg converter turn this orphan into a transaction?
+ *
+ * Mirrors `loadDepositAccounts` + the selection in `classifyWsDepositActivities`: on a
+ * DEPOSIT account every security-less row is a cash event and no allowlist applies; on
+ * an opted-in BROKERAGE account the allowlist does apply, because a `sell` whose
+ * security failed to resolve is also security-less.
+ *
+ * Scoping this to the brokerage ids alone made the blocker near-always empty — it
+ * missed every deposit-account orphan, which is the population the converter was built
+ * for — and made the gap claim "nothing will convert" about rows the converter converts.
+ */
+function isConvertible(a: ActivityRow): boolean {
+  if (DEPOSIT_ACCOUNT_TYPES.has(a.accountType)) return true;
+  return OPT_IN_ACCOUNTS.has(a.accountId)
+    && BROKERAGE_CASH_LEG_ACTIVITY_TYPES.has(a.activityType);
+}
 
 function sumAbs(amounts: readonly string[]): string {
   return amounts.reduce((acc, a) => acc.plus(D(a).abs()), D('0')).toFixed(2);
@@ -45,6 +64,13 @@ export function detectUnclassifiedCorpDraws(ctx: CompletenessContext): Completen
     (t) => t.txnType === 'transfer'
       && t.linkedTransactionId !== null
       && t.counterpartIsCorp
+      // Money ARRIVING, so direction matters. Neither this predicate nor the
+      // classification queue's filtered on sign, and the sum took absolute values — so
+      // a shareholder-loan advance FROM Connor TO the corp was added to "moved from the
+      // corporation to you" and priced as a dividend. A $10,000 capital injection
+      // alongside a $42,000 backlog reported a $52,000 blocker and ~$5,200 of tax that
+      // does not exist.
+      && t.cadAmount.greaterThan(0)
       && !t.isTaxClassified,
   );
   if (rows.length === 0) return [];
@@ -86,7 +112,7 @@ export function detectUnimportedOutboundTransfers(ctx: CompletenessContext): Com
   const rows = ctx.unimportedOutboundTransfers;
   if (rows.length === 0) return [];
 
-  const amount = sumAbs(rows.map((t) => t.amount));
+  const amount = sumAbsCad(rows);
   return [{
     kind: 'unimported_outbound_corp_transfer',
     severity: 'blocker',
@@ -119,15 +145,10 @@ const isCashLeg = (a: ActivityRow): boolean => a.securityId === null && a.amount
  * inventing figures, and the rule wins.
  */
 export function detectConvertibleCashLegs(ctx: CompletenessContext): CompletenessItem[] {
-  const rows = ctx.activities.filter(
-    (a) => !a.hasTransaction
-      && isCashLeg(a)
-      && OPT_IN_ACCOUNTS.has(a.accountId)
-      && BROKERAGE_CASH_LEG_ACTIVITY_TYPES.has(a.activityType),
-  );
+  const rows = ctx.activities.filter((a) => !a.hasTransaction && isCashLeg(a) && isConvertible(a));
   if (rows.length === 0) return [];
 
-  const amount = sumAbs(rows.map((a) => a.amount as string));
+  const amount = sumAbsCad(rows);
   return [{
     kind: 'convertible_cash_leg_activity',
     severity: 'blocker',
@@ -166,6 +187,11 @@ const EVENT_DRIVEN_ACCOUNT_TYPES = new Set(['investment', 'savings']);
  * export is noise that trains the reader to dismiss the panel.
  */
 export function detectTruncatedImports(ctx: CompletenessContext): CompletenessItem[] {
+  // Only a year still in progress can have a truncated import. `personalTxns` is
+  // bounded to the period, so comparing its last date against TODAY flagged every
+  // account of every closed year — opening a 2024 return in 2026 reported all of them
+  // quiet, or worse, reported "export lag" for a year that ended 21 months ago.
+  if (ctx.year !== ctx.now.getUTCFullYear()) return [];
   const watched = ctx.accounts.filter(
     (a) => a.closedAt === null
       && a.mergedIntoId === null
@@ -247,15 +273,14 @@ function daysBetweenDates(a: string, b: string): number {
  * exactly what is unknown).
  */
 export function detectOrphanedCashLegs(ctx: CompletenessContext): CompletenessItem[] {
-  const rows = ctx.activities.filter((a) => {
-    if (a.hasTransaction || !isCashLeg(a)) return false;
-    const optIn = OPT_IN_ACCOUNTS.has(a.accountId);
-    const allowlisted = BROKERAGE_CASH_LEG_ACTIVITY_TYPES.has(a.activityType);
-    return optIn ? !allowlisted : allowlisted;
-  });
+  // Exactly the complement of the blocker, so the two partition the orphans and no
+  // cash leg can fall between them — a row reported by neither was the third failure.
+  const rows = ctx.activities.filter(
+    (a) => !a.hasTransaction && isCashLeg(a) && !isConvertible(a),
+  );
   if (rows.length === 0) return [];
 
-  const amount = sumAbs(rows.map((a) => a.amount as string));
+  const amount = sumAbsCad(rows);
   return [{
     kind: 'orphaned_cash_leg_activity',
     severity: 'gap',
@@ -432,14 +457,21 @@ export function detectAcbWarnings(ctx: CompletenessContext): CompletenessItem[] 
  * contributions not yet made. Same reasoning as the ACB item.
  */
 export function detectCarryforwardsNotRolled(ctx: CompletenessContext): CompletenessItem[] {
-  if (ctx.carryforwardYears.includes(ctx.year)) return [];
+  // `asOfYear = N` means "balances at the END of year N", consumed by year N+1 — see
+  // `rollPersonalCarryforwards`, and `buildPersonalFacts` reads `asOfYear: year - 1`.
+  // So THIS year's return needs LAST year's row. Demanding `ctx.year` fired on every
+  // correctly maintained ledger and could not be cleared for the current year, since
+  // the row only appears once this very return has been computed and rolled.
+  const needed = ctx.year - 1;
+  if (ctx.carryforwardYears.includes(needed)) return [];
   const latest = ctx.carryforwardYears.length > 0 ? Math.max(...ctx.carryforwardYears) : null;
   return [{
     kind: 'carryforwards_not_rolled',
     severity: 'gap',
     title: `Carryforwards stop at ${latest ?? 'no year'}`,
     detail:
-      `RRSP and FHSA room for ${ctx.year} was never rolled forward`
+      `The ${ctx.year} return reads room carried forward from ${needed}, and no ${needed} `
+      + 'row exists'
       + (latest !== null ? `; the latest recorded year is ${latest}.` : '.')
       + ' Deduction limits on this return are stale. No figure is shown: the effect depends '
       + 'on contributions not yet made.',
@@ -480,14 +512,21 @@ export function detectProjectedRates(ctx: CompletenessContext): CompletenessItem
 /** Slips entered for the year that reconcile against nothing computed. */
 export function detectUnreconciledSlips(ctx: CompletenessContext): CompletenessItem[] {
   if (ctx.unreconciledSlips.length === 0) return [];
-  const amount = sumAbs(ctx.unreconciledSlips.map((s) => s.amount));
+  // Null when no box parsed. A zero would be a figure standing in for "unknown".
+  const known = ctx.unreconciledSlips
+    .map((s) => s.amount)
+    .filter((a): a is string => a !== null);
+  const amount = known.length > 0 ? sumAbs(known) : null;
   return [{
     kind: 'unreconciled_slips',
     severity: 'gap',
     title: `${ctx.unreconciledSlips.length} slip${ctx.unreconciledSlips.length === 1 ? '' : 's'} matching nothing in the ledger`,
     detail:
-      `$${amount} is reported on slips with no corresponding transactions. Either the `
-      + 'transactions were never imported, or the slip was entered against the wrong year.',
+      (amount === null
+        ? 'Slips are recorded that nothing in the tax computation reads. '
+        : `Around $${amount} is reported on slips with no corresponding transactions. `)
+      + 'Either the transactions were never imported, or the slip was entered against '
+      + 'the wrong year.',
     amount,
     taxEstimate: null,
     fix: { surface: 'slips', label: 'Reconcile these slips' },

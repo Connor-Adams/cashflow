@@ -2,16 +2,17 @@ import { Op } from 'sequelize';
 import {
   Account, Carryforward, Category, Entity, InvestmentActivity, Security, TaxSlip, Transaction,
 } from '../../models';
-import { D } from '../util/decimal';
+import { D, type Decimal } from '../util/decimal';
 import { resolveTaxTreatment, type TaxTreatmentMaps } from '../builders/resolveTaxTreatment';
 import { activityIdsWithTransaction } from '../../import/wsDepositActivityMigration';
 import { detectDuplicateTransactions } from '../../import/detectDuplicateTransactions';
-import { toCad } from '../../fx/toCad';
+import { createCadConverter } from './cadConverter';
 import { DETECTORS } from './detectors';
 import { worstStatus } from './status';
 import type { RateTable, TaxYearFacts } from '../engine/types';
 import type {
-  AccountRow, ActivityRow, CompletenessContext, CompletenessReport, CompletenessTxn,
+  AccountRow, ActivityRow, CadConverter, CompletenessContext, CompletenessReport,
+  CompletenessTxn,
 } from './types';
 import { loadUnimportedOutboundTransfers } from './loadUnimportedOutboundTransfers';
 
@@ -29,8 +30,19 @@ export interface BuildCompletenessReportArgs {
   now?: Date;
 }
 
-/** Slip types `buildT1` actually reads. Anything else is entered and ignored. */
-const SLIP_TYPES_THE_ENGINE_READS = new Set(['T4', 'T5', 'T3']);
+/**
+ * Slip types something in the tax path actually reads. Anything else is entered and
+ * ignored, which is what "reconciles against nothing" means.
+ *
+ * T4A belongs here: `buildPersonalFacts` reads its boxes 016 and 024 into pension
+ * income. Omitting it reported entered pension income as money whose transactions were
+ * never imported — with a dollar figure attached — when a different code path had
+ * already put it on the return.
+ *
+ * T5008 is deliberately absent: nothing reads it, so a T5008 genuinely does reconcile
+ * against nothing.
+ */
+const SLIP_TYPES_THE_ENGINE_READS = new Set(['T4', 'T5', 'T3', 'T4A']);
 
 /**
  * Asset types whose distributions the single `dividendEligibility` flag cannot
@@ -80,9 +92,12 @@ export async function buildCompletenessReport(
     catTreatment: new Map(categories.map((c) => [c.name, c.taxTreatment])),
   };
 
-  const personalTxns = await toCompletenessTxns(txns, householdId, maps);
+  // One converter for the whole report: memoised per currency/date pair, and it
+  // degrades to the raw amount rather than throwing a 500 over an advisory overlay.
+  const toCadMemo = createCadConverter();
+  const personalTxns = await toCompletenessTxns(txns, householdId, maps, toCadMemo);
   const accountIds = accounts.map((a) => a.id);
-  const activities = await loadActivities(accountIds, startDate, endDate);
+  const activities = await loadActivities(accounts, startDate, endDate, toCadMemo);
 
   const ctx: CompletenessContext = {
     entityId,
@@ -90,7 +105,9 @@ export async function buildCompletenessReport(
     facts,
     rates,
     personalTxns,
-    unimportedOutboundTransfers: await loadUnimportedOutboundTransfers(householdId, year),
+    unimportedOutboundTransfers: await loadUnimportedOutboundTransfers(
+      householdId, year, toCadMemo,
+    ),
     accounts: accounts.map((a): AccountRow => ({
       id: a.id,
       name: a.name,
@@ -109,9 +126,11 @@ export async function buildCompletenessReport(
       .map((s) => ({
         slipId: s.id,
         slipType: s.slipType as string,
-        amount: sumBoxes(s.boxValues as Record<string, unknown>),
+        amount: largestBox(s.boxValues as Record<string, unknown>),
       })),
-    unverifiedEligibility: await loadUnverifiedEligibility(accountIds, startDate, endDate),
+    unverifiedEligibility: await loadUnverifiedEligibility(
+      accountIds, startDate, endDate, toCadMemo,
+    ),
     now,
   };
 
@@ -136,6 +155,7 @@ async function toCompletenessTxns(
   txns: Transaction[],
   householdId: number,
   maps: TaxTreatmentMaps,
+  toCadMemo: CadConverter,
 ): Promise<CompletenessTxn[]> {
   const ids = txns.map((t) => t.id);
   const linkedIds = txns
@@ -170,9 +190,7 @@ async function toCompletenessTxns(
     // Only non-CAD rows pay for a conversion, so the common path stays a plain map.
     const currency = t.currency ?? 'CAD';
     const raw = D(String(t.amount));
-    const cadAmount = currency === 'CAD'
-      ? raw
-      : (await toCad(raw, currency, String(t.date))).cad;
+    const cadAmount = await toCadMemo(raw, currency, String(t.date));
     out.push({
       id: t.id,
       accountId: t.accountId,
@@ -191,11 +209,14 @@ async function toCompletenessTxns(
 }
 
 async function loadActivities(
-  accountIds: number[],
+  accounts: Account[],
   startDate: string,
   endDate: string,
+  toCadMemo: CadConverter,
 ): Promise<ActivityRow[]> {
+  const accountIds = accounts.map((a) => a.id);
   if (accountIds.length === 0) return [];
+  const accountTypeById = new Map(accounts.map((a) => [a.id, a.accountType ?? '']));
   const [activities, transactions] = await Promise.all([
     InvestmentActivity.findAll({
       where: { accountId: { [Op.in]: accountIds }, tradeDate: { [Op.between]: [startDate, endDate] } },
@@ -209,15 +230,29 @@ async function loadActivities(
   // The migration's own matcher, so "already in the ledger" means here exactly what it
   // means when that tool decides whether to convert a row.
   const matched = activityIdsWithTransaction(activities, transactions);
-  return activities.map((a): ActivityRow => ({
-    id: a.id,
-    accountId: a.accountId,
-    activityType: String(a.activityType),
-    amount: a.amount === null || a.amount === undefined ? null : String(a.amount),
-    date: String(a.tradeDate),
-    securityId: a.securityId ?? null,
-    hasTransaction: matched.has(a.id),
-  }));
+  const rows: ActivityRow[] = [];
+  for (const a of activities) {
+    const amount = a.amount === null || a.amount === undefined ? null : String(a.amount);
+    // `InvestmentActivity.currency` is non-null and need not be CAD — USD-listed ETFs
+    // are the archetypal case for the eligibility gap that reads these.
+    const currency = String((a as unknown as { currency?: unknown }).currency ?? 'CAD');
+    const raw = D(amount ?? '0');
+    const cadAmount = amount === null
+      ? raw
+      : await toCadMemo(raw, currency, String(a.tradeDate));
+    rows.push({
+      id: a.id,
+      accountId: a.accountId,
+      accountType: accountTypeById.get(a.accountId) ?? '',
+      activityType: String(a.activityType),
+      amount,
+      cadAmount,
+      date: String(a.tradeDate),
+      securityId: a.securityId ?? null,
+      hasTransaction: matched.has(a.id),
+    });
+  }
+  return rows;
 }
 
 /**
@@ -228,6 +263,7 @@ async function loadUnverifiedEligibility(
   accountIds: number[],
   startDate: string,
   endDate: string,
+  toCadMemo: CadConverter,
 ): Promise<{ securityId: number; symbol: string; amount: string }[]> {
   if (accountIds.length === 0) return [];
   const rows = await InvestmentActivity.findAll({
@@ -247,7 +283,12 @@ async function loadUnverifiedEligibility(
     if (security.dividendEligibility !== 'eligible') continue;
     if (!FUND_LIKE_ASSET_TYPES.has(security.assetType ?? null)) continue;
     const existing = bySecurity.get(security.id);
-    const amount = D(String(r.amount ?? '0')).abs();
+    // USD-listed ETFs are the archetypal case for this very detector.
+    const amount = (await toCadMemo(
+      D(String(r.amount ?? '0')),
+      String((r as unknown as { currency?: unknown }).currency ?? 'CAD'),
+      String(r.tradeDate),
+    )).abs();
     if (existing) existing.total = existing.total.plus(amount);
     else bySecurity.set(security.id, { symbol: security.symbol, total: amount });
   }
@@ -257,12 +298,33 @@ async function loadUnverifiedEligibility(
     .map(([securityId, v]) => ({ securityId, symbol: v.symbol, amount: v.total.toFixed(2) }));
 }
 
-/** Total of a slip's numeric boxes, for the "matches nothing" figure. */
-function sumBoxes(boxValues: Record<string, unknown>): string {
-  let total = D('0');
+/**
+ * The largest single box on a slip, as a size indicator for the "matches nothing" item.
+ *
+ * Deliberately not a sum. Summing every box double-counts by construction — a T5008
+ * carries box 20 (cost) AND box 21 (proceeds); a T4A carries box 016 AND box 022 (tax
+ * deducted) — so the reported figure was not any real quantity. The largest box is at
+ * least a number that appears on the slip.
+ *
+ * Returns null rather than 0.00 when no box parses. A zero here read as "$0.00 is
+ * reported on slips with no corresponding transactions", which is a figure standing in
+ * for "unknown" — the one thing the figure-presence contract forbids.
+ *
+ * `Number(v)` was the only place JS number arithmetic reached the money path: a value
+ * stored as "1,200.50" became NaN and was silently dropped. Parsing goes through
+ * Decimal, and an unparseable box is skipped explicitly.
+ */
+function largestBox(boxValues: Record<string, unknown>): string | null {
+  let largest: Decimal | null = null;
   for (const v of Object.values(boxValues ?? {})) {
-    const n = Number(v);
-    if (Number.isFinite(n)) total = total.plus(D(String(n)).abs());
+    let parsed: Decimal;
+    try {
+      parsed = D(String(v)).abs();
+    } catch {
+      continue;
+    }
+    if (!parsed.isFinite() || parsed.isZero()) continue;
+    if (largest === null || parsed.greaterThan(largest)) largest = parsed;
   }
-  return total.toFixed(2);
+  return largest === null ? null : largest.toFixed(2);
 }

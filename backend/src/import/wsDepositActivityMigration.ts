@@ -36,7 +36,15 @@ import { normalizeMerchant } from './normalizeMerchant';
 import type { NormalizedCashTransaction, StatementPreview } from './statementTypes';
 import type { TxnType } from './enrichment/types';
 
-const DEPOSIT_ACCOUNT_TYPES = new Set(['checking', 'savings']);
+/**
+ * Account types where EVERY security-less row is a cash-ledger event, so no activity
+ * allowlist applies. Exported for the same reason as
+ * `BROKERAGE_CASH_LEG_ACCOUNT_IDS`: the completeness gate must scope its
+ * convertible-orphan blocker to exactly what this converter covers, and two copies of
+ * the rule would be one to forget. Scoping the gate to the brokerage ids alone missed
+ * every deposit-account orphan — which is the population the converter was built for.
+ */
+export const DEPOSIT_ACCOUNT_TYPES: ReadonlySet<string> = new Set(['checking', 'savings']);
 
 /**
  * Brokerage accounts this converter may run against.

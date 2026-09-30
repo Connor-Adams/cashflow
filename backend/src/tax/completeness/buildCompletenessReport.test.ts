@@ -49,8 +49,9 @@ beforeEach(async () => {
   } as never);
   chequingId = chequing.id;
   // Carryforwards rolled and a T5 present, so a clean year is genuinely clean.
+  // asOfYear = N is consumed by year N+1, so a healthy 2026 return reads 2025.
   await Carryforward.create({
-    entityId: personalId, kind: 'rrsp_room', asOfYear: 2026, amount: '10000', notes: null,
+    entityId: personalId, kind: 'rrsp_room', asOfYear: 2025, amount: '10000', notes: null,
   } as never);
   await TaxSlip.create({
     entityId: personalId, year: 2026, slipType: 'T5', issuer: 'CDG', boxValues: { box11: 76500 },
@@ -215,13 +216,17 @@ test('the report is recomputed when import coverage changes but facts do not', a
   } as never);
 
   const after = await build(f);
+  assert.notEqual(before.status, after.status);
   assert.equal(after.status, 'blocked', 'the same facts must produce a different report');
 });
 
-test('a T4A slip the engine never reads is reported as reconciling against nothing', async () => {
+test('a T5008 slip nothing reads is reported as reconciling against nothing', async () => {
+  // T5008 is genuinely unread. T4A is NOT — `buildPersonalFacts` reads its boxes 016
+  // and 024 into pension income — so flagging a T4A reported money the return already
+  // counted as money whose transactions were never imported.
   await TaxSlip.create({
-    entityId: personalId, year: 2026, slipType: 'T4A', issuer: 'Somebody',
-    boxValues: { box048: 2500 },
+    entityId: personalId, year: 2026, slipType: 'T5008', issuer: 'Somebody',
+    boxValues: { box021: 2500 },
   } as never);
   const report = await build();
   const item = report.gaps.find((g) => g.kind === 'unreconciled_slips');
@@ -230,8 +235,10 @@ test('a T4A slip the engine never reads is reported as reconciling against nothi
 });
 
 test('worst-wins: a blocker and a gap together report blocked', async () => {
+  // T5008: nothing reads it, so it is a genuine unreconciled slip. A T4A would not be
+  // — its pension boxes are read.
   await TaxSlip.create({
-    entityId: personalId, year: 2026, slipType: 'T4A', issuer: 'S', boxValues: { box048: 10 },
+    entityId: personalId, year: 2026, slipType: 'T5008', issuer: 'S', boxValues: { box021: 10 },
   } as never);
   const corpAccount = await Account.create({
     name: 'Corp Chequing', householdId, accountType: 'checking',
@@ -251,15 +258,15 @@ test('worst-wins: a blocker and a gap together report blocked', async () => {
   assert.ok(report.gaps.length > 0);
 });
 
-test('carryforwards stopping before the year is a gap', async () => {
+test('carryforwards stopping two years back is a gap', async () => {
   await Carryforward.destroy({ where: { entityId: personalId } });
   await Carryforward.create({
-    entityId: personalId, kind: 'rrsp_room', asOfYear: 2025, amount: '10000', notes: null,
+    entityId: personalId, kind: 'rrsp_room', asOfYear: 2024, amount: '10000', notes: null,
   } as never);
   const report = await build();
   const item = report.gaps.find((g) => g.kind === 'carryforwards_not_rolled');
-  assert.ok(item);
-  assert.match(item.title, /2025/);
+  assert.ok(item, report.gaps.map((g) => g.kind).join(', '));
+  assert.match(item.title, /2024/);
 });
 
 test('duplicate pairs in the period surface as a gap with the overstatement', async () => {
@@ -269,7 +276,8 @@ test('duplicate pairs in the period surface as a gap with the overstatement', as
   const report = await build();
   const item = report.gaps.find((g) => g.kind === 'duplicate_pairs');
   assert.ok(item, report.gaps.map((g) => g.kind).join(', '));
-  assert.equal(item.amount, '-2000.00');
+  // A magnitude: "what the ledger overstates" cannot be negative.
+  assert.equal(item.amount, '2000.00');
 });
 
 test('a USD draw is reported in CAD, not at its face value', async () => {
@@ -301,4 +309,35 @@ test('a USD draw is reported in CAD, not at its face value', async () => {
   const draws = report.blockers.find((b) => b.kind === 'unclassified_corp_draws');
   assert.ok(draws, report.blockers.map((b) => b.kind).join(', '));
   assert.equal(draws.amount, '14000.00', 'USD 10,000 at 1.40, not 10,000');
+});
+
+test('a corp leg a PERSONAL leg points at is not an unimported counterpart', async () => {
+  // Found in review. `linkedTransactionId` is one-directional and the classification
+  // queue's shape is personal-points-at-corp, so the corp leg carries no pointer of its
+  // own. A corp-entity-scoped link-target set cannot see the personal pointer, and the
+  // corp leg was reported as money that left with nothing recording where it went —
+  // while the same dollars were ALSO reported, and priced, as an unclassified draw.
+  //
+  // Part 4 step 2 backfills exactly this shape, so the false blocker was imminent.
+  const corpAccount = await Account.create({
+    name: 'Corp Chequing', householdId, accountType: 'checking',
+    entityId: corpId, taxStatus: 'n_a', defaultCurrency: 'CAD',
+  } as never);
+  const corpLeg = await Transaction.create({
+    accountId: corpAccount.id, householdId, entityId: corpId,
+    date: '2026-01-10', amount: '-15000', currency: 'CAD',
+    merchantRaw: 'TRANSFER', merchantClean: 'TRANSFER', txnType: 'transfer',
+    importBatch: 'b', sourceRowFingerprint: 'bk1', sourceIdentityFingerprint: 'sbk1',
+  } as never);
+  // The personal side carries the pointer; the corp side has none.
+  await txn({
+    date: '2026-01-10', amount: '15000', txnType: 'transfer',
+    linkedTransactionId: corpLeg.id, taxTreatmentOverride: 'non_eligible_dividend',
+  });
+
+  const report = await build();
+  assert.ok(
+    !report.blockers.some((b) => b.kind === 'unimported_outbound_corp_transfer'),
+    `the corp leg is accounted for: ${JSON.stringify(report.blockers.map((b) => b.kind))}`,
+  );
 });

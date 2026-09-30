@@ -797,6 +797,7 @@ function serializeOutlook(outlook: Awaited<ReturnType<typeof buildOutlook>>): un
       options: outlook.obligation.options.map((o) => ({
         basis: o.basis,
         total: money(o.total),
+        balanceWithReturn: money(o.balanceWithReturn),
         carriesInterestRisk: o.carriesInterestRisk,
         instalments: instalments(o.instalments),
       })),

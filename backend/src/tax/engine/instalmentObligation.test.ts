@@ -159,3 +159,114 @@ test('a year that requires nothing still reports the balance-due date', () => {
   assert.equal(got.required, false);
   assert.equal(got.balanceDueOn, '2027-04-30');
 });
+
+test("an option's total is the sum of its own instalments, floor included", () => {
+  // Found in review. `no_calculation`'s total was the prior year's owing, which is
+  // right only while the floor does not bite. Two years prior 20,000 and prior year
+  // 4,000 schedules 5,000 / 5,000 / 0 / 0 — $10,000, not the $4,000 that was
+  // reported — so a UI showing the total beside the schedule showed figures that did
+  // not add up.
+  const got = instalmentObligation({ year: 2027, netOwing: owing('30000', '4000', '20000') });
+  const nc = got.options.find((o) => o.basis === 'no_calculation')!;
+  assert.deepEqual(nc.instalments.map((i) => i.amount.toFixed(2)), ['5000.00', '5000.00', '0.00', '0.00']);
+  assert.equal(nc.total.toFixed(2), '10000.00');
+});
+
+test('every option totals its own schedule', () => {
+  const got = instalmentObligation({ year: 2027, netOwing: owing('16610', '8400', '4000') });
+  for (const o of got.options) {
+    const summed = o.instalments.reduce((acc, i) => acc.plus(i.amount), D('0'));
+    assert.equal(o.total.toFixed(2), summed.toFixed(2), `${o.basis} total disagrees with its schedule`);
+  }
+});
+
+test('each option states what is left to pay with the return', () => {
+  // The largest number in the picture, and the client must not compute it by
+  // subtracting fixed-2 money strings.
+  const got = instalmentObligation({ year: 2027, netOwing: owing('16610', '8400', '4000') });
+  const prior = got.options.find((o) => o.basis === 'prior_year')!;
+  assert.equal(prior.total.toFixed(2), '8400.00');
+  assert.equal(prior.balanceWithReturn.toFixed(2), '8210.00');
+  const current = got.options.find((o) => o.basis === 'current_year')!;
+  assert.equal(current.balanceWithReturn.toFixed(2), '0.00', 'paying the estimate leaves nothing');
+});
+
+test('the balance floors at zero when the instalments overshoot', () => {
+  // Prior year larger than this year: four instalments exceed what is owed, and CRA
+  // refunds the difference rather than the return showing a negative balance due.
+  const got = instalmentObligation({ year: 2027, netOwing: owing('5000', '40000', '40000') });
+  const prior = got.options.find((o) => o.basis === 'prior_year')!;
+  assert.equal(prior.balanceWithReturn.toFixed(2), '0.00');
+});
+
+test('four instalments sum EXACTLY to the amount they split', () => {
+  // $38,224.31 / 4 is $9,556.0775; four of those rounded to cents come to a cent more
+  // than the total. Caught by a route test asserting the schedule against the total.
+  const got = quarterlyInstalments(D('38224.31'), 2027);
+  const summed = got.reduce((acc, i) => acc.plus(i.amount), D('0'));
+  assert.equal(summed.toFixed(2), '38224.31');
+  // Three even payments and a last one carrying the remainder.
+  assert.deepEqual(
+    got.map((i) => i.amount.toFixed(2)),
+    ['9556.08', '9556.08', '9556.08', '9556.07'],
+  );
+});
+
+test('every instalment is a whole number of cents', () => {
+  // Nobody can pay a third of a cent, and a renderer rounding for display would then
+  // show a schedule that does not add up.
+  for (const amount of ['38224.31', '10000', '3333.33', '0.01']) {
+    for (const i of quarterlyInstalments(D(amount), 2027)) {
+      assert.equal(
+        i.amount.toDecimalPlaces(2).toFixed(4), i.amount.toFixed(4),
+        `${amount} produced ${i.amount.toString()}`,
+      );
+    }
+  }
+});
+
+test('the no-calculation schedule also sums exactly', () => {
+  const got = noCalculationInstalments(D('8400.05'), D('4000.03'), 2027);
+  const summed = got.reduce((acc, i) => acc.plus(i.amount), D('0'));
+  assert.equal(summed.toFixed(2), '8400.05');
+});
+
+// ---------------------------------------------------------------------------
+// A refund year is $0 of net tax owing, not a negative
+// ---------------------------------------------------------------------------
+
+test('a refund in the prior year schedules zero, not a negative instalment', () => {
+  // `netTaxOwing` is signed on purpose — a refund is negative — and those values feed
+  // straight in. Nothing floored them, so a refund year divided by four produced four
+  // NEGATIVE payments on the recommended schedule, which is the one rendered as
+  // "instalments due". CRA treats a year that ended in a refund as $0 net tax owing.
+  //
+  // Reachable from Connor's own history: 2025 was a $47.35 refund.
+  const got = instalmentObligation({ year: 2028, netOwing: owing('20000', '-500', '8400') });
+  assert.equal(got.required, true);
+  for (const i of got.instalments) {
+    assert.ok(i.amount.greaterThanOrEqualTo(0), `${i.dueOn} scheduled ${i.amount.toFixed(2)}`);
+  }
+  const prior = got.options.find((o) => o.basis === 'prior_year')!;
+  assert.equal(prior.total.toFixed(2), '0.00');
+  // And the balance cannot exceed the tax actually owed.
+  assert.equal(prior.balanceWithReturn.toFixed(2), '20000.00');
+});
+
+test('a refund two years prior does not make the no-calculation option negative', () => {
+  // Connor's exact projected 2027 window: 2025 was a refund.
+  const got = instalmentObligation({ year: 2027, netOwing: owing('16610', '8400', '-47.35') });
+  const nc = got.options.find((o) => o.basis === 'no_calculation')!;
+  assert.deepEqual(
+    nc.instalments.map((i) => i.amount.toFixed(2)),
+    ['0.00', '0.00', '4200.00', '4200.00'],
+  );
+  assert.equal(nc.total.toFixed(2), '8400.00');
+});
+
+test('a refund in the current year schedules nothing at all', () => {
+  const got = instalmentObligation({ year: 2027, netOwing: owing('-500', '40000', '40000') });
+  assert.equal(got.required, false);
+  const current = got.options.find((o) => o.basis === 'current_year')!;
+  assert.equal(current.total.toFixed(2), '0.00');
+});
