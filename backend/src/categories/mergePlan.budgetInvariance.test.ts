@@ -308,6 +308,71 @@ test('the path-form repair moves exactly three budgets, to exactly these values'
 });
 
 /**
+ * Defect: Rule W groups duplicates by NORMALIZED `nameKey`, but Rule B's
+ * widening check compared raw `name` strings. For a case-only duplicate group
+ * the winner's own raw name never appears in the raw-name "before" set built
+ * from the unmerged rows, so `widens` was always true and the budget always
+ * detached -- even though the counted (normalized) name set does not change.
+ */
+test('Rule B does not detach a case-only duplicate group: the counted set does not widen', () => {
+  const plan = planSynthetic(
+    [
+      { id: 1, parentId: null, name: 'Weed' },
+      { id: 2, parentId: null, name: 'weed' },
+    ],
+    { 1: 5, 2: 1 },
+    [{ id: 904, categoryId: 2 }],
+  );
+  assert.deepEqual(plan.merges.map((m) => `${m.loserId}->${m.winnerId}`), ['2->1']);
+  assert.deepEqual(plan.budgetActions, [{ budgetId: 904, action: 'repoint', categoryId: 1 }],
+    'a case-only duplicate must repoint onto the winner, not detach');
+});
+
+/**
+ * Defect: when a category and its own same-named child are one duplicate
+ * group and the CHILD wins, the reparent loop used to emit
+ * `{childId: winner, newParentId: winner}` -- a self-referential row that, if
+ * a migration applied it as `parent_id = id`, would corrupt the row.
+ */
+test('a same-named child that wins over its own parent gets no self-referential reparent', () => {
+  const plan = planSynthetic(
+    [
+      { id: 1, parentId: null, name: 'Y' },
+      { id: 2, parentId: 1, name: 'Y' },
+    ],
+    { 1: 1, 2: 9 },
+  );
+  assert.deepEqual(plan.merges.map((m) => `${m.loserId}->${m.winnerId}`), ['1->2']);
+  assert.ok(
+    plan.reparents.every((r) => r.childId !== r.newParentId),
+    'reparents must never point a category at itself',
+  );
+  assert.deepEqual(plan.reparents, [], 'the winner is its own loser\'s child: nothing else to reparent');
+});
+
+/**
+ * Coverage only: no production duplicate group has 3+ members, so the
+ * multi-loser path of the merge loop (every non-winner in one group merges
+ * onto the same winner) has no production-data test. The loop already
+ * handles it correctly; this pins that.
+ */
+test('a duplicate group with three members merges both losers onto the single winner', () => {
+  const plan = planSynthetic(
+    [
+      { id: 1, parentId: null, name: 'Z' },
+      { id: 2, parentId: null, name: 'Z' },
+      { id: 3, parentId: null, name: 'Z' },
+    ],
+    { 1: 1, 2: 9, 3: 5 },
+  );
+  assert.deepEqual(
+    plan.merges.map((m) => ({ winnerId: m.winnerId, loserId: m.loserId })).sort((a, b) => a.loserId - b.loserId),
+    [{ winnerId: 2, loserId: 1 }, { winnerId: 2, loserId: 3 }],
+    'both losers must merge onto the single reference-heavy winner',
+  );
+});
+
+/**
  * What this pins, precisely.
  *
  * PINS `computeBudgetProgress`'s two pricing branches, over the shape Rule B

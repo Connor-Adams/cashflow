@@ -18,12 +18,28 @@
  * arrangement.
  */
 
-/** Names of a category and every descendant, over a flat row list. */
-function subtreeNames(categories, rootId) {
+/**
+ * Persisted normalization key, same rule as `src/categories/normalizeName.ts`
+ * and the category migrations. Duplicated locally rather than imported: this
+ * file is plain CommonJS outside `src/` so `sequelize-cli` can load it
+ * directly (see the file header), and it must not pull in the TS module.
+ */
+function normalizeName(name) {
+  return String(name).trim().toLocaleLowerCase('en-CA');
+}
+
+/**
+ * Names of a category and every descendant, over a flat row list.
+ * `nameOf` defaults to the raw `name` (the long-standing, still-exported
+ * behaviour); pass `normalizeName` to get the same set keyed the way grouping
+ * keys duplicates, for the widening comparison below.
+ */
+function subtreeNames(categories, rootId, nameOf) {
+  const pick = nameOf || ((c) => c.name);
   const childrenByParent = new Map();
   const nameById = new Map();
   for (const c of categories) {
-    nameById.set(c.id, c.name);
+    nameById.set(c.id, pick(c));
     if (c.parentId == null) continue;
     const list = childrenByParent.get(c.parentId) || [];
     list.push(c.id);
@@ -89,7 +105,13 @@ function planCategoryMerges(categories, refCounts, budgets) {
         winnerId: winner.id, loserId: loser.id,
       });
       for (const child of categories) {
-        if (child.parentId === loser.id) reparents.push({ childId: child.id, newParentId: winner.id });
+        // Skip the winner itself: if the winner is its own loser's child (a
+        // same-named parent/child pair where the child wins), reparenting it
+        // to itself would write parent_id = id -- a self-referential, corrupt
+        // row. The winner already has its real (pre-merge) parentId; leave it.
+        if (child.parentId === loser.id && child.id !== winner.id) {
+          reparents.push({ childId: child.id, newParentId: winner.id });
+        }
       }
     }
   }
@@ -114,7 +136,17 @@ function planCategoryMerges(categories, refCounts, budgets) {
     // name set gains a name, detach (category_id = NULL, name string retained) —
     // the exact-match no-rollup form budgets 'Household' and 'Hobbies' already
     // use. Narrowing is fine, and must NOT detach: see `widens` above.
-    if (widens(subtreeNames(categories, b.categoryId), subtreeNames(after, afterId))) {
+    // Compare NORMALIZED names, the same key grouping used to decide which
+    // rows are duplicates. Comparing raw `name` here (Defect: Rule W groups by
+    // nameKey, Rule B compared raw names) made a case-only duplicate group
+    // (e.g. {'Weed', 'weed'}) always look like it widens -- the winner's own
+    // raw name never appears in the raw-name "before" set built from the
+    // as-is `categories` rows -- so every such merge wrongly detached instead
+    // of repointing.
+    if (widens(
+      subtreeNames(categories, b.categoryId, (c) => normalizeName(c.name)),
+      subtreeNames(after, afterId, (c) => normalizeName(c.name)),
+    )) {
       budgetActions.push({ budgetId: b.id, action: 'detach', categoryId: null });
     } else if (pointsAtLoser) {
       // Only a budget whose anchor row is about to be DELETED needs rewriting.

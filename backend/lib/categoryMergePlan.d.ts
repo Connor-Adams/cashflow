@@ -19,4 +19,8 @@ export function planCategoryMerges(
   budgets: PlanBudget[],
 ): MergePlan;
 
-export function subtreeNames(categories: PlanCategory[], rootId: number): Set<string>;
+export function subtreeNames(
+  categories: PlanCategory[],
+  rootId: number,
+  nameOf?: (category: PlanCategory) => string,
+): Set<string>;
