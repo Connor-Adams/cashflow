@@ -923,3 +923,26 @@ test('a brokerage BUY still produces no cash mirror', () => {
   assert.equal(result.investmentActivities!.length, 1);
   assert.equal(result.transactions.length, 0);
 });
+
+test('an in-kind securities transfer gets NO cash mirror', () => {
+  // TRFINTF maps to transfer_in, but shares moving in kind are not cash. The
+  // retroactive converter gates on `securityId == null`; the forward fix must gate
+  // on the same thing or it invents money that never moved.
+  const lines: PdfLine[] = [
+    mk('ORDER EXECUTION ONLY ACCOUNT', 1, 798.8),
+    mk(' Account No.   Owner   Statement Period', 1, 762.2),
+    mk(' HQ8H0GZ07CAD   Connor Adams   2026-01-01 - 2026-01-31', 1, 749.6),
+    mk('Phone: (416) 595-7200 Fax: (647) 245-1002', 1, 713.2),
+    mk(' Margin Account', 1, 699.9),
+    mk(' Activity - Current period', 2, 786.3),
+    mk(' Date   Transaction   Description   Debit ($)   Credit ($)   Balance ($)', 2, 769.6),
+    mk('2026-01-15   TRFINTF   XEQT - iShares Core Equity ETF: Transferred in 100 shares   $0.00   $12,345.00   $12,345.00', 2, 758.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.equal(result.investmentActivities!.length, 1, 'still an activity');
+  assert.equal(
+    result.transactions.length,
+    0,
+    `securities are not cash: ${JSON.stringify(result.transactions)}`,
+  );
+});

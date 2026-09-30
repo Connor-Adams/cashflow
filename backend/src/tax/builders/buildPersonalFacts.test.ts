@@ -1066,3 +1066,36 @@ test('an FHSA contribution tagged on both legs is not deducted twice', async () 
     `one contribution, one deduction; got ${total.toFixed(2)} from ${facts.fhsaContribs.length} rows`,
   );
 });
+
+// A row that is BOTH typed interest/dividend AND classified as income was counted
+// twice: once by the treatment loop, once by the txnType pass below it. That pass
+// skipped only the four NOT_INCOME treatments, so every income treatment fell
+// through — and a `dividend` txnType was pushed as ELIGIBLE, which is the wrong
+// character as well as the wrong count.
+test('a transaction both typed interest and classified as a dividend is counted once', async () => {
+  const household = await Household.create({ name: 'Double count HH' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const chq = await Account.create({
+    name: 'Chq', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'n_a', defaultCurrency: 'CAD',
+  } as never);
+  await Transaction.create({
+    accountId: chq.id, householdId: household.id, entityId: entity.id,
+    date: '2026-05-01', amount: '1000', currency: 'CAD', txnType: 'interest',
+    taxTreatmentOverride: 'non_eligible_dividend',
+    merchantRaw: 'Owner draw', merchantClean: 'Owner draw',
+    importBatch: 'b', sourceRowFingerprint: 'fp-dc', sourceIdentityFingerprint: 'sif-dc',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2026);
+  assert.equal(facts.nonEligibleDividends.length, 1, 'classified once');
+  assert.equal(
+    facts.interestIncome.length,
+    0,
+    `must not also appear as interest; got ${JSON.stringify(facts.interestIncome)}`,
+  );
+});
+

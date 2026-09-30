@@ -492,7 +492,11 @@ function depositRouting(ctx: RowContext, isDepositAccount: boolean): Routing | n
  */
 function brokerageRouting(ctx: RowContext): Routing {
   if (ctx.activityType !== null) {
-    if (CASH_CROSSING_ACTIVITY_TYPES.has(ctx.activityType)) {
+    // Security-bearing rows are never cash, whatever their code says: TRFINTF on
+    // an in-kind share transfer is `transfer_in`, and minting a cash leg for it
+    // invents money that never moved. The retroactive converter gates on
+    // `securityId == null` for the same reason.
+    if (ctx.security === null && CASH_CROSSING_ACTIVITY_TYPES.has(ctx.activityType)) {
       // The mirror's type is stamped authoritative rather than hinted. The
       // allowlisted codes are absent from CASH_CODE_TXN_TYPE, so a hint would be
       // no hint at all and the row would land 'unknown' (positive) or 'purchase'

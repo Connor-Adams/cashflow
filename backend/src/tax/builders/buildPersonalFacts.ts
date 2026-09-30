@@ -90,9 +90,14 @@ function dedupeLinkedContribs<T extends { txnId: number; linkedId: number | null
   rows: T[],
 ): Omit<T, 'txnId' | 'linkedId' | 'positive'>[] {
   const present = new Set(rows.map((r) => r.txnId));
-  return rows
-    .filter((r) => !(r.positive && r.linkedId != null && present.has(r.linkedId)))
-    .map(({ txnId: _t, linkedId: _l, positive: _p, ...rest }) => rest);
+  const kept = rows.filter(
+    (r) => !(r.positive && r.linkedId != null && r.linkedId !== r.txnId && present.has(r.linkedId)),
+  );
+  // Never drop every leg. Two mutually-linked positive rows, or a row linked to
+  // itself, would otherwise cancel the deduction entirely — silently deleting a
+  // real claim is far worse than counting one leg too many.
+  const survivors = kept.length > 0 ? kept : rows.slice(0, 1);
+  return survivors.map(({ txnId: _t, linkedId: _l, positive: _p, ...rest }) => rest);
 }
 
 export async function buildPersonalFacts(entityId: number, year: number): Promise<TaxYearFacts> {
@@ -150,6 +155,12 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   let pensionTotal = D('0');
   const rentalIncome: IncomeItem[] = [];
   const rentalExpenses: IncomeItem[] = [];
+  /**
+   * Transactions the treatment loop below routed to a real tax line. The txnType
+   * pass further down must skip these or the row is counted twice — and as the
+   * wrong character, since that pass files every `dividend` as eligible.
+   */
+  const classifiedTxnIds = new Set<number>();
 
   for (const t of txns) {
     const { cad } = await toCad(D(t.amount as unknown as string), t.currency ?? 'CAD', t.date as unknown as string);
@@ -175,6 +186,7 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     if (treatment === 'none' && t.finalCategory && isTaxTreatment(t.finalCategory)) {
       treatment = t.finalCategory;
     }
+    if (treatment !== 'none') classifiedTxnIds.add(t.id as number);
     // Corp→personal distributions + payroll (income-queue) fold into the same
     // treatment routing. loan_advance/loan_repayment/not_income are explicitly
     // non-income — skipped before the self-employment fallback so a business-
@@ -236,8 +248,20 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
 
   const interestIncome: IncomeItem[] = [];
 
-  // Route a dividend-type item by Security.dividendEligibility; unknown/missing
-  // defaults to eligible.
+  // Route a dividend-type item by Security.dividendEligibility.
+  //
+  // `Security.dividendEligibility` is `allowNull: false` with `defaultValue:
+  // 'eligible'` (models/Security.ts:165-170), so there is no "unknown" state to
+  // default differently — every security carries a concrete value. A plan item
+  // once called for defaulting unknown to non-eligible; that item was withdrawn,
+  // because the default is right for the common case: dividends from a publicly
+  // traded Canadian corporation ARE eligible, and flipping it would misclassify
+  // most securities to fix none.
+  //
+  // The real exposure is an ETF distribution, which is a mix of eligible
+  // dividends, foreign income, other income, return of capital and capital gains.
+  // That is a composition problem the eligibility flag cannot express, and it
+  // belongs in the completeness gate as an unverified-eligibility gap.
   const pushDividend = (a: InvestmentActivity, item: IncomeItem) => {
     const eligibility = (a as any).security?.dividendEligibility ?? 'eligible';
     if (eligibility === 'non_eligible') nonEligibleDividends.push(item);
@@ -327,6 +351,13 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   for (const t of txns) {
     const txnType = (t as unknown as { txnType?: string | null }).txnType ?? null;
     if (txnType !== 'interest' && txnType !== 'dividend') continue;
+    // A row the treatment loop above already routed must not be counted again
+    // here. The guard used to list only the four NOT_INCOME treatments, so every
+    // INCOME treatment fell through and was counted twice — and a `dividend`
+    // txnType was added as ELIGIBLE, so an owner's non-eligible draw picked up an
+    // eligible gross-up and credit on the second pass. Inverting the test means a
+    // treatment added later cannot reintroduce the bug.
+    if (classifiedTxnIds.has(t.id as number)) continue;
     if (t.taxTreatmentOverride !== null && NOT_INCOME_TREATMENTS.has(t.taxTreatmentOverride)) {
       continue;
     }

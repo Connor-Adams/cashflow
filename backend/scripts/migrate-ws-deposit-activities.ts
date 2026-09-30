@@ -147,7 +147,11 @@ async function main(): Promise<void> {
   console.log('\nApplied:');
   console.log(`  transactions inserted: ${report.insertedTransactions}`);
   console.log(`  already present (deduped): ${report.skippedDuplicates}`);
-  console.log(`  activity rows deleted: ${report.deletedShadows + report.orphans.length}`);
+  // Opt-in brokerage orphans are converted and LEFT IN PLACE, so they are not
+  // deleted and must not be counted here.
+  const optInAccounts = new Set(BROKERAGE_CASH_LEG_ACCOUNT_IDS);
+  const deletedOrphans = report.orphans.filter((o) => !optInAccounts.has(o.accountId)).length;
+  console.log(`  activity rows deleted: ${report.deletedShadows + deletedOrphans}`);
 }
 
 main()

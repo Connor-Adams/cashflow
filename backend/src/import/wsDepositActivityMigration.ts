@@ -272,13 +272,29 @@ export async function classifyWsDepositActivities(
 
   // A security-bearing row is not a cash event: neither delete it nor flatten
   // it to a transaction, which would lose the security.
+  const optInForSkip = new Set(brokerageAccountIds);
   const skipped: SkippedRow[] = activities
     .filter((a) => a.securityId != null)
     .map((a) => ({
       activityId: a.id as number,
       accountId: a.accountId as number,
       reason: 'carries a security — not a cash event',
-    }));
+    }))
+    // A security-less row the allowlist rejects on an opt-in account belonged to no
+    // bucket at all: not a shadow, not an orphan, and `skipped` only ever held
+    // security-bearing rows. It vanished from the report entirely, which is the one
+    // outcome a tool that decides what to convert must never have.
+    .concat(
+      activities
+        .filter((a) => a.securityId == null
+          && optInForSkip.has(a.accountId as number)
+          && !BROKERAGE_CASH_LEG_ACTIVITY_TYPES.has(String(a.activityType)))
+        .map((a) => ({
+          activityId: a.id as number,
+          accountId: a.accountId as number,
+          reason: `activityType '${String(a.activityType)}' is not a cash crossing — left alone`,
+        })),
+    );
   // On a deposit account every security-less row is a cash event, so selection is
   // unchanged there. On an opt-in brokerage account it is not: a `sell` whose
   // security failed to resolve is also security-less, and converting it would take
@@ -346,6 +362,8 @@ function cleanupPreview(
   accountId: number,
   householdId: number | null,
   orphans: OrphanRow[],
+  brokerageAccountIds: readonly number[],
+  runStamp: string,
 ): StatementPreview {
   return {
     previewToken: `ws-deposit-cleanup-${accountId}`,
@@ -353,7 +371,14 @@ function cleanupPreview(
     contentHash: cleanupContentHash(accountId, orphans.map((o) => o.activityId)),
     accountId,
     householdId,
-    importBatch: 'WS deposit ledger cleanup',
+    // Per run and per account on an opt-in brokerage account, because
+    // `rollbackImportBatch` matches this string EXACTLY — a shared constant means
+    // rolling back one account's conversion reaches every converted row ever made.
+    // Deposit accounts keep the shared label so their existing rollback addressing
+    // is unchanged, which is this part's promise about them.
+    importBatch: brokerageAccountIds.includes(accountId)
+      ? `WS brokerage cash legs acct ${accountId} ${runStamp}`
+      : 'WS deposit ledger cleanup',
     usedParser: 'pdf',
     transactions: orphans.map(orphanToRow),
     investmentActivities: [],
@@ -374,6 +399,8 @@ async function insertOrphans(
   accountIds: number[],
   orphans: OrphanRow[],
   userId: number | null,
+  brokerageAccountIds: readonly number[],
+  runStamp: string,
 ): Promise<{ inserted: number; deduped: number }> {
   let inserted = 0;
   let deduped = 0;
@@ -382,7 +409,7 @@ async function insertOrphans(
     if (mine.length === 0) continue;
     const householdId = mine[0].householdId;
     const result = await commitStatementImport(
-      cleanupPreview(accountId, householdId, mine),
+      cleanupPreview(accountId, householdId, mine, brokerageAccountIds, runStamp),
       userId,
       householdId,
     );
@@ -421,7 +448,12 @@ export async function migrateWsDepositActivities(opts: {
     };
   }
 
-  const { inserted, deduped } = await insertOrphans(opts.accountIds, orphans, opts.userId);
+  // One stamp for the whole run, so every account converted in this invocation is
+  // addressable together and a later run is addressable separately.
+  const runStamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const { inserted, deduped } = await insertOrphans(
+    opts.accountIds, orphans, opts.userId, brokerageAccountIds, runStamp,
+  );
 
   // Insert-only on opt-in brokerage accounts: nothing there is ever removed.
   //

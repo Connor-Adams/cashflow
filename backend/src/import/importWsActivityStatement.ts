@@ -106,12 +106,22 @@ export async function importWsActivityStatement(opts: {
       // because the narrative detector matches "transfer out of the account" and
       // not "transfer into the account", so the symmetric case would never link.
       transactions: slice.activities
-        .filter((a) => CASH_CROSSING_ACTIVITY_TYPES.has(a.activityType))
+        // `security === null` matters as much as the activity type: an in-kind
+        // share transfer is `transfer_in` too, and a cash leg for it would be
+        // money that never moved. A null amount is a parse anomaly — skip the row
+        // rather than minting a $0 transaction for it.
+        .flatMap((a) => (
+          a.security === null
+          && a.amount != null
+          && CASH_CROSSING_ACTIVITY_TYPES.has(a.activityType)
+            ? [a as typeof a & { amount: number }]
+            : []
+        ))
         .map((a) => ({
           date: a.tradeDate,
           merchantRaw: a.description,
           merchantClean: normalizeMerchant(a.description),
-          amount: a.amount ?? 0,
+          amount: a.amount,
           currency: a.currency,
           sourceReference: null,
           overrideTxnType: 'transfer' as const,

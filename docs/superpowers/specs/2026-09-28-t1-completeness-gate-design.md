@@ -184,6 +184,13 @@ demonstrably wrong.
   *target* in the household matches the predicate. Money that arrived is also not
   missing money, so pricing it would mean assuming it is an untagged draw, which is
   the fabricated-number sin that demoted the truncated-import item.
+- **Dividend eligibility never verified.** `Security.dividendEligibility` defaults
+  to `eligible` and nothing checks it against a slip. That default is right for a
+  publicly traded Canadian corporation and wrong for an ETF distribution, which is
+  a mix of eligible dividends, foreign income, other income, return of capital and
+  capital gains — a composition the flag cannot express. Reassigned here from part
+  2, where the fix was to flip the default; flipping it would misclassify most
+  securities to fix none.
 - Suspected duplicate pairs awaiting review (part 1b's detector)
 - ACB warnings raised and discarded — `computeAcb` emits them for clamped sells,
   zero-cost `transfer_in` and mixed currency (`portfolio/acb.ts:154-176,197-202,366-370`)

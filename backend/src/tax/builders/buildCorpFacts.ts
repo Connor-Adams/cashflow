@@ -42,6 +42,10 @@ export async function buildCorpFacts(
   const accountIds = accounts.map((a) => a.id);
 
   const txns = await Transaction.findAll({
+    // Ordered so the mirror exclusion below claims deterministically: two rows at
+    // one key can differ in txnType, treatment, link and merchant, and whichever
+    // survives is what reaches the perimeter split.
+    order: [['id', 'ASC']],
     where: { entityId, date: { [Op.between]: [startDate, endDate] } },
   });
 
@@ -130,6 +134,8 @@ export async function buildCorpFacts(
   // declines to act on elsewhere — and dropping a real corp revenue row silently
   // would be that same mistake with the sign flipped. A surplus stays in.
   const mirrorWarnings: string[] = [];
+  /** Keys where a mirror was already claimed, so a further hit is a real surplus. */
+  const seenMirrorKeys = new Set<string>();
   const perimeterTxns = txns.filter((t) => {
     if ((accountTypeById.get(t.accountId) ?? null) !== 'investment') return true;
     const k = mirrorKey(
@@ -140,12 +146,21 @@ export async function buildCorpFacts(
     );
     const left = unclaimedMirrors.get(k) ?? 0;
     if (left <= 0) {
-      mirrorWarnings.push(
-        `Txn #${t.id} on investment account ${t.accountId} was counted by the corp `
-        + 'perimeter: no matching investment activity explains it.',
-      );
+      // Warn only on a genuine SURPLUS — more transactions at a key than there are
+      // activities to explain them. A key with no activity at all is the ordinary
+      // case on a brokerage account: all twelve CASH_TXN_CODES (SPEND, DCTFEE,
+      // OBP, …) already produce cash rows there, and warning on each would emit
+      // one per row and drown part 3's blocker list.
+      if (seenMirrorKeys.has(k)) {
+        mirrorWarnings.push(
+          `Txn #${t.id} on investment account ${t.accountId} was counted by the corp `
+          + 'perimeter: more transactions share its date and amount than there are '
+          + 'investment activities to explain them.',
+        );
+      }
       return true;
     }
+    seenMirrorKeys.add(k);
     unclaimedMirrors.set(k, left - 1);
     return false;
   });

@@ -126,22 +126,40 @@ test('resolveScenario throws on cyclic ancestry', async () => {
   await assert.rejects(() => resolveScenario(a.id), /cycle/i);
 });
 
-// The Overview tab reads buildPersonalFacts directly (via /api/tax/personal/:year/
-// return); the Personal T1 tab reads it through resolveScenario. They showed
-// different 2026 numbers because the tab defaulted to a projection_root. Part 0
-// makes the baseline the default, so this locks the other half: a baseline must
-// resolve to the same actuals the Overview tab computes, or the two tabs drift
-// again for a different reason.
-test('a baseline scenario resolves to the same facts buildPersonalFacts produces', async () => {
+// The two tabs disagreed because the Personal T1 tab defaulted to a
+// projection_root. Part 0 fixed the selection; this locks the other half — that a
+// BASELINE resolves through actuals and not through the projector.
+//
+// Asserting resolveScenario(baseline) deep-equals buildPersonalFacts is a
+// tautology for an override-free baseline (applyOverrides(X, [{}]) === X), so this
+// asserts the branch instead: a projection_root and a baseline for the same entity
+// and year must produce DIFFERENT facts, and only the baseline's must match actuals.
+test('a baseline resolves through actuals; a projection_root does not', async () => {
   const { entity } = await seedEntity();
   const baseline = await ensureBaselineScenario(entity.id, 2025);
-
-  const viaScenario = await resolveScenario(baseline.id);
+  const viaBaseline = await resolveScenario(baseline.id);
   const { buildPersonalFacts } = await import('../builders/buildPersonalFacts');
-  const viaActuals = await buildPersonalFacts(entity.id, 2025);
+  const actuals = await buildPersonalFacts(entity.id, 2025);
 
+  // The baseline carries the year's own employment income.
+  assert.equal(viaBaseline.employmentIncome.length, actuals.employmentIncome.length);
   assert.equal(
-    JSON.stringify(viaScenario, (_k, v) => (v && typeof v.toString === 'function' && v.constructor?.name === 'Decimal' ? v.toString() : v)),
-    JSON.stringify(viaActuals, (_k, v) => (v && typeof v.toString === 'function' && v.constructor?.name === 'Decimal' ? v.toString() : v)),
+    viaBaseline.employmentIncome[0]?.cadAmount.toString(),
+    actuals.employmentIncome[0]?.cadAmount.toString(),
   );
+
+  // A projection for the NEXT year resolves through the projector, so its facts are
+  // the prior year scaled — not 2026's actuals, of which there are none.
+  const projection = await Scenario.create({
+    entityId: entity.id, year: 2026, name: 'Projection 2026',
+    kind: 'projection_root', parentId: baseline.id, overrides: {}, assumptions: {},
+  } as never);
+  const viaProjection = await resolveScenario(projection.id);
+  assert.equal(viaProjection.year, 2026);
+  assert.ok(
+    viaProjection.employmentIncome.length > 0,
+    'a projection scales the prior year forward, so income appears with no 2026 data',
+  );
+  const actuals2026 = await buildPersonalFacts(entity.id, 2026);
+  assert.equal(actuals2026.employmentIncome.length, 0, '2026 has no actual income');
 });

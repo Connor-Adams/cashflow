@@ -455,13 +455,22 @@ test('a two-activity collision on an opt-in account converges and stays converge
   // insert-only nothing can be lost, but the claim must still settle — the wrong
   // activity claiming the converted row would re-convert the other one forever.
   const { id: accountId, householdId } = await makeAccount('investment');
+  // Two activities at one pairKey with the SAME description — the hard case, since
+  // their converted rows would share an identity fingerprint. One is already
+  // recorded by a pre-existing transaction; the other is not.
+  await models.Transaction.create({
+    accountId, householdId, date: '2026-01-10', amount: '-15000', currency: 'CAD',
+    txnType: 'transfer', merchantRaw: 'Pre-existing withdrawal',
+    merchantClean: 'Pre-existing withdrawal', importBatch: 'prior',
+    sourceRowFingerprint: 'fp-prior', sourceIdentityFingerprint: 'sif-prior',
+  } as never);
   await seedActivity({
     accountId, householdId, date: '2026-01-10', amount: -15000,
     activityType: 'transfer_out', description: 'Money transfer out of the account',
   });
   await seedActivity({
     accountId, householdId, date: '2026-01-10', amount: -15000,
-    activityType: 'transfer_out', description: 'Withdrawal',
+    activityType: 'transfer_out', description: 'Money transfer out of the account',
   });
 
   const counts: number[] = [];
@@ -472,10 +481,12 @@ test('a two-activity collision on an opt-in account converges and stays converge
     counts.push(r.insertedTransactions);
   }
 
+  // Run 1 must actually convert something — without asserting this the whole test
+  // passes when insertOrphans does nothing at all.
+  assert.equal(counts[0], 1, `run 1 should convert the unrecorded activity, got ${counts}`);
   // Both activities survive every run — nothing is ever removed here.
   assert.equal(await models.InvestmentActivity.count({ where: { accountId } }), 2);
-  // And the transaction count settles rather than growing run over run.
-  const txns = await models.Transaction.count({ where: { accountId } });
-  assert.ok(txns <= 2, `expected at most one transaction per activity, got ${txns}`);
+  // The pre-existing transaction plus one conversion, and it stays at two.
+  assert.equal(await models.Transaction.count({ where: { accountId } }), 2);
   assert.deepEqual(counts.slice(1), [0, 0], `later runs must insert nothing, got ${counts}`);
 });
