@@ -42,10 +42,16 @@ function subtreeNames(categories, rootId) {
   return names;
 }
 
-function sameSet(a, b) {
-  if (a.size !== b.size) return false;
-  for (const v of a) if (!b.has(v)) return false;
-  return true;
+/**
+ * True when `after` contains a name `before` lacked — i.e. the counted set
+ * WIDENS. Deliberately one-directional: a set that only loses names has
+ * NARROWED, which is the deduplication working as intended (a budget on an
+ * ancestor of a loser stops seeing the duplicate row's name) and must not
+ * detach. Only new names can make a budget count spend it did not count before.
+ */
+function widens(before, after) {
+  for (const v of after) if (!before.has(v)) return true;
+  return false;
 }
 
 /**
@@ -98,17 +104,22 @@ function planCategoryMerges(categories, refCounts, budgets) {
   const winnerByLoser = new Map(merges.map((m) => [m.loserId, m.winnerId]));
   const budgetActions = [];
   for (const b of budgets) {
-    if (b.categoryId == null || !winnerByLoser.has(b.categoryId)) continue;
-    const winnerId = winnerByLoser.get(b.categoryId);
-    // Rule B: a merge must never widen what a budget counts. If the name set
-    // would change, detach (category_id = NULL, name string retained) — the
-    // exact-match no-rollup form budgets 'Household' and 'Hobbies' already use.
-    const widens = !sameSet(subtreeNames(categories, b.categoryId), subtreeNames(after, winnerId));
-    budgetActions.push(
-      widens
-        ? { budgetId: b.id, action: 'detach', categoryId: null }
-        : { budgetId: b.id, action: 'repoint', categoryId: winnerId },
-    );
+    if (b.categoryId == null) continue;
+    // Rule B applies to EVERY anchored budget, not only the ones pointing at a
+    // loser: a budget sitting on a WINNER also widens when that winner adopts a
+    // loser's children through the `reparents` this planner emits.
+    const pointsAtLoser = winnerByLoser.has(b.categoryId);
+    const afterId = pointsAtLoser ? winnerByLoser.get(b.categoryId) : b.categoryId;
+    // Rule B: a merge must never widen what a budget counts. If the post-merge
+    // name set gains a name, detach (category_id = NULL, name string retained) —
+    // the exact-match no-rollup form budgets 'Household' and 'Hobbies' already
+    // use. Narrowing is fine, and must NOT detach: see `widens` above.
+    if (widens(subtreeNames(categories, b.categoryId), subtreeNames(after, afterId))) {
+      budgetActions.push({ budgetId: b.id, action: 'detach', categoryId: null });
+    } else if (pointsAtLoser) {
+      // Only a budget whose anchor row is about to be DELETED needs rewriting.
+      budgetActions.push({ budgetId: b.id, action: 'repoint', categoryId: afterId });
+    }
   }
 
   return { merges, reparents, budgetActions };
