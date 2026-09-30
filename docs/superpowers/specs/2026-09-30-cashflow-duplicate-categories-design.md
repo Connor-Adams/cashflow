@@ -235,6 +235,13 @@ Per pair, loser `L` → winner `W`:
 
 ### Phase 5 — the data repair
 
+Both parts apply to all three transaction pairs — `final_category` /
+`final_category_id`, `auto_category` / `auto_category_id`, and
+`category_override` / `category_override_id` — plus
+`external_order_items.inferred_category` / `category_override` and their ids.
+The counts below are for `final_category`, the column every budget and spend
+rollup reads; the script reports the other columns' counts at run time.
+
 **(a) 2,804 flat-name rows, 20 names — id fill only, zero budget delta.** The
 string is untouched, so nothing any budget counts changes. After Phase 4 all 20
 names resolve to exactly one category (the six ambiguous ones collapse).
@@ -243,7 +250,9 @@ Largest: `Transfer` 733, `Groceries` 690, `Other` 382, `Payment` 242,
 
 **(b) 198 path-form rows — string rewritten to the leaf name, id filled.** This
 *does* move numbers, because that spend is currently invisible to every budget:
-`CAD\0Household / Vape` matches no budget's name set.
+`CAD\0Household / Vape` matches no budget's name set. The leaf segment is
+resolved the same way Phase 1 resolves it — a household-global `name_key`
+lookup — so the rewrite and the live write path cannot disagree.
 
 ## 5. Expected budget delta
 
