@@ -90,7 +90,7 @@ function makeFacts(overrides: Partial<TaxYearFacts> = {}): TaxYearFacts {
       rrspRoom: D('0'),
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
-      fhsaLifetimeContributions: D('0'),
+      fhsaLifetimeContributions: D('0'), fhsaRoom: D('0'),
     },
     ageAtYearEnd: 40,
     ...overrides,
@@ -126,10 +126,13 @@ test('roll basic case: no income, no gains — preserves zero balances and write
     }
   }
 
-  // FHSA room should equal annual limit (8000) when no lifetime contributions
+  // FHSA room is two years' worth when nothing was contributed: this year's
+  // allowance went unused and carries, so next year has 8,000 + 8,000. The old
+  // expectation of 8,000 came from a formula that never accumulated and therefore
+  // discarded a skipped year — which is the defect being fixed, not a rule.
   const fhsaRow = result.written.find(w => w.kind === 'fhsa_room');
   assert.ok(fhsaRow);
-  assert.equal(fhsaRow.amount.toFixed(2), '8000.00');
+  assert.equal(fhsaRow.amount.toFixed(2), '16000.00');
 
   // Verify rows were upserted to DB
   const dbRows = await Carryforward.findAll({ where: { entityId: entity.id, asOfYear: 2025 } });
@@ -162,7 +165,7 @@ test('roll loss year: capital loss event adds to carry', async () => {
       rrspRoom: D('0'),
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
-      fhsaLifetimeContributions: D('0'),
+      fhsaLifetimeContributions: D('0'), fhsaRoom: D('0'),
     },
   });
 
@@ -201,7 +204,7 @@ test('roll gain year: cap gain reduces carry', async () => {
       rrspRoom: D('0'),
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
-      fhsaLifetimeContributions: D('0'),
+      fhsaLifetimeContributions: D('0'), fhsaRoom: D('0'),
     },
   });
 
@@ -232,7 +235,7 @@ test('roll RRSP room earned: employment income generates room', async () => {
       rrspRoom: D('5000'), // prior room
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
-      fhsaLifetimeContributions: D('0'),
+      fhsaLifetimeContributions: D('0'), fhsaRoom: D('0'),
     },
   });
 
@@ -264,7 +267,7 @@ test('roll RRSP room: capped at rrspAnnualLimit', async () => {
       rrspRoom: D('0'),
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
-      fhsaLifetimeContributions: D('0'),
+      fhsaLifetimeContributions: D('0'), fhsaRoom: D('0'),
     },
   });
 
@@ -324,7 +327,7 @@ test('non-cap loss roll: amount applied against net income is decremented', asyn
       rrspRoom: D('0'),
       nonCapLoss: D('50000'),
       instalmentsPaid: D('0'),
-      fhsaLifetimeContributions: D('0'),
+      fhsaLifetimeContributions: D('0'), fhsaRoom: D('0'),
     },
   });
 
@@ -354,7 +357,7 @@ test('non-cap loss roll: fully consumed when net income exceeds the carry', asyn
       rrspRoom: D('0'),
       nonCapLoss: D('10000'),
       instalmentsPaid: D('0'),
-      fhsaLifetimeContributions: D('0'),
+      fhsaLifetimeContributions: D('0'), fhsaRoom: D('0'),
     },
   });
 
@@ -383,7 +386,7 @@ test('non-cap loss roll: tolerates serialized string netIncome (projection path)
       rrspRoom: D('0'),
       nonCapLoss: D('50000'),
       instalmentsPaid: D('0'),
-      fhsaLifetimeContributions: D('0'),
+      fhsaLifetimeContributions: D('0'), fhsaRoom: D('0'),
     },
   });
 
@@ -432,7 +435,7 @@ test('cap loss roll: superficialLossDenied portion is NOT banked into the carry'
       rrspRoom: D('0'),
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
-      fhsaLifetimeContributions: D('0'),
+      fhsaLifetimeContributions: D('0'), fhsaRoom: D('0'),
     },
   });
 
@@ -465,7 +468,7 @@ test('FHSA: contributions this year reduce room and accumulate lifetime total', 
       rrspRoom: D('0'),
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
-      fhsaLifetimeContributions: D('0'),
+      fhsaLifetimeContributions: D('0'), fhsaRoom: D('0'),
     },
   });
 
@@ -476,10 +479,15 @@ test('FHSA: contributions this year reduce room and accumulate lifetime total', 
   assert.ok(lifetimeRow);
   assert.equal(lifetimeRow.amount.toFixed(2), '5000.00');
 
-  // Room = min(8000, 40000 - 5000) = min(8000, 35000) = 8000
+  // Expectation changed deliberately. The old value (8,000) came from
+  // min(annualLimit, lifetimeRemaining), which never accumulated and so silently
+  // discarded unused room. CRA's rule is next year's annual limit PLUS this year's
+  // unused room, the carry itself capped at one annual limit:
+  //   room this year 8,000 − contributed 5,000 = 3,000 unused
+  //   next year = 8,000 + 3,000 = 11,000, and 40,000 − 5,000 leaves room for it.
   const fhsaRow = result.written.find(w => w.kind === 'fhsa_room');
   assert.ok(fhsaRow);
-  assert.equal(fhsaRow.amount.toFixed(2), '8000.00');
+  assert.equal(fhsaRow.amount.toFixed(2), '11000.00');
 });
 
 test('FHSA: lifetime contributions approaching cap reduce room below annual limit', async () => {
@@ -504,7 +512,7 @@ test('FHSA: lifetime contributions approaching cap reduce room below annual limi
       rrspRoom: D('0'),
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
-      fhsaLifetimeContributions: D('35000'),
+      fhsaLifetimeContributions: D('35000'), fhsaRoom: D('0'),
     },
   });
 
@@ -538,7 +546,7 @@ test('FHSA: exactly at $40k lifetime cap — room is zero', async () => {
       rrspRoom: D('0'),
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
-      fhsaLifetimeContributions: D('40000'),
+      fhsaLifetimeContributions: D('40000'), fhsaRoom: D('0'),
     },
   });
 
@@ -573,7 +581,7 @@ test('FHSA: partial room when near lifetime limit', async () => {
       rrspRoom: D('0'),
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
-      fhsaLifetimeContributions: D('35000'),
+      fhsaLifetimeContributions: D('35000'), fhsaRoom: D('0'),
     },
   });
 
@@ -583,4 +591,55 @@ test('FHSA: partial room when near lifetime limit', async () => {
   const fhsaRow = result.written.find(w => w.kind === 'fhsa_room');
   assert.ok(fhsaRow);
   assert.equal(fhsaRow.amount.toFixed(2), '5000.00');
+});
+
+// FHSA participation room accumulates. An unused year does not vanish — CRA lets
+// up to one year's unused room carry forward, so a contributor who skips 2026 can
+// put $16,000 in during 2027. The roll computed min(annualLimit, lifetimeRemaining)
+// and so capped the stored value at 8,000 forever, which meant the read side could
+// never allow a catch-up year no matter what it did. Contrast the RRSP line three
+// above it, which does accumulate.
+test('unused FHSA room carries into the next year', async () => {
+  const household = await Household.create({ name: 'FHSA carry HH' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'FHSA carry',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  } as never);
+
+  const facts = makeFacts({
+    fhsaContribs: [],
+    carryforwards: {
+      netCapitalLoss: D('0'), rrspRoom: D('0'), nonCapLoss: D('0'),
+      instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0'),
+      fhsaRoom: D('8000'),
+    },
+  });
+  const result = await rollPersonalCarryforwards(entity.id, 2025, makeRet(), facts, RATES_2025);
+
+  const room = result.written.find((w) => w.kind === 'fhsa_room');
+  assert.ok(room, 'fhsa_room must be written');
+  // Carried 8,000 plus this year's own 8,000, contributed nothing.
+  assert.equal(D(room.amount).toFixed(2), '16000.00');
+});
+
+test('FHSA room never exceeds what the lifetime cap leaves', async () => {
+  const household = await Household.create({ name: 'FHSA lifetime HH' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'FHSA lifetime',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  } as never);
+
+  const facts = makeFacts({
+    fhsaContribs: [],
+    carryforwards: {
+      netCapitalLoss: D('0'), rrspRoom: D('0'), nonCapLoss: D('0'),
+      instalmentsPaid: D('0'), fhsaLifetimeContributions: D('36000'),
+      fhsaRoom: D('8000'),
+    },
+  });
+  const result = await rollPersonalCarryforwards(entity.id, 2025, makeRet(), facts, RATES_2025);
+
+  const room = result.written.find((w) => w.kind === 'fhsa_room');
+  // Accumulation would say 16,000; the $40,000 lifetime cap leaves only 4,000.
+  assert.equal(D(room!.amount).toFixed(2), '4000.00');
 });

@@ -1,6 +1,5 @@
 import { Op } from 'sequelize';
 import {
-  Account,
   Carryforward,
   Entity,
   InvestmentActivity,
@@ -12,6 +11,7 @@ import { D } from '../util/decimal';
 import { computeAcb } from '../../portfolio/acb';
 import { toCad } from '../../fx/toCad';
 import { partitionCorpPerimeter } from './corpPerimeter';
+import { loadCorpPerimeterInputs } from './loadCorpPerimeterInputs';
 import type {
   CapGainEvent,
   CorpCarryforwards,
@@ -21,86 +21,19 @@ import type {
   IncomeItem,
 } from '../engine/types';
 
-/** Shift a 'YYYY-MM-DD' date by whole days, staying in UTC. */
-function shiftDays(date: string, days: number): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
 export async function buildCorpFacts(
   entityId: number,
   fiscalYear: CorpFiscalYear,
 ): Promise<CorpTaxYearFacts> {
-  const entity = await Entity.findByPk(entityId);
-  if (!entity) throw new Error(`Entity ${entityId} not found`);
-  if (entity.kind !== 'corp') throw new Error(`Entity ${entityId} is not corp`);
-
   const { startDate, endDate } = fiscalYear;
 
-  const accounts = await Account.findAll({ where: { entityId } });
-  const accountIds = accounts.map((a) => a.id);
+  // Shared with the completeness gate, which partitions the same perimeter to
+  // read `unimportedOutboundTransfers`. Everything below reads from this — do
+  // not re-query here, or the two views of the perimeter will drift.
+  const { entity, accountIds, txns, perimeterInput, perimeterOptions, mirrorWarnings } =
+    await loadCorpPerimeterInputs(entityId, fiscalYear);
 
-  const txns = await Transaction.findAll({
-    where: { entityId, date: { [Op.between]: [startDate, endDate] } },
-  });
-
-  // Active business income — money that actually crossed the corporate
-  // perimeter, in or out. A single customer payment can occupy several rows as
-  // it hops between the corp's own accounts; only the hop that enters from
-  // outside is income. `corpPerimeter` owns that rule and documents why
-  // `linkedTransactionId` alone cannot detect an internal leg.
-  //
-  // The link-target set is built from the entity's FULL history, not the fiscal
-  // window: a transfer initiated in December and settled in January would
-  // otherwise look external on both sides of the year boundary.
-  const allEntityTxns = await Transaction.findAll({
-    where: { entityId },
-    attributes: ['id', 'linkedTransactionId'],
-  });
-  const linkTargetIds = new Set<number>();
-  for (const t of allEntityTxns) {
-    if (t.linkedTransactionId != null) linkTargetIds.add(t.linkedTransactionId);
-  }
-
-  const accountTypeById = new Map(accounts.map((a) => [a.id, a.accountType ?? null]));
-
-  // Cash moving between a bank account and the corp's own brokerage is recorded
-  // on the brokerage side as an InvestmentActivity row, never as a transaction,
-  // so `linkedTransactionId` (an FK into transactions) can never reach it. Feed
-  // those movements to the perimeter split so such a transfer is recognised as
-  // internal instead of being reported as unexplained. Widened past the fiscal
-  // year by the same few days the matcher tolerates, so a transfer initiated in
-  // late December and settled in January still finds its far side.
-  const cashMoves = accountIds.length
-    ? await InvestmentActivity.findAll({
-      where: {
-        accountId: accountIds,
-        activityType: ['transfer_in', 'transfer_out', 'deposit', 'withdrawal'],
-        tradeDate: { [Op.between]: [shiftDays(startDate, -3), shiftDays(endDate, 3)] },
-      },
-    })
-    : [];
-  const internalCashMoves = cashMoves.map((a) => ({
-    date: a.tradeDate as unknown as string,
-    amount: String(a.amount ?? 0),
-    currency: (a as unknown as { currency?: string }).currency ?? 'CAD',
-  }));
-
-  const perimeter = partitionCorpPerimeter(
-    txns.map((t) => ({
-      id: t.id,
-      amount: String(t.amount),
-      currency: t.currency ?? 'CAD',
-      date: t.date as unknown as string,
-      txnType: (t as unknown as { txnType?: string | null }).txnType ?? null,
-      accountType: accountTypeById.get(t.accountId) ?? null,
-      linkedTransactionId: t.linkedTransactionId ?? null,
-      taxTreatmentOverride: t.taxTreatmentOverride ?? null,
-      merchant: t.merchantClean ?? t.merchantRaw ?? null,
-    })),
-    { legalName: entity.legalName ?? '', linkTargetIds, internalCashMoves },
-  );
+  const perimeter = partitionCorpPerimeter(perimeterInput, perimeterOptions);
 
   // Revenue and expenses both land in activeBusinessIncome; expenses keep their
   // negative sign so the engine's signed sum nets them off.
@@ -400,6 +333,6 @@ export async function buildCorpFacts(
     dividendsPaid,
     salaryPaid,
     carryforwards,
-    factWarnings: [...perimeter.warnings, ...ownerPaidWarnings],
+    factWarnings: [...perimeter.warnings, ...ownerPaidWarnings, ...mirrorWarnings],
   };
 }

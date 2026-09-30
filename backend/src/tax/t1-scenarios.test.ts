@@ -10,7 +10,7 @@ const emptyCarryFwd = {
   rrspRoom: D('0'),
   nonCapLoss: D('0'),
   instalmentsPaid: D('0'),
-  fhsaLifetimeContributions: D('0'),
+  fhsaLifetimeContributions: D('0'), fhsaRoom: D('0'),
 };
 
 function baseFacts(): TaxYearFacts {
@@ -36,23 +36,70 @@ function baseFacts(): TaxYearFacts {
   };
 }
 
-test('Scenario A: $80k employment, no other income, single, age 40', () => {
-  // Reference computation done by hand against CRA T1-2024 lines for ON.
-  // Total payable expected ≈ $XX,XXX (engineer: fill in from CRA publication or accountant).
+/**
+ * Scenario A pinned exactly, and what that does and does not prove.
+ *
+ * The assertion used to be `> $14,000 && < $17,000`. A $3,000 band is why a whole
+ * table of wrong 2026 constants survived: nothing failed when they were wrong, so
+ * nothing failed when they were corrected either. An exact value fails on any
+ * change to a constant or to the credit set, which forces a re-derivation instead
+ * of a shrug.
+ *
+ * What it proves: the COMPOSITION is stable — bracket application, BPA, the
+ * CPP/EI credits, the Ontario surtax ordering and the health premium still
+ * combine the way they did. What it does not prove: that the constants match CRA.
+ * That claim belongs to `rates-2026.test.ts`, which asserts each published figure
+ * one per case so a regression names the value. Two different jobs; neither
+ * substitutes for the other, and pretending this test verifies CRA figures would
+ * be the same mistake in a new place.
+ *
+ * Components are asserted separately so a failure localises to federal, Ontario,
+ * or the health premium rather than reporting one moved total.
+ */
+function scenarioA(year: number) {
   const facts: TaxYearFacts = {
     ...baseFacts(),
+    year,
     employmentIncome: [{ source: 'T4', amount: D('80000'), cadAmount: D('80000') }],
   };
-  const ret = buildT1(facts, ratesFor(2024));
-  // First sanity: total income = 80000, no deductions => taxable = 80000
+  return buildT1(facts, ratesFor(year));
+}
+
+test('Scenario A 2024: $80k employment, single, age 40', () => {
+  const ret = scenarioA(2024);
   assert.equal(ret.totals.totalIncome.toFixed(2), '80000.00');
   assert.equal(ret.totals.taxableIncome.toFixed(2), '80000.00');
-  // Federal+ON+surtax+OHP total (CPP/EI excluded from L43500 per CRA T1 — they are
-  // payroll-remitted, not owing at filing). Correct range ~$14k-$17k.
-  // Old range (17k-22k) was based on the buggy computation that added cpp($4055.50)+ei($1049.12)=~$5104.62.
-  // Correct totalPayable = 15067.70 (federal 9990.92 + provincial 5076.78).
-  assert.ok(ret.totals.totalPayable.greaterThan(D('14000')));
-  assert.ok(ret.totals.totalPayable.lessThan(D('17000')));
+  // Federal + ON + surtax + OHP. CPP and EI are excluded from L43500 per the CRA
+  // T1: they are payroll-remitted, not owing at filing. The band this replaces
+  // had been widened once already to accommodate a bug that added
+  // cpp(4055.50) + ei(1049.12) here.
+  assert.equal(ret.lines.find((l) => l.code === 'L42000')?.amount.toFixed(2), '9990.92');
+  // L42800 is Ontario tax before the health premium; the premium is $750 at $80k,
+  // which is the whole of the 15,067.70 - 9,990.92 - 4,326.78 remainder.
+  assert.equal(ret.lines.find((l) => l.code === 'L42800')?.amount.toFixed(2), '4326.78');
+  assert.equal(ret.totals.totalPayable.toFixed(2), '15067.70');
+});
+
+test('Scenario A 2026: the same taxpayer against the published table', () => {
+  // The year Connor is actually exposed in, and the only one whose table is
+  // marked provenance: 'published'. 2024 is encoded from recall (see
+  // rates-2024.ts), so pinning it is a regression lock and nothing more; this
+  // case is a claim about numbers that were checked.
+  const ret = scenarioA(2026);
+  assert.equal(ret.totals.taxableIncome.toFixed(2), '80000.00');
+  assert.equal(ret.lines.find((l) => l.code === 'L42000')?.amount.toFixed(2), '9302.85');
+  assert.equal(ret.lines.find((l) => l.code === 'L42800')?.amount.toFixed(2), '4173.26');
+  assert.equal(ret.totals.totalPayable.toFixed(2), '14226.12');
+});
+
+test('indexation lowers tax on a constant nominal income, 2024 through 2026', () => {
+  // Cheap, and it catches a class of constant errors an exact pin does not name:
+  // a transposed digit that SHRINKS a bracket raises tax on a fixed $80k, and
+  // three independently-pinned totals would each just be "the new expected value".
+  // A monotone direction is a property, not a snapshot.
+  const totals = [2024, 2025, 2026].map((y) => scenarioA(y).totals.totalPayable);
+  assert.ok(totals[0].greaterThan(totals[1]), `2024 ${totals[0]} should exceed 2025 ${totals[1]}`);
+  assert.ok(totals[1].greaterThan(totals[2]), `2025 ${totals[1]} should exceed 2026 ${totals[2]}`);
 });
 
 test('Scenario B: $80k employment + $10k eligible dividends', () => {
@@ -212,7 +259,7 @@ test('Scenario G: OAS clawback — only applies to OAS actually received, capped
     ],
     oasBenefits: D('8500'),
     fhsaContribs: [{ source: 'FHSA', amount: D('8000'), date: '2024-02-01' }],
-    carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('100000'), nonCapLoss: D('0'), instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0') },
+    carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('100000'), nonCapLoss: D('0'), instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0'), fhsaRoom: D('0') },
   };
   const retWithFhsa = buildT1(factsWithFhsa, r);
   const oasLineFhsa = retWithFhsa.lines.find((l) => l.code === 'L23500');

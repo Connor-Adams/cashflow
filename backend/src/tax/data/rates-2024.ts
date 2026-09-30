@@ -5,6 +5,8 @@ import { D } from '../util/decimal';
 import type { RateTable } from '../engine/types';
 
 export const RATES_2024: RateTable = {
+  // encoded from plan recall, never cross-checked against CRA
+  provenance: 'projected',
   year: 2024,
   federalBrackets: [
     { upTo: D('55867'), rate: D('0.15') },

@@ -13,7 +13,6 @@ import {
   User,
 } from '../../models';
 import { D, Decimal, sumD } from '../util/decimal';
-import { isTaxTreatment } from '@cashflow/shared';
 import type {
   CapGainEvent,
   IncomeItem,
@@ -23,7 +22,7 @@ import type {
   TaxYearFacts,
 } from '../engine/types';
 import { computeAcb, type AcbActivity, type AcbRealizedEvent } from '../../portfolio/acb';
-import { inheritedTaxTreatment } from '../../categories/inheritedTaxTreatment';
+import { resolveTaxTreatment } from './resolveTaxTreatment';
 import { toCad } from '../../fx/toCad';
 import { dividendDedupDays } from '../../config/env';
 
@@ -73,6 +72,33 @@ function daysBetween(a: string, b: string): number {
   return Math.round((da - db) / 86_400_000);
 }
 
+/**
+ * Collapse the two legs of one internal contribution transfer into one.
+ *
+ * Both legs live in the same entity — the funding account's outflow and the
+ * registered account's inflow — and both collect as an absolute amount, so
+ * counting both deducts the contribution twice. When a pair is linked and both
+ * sides carry the treatment, keep the outflow: that is the leg that represents
+ * money committed, and it is the one that exists whether or not the registered
+ * side was ever imported.
+ *
+ * A leg tagged on its own is always kept, linked or not — the user may only have
+ * classified one side, and dropping it would lose a real deduction.
+ */
+function dedupeLinkedContribs<T extends { txnId: number; linkedId: number | null; positive: boolean }>(
+  rows: T[],
+): Omit<T, 'txnId' | 'linkedId' | 'positive'>[] {
+  const present = new Set(rows.map((r) => r.txnId));
+  const kept = rows.filter(
+    (r) => !(r.positive && r.linkedId != null && r.linkedId !== r.txnId && present.has(r.linkedId)),
+  );
+  // Never drop every leg. Two mutually-linked positive rows, or a row linked to
+  // itself, would otherwise cancel the deduction entirely — silently deleting a
+  // real claim is far worse than counting one leg too many.
+  const survivors = kept.length > 0 ? kept : rows.slice(0, 1);
+  return survivors.map(({ txnId: _t, linkedId: _l, positive: _p, ...rest }) => rest);
+}
+
 export async function buildPersonalFacts(entityId: number, year: number): Promise<TaxYearFacts> {
   const entity = await Entity.findByPk(entityId);
   if (!entity) throw new Error(`Entity ${entityId} not found`);
@@ -114,12 +140,26 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   const selfEmploymentIncome: IncomeItem[] = [];
   const selfEmploymentExpenses: IncomeItem[] = [];
   const donations: IncomeItem[] = [];
-  const rrspContribs: RrspContrib[] = [];
-  const fhsaContribs: RrspContrib[] = [];
+  /**
+   * Contributions carry their transaction id and link so the two legs of one
+   * internal transfer can be collapsed afterwards. A chequing→FHSA contribution
+   * has a leg on each account inside the same entity — the brokerage cash mirror
+   * made that shape common — and both collect as `cad.abs()`, so tagging both
+   * would deduct the money twice.
+   */
+  type ContribRow = RrspContrib & { txnId: number; linkedId: number | null; positive: boolean };
+  const rrspContribRows: ContribRow[] = [];
+  const fhsaContribRows: ContribRow[] = [];
   const medicalExpenses: IncomeItem[] = [];
   let pensionTotal = D('0');
   const rentalIncome: IncomeItem[] = [];
   const rentalExpenses: IncomeItem[] = [];
+  /**
+   * Transactions the treatment loop below routed to a real tax line. The txnType
+   * pass further down must skip these or the row is counted twice — and as the
+   * wrong character, since that pass files every `dividend` as eligible.
+   */
+  const classifiedTxnIds = new Set<number>();
 
   for (const t of txns) {
     const { cad } = await toCad(D(t.amount as unknown as string), t.currency ?? 'CAD', t.date as unknown as string);
@@ -128,23 +168,12 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
       amount: D(t.amount as unknown as string),
       cadAmount: cad,
     };
-    // Resolve via the transaction's category treatment; fall back to the
-    // finalCategory string itself when it is a tax-treatment keyword. This keeps
-    // the pre-category snake_case categories (e.g. 'employment_income') working
-    // when no Category.taxTreatment / per-txn override is set.
-    // Per-txn override wins; otherwise the category's treatment, inherited from
-    // ancestors when the category itself is 'none' (resolve by id to honour the
-    // hierarchy and dodge same-named-category collisions); finally fall back to
-    // the legacy name map for rows with no finalCategoryId.
-    let treatment =
-      t.taxTreatmentOverride ??
-      (t.finalCategoryId != null
-        ? inheritedTaxTreatment(catById, t.finalCategoryId)
-        : catTreatment.get(t.finalCategory ?? '')) ??
-      'none';
-    if (treatment === 'none' && t.finalCategory && isTaxTreatment(t.finalCategory)) {
-      treatment = t.finalCategory;
-    }
+    // Four routes, override first — see `resolveTaxTreatment`. Shared with the
+    // duplicate detector, which must ask "is this row classified?" with this exact
+    // ladder: three of the four routes leave `taxTreatmentOverride` null, so the
+    // obvious shortcut would report a categorised row as untouched.
+    const treatment = resolveTaxTreatment(t, { catById, catTreatment });
+    if (treatment !== 'none') classifiedTxnIds.add(t.id as number);
     // Corp→personal distributions + payroll (income-queue) fold into the same
     // treatment routing. loan_advance/loan_repayment/not_income are explicitly
     // non-income — skipped before the self-employment fallback so a business-
@@ -163,10 +192,16 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
       // self-employment income, and a reimbursement is exactly that shape.
     }
     else if (treatment === 'rrsp_contribution') {
-      rrspContribs.push({ source: item.source, amount: cad.abs(), date: t.date as unknown as string });
+      rrspContribRows.push({
+        source: item.source, amount: cad.abs(), date: t.date as unknown as string,
+        txnId: t.id as number, linkedId: t.linkedTransactionId ?? null, positive: cad.greaterThan(0),
+      });
     }
     else if (treatment === 'fhsa_contribution') {
-      fhsaContribs.push({ source: item.source, amount: cad.abs(), date: t.date as unknown as string });
+      fhsaContribRows.push({
+        source: item.source, amount: cad.abs(), date: t.date as unknown as string,
+        txnId: t.id as number, linkedId: t.linkedTransactionId ?? null, positive: cad.greaterThan(0),
+      });
     }
     else if (treatment === 'medical_expense') {
       medicalExpenses.push({ ...item, cadAmount: cad.abs(), amount: D(t.amount as unknown as string).abs() });
@@ -200,8 +235,20 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
 
   const interestIncome: IncomeItem[] = [];
 
-  // Route a dividend-type item by Security.dividendEligibility; unknown/missing
-  // defaults to eligible.
+  // Route a dividend-type item by Security.dividendEligibility.
+  //
+  // `Security.dividendEligibility` is `allowNull: false` with `defaultValue:
+  // 'eligible'` (models/Security.ts:165-170), so there is no "unknown" state to
+  // default differently — every security carries a concrete value. A plan item
+  // once called for defaulting unknown to non-eligible; that item was withdrawn,
+  // because the default is right for the common case: dividends from a publicly
+  // traded Canadian corporation ARE eligible, and flipping it would misclassify
+  // most securities to fix none.
+  //
+  // The real exposure is an ETF distribution, which is a mix of eligible
+  // dividends, foreign income, other income, return of capital and capital gains.
+  // That is a composition problem the eligibility flag cannot express, and it
+  // belongs in the completeness gate as an unverified-eligibility gap.
   const pushDividend = (a: InvestmentActivity, item: IncomeItem) => {
     const eligibility = (a as any).security?.dividendEligibility ?? 'eligible';
     if (eligibility === 'non_eligible') nonEligibleDividends.push(item);
@@ -291,6 +338,13 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   for (const t of txns) {
     const txnType = (t as unknown as { txnType?: string | null }).txnType ?? null;
     if (txnType !== 'interest' && txnType !== 'dividend') continue;
+    // A row the treatment loop above already routed must not be counted again
+    // here. The guard used to list only the four NOT_INCOME treatments, so every
+    // INCOME treatment fell through and was counted twice — and a `dividend`
+    // txnType was added as ELIGIBLE, so an owner's non-eligible draw picked up an
+    // eligible gross-up and credit on the second pass. Inverting the test means a
+    // treatment added later cannot reintroduce the bug.
+    if (classifiedTxnIds.has(t.id as number)) continue;
     if (t.taxTreatmentOverride !== null && NOT_INCOME_TREATMENTS.has(t.taxTreatmentOverride)) {
       continue;
     }
@@ -309,6 +363,12 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
 
   // Capital gain events from sells, using the ACB helper.
   //
+  /**
+   * Cost-base warnings the ACB walk raises. Accumulated across securities and
+   * de-duplicated on the way out; previously computed and thrown away.
+   */
+  const acbWarnings: string[] = [];
+
   // ACB is a weighted-average running balance, so computeAcb needs the FULL
   // per-security history up to year-end — NOT just this tax year's rows. A
   // year-windowed feed makes prior-year buys (and return_of_capital) invisible,
@@ -372,6 +432,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     const denials = new Map<number, Decimal>();
     const processed = new Set<number>();
     let acb = computeAcb(acbInput);
+    // Kept rather than discarded: these say the cost base a capital gain was priced
+    // against is uncertain, which is exactly what a completeness report exists to say.
+    acbWarnings.push(...acb.warnings);
     for (;;) {
       const next = acb.realizedEvents.find(
         ev => !processed.has(ev.activityId) && ev.qtySold > 0
@@ -395,6 +458,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
         acb = computeAcb([...acbInput, ...injected]);
       }
     }
+    // The loop above re-runs computeAcb on each superficial-loss injection, so take
+    // the final walk's warnings too; duplicates are collapsed at the end.
+    acbWarnings.push(...acb.warnings);
     for (const realized of acb.realizedEvents) {
       // Prior-year dispositions are already reported on their own year's return;
       // here they only serve to advance the ACB state. Keep just this year's.
@@ -440,6 +506,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     nonCapLoss: D(cf.find((c) => c.kind === 'non_cap_loss')?.amount ?? 0),
     instalmentsPaid: D(cf.find((c) => c.kind === 'instalments_paid')?.amount ?? 0),
     fhsaLifetimeContributions: D(cf.find((c) => c.kind === 'fhsa_lifetime_contribs')?.amount ?? 0),
+    // Written by the roll and, until now, never read — so the FHSA deduction was
+    // capped at one year's annual limit and a carried-forward year was lost.
+    fhsaRoom: D(cf.find((c) => c.kind === 'fhsa_room')?.amount ?? 0),
   };
 
   // Phase 4: override instalmentsPaid from InstalmentPayment ledger rows for this year
@@ -476,8 +545,8 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     eligibleDividends,
     nonEligibleDividends,
     capitalGainEvents,
-    rrspContribs,
-    fhsaContribs,
+    rrspContribs: dedupeLinkedContribs(rrspContribRows),
+    fhsaContribs: dedupeLinkedContribs(fhsaContribRows),
     donations,
     slips,
     carryforwards,
@@ -486,5 +555,6 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     medicalExpenses,
     rentalIncome,
     rentalExpenses,
+    acbWarnings: [...new Set(acbWarnings)],
   };
 }

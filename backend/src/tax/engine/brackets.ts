@@ -14,7 +14,11 @@ export class RateTableMissingError extends Error {
   }
 }
 
-const TABLES: Record<number, RateTable> = {
+/**
+ * Exported so `engineVersion.ts` can fold every encoded constant into the cache
+ * fingerprint. Treat as immutable — the fingerprint is memoised on first use.
+ */
+export const RATE_TABLES: Record<number, RateTable> = {
   2024: RATES_2024,
   2025: RATES_2025,
   2026: RATES_2026,
@@ -25,13 +29,13 @@ const TABLES: Record<number, RateTable> = {
 };
 
 export function ratesFor(year: number): RateTable {
-  const t = TABLES[year];
+  const t = RATE_TABLES[year];
   if (!t) throw new RateTableMissingError(year);
   return t;
 }
 
 export function supportedYears(): number[] {
-  return Object.keys(TABLES).map(Number).sort((a, b) => a - b);
+  return Object.keys(RATE_TABLES).map(Number).sort((a, b) => a - b);
 }
 
 export function applyBrackets(taxableIncome: Decimal, brackets: Bracket[]): Decimal {

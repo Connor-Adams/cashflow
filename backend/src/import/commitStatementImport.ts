@@ -565,6 +565,10 @@ export async function commitStatementImport(
       );
 
       const enriched = await enrichTransaction({
+        // Stage 7 needs the source's own view of the type; without it a mirror
+        // whose wording the narrative detector misses never finds its sibling.
+        overrideTxnType: row.overrideTxnType ?? null,
+        txnTypeHint: row.txnTypeHint ?? null,
         raw: {
           merchantRaw: row.merchantRaw,
           date: row.date,

@@ -77,7 +77,7 @@ test('buildT1 includes SE CPP in totalPayable and grants credit for employee hal
       rrspRoom: D('0'),
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
-      fhsaLifetimeContributions: D('0'),
+      fhsaLifetimeContributions: D('0'), fhsaRoom: D('0'),
     },
     ageAtYearEnd: 35,
   };

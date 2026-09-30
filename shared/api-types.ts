@@ -2359,3 +2359,165 @@ export interface SplitTransactionResponse {
    *  reimbursements list endpoint's `data[]`). */
   claims: unknown[];
 }
+
+// ---------------------------------------------------------------------------
+// Tax completeness — what a return does not know
+// ---------------------------------------------------------------------------
+
+/** Worst-wins across every completeness item. */
+export type CompletenessStatus = 'complete' | 'gaps' | 'blocked'
+
+/**
+ * `blocker` — known-missing money whose size is known or boundable; the total is
+ * demonstrably wrong. `gap` — a correctness risk of unknown size; the total may be
+ * right.
+ */
+export type CompletenessSeverity = 'blocker' | 'gap'
+
+/** Where the reader goes to clear an item. */
+export type CompletenessFixSurface =
+  | 'classify'
+  | 'import'
+  | 'duplicates'
+  | 'slips'
+  | 'carryforwards'
+  | 'securities'
+  | 'rates'
+  | 'transactions'
+
+export interface CompletenessItemDto {
+  kind: string
+  severity: CompletenessSeverity
+  title: string
+  detail: string
+  /** Money missing or at risk, signed as the ledger holds it. `null` where no honest figure exists. */
+  amount: string | null
+  /**
+   * Tax this would add if fixed. `null` where the money's character is unknown —
+   * rendering an invented figure is worse than rendering none.
+   */
+  taxEstimate: string | null
+  fix: { surface: CompletenessFixSurface; label: string }
+  references: number[]
+}
+
+export interface CompletenessReportDto {
+  status: CompletenessStatus
+  checkedAt: string
+  /**
+   * Latest transaction date the report saw, or `null` for an empty period. Rendered
+   * even when complete: absence of warning must be affirmative, or "no problems" and
+   * "nobody checked" look identical.
+   */
+  coverageThrough: string | null
+  blockers: CompletenessItemDto[]
+  gaps: CompletenessItemDto[]
+}
+
+/** The personal T1 / corp T2 return as the scenario and return routes serve it. */
+export interface TaxReturnDto {
+  cached: boolean
+  computedAt: string
+  lines: unknown[]
+  totals: Record<string, unknown>
+  warnings: string[]
+  /**
+   * Present on the personal T1 paths. Absent for corp returns — the same hole exists
+   * on the T2 side and is deliberately out of scope for now.
+   */
+  completeness?: CompletenessReportDto
+}
+
+// ---------------------------------------------------------------------------
+// Tax outlook — what is coming, rather than what happened
+// ---------------------------------------------------------------------------
+
+/** Which of CRA's three instalment calculations an option follows. */
+export type InstalmentBasis = 'no_calculation' | 'prior_year' | 'current_year'
+
+/** One dated payment. `amount` is a fixed-2 string like every money value here. */
+export interface InstalmentDueDto {
+  /** `YYYY-MM-DD`. */
+  dueOn: string
+  amount: string
+}
+
+export interface InstalmentOptionDto {
+  basis: InstalmentBasis
+  /** The sum of this option's own four instalments — always, so the two agree. */
+  total: string
+  /**
+   * What is left to pay with the return if this option is followed: the year's
+   * projected net owing less what these instalments cover, floored at zero.
+   *
+   * Server-computed, because finding it in the client would mean subtracting fixed-2
+   * money strings — and it is the largest number in the picture.
+   */
+  balanceWithReturn: string
+  /**
+   * True only for the current-year estimate. It is the one option that can leave a
+   * shortfall CRA charges interest on, and the backend surfaces the trade-off rather
+   * than deciding it, so the UI must show it rather than silently ranking it last.
+   */
+  carriesInterestRisk: boolean
+  instalments: InstalmentDueDto[]
+}
+
+export interface InstalmentObligationDto {
+  year: number
+  required: boolean
+  /** Plain-language statement of which conjunct of CRA's test decided it. */
+  reason: string
+  /**
+   * When the year's remaining balance is due — April 30 of the following year.
+   *
+   * Present even when no instalments are required, because it is then the whole
+   * obligation. Nothing in the app named this date before.
+   */
+  balanceDueOn: string
+  recommended: InstalmentBasis
+  /** The recommended option's payments, or empty when none are required. */
+  instalments: InstalmentDueDto[]
+  options: InstalmentOptionDto[]
+}
+
+export interface ForwardDrawsDto {
+  actualToDate: string
+  monthlyRunRate: string
+  projectedRemainder: string
+  projectedTotal: string
+  coveredMonths: number
+  /** Elapsed months (1-12) with no transactions at all, i.e. probably unimported. */
+  uncoveredMonths: number[]
+  /** The assumption in words, including any uncovered months it names. */
+  basis: string
+}
+
+export interface ForwardViewDto {
+  year: number
+  /** Always true. Stated so the figure can never be mistaken for a filed number. */
+  isProjection: boolean
+  /** Total payable on the return as it stands. */
+  currentTotalPayable: string
+  /** Total payable if the projected remainder is drawn as it has been so far. */
+  projectedTotalPayable: string
+  /** The difference — what the rest of the year is expected to add. */
+  projectedAdditionalTax: string
+  draws: ForwardDrawsDto
+}
+
+/** `GET /api/tax/personal/:year/outlook`. Every money value is a fixed-2 string. */
+export interface TaxOutlookDto {
+  year: number
+  /**
+   * Net tax owing for each year of CRA's three-year threshold window, keyed by year.
+   * The current year's entry is year-to-date; `projectedCurrentYearNetOwing` is the
+   * figure the threshold test actually used.
+   */
+  netOwingByYear: Record<string, string>
+  projectedCurrentYearNetOwing: string
+  /** Years in the window whose rate table is a projection rather than published. */
+  provenanceWarnings: string[]
+  obligation: InstalmentObligationDto
+  forward: ForwardViewDto
+}

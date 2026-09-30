@@ -10,6 +10,9 @@ import { D } from '../util/decimal';
 // statutorily fixed amounts left alone. These tests lock that contract so a
 // later hand-edit that forgets the "fixed" list is caught.
 
+// Bases are read from RATES_2026 rather than hardcoded. An earlier version wrote
+// the 2026 numbers as literals here, so correcting 2026 left this file asserting
+// against values that no longer existed anywhere.
 /** 2026 value × factor, rounded half-up to the nearest dollar (CRA convention). */
 function indexed(base: string): string {
   return D(base).times(D(String(INDEXATION_FACTOR_2027))).toDecimalPlaces(0, 4).toString();
@@ -43,12 +46,12 @@ test('2027 Ontario top two bracket thresholds stay unindexed at 150k/220k', () =
 });
 
 test('2027 Ontario lower bracket thresholds are 2026 indexed', () => {
-  assert.equal(RATES_2027.provincialBrackets[0].upTo?.toString(), indexed('52886'));
-  assert.equal(RATES_2027.provincialBrackets[1].upTo?.toString(), indexed('105775'));
+  assert.equal(RATES_2027.provincialBrackets[0].upTo?.toString(), indexed(RATES_2026.provincialBrackets[0].upTo!.toString()));
+  assert.equal(RATES_2027.provincialBrackets[1].upTo?.toString(), indexed(RATES_2026.provincialBrackets[1].upTo!.toString()));
 });
 
 test('2027 federal BPA is 2026 indexed and its phaseout tracks the top two brackets', () => {
-  assert.equal(RATES_2027.basicPersonalAmountFederal.toString(), indexed('16564'));
+  assert.equal(RATES_2027.basicPersonalAmountFederal.toString(), indexed(RATES_2026.basicPersonalAmountFederal.toString()));
   assert.equal(
     RATES_2027.bpaFederalPhaseoutStart.toString(),
     RATES_2027.federalBrackets[2].upTo?.toString(),

@@ -801,3 +801,44 @@ test('a transfer to the corp brokerage is not flagged as unexplained', async () 
 
   assert.deepEqual(facts.factWarnings ?? [], []);
 });
+
+// ---------------------------------------------------------------------------
+// The forward fix (part 1a) puts a cash mirror on brokerage accounts. On a CORP
+// brokerage account that mirror is a plain transaction the perimeter split has
+// never seen before, and a positive one cannot be claimed by claimMatchingCashMove
+// — that matcher needs an opposite sign, and the activity is positive too. So it
+// would fall through to revenue.push as phantom active business income. Activity
+// 1712 in prod is exactly this shape: transfer_in +10,000 into account 13.
+// ---------------------------------------------------------------------------
+
+test('a cash mirror on a corp brokerage account is not counted as revenue', async () => {
+  const { household, entity, account } = await seedCorpInvestmentAccount('Mirror Revenue HH');
+
+  // The activity: money arriving in the corp's own brokerage from its chequing.
+  await InvestmentActivity.create({
+    accountId: account.id, householdId: household.id,
+    activityType: 'transfer_in', tradeDate: '2026-07-06',
+    amount: '10000', currency: 'CAD',
+    description: 'Money transfer into the account',
+    sourceRowFingerprint: 'fp-mirror-act', importBatch: 'b',
+  } as never);
+
+  // The mirror the forward fix now emits alongside it.
+  await Transaction.create({
+    accountId: account.id, householdId: household.id, entityId: entity.id,
+    date: '2026-07-06', amount: '10000', currency: 'CAD', txnType: 'transfer',
+    merchantRaw: 'Money transfer into the account',
+    merchantClean: 'Money transfer into the account',
+    importBatch: 'b', sourceRowFingerprint: 'fp-mirror-txn',
+    sourceIdentityFingerprint: 'sif-mirror-txn',
+  } as never);
+
+  const facts = await buildCorpFacts(entity.id, { startDate: '2026-01-01', endDate: '2026-12-31' });
+  assert.equal(
+    facts.activeBusinessIncome.length,
+    0,
+    `mirror must not be revenue; got ${JSON.stringify(
+      facts.activeBusinessIncome.map((i) => i.cadAmount.toString()),
+    )}`,
+  );
+});

@@ -69,12 +69,18 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   const t5s = facts.slips.filter(s => s.slipType === 'T5');
   const t5Box13Total = sumD(t5s.map(s => s.boxes['box13'] ?? D('0')));
   const t5Box25Total = sumD(t5s.map(s => s.boxes['box25'] ?? D('0')));
-  const t5Box26Total = sumD(t5s.map(s => s.boxes['box26'] ?? D('0')));
+  // CRA T5 box 11 is the TAXABLE amount of dividends other than eligible. Box 26
+  // is the dividend tax credit for ELIGIBLE dividends — reading it here both put a
+  // ~15% credit figure on the non-eligible income line and suppressed the computed
+  // dividends entirely, which for an owner-managed corp is tens of thousands.
+  const t5Box11Total = sumD(t5s.map(s => s.boxes['box11'] ?? D('0')));
 
   // T3 slip reconciliation
   const t3s = facts.slips.filter(s => s.slipType === 'T3');
   const t3Box26Total = sumD(t3s.map(s => s.boxes['box26'] ?? D('0')));
-  const t3Box49Total = sumD(t3s.map(s => s.boxes['box49'] ?? D('0')));
+  // CRA T3 box 50 is the TAXABLE amount of eligible dividends; box 49 is the
+  // actual amount. Taking box 49 understated eligible dividends by the 38% gross-up.
+  const t3Box50Total = sumD(t3s.map(s => s.boxes['box50'] ?? D('0')));
   const t3Box32Total = sumD(t3s.map(s => s.boxes['box32'] ?? D('0')));
 
   // Interest L12100 — prefer T5 box 13 + T3 box 26 when slips exist
@@ -94,11 +100,11 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
          ...t3s.map(s => ({ source: `Slip T3 #${s.slipId} box 26`, amount: s.boxes['box26'] ?? D('0') }))]
       : facts.interestIncome.map(i => ({ source: i.source, amount: i.cadAmount })));
 
-  // Eligible dividends L12000 — T5 box 25 / T3 box 49 are already grossed-up (taxable amount)
+  // Eligible dividends L12000 — T5 box 25 / T3 box 50 are already grossed-up (taxable amount)
   const eligibleActual = sumD(facts.eligibleDividends.map(i => i.cadAmount));
-  const slipEligibleGrossed = t5Box25Total.plus(t3Box49Total);
+  const slipEligibleGrossed = t5Box25Total.plus(t3Box50Total);
   const hasEligibleSlips = t5s.some(s => (s.boxes['box25'] ?? D('0')).greaterThan(0))
-    || t3s.some(s => (s.boxes['box49'] ?? D('0')).greaterThan(0));
+    || t3s.some(s => (s.boxes['box50'] ?? D('0')).greaterThan(0));
   const eligibleGrossed = hasEligibleSlips ? slipEligibleGrossed : grossUpEligible(eligibleActual, r);
   if (hasEligibleSlips) {
     const computedGrossed = grossUpEligible(eligibleActual, r);
@@ -111,14 +117,17 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   push('L12000', 'Taxable amount of eligible dividends', eligibleGrossed,
     hasEligibleSlips
       ? [...t5s.map(s => ({ source: `Slip T5 #${s.slipId} box 25`, amount: s.boxes['box25'] ?? D('0') })),
-         ...t3s.map(s => ({ source: `Slip T3 #${s.slipId} box 49`, amount: s.boxes['box49'] ?? D('0') }))]
+         ...t3s.map(s => ({ source: `Slip T3 #${s.slipId} box 50`, amount: s.boxes['box50'] ?? D('0') }))]
       : facts.eligibleDividends.map(i => ({ source: i.source, amount: i.cadAmount })),
     hasEligibleSlips ? 'from T5/T3 slips (pre-grossed)' : `${r.dividendGrossUpEligible.plus(1).toString()} × actual`);
 
   // Non-eligible dividends L12010
   const nonElActual = sumD(facts.nonEligibleDividends.map(i => i.cadAmount));
-  const slipNonElGrossed = t5Box26Total.plus(t3Box32Total);
-  const hasNonElSlips = t5s.some(s => (s.boxes['box26'] ?? D('0')).greaterThan(0))
+  const slipNonElGrossed = t5Box11Total.plus(t3Box32Total);
+  // Gated on the boxes actually read. Gating on box 26 meant a pure non-eligible
+  // T5 — boxes 10/11/12, box 26 empty — never triggered the reconciliation at all,
+  // so the slip was decorative and no warning could fire.
+  const hasNonElSlips = t5s.some(s => (s.boxes['box11'] ?? D('0')).greaterThan(0))
     || t3s.some(s => (s.boxes['box32'] ?? D('0')).greaterThan(0));
   const nonElGrossed = hasNonElSlips ? slipNonElGrossed : grossUpNonEligible(nonElActual, r);
   if (hasNonElSlips) {
@@ -131,7 +140,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   }
   push('L12010', 'Taxable amount of non-eligible dividends', nonElGrossed,
     hasNonElSlips
-      ? [...t5s.map(s => ({ source: `Slip T5 #${s.slipId} box 26`, amount: s.boxes['box26'] ?? D('0') })),
+      ? [...t5s.map(s => ({ source: `Slip T5 #${s.slipId} box 11`, amount: s.boxes['box11'] ?? D('0') })),
          ...t3s.map(s => ({ source: `Slip T3 #${s.slipId} box 32`, amount: s.boxes['box32'] ?? D('0') }))]
       : facts.nonEligibleDividends.map(i => ({ source: i.source, amount: i.cadAmount })));
 
@@ -212,11 +221,29 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
     facts.rrspContribs.map((c) => ({ source: c.source, amount: c.amount })),
     `min(contribs, rrspRoom=${facts.carryforwards.rrspRoom.toFixed(2)})`);
 
-  // FHSA deduction L20805 — capped at annual limit ($8,000)
-  const fhsa = Decimal.min(sumD(facts.fhsaContribs.map((c) => c.amount)), r.fhsaAnnualLimit);
+  // FHSA deduction L20805 — bounded by stored participation room, which the roll
+  // accumulates and already bounds by the $40k lifetime cap. Capping at the annual
+  // limit here lost a carried-forward year: a contributor who skipped 2026 has
+  // $16,000 available in 2027 and could only ever deduct $8,000.
+  //
+  // A zero stored room is ambiguous: it is what the roll writes when it has never run
+  // for this entity, AND what it writes once the $40,000 lifetime cap is exhausted
+  // (`rollPersonalCarryforwards` bounds room by `lifetimeRemaining`). Falling back to
+  // the annual limit on both readings re-granted $8,000 a year to a contributor who
+  // had no room left — understating tax by $8,000 x marginal rate, every year.
+  //
+  // Lifetime contributions disambiguate it, and the fallback is bounded by whatever
+  // remains of the cap rather than by the annual limit alone.
+  const lifetimeRemaining = maxZero(
+    r.fhsaLifetimeLimit.minus(facts.carryforwards.fhsaLifetimeContributions),
+  );
+  const fhsaRoom = facts.carryforwards.fhsaRoom.greaterThan(0)
+    ? facts.carryforwards.fhsaRoom
+    : Decimal.min(r.fhsaAnnualLimit, lifetimeRemaining);
+  const fhsa = Decimal.min(sumD(facts.fhsaContribs.map((c) => c.amount)), fhsaRoom);
   push('L20805', 'FHSA deduction', fhsa,
     facts.fhsaContribs.map((c) => ({ source: c.source, amount: c.amount })),
-    `min(fhsaContribs, fhsaAnnualLimit=${r.fhsaAnnualLimit.toFixed(2)})`);
+    `min(fhsaContribs, fhsaRoom=${fhsaRoom.toFixed(2)})`);
 
   // SE CPP deductible half L22200 — deductible against net income (employer half)
   const seCppDeductible = seCppContrib.dividedBy(2);
@@ -383,8 +410,20 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
     'sum(T4.box22)');
 
   const instalmentsPaid = facts.carryforwards.instalmentsPaid;
+  // Its own line. The CRA instalment-threshold test is defined on net tax owing
+  // BEFORE instalments are credited — crediting them first would let paying
+  // instalments remove the obligation to pay them — and there was no line isolating
+  // them to read.
+  push('L47600', 'Instalments paid', instalmentsPaid);
   const totalCredits = taxDeductedAtSource.plus(instalmentsPaid);
   push('L48200', 'Total credits (tax deducted + instalments)', totalCredits);
+
+  /**
+   * Net tax owing for the CRA instalment test: payable less tax withheld at source,
+   * and NOT less instalments. Signed — a negative is a refund, and on a rising-income
+   * year the sign is what the two-year test reads.
+   */
+  const netTaxOwing = totalPayable.minus(taxDeductedAtSource);
 
   const refundOrOwing = totalPayable.minus(totalCredits);
   push('L48500', refundOrOwing.greaterThan(0) ? 'Balance owing' : 'Refund', refundOrOwing);
@@ -401,6 +440,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       cppContrib: cppEmployee.plus(seCppContrib),
       eiPremium: eiEmployee,
       totalPayable,
+      netTaxOwing,
       refundOrOwing,
     },
     warnings,

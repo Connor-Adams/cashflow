@@ -1,3 +1,4 @@
+import type { CompletenessReportDto } from '@cashflow/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { deleteReq, getJson, patchJson, postJson } from '@/lib/api';
 
@@ -26,6 +27,14 @@ export interface ComputedReturn {
   totals: Record<string, string | number>;
   warnings: string[];
   cached: boolean;
+  /**
+   * What the return does not know. Present on personal scenarios; absent on corp,
+   * where the same hole exists and is deliberately out of scope for now.
+   *
+   * Computed on every request rather than cached with the return: import coverage
+   * changes without any fact changing.
+   */
+  completeness?: CompletenessReportDto;
 }
 
 export interface ScenarioWithComputed {

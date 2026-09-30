@@ -429,7 +429,29 @@ type CountBucket = 'skip' | 'unmapped';
 type Routing =
   | { kind: 'count'; bucket: CountBucket }
   | { kind: 'cash'; txnType: ReturnType<typeof wsPdfCashCodeToTxnType> }
-  | { kind: 'activity'; activityType: NonNullable<RowContext['activityType']> };
+  | { kind: 'activity'; activityType: NonNullable<RowContext['activityType']> }
+  /**
+   * Both sinks. A cash crossing on a brokerage account is two things at once: an
+   * event in that account's own ledger, and money leaving or entering the entity.
+   * Emitting only the activity is what made a $15,000 owner draw invisible to the
+   * tax engine, which reads `transactions`.
+   */
+  | {
+    kind: 'both';
+    activityType: NonNullable<RowContext['activityType']>;
+    txnType: NonNullable<ReturnType<typeof wsPdfCashCodeToTxnType>>;
+  };
+
+/**
+ * Activity types that cross the account boundary, and so need a cash leg as well.
+ *
+ * A bare `transfer` is excluded deliberately: `CONT` maps to it and a contribution
+ * is not unambiguously a crossing. Buys, sells, dividends and fees settle inside
+ * the account and have no external leg at all.
+ */
+const CASH_CROSSING_ACTIVITY_TYPES: ReadonlySet<string> = new Set([
+  'transfer_in', 'transfer_out', 'cash_movement',
+]);
 
 function bump(counts: Record<string, number>, code: string): void {
   counts[code] = (counts[code] ?? 0) + 1;
@@ -469,7 +491,25 @@ function depositRouting(ctx: RowContext, isDepositAccount: boolean): Routing | n
  * than being warn-skipped as unmapped.
  */
 function brokerageRouting(ctx: RowContext): Routing {
-  if (ctx.activityType !== null) return { kind: 'activity', activityType: ctx.activityType };
+  if (ctx.activityType !== null) {
+    // Security-bearing rows are never cash, whatever their code says: TRFINTF on
+    // an in-kind share transfer is `transfer_in`, and minting a cash leg for it
+    // invents money that never moved. The retroactive converter gates on
+    // `securityId == null` for the same reason.
+    if (ctx.security === null && CASH_CROSSING_ACTIVITY_TYPES.has(ctx.activityType)) {
+      // The mirror's type is stamped authoritative rather than hinted. The
+      // allowlisted codes are absent from CASH_CODE_TXN_TYPE, so a hint would be
+      // no hint at all and the row would land 'unknown' (positive) or 'purchase'
+      // (negative); and the narrative detector matches "transfer out of the
+      // account" but not "transfer into the account", so the symmetric case would
+      // never link. The activityType is unambiguous, so it can say so outright.
+      // This is scoped to the synthesised mirror: ordinary statement rows keep
+      // cashTyping's hint-vs-override logic, which excludes these codes from
+      // AUTHORITATIVE_CODES for a measured reason.
+      return { kind: 'both', activityType: ctx.activityType, txnType: 'transfer' };
+    }
+    return { kind: 'activity', activityType: ctx.activityType };
+  }
   if (CASH_TXN_CODES.has(ctx.code)) {
     return { kind: 'cash', txnType: wsPdfCashCodeToTxnType(ctx.code) };
   }
@@ -511,6 +551,19 @@ function parseActivities(
     const routed = routeRow(ctx, isDepositAccount);
     if (routed.kind === 'count') return bump(counts[routed.bucket], ctx.code);
     if (routed.kind === 'cash') return void transactions.push(cashTxnFrom(ctx, routed.txnType));
+    if (routed.kind === 'both') {
+      activities.push(activityFrom(ctx, routed.activityType));
+      transactions.push({
+        date: ctx.tradeDate,
+        merchantRaw: ctx.description,
+        merchantClean: normalizeMerchant(ctx.description),
+        amount: ctx.amount,
+        currency: ctx.currency,
+        sourceReference: null,
+        overrideTxnType: routed.txnType,
+      });
+      return;
+    }
     activities.push(activityFrom(ctx, routed.activityType));
   };
 

@@ -1019,3 +1019,83 @@ test('an expense reimbursement is not personal income', async () => {
   assert.deepEqual(facts.nonEligibleDividends, []);
   assert.deepEqual(facts.selfEmploymentIncome, []);
 });
+
+// The forward fix (part 1a) puts a cash mirror on brokerage accounts, including
+// registered ones. A chequing→FHSA contribution therefore now has TWO legs inside
+// the same entity, and `buildPersonalFacts` collects fhsa_contribution rows with
+// `cad.abs()` — so tagging both legs would deduct the contribution twice. The
+// account-scoped feeds do not protect this path: transactions are pulled by
+// entity, unfiltered by account.
+test('an FHSA contribution tagged on both legs is not deducted twice', async () => {
+  const household = await Household.create({ name: 'FHSA double HH' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const chequing = await Account.create({
+    name: 'Chq', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'n_a', defaultCurrency: 'CAD',
+  } as never);
+  const fhsa = await Account.create({
+    name: 'WS FHSA', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'registered_fhsa', defaultCurrency: 'CAD',
+  } as never);
+
+  const out = await Transaction.create({
+    accountId: chequing.id, householdId: household.id, entityId: entity.id,
+    date: '2026-03-01', amount: '-8000', currency: 'CAD', txnType: 'transfer',
+    taxTreatmentOverride: 'fhsa_contribution',
+    merchantRaw: 'To FHSA', merchantClean: 'To FHSA',
+    importBatch: 'b', sourceRowFingerprint: 'fp-fhsa-out', sourceIdentityFingerprint: 'sif-fhsa-out',
+  } as never);
+  // The mirror the forward fix now emits on the FHSA side.
+  await Transaction.create({
+    accountId: fhsa.id, householdId: household.id, entityId: entity.id,
+    date: '2026-03-01', amount: '8000', currency: 'CAD', txnType: 'transfer',
+    taxTreatmentOverride: 'fhsa_contribution',
+    linkedTransactionId: out.id,
+    merchantRaw: 'Contribution', merchantClean: 'Contribution',
+    importBatch: 'b', sourceRowFingerprint: 'fp-fhsa-in', sourceIdentityFingerprint: 'sif-fhsa-in',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2026);
+  const total = facts.fhsaContribs.reduce((acc, c) => acc.plus(c.amount), D('0'));
+  assert.equal(
+    total.toFixed(2),
+    '8000.00',
+    `one contribution, one deduction; got ${total.toFixed(2)} from ${facts.fhsaContribs.length} rows`,
+  );
+});
+
+// A row that is BOTH typed interest/dividend AND classified as income was counted
+// twice: once by the treatment loop, once by the txnType pass below it. That pass
+// skipped only the four NOT_INCOME treatments, so every income treatment fell
+// through — and a `dividend` txnType was pushed as ELIGIBLE, which is the wrong
+// character as well as the wrong count.
+test('a transaction both typed interest and classified as a dividend is counted once', async () => {
+  const household = await Household.create({ name: 'Double count HH' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const chq = await Account.create({
+    name: 'Chq', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'n_a', defaultCurrency: 'CAD',
+  } as never);
+  await Transaction.create({
+    accountId: chq.id, householdId: household.id, entityId: entity.id,
+    date: '2026-05-01', amount: '1000', currency: 'CAD', txnType: 'interest',
+    taxTreatmentOverride: 'non_eligible_dividend',
+    merchantRaw: 'Owner draw', merchantClean: 'Owner draw',
+    importBatch: 'b', sourceRowFingerprint: 'fp-dc', sourceIdentityFingerprint: 'sif-dc',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2026);
+  assert.equal(facts.nonEligibleDividends.length, 1, 'classified once');
+  assert.equal(
+    facts.interestIncome.length,
+    0,
+    `must not also appear as interest; got ${JSON.stringify(facts.interestIncome)}`,
+  );
+});
+

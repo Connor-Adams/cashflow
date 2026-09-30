@@ -1,54 +1,59 @@
-// VERIFIED 2026-05-24 — encoded from indexation projection on 2025; engineer MUST update once CRA publishes T1-2026.
-// Federal brackets: 2025 thresholds × 1.027 (CRA announced ~2.7% indexation for 2026).
-// ON brackets: 2025 ON values reused — ON 2026 indexation factor not yet published; update when available.
-// CPP/EI numbers for 2026 are projected; confirm via Service Canada 2026 announcement.
+// PUBLISHED 2026-09-29 — every indexed amount taken from the announced figures:
+// CRA's indexation table for 2026 (federal, 2.0%), Ontario Finance / TD1ON 2026
+// (Ontario, 1.9% — and its top two brackets are statutorily unindexed), and
+// Service Canada for CPP/EI.
+//
+// This file previously carried a "VERIFIED" header over an indexation projection
+// written before any of that was announced, and was served anyway. That is why
+// provenance is now a field the return route can enforce rather than a comment.
 import { D } from '../util/decimal';
 import type { RateTable } from '../engine/types';
 
 export const RATES_2026: RateTable = {
+  provenance: 'published',
   year: 2026,
   // Federal bracket thresholds: 2025 × 1.027 (2.7% federal indexation factor).
   // Lowest rate is 14% — Bill C-4 cut 15% → 14% effective 2025-07-01 (2025
   // blends to 14.5%); 2026 is the first full year at 14%. LEGISLATED, not a
   // projection.
   federalBrackets: [
-    { upTo: D('58924'), rate: D('0.14') },
-    { upTo: D('117848'), rate: D('0.205') },
-    { upTo: D('182674'), rate: D('0.26') },
-    { upTo: D('260257'), rate: D('0.29') },
+    { upTo: D('58523'), rate: D('0.14') },
+    { upTo: D('117045'), rate: D('0.205') },
+    { upTo: D('181440'), rate: D('0.26') },
+    { upTo: D('258482'), rate: D('0.29') },
     { upTo: null, rate: D('0.33') },
   ],
   // ON brackets: 2025 values — ON 2026 indexation not yet available; MUST update
   provincialBrackets: [
-    { upTo: D('52886'), rate: D('0.0505') },
-    { upTo: D('105775'), rate: D('0.0915') },
+    { upTo: D('53891'), rate: D('0.0505') },
+    { upTo: D('107785'), rate: D('0.0915') },
     { upTo: D('150000'), rate: D('0.1116') },
     { upTo: D('220000'), rate: D('0.1216') },
     { upTo: null, rate: D('0.1316') },
   ],
   // BPA federal: ~2025 BPA × 1.027 ≈ 16,564; min: 2025 min × 1.027 ≈ 14,931
-  basicPersonalAmountFederal: D('16564'),
-  bpaFederalPhaseoutStart: D('182674'),
-  bpaFederalPhaseoutEnd: D('260257'),
-  bpaFederalMin: D('14931'),
+  basicPersonalAmountFederal: D('16452'),
+  bpaFederalPhaseoutStart: D('181440'),
+  bpaFederalPhaseoutEnd: D('258482'),
+  bpaFederalMin: D('14829'),
   // ON BPA: 2025 value — update when ON publishes 2026
-  basicPersonalAmountOntario: D('12747'),
-  spousalAmountFederal: D('16564'),
+  basicPersonalAmountOntario: D('12989'),
+  spousalAmountFederal: D('16452'),
   // ON spousal: 2025 value — update when ON publishes 2026
-  spousalAmountOntario: D('10818'),
+  spousalAmountOntario: D('11029'),
   // Federal age amount: 2025 × 1.027 ≈ 9,272
-  ageAmountFederal: D('9272'),
+  ageAmountFederal: D('9208'),
   // ON age amount: 2025 value — update when ON publishes 2026
   ageAmountOntario: D('6078'),
   ageAmountAge: 65,
   // Federal age amount income threshold: 2025 × 1.027 ≈ 46,751
-  ageAmountFederalThreshold: D('46751'),
+  ageAmountFederalThreshold: D('46432'),
   // ON age amount threshold: 2025 value — update when ON publishes 2026
   ageAmountOntarioThreshold: D('44323'),
   ageAmountFederalClawbackRate: D('0.15'),
   ageAmountOntarioClawbackRate: D('0.15'),
   // Employment amount federal: 2025 × 1.027 ≈ 1,511
-  employmentAmountFederal: D('1511'),
+  employmentAmountFederal: D('1501'),
   dividendGrossUpEligible: D('0.38'),
   dividendGrossUpNonEligible: D('0.15'),
   dtcFederalEligible: D('0.150198'),
@@ -57,24 +62,24 @@ export const RATES_2026: RateTable = {
   dtcOntarioNonEligible: D('0.029863'),
   // CPP 2026: projected — confirm via Service Canada announcement
   cpp: {
-    ympe: D('73200'),
-    yampe: D('83400'),
+    ympe: D('74600'),
+    yampe: D('85000'),
     basicExemption: D('3500'),
     employeeRate: D('0.0595'),
     cpp2Rate: D('0.04'),
   },
   // EI 2026: projected — confirm via Employment and Social Development Canada announcement
   ei: {
-    maxInsurable: D('67500'),
-    employeeRate: D('0.0166'),
+    maxInsurable: D('68900'),
+    employeeRate: D('0.0163'),
   },
   capitalGainsInclusion: D('0.5'),
-  capitalGainsInclusionHigh: D('0.666667'),
+  capitalGainsInclusionHigh: D('0.5'),
   capitalGainsInclusionThreshold: D('250000'),
   // ON surtax bands: 2025 values indexed by ~1.027 ≈ 5,864 / 7,504
   onSurtaxBands: [
-    { threshold: D('5864'), rate: D('0.20') },
-    { threshold: D('7504'), rate: D('0.36') },
+    { threshold: D('5818'), rate: D('0.20') },
+    { threshold: D('7446'), rate: D('0.36') },
   ],
   // ON health premium band thresholds unchanged (statutory fixed amounts); update if ON changes
   ontarioHealthPremium: [
@@ -98,9 +103,9 @@ export const RATES_2026: RateTable = {
   donationHighRateOntario: D('0.1116'),
   // Medical threshold cap: 2025 cap (2837) × 1.027 = 2913.59 → round to 2914
   medicalThresholdPercent: D('0.03'),
-  medicalThresholdCap: D('2914'),
+  medicalThresholdCap: D('2890'),
   // 2026 projected RRSP limit: $33,367 (2025 $32,490 × 1.027 ≈ 33,367). Verify when CRA announces.
-  rrspAnnualLimit: D('33367'),
+  rrspAnnualLimit: D('33810'),
   fhsaLifetimeLimit: D('40000'),
   // Disability Tax Credit — PROJECTED: 2025 values × 1.027 (2.7% federal indexation)
   dtcBaseFederal: D('10412'),          // 10138 × 1.027 ≈ 10412 — PROJECTED
@@ -114,12 +119,12 @@ export const RATES_2026: RateTable = {
   pensionIncomeAmountCap: D('2000'),              // fixed statutory amount, not indexed
   pensionIncomeAmountCapOntario: D('1686'),       // 2025 value reused — PROJECTED
   // OAS clawback threshold — PROJECTED
-  oasClawbackThreshold: D('95977'),               // 93454 × 1.027 ≈ 95977 — PROJECTED
+  oasClawbackThreshold: D('95323'),               // 93454 × 1.027 ≈ 95977 — PROJECTED
   oasClawbackRate: D('0.15'),
   // FHSA annual deduction limit (fixed at $8,000 — not indexed)
   fhsaAnnualLimit: D('8000'),
   amtRate: D('0.205'),
-  amtExemption: D('182674'),
+  amtExemption: D('181440'),
   amtCapGainsInclusion: D('1'),
   amtNonRefCreditFraction: D('0.5'),
   amtDtcFraction: D('0'), // dividend tax credit fully denied under AMT (gross-up excluded from ATI)

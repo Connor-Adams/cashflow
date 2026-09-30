@@ -5,12 +5,15 @@ import {
 import { useScenarioChain } from '../../hooks/useScenarioChain';
 import { type TaxLineDto } from '../../hooks/useTaxReturn';
 import { ScenarioTree } from './scenarios/ScenarioTree';
+import { pickDefaultScenarioId, describeProvenance } from './scenarios/provenance';
 import { OverrideEditor } from './scenarios/OverrideEditor';
 import { ComparisonView } from './scenarios/ComparisonView';
 import { YearStripNav } from './scenarios/YearStripNav';
 import { AssumptionsEditor } from './scenarios/AssumptionsEditor';
 import { RrifMinCalc } from './scenarios/RrifMinCalc';
 import { fmtCurrency } from './util/format';
+import { CompletenessPanel } from './CompletenessPanel';
+import { OutlookPanel } from './OutlookPanel';
 import { labelForTotal } from './util/labels';
 import { TaxLineBreakdownTable } from './components/TaxLineBreakdownTable';
 import { ScenarioCompareBar } from './components/ScenarioCompareBar';
@@ -21,7 +24,20 @@ import { CollapsibleCard } from '@/components/ui/collapsible-card';
 import { Alert } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
 
-export function PersonalT1Tab({ year }: { year: number }) {
+export interface PersonalT1TabProps {
+  year: number;
+  /**
+   * Switches the enclosing TaxPage tab. Completeness items whose fix lives on
+   * another tab — Classify, Slips — call it; TaxPage owns that state, not this tab.
+   *
+   * Optional so existing callers and tests need not supply it; a completeness item
+   * with a tab destination then simply renders no action, which is the same
+   * behaviour as an item with no destination at all.
+   */
+  onNavigate?: (tab: string) => void;
+}
+
+export function PersonalT1Tab({ year, onNavigate = () => {} }: PersonalT1TabProps) {
   const { entities, error: entitiesError } = useTaxEntities();
 
   if (entitiesError) return <p className="error">Failed to load entities: {entitiesError}</p>;
@@ -37,15 +53,22 @@ export function PersonalT1Tab({ year }: { year: number }) {
     );
   }
 
-  return <PersonalT1ScenarioWorkspace year={year} entityId={personalEntity.id} />;
+  return (
+    <PersonalT1ScenarioWorkspace
+      year={year}
+      entityId={personalEntity.id}
+      onNavigate={onNavigate}
+    />
+  );
 }
 
 interface WorkspaceProps {
   year: number;
   entityId: number;
+  onNavigate: (tab: string) => void;
 }
 
-function PersonalT1ScenarioWorkspace({ year: yearProp, entityId }: WorkspaceProps) {
+function PersonalT1ScenarioWorkspace({ year: yearProp, entityId, onNavigate }: WorkspaceProps) {
   // Local `selectedYear` overlays the prop so the YearStripNav can pivot to a
   // chained year (year+1 projection, etc.) without round-tripping through
   // TaxPage's year selector. When the prop changes (user picks a year in the
@@ -85,16 +108,14 @@ function PersonalT1ScenarioWorkspace({ year: yearProp, entityId }: WorkspaceProp
     }
   }, [loading, bootstrapping, scenarios.length, create]);
 
-  // Auto-select the most-recently-created leaf so the detail pane has content
-  // as soon as the bootstrap POST resolves (or the user logs in to an existing
-  // tree). Picks the latest fork if any, otherwise falls back to the baseline.
+  // Select the year's actuals so the detail pane has content as soon as the
+  // bootstrap POST resolves. This used to pick the most-recently-created
+  // non-baseline scenario, which in prod was a `projection_root` holding no
+  // transactions from the year on screen — see `pickDefaultScenarioId`.
   useEffect(() => {
     if (activeId !== null) return;
-    if (scenarios.length === 0) return;
-    const latestFork = [...scenarios]
-      .reverse()
-      .find((s) => s.kind !== 'baseline');
-    setActiveId((latestFork ?? scenarios[0]).id);
+    const id = pickDefaultScenarioId(scenarios);
+    if (id !== null) setActiveId(id);
   }, [activeId, scenarios]);
 
   // Prune deleted scenarios from the compare set so the comparison view never
@@ -247,6 +268,7 @@ function PersonalT1ScenarioWorkspace({ year: yearProp, entityId }: WorkspaceProp
               onAssumptionsChange={handleAssumptionsChange}
               onAddToCompare={() => toggleCompare(active.data!.scenario.id)}
               inCompare={compareIds.includes(active.data.scenario.id)}
+              onNavigate={onNavigate}
             />
           ) : null}
           {compareIds.length > 0 && (
@@ -267,6 +289,8 @@ function PersonalT1ScenarioWorkspace({ year: yearProp, entityId }: WorkspaceProp
 }
 
 interface ActiveScenarioPanelProps {
+  /** Switches the enclosing TaxPage tab, for completeness items fixed elsewhere. */
+  onNavigate: (tab: string) => void;
   data: ScenarioWithComputed;
   onOverridesChange: (next: Record<string, unknown>) => void;
   onAssumptionsChange: (next: { inflation?: number; investmentReturn?: number }) => void;
@@ -280,20 +304,21 @@ function ActiveScenarioPanel({
   onAssumptionsChange,
   onAddToCompare,
   inCompare,
+  onNavigate,
 }: ActiveScenarioPanelProps) {
   const { scenario, computed } = data;
   // Backend serialises Decimal via toJSON → string, matching TaxLineDto. The
   // computed lines come back through `JSON.parse(JSON.stringify(...))` which
   // collapses the Decimal instances to their string form (see computeScenario).
   const lines = (computed.lines ?? []) as TaxLineDto[];
-  const isProjection = scenario.kind === 'projection_root';
+  const provenance = describeProvenance(scenario);
+  const isProjection = provenance.isProjection;
   return (
     <div>
       <header className="mb-3 flex items-baseline gap-3">
         <h3 className="m-0">{scenario.name}</h3>
-        <span className="muted">
-          {scenario.kind === 'baseline' ? 'baseline (actuals)' : scenario.kind}
-        </span>
+        <span className="muted">{provenance.label}</span>
+        {provenance.caveat && <span className="muted">{provenance.caveat}</span>}
         <Button variant="secondary" size="sm" onClick={onAddToCompare} className="ml-auto">
           {inCompare ? '✓ In compare' : '+ Add to compare'}
         </Button>
@@ -318,6 +343,13 @@ function ActiveScenarioPanel({
       )}
       <OverrideEditor overrides={scenario.overrides} onChange={onOverridesChange} />
 
+      {/* Above the total, always. The three prior investigations of "my tax looks
+          too low" each ended at incomplete data while this tab rendered a clean
+          number, so the number does not appear without its caveat. */}
+      {computed.completeness && (
+        <CompletenessPanel report={computed.completeness} onNavigate={onNavigate} />
+      )}
+
       {/* Headline */}
       <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard label="Total payable" value={fmtCurrency(computed.totals.totalPayable)} />
@@ -325,6 +357,12 @@ function ActiveScenarioPanel({
         <StatCard label="Total income" value={fmtCurrency(computed.totals.totalIncome)} />
         <StatCard label="Taxable income" value={fmtCurrency(computed.totals.taxableIncome)} />
       </div>
+
+      {/* Below the total, deliberately: completeness qualifies the number above it,
+          this answers what the number means for the next cash obligation. Keyed on
+          the scenario's year — the outlook reads actuals, not this scenario's
+          overrides. */}
+      <OutlookPanel year={scenario.year} />
 
       {/* All totals, humanized */}
       <Card className="mb-4">

@@ -9,6 +9,7 @@ import { runLinkItemsStage, type LinkItemsCandidateOrder } from './enrichment/li
 import { runDetectRelationshipsStage, type RelationshipCandidate } from './enrichment/detectRelationshipsStage';
 import { runWsInvestmentBrandStage } from './enrichment/wsInvestmentBrandStage';
 import type { EnrichmentResult, Signal, TxnType } from './enrichment/types';
+import { resolveRelationshipTxnType } from './resolveRelationshipTxnType';
 import type { RuleRow } from './applyRules';
 import type { MerchantMemoryMatch } from '../ai/merchantMemory';
 
@@ -21,6 +22,10 @@ export interface EnrichRawInputs {
 }
 
 export interface EnrichInputs {
+  /** The source's authoritative txnType, when it has one. Gates stage 7. */
+  overrideTxnType?: TxnType | null;
+  /** The source's weak suggestion; a high-confidence narrative beats it. */
+  txnTypeHint?: TxnType | null;
   raw: EnrichRawInputs;
   accountId: number;
   householdId: number | null;
@@ -101,7 +106,16 @@ export async function enrichTransaction(input: EnrichInputs): Promise<Enrichment
     ownerNames: input.ownerNames,
   }), []));
 
-  const txnType = pickTxnType(signals);
+  // Stage 7's gate. A source that knows its own type (the synthesised brokerage
+  // cash mirror) must be able to say so, because the narrative detector matches
+  // "transfer out of the account" and not "transfer into the account" — so the
+  // symmetric case would never link. The ladder keeps a confident narrative above
+  // a weak hint, which is what stops a WS card payment being relabelled a transfer.
+  const txnType = resolveRelationshipTxnType({
+    overrideTxnType: input.overrideTxnType ?? null,
+    txnTypeHint: input.txnTypeHint ?? null,
+    signals,
+  }, pickTxnType);
 
   // Stage 3: detect-recurring
   signals.push(...safeStage('detect-recurring', () => runDetectRecurringStage({

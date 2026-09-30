@@ -36,7 +36,44 @@ import { normalizeMerchant } from './normalizeMerchant';
 import type { NormalizedCashTransaction, StatementPreview } from './statementTypes';
 import type { TxnType } from './enrichment/types';
 
-const DEPOSIT_ACCOUNT_TYPES = new Set(['checking', 'savings']);
+/**
+ * Account types where EVERY security-less row is a cash-ledger event, so no activity
+ * allowlist applies. Exported for the same reason as
+ * `BROKERAGE_CASH_LEG_ACCOUNT_IDS`: the completeness gate must scope its
+ * convertible-orphan blocker to exactly what this converter covers, and two copies of
+ * the rule would be one to forget. Scoping the gate to the brokerage ids alone missed
+ * every deposit-account orphan — which is the population the converter was built for.
+ */
+export const DEPOSIT_ACCOUNT_TYPES: ReadonlySet<string> = new Set(['checking', 'savings']);
+
+/**
+ * Brokerage accounts this converter may run against.
+ *
+ * `Account` has no institution, provider or parser column, and every brokerage
+ * account of every provider is `accountType: 'investment'` — so there is no way to
+ * widen the type guard to admit one Wealthsimple account without admitting every
+ * Questrade account at the same time, and `questrade.ts` already emits its own cash
+ * mirrors, which this converter would then read as shadows.
+ *
+ * Hence an explicit id list. Exported because the completeness gate (part 3) must
+ * scope its orphaned-cash-leg blocker to exactly the accounts this converter
+ * covers; two copies of the list would be one to forget.
+ */
+export const BROKERAGE_CASH_LEG_ACCOUNT_IDS: readonly number[] = [13];
+
+/**
+ * The only activity types that are cash crossings, and so the only ones converted
+ * on a brokerage account.
+ *
+ * Deliberately excludes a bare `transfer` — `rbcInvestment` and `questrade` both
+ * emit it, and `wealthsimpleActivityCodes` maps `CONT` to it — and `interest`,
+ * which is income rather than a crossing. On a DEPOSIT account no allowlist
+ * applies: every row there is a cash-ledger event, which is the assumption the
+ * existing 190-shadow cleanup was measured against.
+ */
+export const BROKERAGE_CASH_LEG_ACTIVITY_TYPES: ReadonlySet<string> = new Set([
+  'transfer_in', 'transfer_out', 'cash_movement',
+]);
 
 /**
  * Activity type → the TxnType the converted transaction should carry. Supplied
@@ -101,21 +138,27 @@ function pairKey(accountId: number, date: string, amount: number, currency: stri
   return `${accountId}|${date}|${amount.toFixed(4)}|${String(currency || 'CAD').toUpperCase()}`;
 }
 
-async function loadDepositAccounts(accountIds: number[]): Promise<Account[]> {
+async function loadDepositAccounts(
+  accountIds: number[],
+  brokerageAccountIds: readonly number[],
+): Promise<Account[]> {
   const accounts = await Account.findAll({ where: { id: { [Op.in]: accountIds } } });
   const found = new Set(accounts.map((a) => a.id));
   const missing = accountIds.filter((id) => !found.has(id));
   if (missing.length > 0) {
     throw new Error(`No account with id ${missing.join(', ')}`);
   }
-  const wrong = accounts.filter((a) => !DEPOSIT_ACCOUNT_TYPES.has(String(a.accountType)));
+  const optIn = new Set(brokerageAccountIds);
+  const wrong = accounts.filter(
+    (a) => !DEPOSIT_ACCOUNT_TYPES.has(String(a.accountType)) && !optIn.has(a.id as number),
+  );
   if (wrong.length > 0) {
     // Refuse rather than silently skip: this cleanup deletes rows, and running
     // it against a brokerage account would be a request to destroy real
     // investment activity.
     throw new Error(
       `Account ${wrong.map((a) => `${a.id} (${a.name}, ${a.accountType})`).join('; ')} ` +
-        'is not a deposit account — this cleanup only applies to checking/savings.',
+        'is not a deposit account and is not in BROKERAGE_CASH_LEG_ACCOUNT_IDS.',
     );
   }
   return accounts;
@@ -137,6 +180,35 @@ function buildTransactionIndex(transactions: Transaction[]): Map<string, TxnInde
     else index.set(key, [entry]);
   }
   return index;
+}
+
+/**
+ * Activity ids for which a transaction already records the same event.
+ *
+ * Exported for part 3's completeness gate, which must know whether a cash-leg
+ * activity is already in the ledger but cannot call `classifyWsDepositActivities` —
+ * that function scans an account's entire history, and the gate is period-bounded
+ * because it runs on every T1 request.
+ *
+ * Built on this module's own index so the gate's notion of "already recorded" is the
+ * same one the migration uses when it decides what to convert. Matching is on
+ * (account, date, amount, currency); merchant text is deliberately not compared,
+ * because the point here is only whether the event exists, not which row describes
+ * it better.
+ */
+export function activityIdsWithTransaction(
+  activities: InvestmentActivity[],
+  transactions: Transaction[],
+): Set<number> {
+  const index = buildTransactionIndex(transactions);
+  const matched = new Set<number>();
+  for (const a of activities) {
+    const f = activityFields(a);
+    if (index.has(pairKey(f.accountId, f.date, f.amount, f.currency))) {
+      matched.add(f.activityId);
+    }
+  }
+  return matched;
 }
 
 /** The shape shared by both classifications, read off one activity row. */
@@ -218,9 +290,10 @@ function partitionActivities(
  */
 export async function classifyWsDepositActivities(
   accountIds: number[],
+  brokerageAccountIds: readonly number[] = BROKERAGE_CASH_LEG_ACCOUNT_IDS,
 ): Promise<Classification> {
   if (accountIds.length === 0) return { shadows: [], orphans: [], skipped: [] };
-  const accounts = await loadDepositAccounts(accountIds);
+  const accounts = await loadDepositAccounts(accountIds, brokerageAccountIds);
   const householdByAccount = new Map(accounts.map((a) => [a.id, a.householdId ?? null]));
 
   const activities = await InvestmentActivity.findAll({
@@ -236,14 +309,39 @@ export async function classifyWsDepositActivities(
 
   // A security-bearing row is not a cash event: neither delete it nor flatten
   // it to a transaction, which would lose the security.
+  const optInForSkip = new Set(brokerageAccountIds);
   const skipped: SkippedRow[] = activities
     .filter((a) => a.securityId != null)
     .map((a) => ({
       activityId: a.id as number,
       accountId: a.accountId as number,
       reason: 'carries a security — not a cash event',
-    }));
-  const cashRows = activities.filter((a) => a.securityId == null);
+    }))
+    // A security-less row the allowlist rejects on an opt-in account belonged to no
+    // bucket at all: not a shadow, not an orphan, and `skipped` only ever held
+    // security-bearing rows. It vanished from the report entirely, which is the one
+    // outcome a tool that decides what to convert must never have.
+    .concat(
+      activities
+        .filter((a) => a.securityId == null
+          && optInForSkip.has(a.accountId as number)
+          && !BROKERAGE_CASH_LEG_ACTIVITY_TYPES.has(String(a.activityType)))
+        .map((a) => ({
+          activityId: a.id as number,
+          accountId: a.accountId as number,
+          reason: `activityType '${String(a.activityType)}' is not a cash crossing — left alone`,
+        })),
+    );
+  // On a deposit account every security-less row is a cash event, so selection is
+  // unchanged there. On an opt-in brokerage account it is not: a `sell` whose
+  // security failed to resolve is also security-less, and converting it would take
+  // out real investment activity. So the allowlist applies there and only there.
+  const optIn = new Set(brokerageAccountIds);
+  const isDepositRow = (a: InvestmentActivity) => !optIn.has(a.accountId as number);
+  const cashRows = activities.filter(
+    (a) => a.securityId == null
+      && (isDepositRow(a) || BROKERAGE_CASH_LEG_ACTIVITY_TYPES.has(String(a.activityType))),
+  );
 
   return { ...partitionActivities(cashRows, index, householdByAccount), skipped };
 }
@@ -301,6 +399,8 @@ function cleanupPreview(
   accountId: number,
   householdId: number | null,
   orphans: OrphanRow[],
+  brokerageAccountIds: readonly number[],
+  runStamp: string,
 ): StatementPreview {
   return {
     previewToken: `ws-deposit-cleanup-${accountId}`,
@@ -308,7 +408,14 @@ function cleanupPreview(
     contentHash: cleanupContentHash(accountId, orphans.map((o) => o.activityId)),
     accountId,
     householdId,
-    importBatch: 'WS deposit ledger cleanup',
+    // Per run and per account on an opt-in brokerage account, because
+    // `rollbackImportBatch` matches this string EXACTLY — a shared constant means
+    // rolling back one account's conversion reaches every converted row ever made.
+    // Deposit accounts keep the shared label so their existing rollback addressing
+    // is unchanged, which is this part's promise about them.
+    importBatch: brokerageAccountIds.includes(accountId)
+      ? `WS brokerage cash legs acct ${accountId} ${runStamp}`
+      : 'WS deposit ledger cleanup',
     usedParser: 'pdf',
     transactions: orphans.map(orphanToRow),
     investmentActivities: [],
@@ -329,6 +436,8 @@ async function insertOrphans(
   accountIds: number[],
   orphans: OrphanRow[],
   userId: number | null,
+  brokerageAccountIds: readonly number[],
+  runStamp: string,
 ): Promise<{ inserted: number; deduped: number }> {
   let inserted = 0;
   let deduped = 0;
@@ -337,7 +446,7 @@ async function insertOrphans(
     if (mine.length === 0) continue;
     const householdId = mine[0].householdId;
     const result = await commitStatementImport(
-      cleanupPreview(accountId, householdId, mine),
+      cleanupPreview(accountId, householdId, mine, brokerageAccountIds, runStamp),
       userId,
       householdId,
     );
@@ -356,9 +465,14 @@ export async function migrateWsDepositActivities(opts: {
   accountIds: number[];
   userId: number | null;
   dryRun?: boolean;
+  brokerageAccountIds?: readonly number[];
 }): Promise<MigrationReport> {
   const dryRun = opts.dryRun === true;
-  const classification = await classifyWsDepositActivities(opts.accountIds);
+  const brokerageAccountIds = opts.brokerageAccountIds ?? BROKERAGE_CASH_LEG_ACCOUNT_IDS;
+  const classification = await classifyWsDepositActivities(
+    opts.accountIds,
+    brokerageAccountIds,
+  );
   const { shadows, orphans } = classification;
 
   if (dryRun) {
@@ -371,13 +485,36 @@ export async function migrateWsDepositActivities(opts: {
     };
   }
 
-  const { inserted, deduped } = await insertOrphans(opts.accountIds, orphans, opts.userId);
+  // One stamp for the whole run, so every account converted in this invocation is
+  // addressable together and a later run is addressable separately.
+  const runStamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const { inserted, deduped } = await insertOrphans(
+    opts.accountIds, orphans, opts.userId, brokerageAccountIds, runStamp,
+  );
 
-  const toDelete = [...shadows.map((s) => s.activityId), ...orphans.map((o) => o.activityId)];
+  // Insert-only on opt-in brokerage accounts: nothing there is ever removed.
+  //
+  // After one run the database holds one activity at a key and one converted
+  // transaction carrying the same merchantRaw. That state is byte-identical
+  // whether it came from two real events whose second insert collided on
+  // stableIdentityFingerprint, or from one event whose run stopped between the
+  // insert and the sweep. In the first the survivor is a real cash event and must
+  // never be removed; in the second it is redundant and must be. Same state,
+  // opposite correct actions — so no predicate over that state can choose, and
+  // four earlier attempts at one all lost a row. Removing nothing dissolves it.
+  //
+  // Deposit accounts keep the sweep: there the pairing assumption was measured,
+  // and the 190 shadows this module exists for still need retiring.
+  const optIn = new Set(brokerageAccountIds);
+  const removable = (accountId: number) => !optIn.has(accountId);
+  const toDelete = [
+    ...shadows.filter((s) => removable(s.accountId)).map((s) => s.activityId),
+    ...orphans.filter((o) => removable(o.accountId)).map((o) => o.activityId),
+  ];
   let deletedShadows = 0;
   if (toDelete.length > 0) {
     await InvestmentActivity.destroy({ where: { id: { [Op.in]: toDelete } } });
-    deletedShadows = shadows.length;
+    deletedShadows = shadows.filter((s) => removable(s.accountId)).length;
   }
 
   return {

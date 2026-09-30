@@ -109,7 +109,7 @@ export function TaxPage() {
               onPlanChange={setActivePlanId}
             />
           )}
-          {tab === 'personal' && <PersonalT1Tab year={year} />}
+          {tab === 'personal' && <PersonalT1Tab year={year} onNavigate={setTab} />}
           {tab === 'slips' && <SlipsTab year={year} />}
           {tab === 'reconciliation' && <ReconciliationTab year={year} />}
           {tab === 'classify' && <ClassifyTab year={year} />}

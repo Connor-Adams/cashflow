@@ -54,11 +54,11 @@ export async function projectPersonalFactsFromPrevYear(
       // computeScenario returns serialised totals/lines; rollPersonalCarryforwards
       // needs a TaxReturn-shape struct. Reconstruct only the fields it reads.
       year: parent.year,
-      lines: parentReturn.lines as never,
+      lines: parentReturn.result.lines as never,
       totals: {
-        ...(parentReturn.totals as Record<string, unknown>),
+        ...(parentReturn.result.totals as Record<string, unknown>),
       } as never,
-      warnings: parentReturn.warnings,
+      warnings: parentReturn.result.warnings,
     } as never,
     parentFacts,
     rates,
@@ -101,6 +101,11 @@ export async function projectPersonalFactsFromPrevYear(
       ? instRows.reduce((sum, r) => sum.plus(D(r.amount as unknown as string)), D('0'))
       : D(cfRows.find(c => c.kind === 'instalments_paid')?.amount ?? '0'),
     fhsaLifetimeContributions: D(cfRows.find(c => c.kind === 'fhsa_lifetime_contribs')?.amount ?? '0'),
+    // From `cfRows`, like every sibling above. Reading `parentFacts.carryforwards`
+    // here took the parent's own INPUT room — a year too early — so the projection
+    // discarded the new year's annual limit plus carried-forward unused room, and kept
+    // deducting FHSA even after the lifetime cap was reached.
+    fhsaRoom: D(cfRows.find(c => c.kind === 'fhsa_room')?.amount ?? '0'),
   };
 
   return {

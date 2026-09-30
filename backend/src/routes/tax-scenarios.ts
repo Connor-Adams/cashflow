@@ -16,6 +16,10 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { Router } from 'express';
 import { currentAuth } from '../auth/middleware';
+import { ratesFor } from '../tax/engine/brackets';
+import { assertRatesUsable } from '../tax/engine/rateProvenance';
+import { buildCompletenessReport } from '../tax/completeness/buildCompletenessReport';
+import type { TaxYearFacts } from '../tax/engine/types';
 import { Entity, Scenario } from '../models';
 import { logger } from '../observability/logger';
 import {
@@ -221,7 +225,7 @@ router.get('/:kind/compare', async (req, res, next) => {
     const computedAll = await Promise.all(
       scenarios.map(async (s) => ({
         scenario: s,
-        computed: await cfg.compute(s.id),
+        computed: (await cfg.compute(s.id)).result,
       })),
     );
     res.json({ scenarios: computedAll });
@@ -303,7 +307,7 @@ router.get(
     const chain = await Promise.all(
       chainScenarios.map(async (s) => {
         try {
-          return { scenario: s, computed: await cfg.compute(s.id), error: null };
+          return { scenario: s, computed: (await cfg.compute(s.id)).result, error: null };
         } catch (err) {
           const message = (err as Error).message;
           logger.warn(
@@ -324,8 +328,55 @@ router.get(
   '/:kind/:id',
   withScenario(async (_req, res, { scenario }) => {
     const cfg = cfgOf(res);
+    // Enforced HERE — at the request boundary — and deliberately not inside
+    // `computeScenarioReturn`. A projection resolves its parent by computing it
+    // (`projectPersonalFactsFromPrevYear` calls `computeScenario`), so a refusal
+    // sitting inside compute cascades: a 2026 chain rooted at the unverified 2024
+    // table would refuse to show 2026, which is the opposite of the point.
+    // Refusing to SERVE a closed year's return computed from recalled constants
+    // is the claim worth making; an ancestor computed as machinery is not that
+    // claim. Surfacing weaker-provenance inputs is part 3's completeness report.
+    //
+    // Pre-cache by construction: nothing is read before this runs.
+    //
+    // `${year}-12-31` is right for corp too — `resolveCorpScenario` builds every
+    // corp scenario's fiscal year as the calendar year. The off-calendar case
+    // exists only on `/api/tax/corp/:fiscalYear/return`, which passes the real
+    // end date.
+    assertRatesUsable(ratesFor(scenario.year), {
+      periodEnd: `${scenario.year}-12-31`,
+      now: new Date(),
+    });
+    const rates = ratesFor(scenario.year);
     const computed = await cfg.compute(scenario.id);
-    res.json({ scenario, computed });
+
+    // THIS is the path the Personal T1 tab renders — `useScenarioDetail` →
+    // here → `computeScenarioReturn`. An earlier draft of the design attached the
+    // gate to `routes/tax.ts` alone, whose only consumer is the Overview tab; that
+    // would have shipped the gate onto Overview and left the T1 rendering a bare
+    // total, which is the exact failure the gate exists to prevent.
+    //
+    // Computed on EVERY request, cache hit included, and never folded into
+    // `factsHash`: import coverage changes without any fact changing, so a report
+    // keyed on facts goes stale precisely when it matters.
+    //
+    // Facts come off the computed result rather than a fresh build, so the estimates
+    // and the displayed total share a basis even when the selected scenario is a fork
+    // carrying overrides.
+    // `cfg.kind`, not `cfg.entityKindGuard` — the personal config's guard is
+    // deliberately `undefined` ("personal endpoints historically never enforced
+    // entity-kind on :id"), so testing the guard silently skips the gate on the one
+    // path that needs it.
+    const completeness = cfg.kind === 'personal'
+      ? await buildCompletenessReport({
+        entityId: scenario.entityId,
+        year: scenario.year,
+        facts: computed.facts as TaxYearFacts,
+        rates,
+      })
+      : undefined;
+
+    res.json({ scenario, computed: { ...computed.result, completeness } });
   }),
 );
 
@@ -481,7 +532,10 @@ router.post(
   withScenario(async (_req, res, { scenario }) => {
     const cfg = cfgOf(res);
     const computed = await cfg.compute(scenario.id, { force: true });
-    res.json({ computed });
+    // `.result` only. `computed` also carries the resolved facts, which exist for the
+    // completeness gate and are not part of the API contract — `res.json({ computed })`
+    // shipped every transaction amount in the fact set to the client.
+    res.json({ computed: computed.result });
   }),
 );
 
