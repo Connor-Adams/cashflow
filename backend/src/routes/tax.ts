@@ -11,6 +11,7 @@ import { ratesFor, supportedYears, RateTableMissingError } from '../tax/engine/b
 import { computeEntityReturn } from '../tax/services/computeEntityReturn';
 import { assertRatesUsable, ProjectedRatesError } from '../tax/engine/rateProvenance';
 import { buildCompletenessReport } from '../tax/completeness/buildCompletenessReport';
+import { buildOutlook } from '../tax/forward/buildOutlook';
 import type { CorpFiscalYear } from '../tax/engine/types';
 import { rollPersonalCarryforwards } from '../tax/services/rollPersonalCarryforwards';
 import { buildReconciliationReport } from '../tax/reconciliation/buildReport';
@@ -739,6 +740,85 @@ router.get('/personal/years', async (req, res, next) => {
     next(err);
   }
 });
+
+// GET /api/tax/personal/:year/outlook — what is coming: whether instalments are
+// required, what the three CRA options come to, when the balance is due, and the
+// year at its current run rate.
+//
+// Every other tax endpoint answers what happened. This is the one that answers what
+// Connor actually asked — "so I know what I'm getting myself into" — and his next
+// cash obligation is a date nothing in the app named.
+//
+// Not cached. The run-rate projection changes as the calendar advances with no fact
+// changing, which is the same reason the completeness report is recomputed per
+// request.
+router.get('/personal/:year/outlook', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const year = Number(req.params.year);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
+      return;
+    }
+
+    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    if (!entity) {
+      res.status(404).json({ error: 'no_personal_entity', message: 'No Personal entity for this household.' });
+      return;
+    }
+
+    res.json(serializeOutlook(await buildOutlook({ entityId: entity.id, year })));
+  } catch (err) {
+    if (err instanceof RateTableMissingError) {
+      res.status(409).json({ error: 'rate_table_missing', message: err.message });
+      return;
+    }
+    next(err);
+  }
+});
+
+/** Decimals to fixed strings; the outlook is Decimal-valued throughout. */
+function serializeOutlook(outlook: Awaited<ReturnType<typeof buildOutlook>>): unknown {
+  const money = (d: { toFixed: (n: number) => string }) => d.toFixed(2);
+  const instalments = (list: { dueOn: string; amount: { toFixed: (n: number) => string } }[]) =>
+    list.map((i) => ({ dueOn: i.dueOn, amount: money(i.amount) }));
+  return {
+    year: outlook.year,
+    netOwingByYear: outlook.netOwingByYear,
+    projectedCurrentYearNetOwing: outlook.projectedCurrentYearNetOwing,
+    provenanceWarnings: outlook.provenanceWarnings,
+    obligation: {
+      year: outlook.obligation.year,
+      required: outlook.obligation.required,
+      reason: outlook.obligation.reason,
+      balanceDueOn: outlook.obligation.balanceDueOn,
+      recommended: outlook.obligation.recommended,
+      instalments: instalments(outlook.obligation.instalments),
+      options: outlook.obligation.options.map((o) => ({
+        basis: o.basis,
+        total: money(o.total),
+        carriesInterestRisk: o.carriesInterestRisk,
+        instalments: instalments(o.instalments),
+      })),
+    },
+    forward: {
+      year: outlook.forward.year,
+      isProjection: outlook.forward.isProjection,
+      currentTotalPayable: outlook.forward.currentTotalPayable,
+      projectedTotalPayable: outlook.forward.projectedTotalPayable,
+      projectedAdditionalTax: outlook.forward.projectedAdditionalTax,
+      draws: {
+        actualToDate: money(outlook.forward.draws.actualToDate),
+        monthlyRunRate: money(outlook.forward.draws.monthlyRunRate),
+        projectedRemainder: money(outlook.forward.draws.projectedRemainder),
+        projectedTotal: money(outlook.forward.draws.projectedTotal),
+        coveredMonths: outlook.forward.draws.coveredMonths,
+        uncoveredMonths: outlook.forward.draws.uncoveredMonths,
+        basis: outlook.forward.draws.basis,
+      },
+    },
+  };
+}
 
 // GET /api/tax/personal/:year/instalments — list instalment payments for the year.
 router.get('/personal/:year/instalments', async (req, res, next) => {
