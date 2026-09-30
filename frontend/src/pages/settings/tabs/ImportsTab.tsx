@@ -64,6 +64,23 @@ type ReceiptImportResult = {
   }
 }
 
+type BulkReceiptImportResult = {
+  total: number
+  imported: number
+  duplicates: number
+  failed: number
+  results: Array<{
+    filename: string
+    status: 'imported' | 'duplicate' | 'failed'
+    parserId?: string
+    orderId?: number
+    warnings?: string[]
+    linksCreated?: number
+    linksUpdated?: number
+    error?: string
+  }>
+}
+
 type PurchaseHistoryCsvResult = {
   vendor: string
   fileName: string
@@ -96,6 +113,22 @@ async function postFormDataFile<T>(endpoint: string, file: File): Promise<T> {
   return (await res.json()) as T
 }
 
+async function postFormDataFiles<T>(endpoint: string, files: File[]): Promise<T> {
+  const fd = new FormData()
+  for (const f of files) fd.append('files', f)
+  const base = apiBase()
+  const res = await fetch(`${base}${endpoint}`, {
+    method: 'POST',
+    credentials: 'include',
+    body: fd,
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText)
+    throw new Error(text || `HTTP ${res.status}`)
+  }
+  return (await res.json()) as T
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -108,6 +141,7 @@ export function ImportsTab() {
   const [receiptBusy, setReceiptBusy] = useState<'text' | 'image' | 'csv' | 'pdf' | null>(null)
   const [receiptError, setReceiptError] = useState<string | null>(null)
   const [receiptResult, setReceiptResult] = useState<ReceiptImportResult | null>(null)
+  const [bulkReceiptResult, setBulkReceiptResult] = useState<BulkReceiptImportResult | null>(null)
   const [csvVendor, setCsvVendor] = useState<'apple' | 'google' | 'amazon' | 'other'>('apple')
   const [csvResult, setCsvResult] = useState<PurchaseHistoryCsvResult | null>(null)
 
@@ -218,6 +252,27 @@ export function ImportsTab() {
 
   function parseReceiptPdf(file: File) {
     return uploadReceiptFile(file, 'pdf', '/api/external-orders/import-pdf', 'PDF parse failed')
+  }
+
+  /** Several PDFs in one request. One bad file does not fail the rest. */
+  async function parseReceiptPdfs(files: File[]) {
+    if (receiptBusy) return
+    setReceiptBusy('pdf')
+    setReceiptError(null)
+    setReceiptResult(null)
+    setBulkReceiptResult(null)
+    try {
+      setBulkReceiptResult(
+        await postFormDataFiles<BulkReceiptImportResult>(
+          '/api/external-orders/import-pdf-bulk',
+          files,
+        ),
+      )
+    } catch (e) {
+      setReceiptError(e instanceof Error ? e.message : 'PDF parse failed')
+    } finally {
+      setReceiptBusy(null)
+    }
   }
 
   // ── Receipt capture handlers ─────────────────────────────────────────────
@@ -393,16 +448,18 @@ export function ImportsTab() {
               <input
                 type="file"
                 accept="application/pdf,.pdf"
+                multiple
                 disabled={receiptBusy != null}
                 style={{ display: 'none' }}
                 onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) void parseReceiptPdf(file)
+                  const files = Array.from(e.target.files ?? [])
+                  if (files.length === 1) void parseReceiptPdf(files[0])
+                  else if (files.length > 1) void parseReceiptPdfs(files)
                   e.target.value = ''
                 }}
               />
               <Icon name="sparkles" aria-hidden="true" />
-              {receiptBusy === 'pdf' ? 'Parsing PDF…' : 'Or upload a receipt PDF (Costco)'}
+              {receiptBusy === 'pdf' ? 'Parsing PDFs…' : 'Or upload receipt PDFs (Costco — select several)'}
             </label>
           </div>
           <div className="row" style={{ gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: '0.75rem' }}>
@@ -477,6 +534,30 @@ export function ImportsTab() {
           )}
           {receiptError && (
             <span className="error" role="alert">{receiptError}</span>
+          )}
+          {bulkReceiptResult && (
+            <div className="stack" style={{ gap: '0.35rem' }}>
+              <div>
+                <strong>
+                  {bulkReceiptResult.imported} imported
+                </strong>
+                {bulkReceiptResult.duplicates > 0 && ` · ${bulkReceiptResult.duplicates} already on file`}
+                {bulkReceiptResult.failed > 0 && ` · ${bulkReceiptResult.failed} failed`}
+                {` · ${bulkReceiptResult.total} file(s)`}
+              </div>
+              <ul className="stack" style={{ gap: '0.15rem', margin: 0, paddingLeft: '1rem' }}>
+                {bulkReceiptResult.results.map((r) => (
+                  <li key={r.filename} className={r.status === 'failed' ? undefined : 'muted'}>
+                    {r.filename} — {r.status}
+                    {r.error && `: ${r.error}`}
+                    {r.status === 'imported' &&
+                      (r.linksCreated ?? 0) + (r.linksUpdated ?? 0) > 0 &&
+                      ` · linked ${(r.linksCreated ?? 0) + (r.linksUpdated ?? 0)} payment(s)`}
+                    {r.warnings && r.warnings.length > 0 && ` · ${r.warnings.length} warning(s)`}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
           {receiptResult && (
             <div style={{ marginTop: '0.25rem', padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-md, 6px)' }}>
