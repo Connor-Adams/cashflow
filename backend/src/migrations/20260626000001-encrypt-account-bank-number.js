@@ -20,8 +20,8 @@
  *
  * Dual-dialect (SQLite + Postgres): column adds via queryInterface, backfill via
  * a row-by-row read/encrypt/write loop (no SQL crypto), index swap via
- * add/removeIndex, and column DROPS via `dropColumn` below — NOT
- * queryInterface.removeColumn, which wrecks the SQLite schema (see its comment).
+ * add/removeIndex, and column DROPS via the shared `dropColumn` helper — NOT
+ * queryInterface.removeColumn, which wrecks the SQLite schema (see the helper).
  * down() decrypts back to plaintext and restores the original column + index, so
  * the round-trip is reversible.
  *
@@ -30,6 +30,7 @@
  * likewise needs it to decrypt.
  */
 const { createCipheriv, createDecipheriv, createHmac, randomBytes } = require('crypto');
+const { dropColumn } = require('./helpers/sqliteDropColumn');
 
 const VERSION_BYTE = 0x01;
 const IV_LEN = 12;
@@ -79,33 +80,6 @@ function decryptSecret(envelopeBase64, key) {
  */
 function blindIndex(value, key) {
   return createHmac('sha256', key).update(value, 'utf8').digest('hex');
-}
-
-/**
- * Drop a column without letting SQLite's table rebuild mangle the schema.
- *
- * Sequelize 6 emulates `removeColumn` on SQLite by recreating the table from
- * `describeTable()`, and that rebuild is destructive twice over: it drops every
- * index on the table, and it re-reports each COMPOSITE unique index as a
- * per-COLUMN `UNIQUE` flag. On the real `accounts` table that turned
- * `UNIQUE (household_id, short_code)` into `household_id INTEGER UNIQUE` — one
- * account per household, ever — plus it lost AUTOINCREMENT and every FK action.
- * Verified, not theoretical: it broke `Account.create` for the second account in
- * a household.
- *
- * SQLite has had native `ALTER TABLE ... DROP COLUMN` since 3.35 (the bundled
- * sqlite3 ships 3.44), which alters in place and touches nothing else, so use it
- * directly and skip the rebuild. It refuses to drop an indexed column, which is
- * why both callers below remove the column's index first.
- */
-async function dropColumn(queryInterface, table, column) {
-  if (queryInterface.sequelize.getDialect() !== 'sqlite') {
-    await queryInterface.removeColumn(table, column);
-    return;
-  }
-  await queryInterface.sequelize.query(
-    `ALTER TABLE "${table}" DROP COLUMN "${column}"`,
-  );
 }
 
 const OLD_INDEX = 'accounts_household_bank_number_unique';
