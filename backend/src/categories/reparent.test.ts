@@ -5,6 +5,7 @@ import { sequelize } from '../db';
 import { Category, Household } from '../models';
 import { reparentCategory } from './reparent';
 import { CategoryError } from './errors';
+import { allowDuplicateCategoryNames } from './duplicateNameFixture.testHelper';
 
 let householdId: number;
 let work: Category, expenses: Category, home: Category;
@@ -38,12 +39,15 @@ test('rejects a name collision anywhere in the household, not just under the new
   // A third, unrelated branch ("Family") already has a same-named "expenses"
   // (case variant) — NOT under the new parent (home) and NOT under the old
   // parent (work). The old parentId-scoped check would have missed this and
-  // let the move through; the household-wide guard still catches it. This
-  // state (two nodes sharing a nameKey) is only reachable by bypassing
-  // createCategory/reparent (as here, via direct Category.create) — the
-  // household-wide unique index arriving in Task 6 forbids it via the app.
-  // That's the guard's whole remaining job: catching a pre-existing
+  // let the move through; the household-wide guard still catches it.
+  //
+  // categories_household_name_key_unique now forbids that state outright, so it
+  // is only reachable in a database predating migration 20260930000001 — drop
+  // the index to build it. The guard is what turns such a row into a clean
+  // `name_conflict` (a 409) instead of a raw SequelizeUniqueConstraintError on
+  // save, which is its whole remaining job: catching a pre-existing
   // inconsistency, not a parent-local one.
+  await allowDuplicateCategoryNames();
   const family = await Category.create({ householdId, name: 'Family', icon: null, parentId: null });
   await Category.create({ householdId, name: 'expenses', icon: null, parentId: family.id });
   await assert.rejects(

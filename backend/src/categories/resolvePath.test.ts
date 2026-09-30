@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { Category, Household } from '../models';
 import { resolveCategoryPath } from './resolvePath';
+import { allowDuplicateCategoryNames } from './duplicateNameFixture.testHelper';
 
 let householdId: number;
 
@@ -104,10 +105,13 @@ test('the name lookup emits ORDER BY id, so duplicates resolve deterministically
 });
 
 test('duplicate names resolve to the LOWEST (oldest) id', async () => {
-  // Prod shape until the Task 6 merge migration lands: the partial indexes let a
-  // root "Ai" coexist with a nested "Subscriptions / Ai". An unordered LIMIT 1
-  // would return whichever row the planner handed back; the resolver must always
-  // pick the oldest, matching the merge planner's lowest-id tie-break.
+  // The prod shape migration 20260930000001 cleaned up: the two partial indexes
+  // let a root "Ai" coexist with a nested "Subscriptions / Ai". An unordered
+  // LIMIT 1 would return whichever row the planner handed back; the resolver must
+  // always pick the oldest, matching the merge planner's lowest-id tie-break.
+  // categories_household_name_key_unique forbids the shape now, so it survives
+  // only in a database predating that migration — drop the index to build it.
+  await allowDuplicateCategoryNames();
   const subs = await Category.create({ householdId, name: 'Subscriptions', parentId: null });
   const nested = await Category.create({ householdId, name: 'Ai', parentId: subs.id });
   const duplicateRoot = await Category.create({ householdId, name: 'Ai', parentId: null });
@@ -122,18 +126,19 @@ test('duplicate names resolve to the LOWEST (oldest) id', async () => {
   // is set per connection, and SQLite runs an implicit `DELETE FROM` before a
   // `DROP TABLE` — so the next `sync({ force: true })` deletes "Subscriptions",
   // the belongsTo's default ON DELETE SET NULL promotes nested "Ai" to a root,
-  // and it collides with this duplicate root under
-  // categories_household_root_name_key_unique. The DROP then fails with
+  // and it collides with this duplicate root. The DROP then fails with
   // "UNIQUE constraint failed: categories.household_id, categories.name_key"
-  // and breaks the NEXT test's beforeEach. Drop the childless duplicate here so
-  // the leftover shape is one the drop can unwind.
+  // and breaks the NEXT test's beforeEach. `allowDuplicateCategoryNames()` above
+  // already removes the index this would violate; drop the childless duplicate
+  // anyway so the leftover shape is one the drop can unwind either way.
   await duplicateRoot.destroy();
 });
 
 test('"Food / Food" truncates to the Food node and does not throw', async () => {
   // The UI hands the user this exact string: flattenTreeToPaths emits every
   // node's full root-to-node path, and a child named "Food" under a root named
-  // "Food" is legal today (createCategory enforces only SIBLING uniqueness). A
+  // "Food" was legal before migration 20260930000001 made names unique per
+  // household. Such a tree still exists in any database not yet migrated, and a
   // 400 here would reject a value the server's own tree offered.
   const { leafId, createdIds } = await resolveCategoryPath(householdId, 'Food / Food');
   const food = await Category.findOne({ where: { householdId, nameKey: 'food' } });
@@ -149,7 +154,10 @@ test('"Food / Food" truncates to the Food node and does not throw', async () => 
 });
 
 test('the real UI shape — a child sharing its parent\'s name — resolves to the existing root', async () => {
-  // flattenTreeToPaths turns this legal tree into the string "Food / Food".
+  // flattenTreeToPaths turns this tree into the string "Food / Food". Names are
+  // unique per household now (migration 20260930000001), so the tree only exists
+  // in a database predating it — drop the index to reproduce it.
+  await allowDuplicateCategoryNames();
   const root = await Category.create({ householdId, name: 'Food', parentId: null });
   await Category.create({ householdId, name: 'Food', parentId: root.id });
   const { leafId, createdIds } = await resolveCategoryPath(householdId, 'Food / Food');
