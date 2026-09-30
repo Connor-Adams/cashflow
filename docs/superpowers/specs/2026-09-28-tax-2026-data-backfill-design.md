@@ -1,5 +1,26 @@
 # 2026 Tax Data Backfill — make Connor's actual 2026 return true
 
+> **STATE RE-VERIFIED against prod 2026-09-29, read-only.** Every claim below that
+> could be checked without the missing statement files still holds:
+>
+> | Step | Claim | Verified |
+> |---|---|---|
+> | 2 | txn 12139 needs a corp leg | 2026-01-10, +$15,000 CAD on account 14, `linked_transaction_id` NULL, `tax_treatment_override` NULL |
+> | 3 | "~25 duplicate pairs" | **34 groups** in 2026. 12 are structurally certain ($17,722.35 net), including all four account-13 pairs ($28,848.18). See part 1b's spec — its guess that the account-13 class was for-review was wrong. |
+> | 6 | Personal carryforwards stop at 2025 | `rrsp_room` 4122.9612, `fhsa_room` 8000 at `as_of_year` 2025; corp rolled to 2026 |
+> | 7 | Phantom opening balance on account 24 | `opening_balance` 899.1000 with a NULL `opening_balance_date`; first transaction 2026-04-09 |
+>
+> **This part is entirely operational** — imports, prod writes and manual review
+> decisions. Nothing in it is code, which is why it is the one part of the set that
+> cannot be completed without Connor: step 1 needs statement files, and steps 2, 5,
+> 6, 7 and 8 are prod writes that need a per-step go-ahead.
+>
+> Two of these now surface in the app on their own, via part 3's completeness gate:
+> txn 12139 as an `uncounted_transfer_in` gap, and the stale carryforwards as
+> `carryforwards_not_rolled`. Step 3's pairs surface as `duplicate_pairs`, and the
+> worklist for them is `backend/scripts/detect-duplicate-transactions.ts`.
+
+
 **Date:** 2026-09-28
 **Status:** Design; not yet implemented
 **Type:** Operational data work against production
