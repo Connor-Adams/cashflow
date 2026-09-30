@@ -17,17 +17,14 @@ test('rejects empty segments', () => {
   assert.throws(() => parseCategoryPath('  '), /invalid category path/);
 });
 
-test('rejects a path that repeats a segment name', () => {
-  // A name denotes one node per household, so the same name cannot be two
-  // different nodes on one path. Unrejected, resolveCategoryPath returned a leaf
-  // that was an ancestor of a node the same call had just created.
-  assert.throws(() => parseCategoryPath('Food / Bar / Food'), /invalid category path/);
-  assert.throws(() => parseCategoryPath('Food / Food'), /invalid category path/);
-});
-
-test('repeated-segment rejection uses the name_key normalizer, so case and spacing do not evade it', () => {
-  assert.throws(() => parseCategoryPath('Food / bar / FOOD'), /invalid category path/);
-  assert.throws(() => parseCategoryPath('Food /   food  '), /invalid category path/);
+test('a repeated segment name parses: this is a pure parser, not a validator', () => {
+  // A repeated name is handled by resolveCategoryPath, which TRUNCATES the path
+  // at the repetition (a name denotes one household node, so the repeat adds no
+  // information). Rejecting here would 400 "Food / Food", which the UI's own
+  // tree flattener hands the user whenever a child shares its parent's name.
+  assert.deepEqual(parseCategoryPath('Food / Food'), ['Food', 'Food']);
+  assert.deepEqual(parseCategoryPath('Food / Bar / Food'), ['Food', 'Bar', 'Food']);
+  assert.deepEqual(parseCategoryPath('Food / bar / FOOD'), ['Food', 'bar', 'FOOD']);
 });
 
 test('distinct segments that merely share a prefix are still accepted', () => {
@@ -39,10 +36,9 @@ test('the rejection message stays exactly "invalid category path" (both callers 
   // cannot fail the batch; routes/categories.ts POST /resolve-path maps it to a
   // 400. Decorating the message would turn those into a thrown batch and a 500.
   assert.throws(
-    () => parseCategoryPath('Food / Bar / Food'),
-    (err: Error & { repeatedSegment?: string }) => {
+    () => parseCategoryPath('Work//Internet'),
+    (err: Error) => {
       assert.equal(err.message, 'invalid category path');
-      assert.equal(err.repeatedSegment, 'Food');
       return true;
     },
   );

@@ -52,12 +52,46 @@ async function findByName(
   });
 }
 
+/**
+ * Reduce a path to its longest prefix containing no repeated `name_key`.
+ *
+ * Under the household-global lookup above a name denotes exactly ONE node per
+ * household, so a segment that repeats an earlier name adds no information: it
+ * can only resolve back to the node the walk has already visited. Walking past
+ * it is incoherent either way — it returns a `leafId` that is an ANCESTOR of a
+ * node the same call just created (leaving that node dangling and unreachable),
+ * or it contradicts the earlier segment. Truncating keeps the answer
+ * well-defined and creates nothing after the repetition, so the orphan is
+ * impossible by construction.
+ *
+ * Truncating rather than REJECTING matters because the UI hands users these
+ * paths: `flattenTreeToPaths` in `frontend/src/lib/categoriesApi.ts` emits every
+ * node's full root-to-node path, and `createCategory.ts` enforces only SIBLING
+ * uniqueness — so a child `Food` under a root `Food` is legal on today's schema
+ * and flattens to `"Food / Food"`. A 400 there would reject a value the server's
+ * own tree offered.
+ *
+ * `"Food / Food"` walks `['Food']` → the `Food` node, creating nothing.
+ * `"Food / Bar / Food"` walks `['Food', 'Bar']` → `Bar` under `Food`.
+ */
+function truncateAtRepeatedName(segments: string[]): string[] {
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const segment of segments) {
+    const nameKey = normalizeCategoryName(segment);
+    if (seen.has(nameKey)) break;
+    seen.add(nameKey);
+    kept.push(segment);
+  }
+  return kept;
+}
+
 export async function resolveCategoryPath(
   householdId: number,
   input: string,
   opts: { transaction?: Transaction } = {},
 ): Promise<ResolvedPath> {
-  const segments = parseCategoryPath(input);
+  const segments = truncateAtRepeatedName(parseCategoryPath(input));
 
   const run = async (transaction: Transaction): Promise<ResolvedPath> => {
     let parentId: number | null = null;
@@ -77,6 +111,12 @@ export async function resolveCategoryPath(
           // on SQLite, and production is Postgres. With the savepoint, Sequelize
           // issues ROLLBACK TO SAVEPOINT on the failure, the outer transaction
           // survives, and the re-lookup can find the row the winner committed.
+          // That re-lookup depends on READ COMMITTED — Postgres's default, and
+          // nothing in backend/src sets `isolationLevel`. Under REPEATABLE READ
+          // the outer snapshot predates the winner's commit, so the re-lookup
+          // returns null and the original violation is rethrown: a safe failure,
+          // not a wrong answer, but a silent surprise if the isolation level is
+          // ever raised.
           node = await sequelize.transaction({ transaction }, (inner) =>
             Category.create(
               { householdId, parentId, name: segment, icon: null },

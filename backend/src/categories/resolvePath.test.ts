@@ -78,7 +78,32 @@ test('a name absent from the household is still created at the walk position', a
   assert.equal((await Category.findByPk(leaf!.parentId!))?.name, 'Work');
 });
 
-test('duplicate names resolve deterministically to the LOWEST (oldest) id', async () => {
+test('the name lookup emits ORDER BY id, so duplicates resolve deterministically', async () => {
+  // Asserting the RESULT is vacuous: SQLite's natural scan order already returns
+  // the lower rowid, so a fixture-based test passes with or without the `order`
+  // clause in resolvePath.ts. The determinism guarantee lives in the SQL, and
+  // only Postgres (no heap order) can actually violate it — so assert the clause
+  // is emitted, the way the SAVEPOINT test below does.
+  const sql: string[] = [];
+  const original = sequelize.options.logging;
+  sequelize.options.logging = (line: string) => {
+    sql.push(line);
+  };
+  try {
+    await resolveCategoryPath(householdId, 'Subscriptions / Ai');
+  } finally {
+    sequelize.options.logging = original;
+  }
+  // The by-name lookup is the only SELECT that filters on name_key.
+  const lookups = sql.filter((line) => /SELECT/.test(line) && /name_key/.test(line));
+  assert.ok(lookups.length > 0, `no name_key lookup was logged, got: ${sql.join(' | ')}`);
+  const orderedById = /ORDER BY\s+[`"[]?Category[`"\]]?\.[`"[]?id[`"\]]?\s+ASC/;
+  for (const lookup of lookups) {
+    assert.match(lookup, orderedById);
+  }
+});
+
+test('duplicate names resolve to the LOWEST (oldest) id', async () => {
   // Prod shape until the Task 6 merge migration lands: the partial indexes let a
   // root "Ai" coexist with a nested "Subscriptions / Ai". An unordered LIMIT 1
   // would return whichever row the planner handed back; the resolver must always
@@ -105,21 +130,55 @@ test('duplicate names resolve deterministically to the LOWEST (oldest) id', asyn
   await duplicateRoot.destroy();
 });
 
-test('a path that repeats a name is rejected and creates nothing', async () => {
-  // Before the rejection this returned { leafId: <root Food>, createdIds: [<Bar>] }:
-  // a leaf that is an ANCESTOR of the node the same call created, leaving "Bar"
-  // dangling and empty.
-  await assert.rejects(
-    () => resolveCategoryPath(householdId, 'Food / Bar / Food'),
-    /invalid category path/,
-  );
-  assert.equal(await Category.count({ where: { householdId } }), 0, 'no partial rows');
+test('"Food / Food" truncates to the Food node and does not throw', async () => {
+  // The UI hands the user this exact string: flattenTreeToPaths emits every
+  // node's full root-to-node path, and a child named "Food" under a root named
+  // "Food" is legal today (createCategory enforces only SIBLING uniqueness). A
+  // 400 here would reject a value the server's own tree offered.
+  const { leafId, createdIds } = await resolveCategoryPath(householdId, 'Food / Food');
+  const food = await Category.findOne({ where: { householdId, nameKey: 'food' } });
+  assert.equal(leafId, food!.id);
+  assert.deepEqual(createdIds, [food!.id], 'only the single "Food" node is created');
+  assert.equal(await Category.count({ where: { householdId } }), 1);
 
-  await assert.rejects(
-    () => resolveCategoryPath(householdId, 'Food / bar / FOOD'),
-    /invalid category path/,
-  );
-  assert.equal(await Category.count({ where: { householdId } }), 0, 'no partial rows');
+  // Second call resolves to the same node and creates nothing.
+  const again = await resolveCategoryPath(householdId, 'Food / Food');
+  assert.equal(again.leafId, food!.id);
+  assert.deepEqual(again.createdIds, []);
+  assert.equal(await Category.count({ where: { householdId } }), 1);
+});
+
+test('the real UI shape — a child sharing its parent\'s name — resolves to the existing root', async () => {
+  // flattenTreeToPaths turns this legal tree into the string "Food / Food".
+  const root = await Category.create({ householdId, name: 'Food', parentId: null });
+  await Category.create({ householdId, name: 'Food', parentId: root.id });
+  const { leafId, createdIds } = await resolveCategoryPath(householdId, 'Food / Food');
+  assert.equal(leafId, root.id, 'resolves household-globally to the oldest "Food"');
+  assert.deepEqual(createdIds, [], 'creates nothing');
+  assert.equal(await Category.count({ where: { householdId } }), 2);
+});
+
+test('"Food / Bar / Food" truncates to Food / Bar, creating no unreachable node', async () => {
+  // Before the truncation this returned { leafId: <root Food>, createdIds: [<Bar>] }:
+  // a leaf that is an ANCESTOR of the node the same call created, leaving "Bar"
+  // dangling and empty. Nothing is created after the truncation point now, so
+  // the orphan is impossible by construction.
+  const { leafId, createdIds } = await resolveCategoryPath(householdId, 'Food / Bar / Food');
+  const food = await Category.findOne({ where: { householdId, nameKey: 'food' } });
+  const bar = await Category.findOne({ where: { householdId, nameKey: 'bar' } });
+  assert.equal(leafId, bar!.id, 'the leaf is Bar, not its own ancestor');
+  assert.deepEqual(createdIds, [food!.id, bar!.id]);
+  assert.equal(bar!.parentId, food!.id, 'Bar is reachable from the returned chain');
+  assert.equal(food!.parentId, null);
+  assert.equal(await Category.count({ where: { householdId } }), 2, 'no extra rows');
+});
+
+test('the repeated-name truncation uses the name_key normalizer, so case does not evade it', async () => {
+  const { leafId, createdIds } = await resolveCategoryPath(householdId, 'Food / bar / FOOD');
+  const bar = await Category.findOne({ where: { householdId, nameKey: 'bar' } });
+  assert.equal(leafId, bar!.id);
+  assert.equal(createdIds.length, 2);
+  assert.equal(await Category.count({ where: { householdId } }), 2);
 });
 
 test('the create is wrapped in a SAVEPOINT so a unique violation cannot abort the outer transaction', async () => {
