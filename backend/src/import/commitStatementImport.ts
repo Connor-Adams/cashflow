@@ -12,7 +12,7 @@ import {
 } from '../models';
 import { loadAllRules } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
-import { findExistingForDedup } from './dedupExisting';
+import { findExistingForDedup, nearDuplicateWarnings } from './dedupExisting';
 import { normalizeSourceRef } from './normalizeSourceRef';
 import { findExistingInvestmentByFuzzyMatch } from './fuzzyDedupInvestmentActivity';
 import { stableIdentityFingerprint } from './fingerprint';
@@ -492,6 +492,19 @@ export async function commitStatementImport(
   let insertedInvestmentActivities = 0;
   let insertedHoldings = 0;
   let skippedDuplicates = 0;
+  /**
+   * Existing transaction ids the narrative-rename dedup tier may no longer
+   * claim: rows an earlier incoming row already matched, plus rows this commit
+   * inserted. That tier keys on (account, date, amount, currency) with the
+   * merchant text excluded, and the key is not unique, so without this set two
+   * incoming rows sharing it would both absorb the SAME existing row (or the
+   * second would absorb the first, freshly inserted, row) and a real cash event
+   * would be silently dropped. Same role as `excludeIds` in the investment
+   * fuzzy matcher.
+   */
+  const consumedExistingIds = new Set<number>();
+  /** Date-shifted near-misses dedup declined, one entry per incoming row. */
+  const nearDuplicates: number[][] = [];
   let ratePeriodsWritten = 0;
   /**
    * Rows the deterministic stages could not resolve (review_flag still true),
@@ -521,11 +534,14 @@ export async function commitStatementImport(
         incomingAmount: row.amount,
         incomingCurrency: row.currency,
         incomingMerchantRaw: row.merchantRaw,
+        consumedExistingIds,
       });
       if (dedup.kind !== 'no-match') {
+        consumedExistingIds.add(dedup.existingId);
         skippedDuplicates += 1;
         continue;
       }
+      if (dedup.nearMissCandidateIds) nearDuplicates.push(dedup.nearMissCandidateIds);
       // All three reads thread `t` — see the matching comment in runImport.ts:
       // un-threaded raw queries cannot see rows inserted earlier in this same
       // import on Postgres (READ COMMITTED, separate pooled connection).
@@ -733,6 +749,7 @@ export async function commitStatementImport(
           }
         });
         insertedTransactions += 1;
+        consumedExistingIds.add(txn.id);
         if (f.reviewFlag) {
           const merchantKey = (f.merchantCanonical ?? '').trim() || f.merchantClean.trim();
           if (merchantKey.length > 0) {
@@ -928,7 +945,7 @@ export async function commitStatementImport(
     rowErrors: preview.rowErrors,
     parseErrors: preview.parseErrors,
     acceptedUnreconciled,
-    warnings: preview.warnings,
+    warnings: [...preview.warnings, ...nearDuplicateWarnings(nearDuplicates)],
     usedParser: preview.usedParser,
     usedProfileId: preview.usedProfileId,
     profileInferred: preview.profileInferred,
