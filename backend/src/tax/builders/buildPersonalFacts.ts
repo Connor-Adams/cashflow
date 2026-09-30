@@ -476,6 +476,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     nonCapLoss: D(cf.find((c) => c.kind === 'non_cap_loss')?.amount ?? 0),
     instalmentsPaid: D(cf.find((c) => c.kind === 'instalments_paid')?.amount ?? 0),
     fhsaLifetimeContributions: D(cf.find((c) => c.kind === 'fhsa_lifetime_contribs')?.amount ?? 0),
+    // Written by the roll and, until now, never read — so the FHSA deduction was
+    // capped at one year's annual limit and a carried-forward year was lost.
+    fhsaRoom: D(cf.find((c) => c.kind === 'fhsa_room')?.amount ?? 0),
   };
 
   // Phase 4: override instalmentsPaid from InstalmentPayment ledger rows for this year

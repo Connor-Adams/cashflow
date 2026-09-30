@@ -53,15 +53,30 @@ export async function rollPersonalCarryforwards(
   const contribsUsed = sumD(facts.rrspContribs.map(c => c.amount));
   const rrspRoom = maxZero(facts.carryforwards.rrspRoom.plus(newRoom).minus(contribsUsed));
 
-  // FHSA room: annual limit capped by $40k lifetime limit.
-  // Track cumulative contributions so room goes to zero once lifetime cap is hit.
+  // FHSA room accumulates, then is bounded by what the $40k lifetime cap leaves.
+  //
+  // This used to be min(annualLimit, lifetimeRemaining), which capped the stored
+  // value at one year's limit forever — so an unused year vanished and no read-side
+  // change could ever allow a catch-up contribution. CRA lets up to one year's
+  // unused participation room carry forward, exactly as the RRSP line above does.
   const fhsaAnnualLimit = r.fhsaAnnualLimit;
   const fhsaLifetimeLimit = r.fhsaLifetimeLimit;
   const fhsaUsed = sumD(facts.fhsaContribs.map(c => c.amount));
   const priorLifetimeContribs = facts.carryforwards.fhsaLifetimeContributions;
   const newLifetimeContribs = priorLifetimeContribs.plus(fhsaUsed);
   const lifetimeRemaining = maxZero(fhsaLifetimeLimit.minus(newLifetimeContribs));
-  const fhsaRoom = Decimal.min(fhsaAnnualLimit, lifetimeRemaining);
+  // CRA: next year's participation room is next year's annual limit plus this
+  // year's UNUSED room, and the carry-forward is itself capped at one annual
+  // limit — so the most anyone can have available is two years' worth.
+  //
+  // `carryforwards.fhsaRoom` is what was available THIS year. Zero means the roll
+  // has never run for this entity, in which case this year's room was the annual
+  // limit.
+  const roomThisYear = facts.carryforwards.fhsaRoom.greaterThan(0)
+    ? facts.carryforwards.fhsaRoom
+    : fhsaAnnualLimit;
+  const unusedThisYear = Decimal.min(maxZero(roomThisYear.minus(fhsaUsed)), fhsaAnnualLimit);
+  const fhsaRoom = Decimal.min(fhsaAnnualLimit.plus(unusedThisYear), lifetimeRemaining);
 
   const writes: Array<{ kind: string; amount: Decimal }> = [
     { kind: 'cap_loss', amount: netCapLoss },

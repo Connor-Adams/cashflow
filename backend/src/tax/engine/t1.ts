@@ -221,11 +221,21 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
     facts.rrspContribs.map((c) => ({ source: c.source, amount: c.amount })),
     `min(contribs, rrspRoom=${facts.carryforwards.rrspRoom.toFixed(2)})`);
 
-  // FHSA deduction L20805 — capped at annual limit ($8,000)
-  const fhsa = Decimal.min(sumD(facts.fhsaContribs.map((c) => c.amount)), r.fhsaAnnualLimit);
+  // FHSA deduction L20805 — bounded by stored participation room, which the roll
+  // accumulates and already bounds by the $40k lifetime cap. Capping at the annual
+  // limit here lost a carried-forward year: a contributor who skipped 2026 has
+  // $16,000 available in 2027 and could only ever deduct $8,000.
+  //
+  // A zero room with contributions present means the roll has not run for this
+  // entity yet, so fall back to the annual limit rather than deducting nothing —
+  // under-deducting silently would be worse than the old behaviour.
+  const fhsaRoom = facts.carryforwards.fhsaRoom.greaterThan(0)
+    ? facts.carryforwards.fhsaRoom
+    : r.fhsaAnnualLimit;
+  const fhsa = Decimal.min(sumD(facts.fhsaContribs.map((c) => c.amount)), fhsaRoom);
   push('L20805', 'FHSA deduction', fhsa,
     facts.fhsaContribs.map((c) => ({ source: c.source, amount: c.amount })),
-    `min(fhsaContribs, fhsaAnnualLimit=${r.fhsaAnnualLimit.toFixed(2)})`);
+    `min(fhsaContribs, fhsaRoom=${fhsaRoom.toFixed(2)})`);
 
   // SE CPP deductible half L22200 — deductible against net income (employer half)
   const seCppDeductible = seCppContrib.dividedBy(2);

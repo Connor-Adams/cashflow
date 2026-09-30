@@ -38,6 +38,12 @@ export type PersonalCarryforwards = {
   instalmentsPaid: Decimal;
   /** Cumulative FHSA contributions across all years (tracks $40k lifetime cap). */
   fhsaLifetimeContributions: Decimal;
+  /**
+   * FHSA participation room carried in, which the roll accumulates. CRA lets up to
+   * one year's unused room carry forward, so this can legitimately exceed the
+   * annual limit — a contributor who skipped a year has two years available.
+   */
+  fhsaRoom: Decimal;
 };
 
 export type CorpFiscalYear = {

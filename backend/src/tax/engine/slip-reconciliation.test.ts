@@ -22,7 +22,7 @@ const baseFacts = (): TaxYearFacts => ({
   rentalIncome: [],
   rentalExpenses: [],
   medicalExpenses: [],
-  carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('0'), nonCapLoss: D('0'), instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0') },
+  carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('0'), nonCapLoss: D('0'), instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0'), fhsaRoom: D('0') },
   ageAtYearEnd: 40,
 });
 
@@ -161,4 +161,30 @@ test('T3 box 50 is the taxable eligible dividend amount, not box 49', () => {
   const ret = buildT1(facts, r);
   const l12000 = ret.lines.find((l) => l.code === 'L12000');
   assert.equal(l12000?.amount.toFixed(2), '1380.00');
+});
+
+// FHSA deduction is bounded by stored participation room, not by the annual limit.
+// A contributor who skipped a year has two years available; capping at the annual
+// limit lost the carried year. `fhsa_room` was computed and persisted by the roll
+// and never read.
+test('FHSA deduction uses stored room, so a catch-up year deducts both years', () => {
+  const r = ratesFor(2026);
+  const facts = baseFacts();
+  facts.year = 2026;
+  facts.fhsaContribs = [{ source: 'WS FHSA', amount: D('16000'), date: '2026-03-01' }];
+  facts.carryforwards = { ...facts.carryforwards, fhsaRoom: D('16000') };
+  const ret = buildT1(facts, r);
+  const l20805 = ret.lines.find((l) => l.code === 'L20805');
+  assert.equal(l20805?.amount.toFixed(2), '16000.00');
+});
+
+test('FHSA deduction is still bounded — a contribution past the room is capped', () => {
+  const r = ratesFor(2026);
+  const facts = baseFacts();
+  facts.year = 2026;
+  facts.fhsaContribs = [{ source: 'WS FHSA', amount: D('16000'), date: '2026-03-01' }];
+  facts.carryforwards = { ...facts.carryforwards, fhsaRoom: D('4000') };
+  const ret = buildT1(facts, r);
+  const l20805 = ret.lines.find((l) => l.code === 'L20805');
+  assert.equal(l20805?.amount.toFixed(2), '4000.00');
 });
