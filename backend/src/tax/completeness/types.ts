@@ -155,5 +155,13 @@ export interface CompletenessTxn {
   isTaxClassified: boolean;
   /** True when this row's linked counterpart belongs to a corp entity. */
   counterpartIsCorp: boolean;
+  /**
+   * The amount in CAD, converted where the row is not already CAD.
+   *
+   * There is no `cad_amount` column — `buildPersonalFacts` converts through `toCad`
+   * per row, and so does the loader here. Detectors must sum THIS, not `amount`:
+   * 2026 holds 30 USD transfers, and summing those as CAD would misreport the size of
+   * a blocker and misprice its tax.
+   */
   cadAmount: Decimal;
 }

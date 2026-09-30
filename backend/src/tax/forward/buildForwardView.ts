@@ -1,5 +1,6 @@
 import { Op } from 'sequelize';
 import { Entity, Transaction } from '../../models';
+import { toCad } from '../../fx/toCad';
 import { D } from '../util/decimal';
 import { buildT1 } from '../engine/t1';
 import { addNonEligibleDividend } from '../completeness/estimateTaxImpact';
@@ -95,7 +96,7 @@ async function loadMonthlyDrawActivity(entityId: number, year: number): Promise<
 
   const txns = await Transaction.findAll({
     where: { entityId, date: { [Op.between]: [`${year}-01-01`, `${year}-12-31`] } },
-    attributes: ['id', 'date', 'amount', 'txnType', 'linkedTransactionId'],
+    attributes: ['id', 'date', 'amount', 'currency', 'txnType', 'linkedTransactionId'],
   });
 
   const linkedIds = txns
@@ -121,7 +122,14 @@ async function loadMonthlyDrawActivity(entityId: number, year: number): Promise<
     const isDraw = (t as unknown as { txnType?: string | null }).txnType === 'transfer'
       && counterpart !== null
       && corpEntityIds.has(counterpart);
-    if (isDraw) entry.draws = entry.draws.plus(D(String(t.amount)));
+    if (isDraw) {
+      // 2026 holds 30 USD transfers. A run rate summed across currencies would be a
+      // meaningless average, and it feeds a tax estimate.
+      const currency = t.currency ?? 'CAD';
+      const raw = D(String(t.amount));
+      const cad = currency === 'CAD' ? raw : (await toCad(raw, currency, String(t.date))).cad;
+      entry.draws = entry.draws.plus(cad);
+    }
     byMonth.set(month, entry);
   }
   return [...byMonth.values()].sort((a, b) => a.month - b.month);

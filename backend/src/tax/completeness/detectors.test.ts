@@ -32,12 +32,15 @@ function facts(over: Partial<TaxYearFacts> = {}): TaxYearFacts {
 }
 
 function txn(over: Partial<CompletenessTxn> & Pick<CompletenessTxn, 'id'>): CompletenessTxn {
-  return {
+  const base = {
     accountId: 14, date: '2026-03-01', amount: '-1000', txnType: null,
     linkedTransactionId: null, isLinkTarget: false, taxTreatmentOverride: null,
-    isTaxClassified: false, counterpartIsCorp: false, cadAmount: D('-1000'),
+    isTaxClassified: false, counterpartIsCorp: false,
     ...over,
   };
+  // cadAmount tracks amount unless a case sets it deliberately. The detectors sum the
+  // CAD figure, so a fixture whose two fields disagree silently tests neither.
+  return { ...base, cadAmount: over.cadAmount ?? D(base.amount) };
 }
 
 /** A context with nothing wrong. Each case perturbs exactly one thing. */

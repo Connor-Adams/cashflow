@@ -271,3 +271,34 @@ test('duplicate pairs in the period surface as a gap with the overstatement', as
   assert.ok(item, report.gaps.map((g) => g.kind).join(', '));
   assert.equal(item.amount, '-2000.00');
 });
+
+test('a USD draw is reported in CAD, not at its face value', async () => {
+  // There is no cad_amount column: `buildPersonalFacts` converts per row through
+  // toCad and so must this loader. 2026 holds 30 USD transfers in prod, and summing
+  // those as CAD would both misstate the blocker's size and misprice its tax.
+  //
+  // An earlier version of this code read a `cadAmount` property off Transaction that
+  // does not exist, so it silently fell back to the raw amount and every non-CAD row
+  // was reported at face value.
+  const { FxRate } = await import('../../models');
+  await FxRate.create({
+    fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: '2026-04-01',
+    rate: '1.40', source: 'test', fetchedAt: new Date(),
+  } as never);
+
+  const corpLeg = await Transaction.create({
+    accountId: chequingId, householdId, entityId: corpId,
+    date: '2026-04-01', amount: '-10000', currency: 'USD',
+    merchantRaw: 'X', merchantClean: 'X', txnType: 'transfer',
+    importBatch: 'b', sourceRowFingerprint: 'u1', sourceIdentityFingerprint: 'su1',
+  } as never);
+  await txn({
+    date: '2026-04-01', amount: '10000', currency: 'USD',
+    txnType: 'transfer', linkedTransactionId: corpLeg.id,
+  });
+
+  const report = await build();
+  const draws = report.blockers.find((b) => b.kind === 'unclassified_corp_draws');
+  assert.ok(draws, report.blockers.map((b) => b.kind).join(', '));
+  assert.equal(draws.amount, '14000.00', 'USD 10,000 at 1.40, not 10,000');
+});

@@ -6,6 +6,7 @@ import { D } from '../util/decimal';
 import { resolveTaxTreatment, type TaxTreatmentMaps } from '../builders/resolveTaxTreatment';
 import { activityIdsWithTransaction } from '../../import/wsDepositActivityMigration';
 import { detectDuplicateTransactions } from '../../import/detectDuplicateTransactions';
+import { toCad } from '../../fx/toCad';
 import { DETECTORS } from './detectors';
 import { worstStatus } from './status';
 import type { RateTable, TaxYearFacts } from '../engine/types';
@@ -161,11 +162,18 @@ async function toCompletenessTxns(
   const corpEntityIds = new Set(corpEntities.map((e) => e.id));
   const counterpartEntity = new Map(counterparts.map((c) => [c.id, c.entityId ?? null]));
 
-  return txns.map((t): CompletenessTxn => {
+  const out: CompletenessTxn[] = [];
+  for (const t of txns) {
     const counterpart = t.linkedTransactionId != null
       ? counterpartEntity.get(t.linkedTransactionId) ?? null
       : null;
-    return {
+    // Only non-CAD rows pay for a conversion, so the common path stays a plain map.
+    const currency = t.currency ?? 'CAD';
+    const raw = D(String(t.amount));
+    const cadAmount = currency === 'CAD'
+      ? raw
+      : (await toCad(raw, currency, String(t.date))).cad;
+    out.push({
       id: t.id,
       accountId: t.accountId,
       date: String(t.date),
@@ -176,9 +184,10 @@ async function toCompletenessTxns(
       taxTreatmentOverride: t.taxTreatmentOverride ?? null,
       isTaxClassified: resolveTaxTreatment(t, maps) !== 'none',
       counterpartIsCorp: counterpart !== null && corpEntityIds.has(counterpart),
-      cadAmount: D(String((t as unknown as { cadAmount?: unknown }).cadAmount ?? t.amount)),
-    };
-  });
+      cadAmount,
+    });
+  }
+  return out;
 }
 
 async function loadActivities(

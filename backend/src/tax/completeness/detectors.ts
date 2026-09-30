@@ -1,4 +1,4 @@
-import { D } from '../util/decimal';
+import { D, type Decimal } from '../util/decimal';
 import { addNonEligibleDividend, estimateTaxImpact } from './estimateTaxImpact';
 import {
   BROKERAGE_CASH_LEG_ACCOUNT_IDS,
@@ -10,6 +10,11 @@ const OPT_IN_ACCOUNTS = new Set<number>(BROKERAGE_CASH_LEG_ACCOUNT_IDS);
 
 function sumAbs(amounts: readonly string[]): string {
   return amounts.reduce((acc, a) => acc.plus(D(a).abs()), D('0')).toFixed(2);
+}
+
+/** Sums the CAD-converted amounts. 2026 holds 30 USD transfers; `amount` is not CAD. */
+function sumAbsCad(rows: readonly { cadAmount: Decimal }[]): string {
+  return rows.reduce((acc, r) => acc.plus(r.cadAmount.abs()), D('0')).toFixed(2);
 }
 
 // ---------------------------------------------------------------------------
@@ -38,7 +43,7 @@ export function detectUnclassifiedCorpDraws(ctx: CompletenessContext): Completen
   );
   if (rows.length === 0) return [];
 
-  const amount = sumAbs(rows.map((t) => t.amount));
+  const amount = sumAbsCad(rows);
   return [{
     kind: 'unclassified_corp_draws',
     severity: 'blocker',
