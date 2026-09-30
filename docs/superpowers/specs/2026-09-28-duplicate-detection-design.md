@@ -1,7 +1,7 @@
 # Duplicate Detection and Supersession — retroactively, without deleting anything
 
 **Date:** 2026-09-28
-**Status:** Design; not yet implemented
+**Status:** Implemented 2026-09-29 — detector module, script wrapper, prod verification below
 **Type:** Data integrity, backend
 **Part:** 1b of 7 — **scoped to detect-and-report** (2026-09-28)
 
@@ -130,6 +130,39 @@ at all, so those are likely for-review too — confirm against prod before the i
 plan is written. Classifying the account-14 pairs for review is the correct outcome
 regardless: they are the class the withdrawn criterion would have merged on a false
 premise.
+
+### CONFIRMED against prod, 2026-09-29 — and the guess above was wrong twice
+
+Read-only query over `transactions` for 2026, replicating the rule below:
+
+| Verdict | Groups | Surplus rows | Ledger overstates by |
+|---|---|---|---|
+| **certain** | 12 | 12 | **$17,722.35** net |
+| for review | 22 | 22 | $3,627.76 net |
+| *(of the certain, account 13 alone)* | 4 | 4 | **$28,848.18** |
+
+Two corrections:
+
+1. **All four account-13 pairs DO share one `linked_transaction_id`** — they are
+   *certain*, not for review. The largest single class, the $28,848.18 phantom corp
+   inflow, is the most confidently detectable one, not the least.
+2. **Eight of the twelve account-14 pairs also share one link**, so they are certain
+   too. The paragraph above predicted the opposite for both classes. The withdrawn
+   `import_batch` criterion was still right to go: it would have merged the *other*
+   22 groups, which include the $6–$14 recurring-fee shapes.
+
+**The certain pairs are structurally duplicates, verified rather than assumed.** Each
+group's counterpart carries the negation of **one** leg (e.g. txns 2764 and 3329 at
++7,348.18 both point at txn 2937 at −7,348.18). A legitimate two-into-one
+aggregation would show a counterpart at twice the leg amount; none does. Every one of
+the 24 rows is categorised `Transfer` whose `taxTreatment` is `none`, carries the
+default split, has no receipt and no override — so none is disqualified by criterion
+3, and the certainty verdict survives contact with the real data.
+
+The count is **34 groups in 2026**, not the "25+" this spec estimated.
+
+The Amex RAILWAY pair (11559/11748, −$20.73 — the one with actual T1 exposure) does
+**not** share a link, and is correctly for-review.
 
 Explicitly **not** certain: two identical amounts on one day from one import
 (the recurring $6.00 RBC monthly fees, equal staking rewards, two genuine $1,000

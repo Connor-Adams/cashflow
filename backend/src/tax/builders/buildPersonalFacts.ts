@@ -13,7 +13,6 @@ import {
   User,
 } from '../../models';
 import { D, Decimal, sumD } from '../util/decimal';
-import { isTaxTreatment } from '@cashflow/shared';
 import type {
   CapGainEvent,
   IncomeItem,
@@ -23,7 +22,7 @@ import type {
   TaxYearFacts,
 } from '../engine/types';
 import { computeAcb, type AcbActivity, type AcbRealizedEvent } from '../../portfolio/acb';
-import { inheritedTaxTreatment } from '../../categories/inheritedTaxTreatment';
+import { resolveTaxTreatment } from './resolveTaxTreatment';
 import { toCad } from '../../fx/toCad';
 import { dividendDedupDays } from '../../config/env';
 
@@ -169,23 +168,11 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
       amount: D(t.amount as unknown as string),
       cadAmount: cad,
     };
-    // Resolve via the transaction's category treatment; fall back to the
-    // finalCategory string itself when it is a tax-treatment keyword. This keeps
-    // the pre-category snake_case categories (e.g. 'employment_income') working
-    // when no Category.taxTreatment / per-txn override is set.
-    // Per-txn override wins; otherwise the category's treatment, inherited from
-    // ancestors when the category itself is 'none' (resolve by id to honour the
-    // hierarchy and dodge same-named-category collisions); finally fall back to
-    // the legacy name map for rows with no finalCategoryId.
-    let treatment =
-      t.taxTreatmentOverride ??
-      (t.finalCategoryId != null
-        ? inheritedTaxTreatment(catById, t.finalCategoryId)
-        : catTreatment.get(t.finalCategory ?? '')) ??
-      'none';
-    if (treatment === 'none' && t.finalCategory && isTaxTreatment(t.finalCategory)) {
-      treatment = t.finalCategory;
-    }
+    // Four routes, override first — see `resolveTaxTreatment`. Shared with the
+    // duplicate detector, which must ask "is this row classified?" with this exact
+    // ladder: three of the four routes leave `taxTreatmentOverride` null, so the
+    // obvious shortcut would report a categorised row as untouched.
+    const treatment = resolveTaxTreatment(t, { catById, catTreatment });
     if (treatment !== 'none') classifiedTxnIds.add(t.id as number);
     // Corp→personal distributions + payroll (income-queue) fold into the same
     // treatment routing. loan_advance/loan_repayment/not_income are explicitly
