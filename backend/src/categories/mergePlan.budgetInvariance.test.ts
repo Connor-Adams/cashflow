@@ -71,6 +71,38 @@ function repairPaths(spend: FixtureSpend[]): FixtureSpend[] {
       : r);
 }
 
+/**
+ * One budget's spend, with `categoryId` supplied by the caller rather than read
+ * off the row — so a single budget can be priced under the before shape, the
+ * plan's chosen shape, and a hypothetical wrong shape, from the same spend rows.
+ */
+function spentForCategoryId(
+  cats: FixtureCategory[],
+  budget: FixtureBudget,
+  categoryId: number | null,
+  spend: FixtureSpend[],
+): number {
+  const tree = treeOf(cats);
+  const [progress] = computeBudgetProgress(
+    [{
+      id: budget.id,
+      category: budget.category,
+      currency: budget.currency,
+      amount: budget.amount,
+      categoryNames: categoryId != null ? categoryAndDescendantNames(tree, categoryId) : null,
+    }],
+    spendMap(spend),
+    BOUNDS,
+  );
+  return Number(progress.spent.toFixed(2));
+}
+
+function budgetById(id: number): FixtureBudget {
+  const row = FIXTURE_BUDGETS.find((b) => b.id === id);
+  assert.ok(row, `fixture budget ${id}`);
+  return row;
+}
+
 test('the plan picks the reference-heavy node and deletes exactly 15 losers', () => {
   const { plan } = applyPlan(FIXTURE_CATEGORIES, FIXTURE_BUDGETS);
   const pairs = plan.merges.map((m) => `${m.loserId}->${m.winnerId}`).sort();
@@ -93,6 +125,26 @@ test('Rule B detaches exactly the two budgets whose counted set would widen', ()
   }
 });
 
+/**
+ * What this proves, and what it does not.
+ *
+ * PROVES: no budget's September-2026 spend moves as a side effect of the merge.
+ * It is a regression net for spend MOVEMENT across all 23 budgets at once —
+ * valuable if a future change to the planner starts shifting figures.
+ *
+ * DOES NOT prove the merge rules are right. `computeBudgetProgress` keys spend by
+ * category NAME, and both halves of every duplicate pair share a name by
+ * construction, so swapping which half wins moves nothing here: Rule W is
+ * invisible to this test. Rule B is invisible too, because the only two
+ * categories it protects (`Snowboarding Gear` under Clothing 13, `Clublink`
+ * under Golf 19) happen to have zero September-2026 spend. Both mutations —
+ * Rule W picking the FEWEST references, Rule B disabled entirely — leave this
+ * test green.
+ *
+ * Rule W is pinned by 'the plan picks the reference-heavy node...' above.
+ * Rule B is pinned by 'Rule B prevents the Clublink double-count...' below.
+ * This test alone is NOT evidence that the merge is safe.
+ */
 test('the merge alone changes no budget spend at all', () => {
   const before = spentByBudget(FIXTURE_CATEGORIES, FIXTURE_BUDGETS, FIXTURE_SPEND);
   const { nextCats, nextBudgets } = applyPlan(FIXTURE_CATEGORIES, FIXTURE_BUDGETS);
@@ -123,12 +175,70 @@ test('the path-form repair moves exactly three budgets, to exactly these values'
   }
 });
 
-test('the no-rollup budgets keep a name string when their id is detached', () => {
-  const { nextBudgets } = applyPlan(FIXTURE_CATEGORIES, FIXTURE_BUDGETS);
-  for (const id of [16, 17]) {
-    const row = nextBudgets.find((b) => b.id === id)!;
-    assert.equal(row.categoryId, null);
-    assert.ok(row.category.length > 0,
-      'reconcileCategoryField nulls the string when the id changes; the migration must write raw SQL');
+/**
+ * The falsifiable Rule B test. Prices budget 17 (`Golf`) three ways over the same
+ * spend rows and pins the plan's answer to the before figure while showing the
+ * naive alternative is measurably wrong. Deleting Rule B from the planner — or
+ * making it always `repoint` — fails this test.
+ *
+ * Note the shape Rule B produces: `category_id = NULL` with the `category` NAME
+ * string retained, which `computeBudgetProgress` prices as an exact-name match
+ * with no rollup. That is the behaviour under test here, and the reason the
+ * migration must write these two rows with raw SQL: `reconcileCategoryField`
+ * nulls the `category` string whenever `categoryId` changes, which would turn
+ * these budgets into whole-currency totals (`category == null` is the
+ * total-by-currency branch) instead of exact-name budgets. A later task's
+ * migration test enforces that against a real database.
+ */
+test('Rule B prevents the Clublink double-count that a naive repoint would cause', () => {
+  // SYNTHETIC ROWS. `Clublink` and `Snowboarding Gear` have no September 2026
+  // spend in prod, so the real fixture cannot exercise the trap that motivated
+  // Rule B: a child name that only a rolled-up winner would pull in. One row per
+  // trap, added here rather than in mergePlanFixture.ts so the checked-in fixture
+  // stays a faithful production snapshot.
+  const CLUBLINK = 879;
+  const SNOWBOARDING = 512.25;
+  const spend: FixtureSpend[] = [
+    ...FIXTURE_SPEND,
+    { currency: 'CAD', finalCategory: 'Clublink', spent: CLUBLINK },
+    { currency: 'CAD', finalCategory: 'Snowboarding Gear', spent: SNOWBOARDING },
+  ];
+
+  const { plan, nextCats } = applyPlan(FIXTURE_CATEGORIES, FIXTURE_BUDGETS);
+  const actionOf = (budgetId: number) => {
+    const a = plan.budgetActions.find((x) => x.budgetId === budgetId);
+    assert.ok(a, `plan has an action for budget ${budgetId}`);
+    return a;
+  };
+
+  const TRAPS = [
+    // budget, childless duplicate root (before), rollup winner (naive), trap name
+    { budgetId: 17, beforeId: 76, naiveId: 19, delta: CLUBLINK, trap: 'Clublink' },
+    { budgetId: 16, beforeId: 75, naiveId: 13, delta: SNOWBOARDING, trap: 'Snowboarding Gear' },
+  ];
+
+  for (const { budgetId, beforeId, naiveId, delta, trap } of TRAPS) {
+    const budget = budgetById(budgetId);
+    assert.equal(budget.categoryId, beforeId, `budget ${budgetId} starts on the duplicate root`);
+
+    // 1. Before the merge: the childless duplicate root counts its own name only.
+    const before = spentForCategoryId(FIXTURE_CATEGORIES, budget, beforeId, spend);
+
+    // 2. With Rule B: the plan detaches, so the budget prices by exact name.
+    const action = actionOf(budgetId);
+    assert.equal(action.action, 'detach', `Rule B must detach budget ${budgetId}`);
+    assert.equal(action.categoryId, null);
+    const ruleB = spentForCategoryId(nextCats, budget, action.categoryId, spend);
+    assert.equal(ruleB, before,
+      `INVARIANT: budget ${budgetId} counts the same spend after the merge as before it`);
+
+    // 3. With a naive repoint onto the winner: ${trap} is rolled up and double-counted.
+    const naive = spentForCategoryId(nextCats, budget, naiveId, spend);
+    assert.equal(naive, Number((before + delta).toFixed(2)),
+      `a naive repoint of budget ${budgetId} onto ${naiveId} adds ${trap}'s ${delta}`);
+    assert.ok(naive > before,
+      `a naive repoint of budget ${budgetId} inflates its spend`);
+    assert.notEqual(naive, ruleB,
+      `Rule B and the naive repoint must differ for budget ${budgetId}, or this test proves nothing`);
   }
 });
