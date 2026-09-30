@@ -24,3 +24,27 @@ export function parseCategoryPath(input: string): string[] {
   }
   return segments;
 }
+
+/**
+ * The LEAF segment of a possibly path-form category string.
+ *
+ * This is the fallback the AI writers use when `ensureCategory` returns null —
+ * which it does for a null/empty name, a malformed path, or a null household.
+ * Writing the raw string back in that case is exactly the bug: it is what put
+ * ~200 path-form values like `"Household / Rent"` into `final_category`, where
+ * they match no budget at all, because every budget and spend rollup joins that
+ * column as an exact string. Falling back to the last segment keeps the value
+ * joinable even when nothing resolved: `"Household / Rent"` becomes `"Rent"`.
+ *
+ * Unlike {@link parseCategoryPath} this never throws — empty segments are
+ * skipped, not rejected, because a fire-and-forget enrichment writer's fallback
+ * must not fail the batch. Null when there is no non-empty segment at all.
+ */
+export function categoryLeafSegment(input: string | null | undefined): string | null {
+  if (input == null) return null;
+  const segments = input
+    .split('/')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return segments.length > 0 ? segments[segments.length - 1] : null;
+}

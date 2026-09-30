@@ -3,6 +3,7 @@ import { ExternalOrder, ExternalOrderItem } from '../models';
 import { loadCategoryHints } from '../ai/suggestTransaction';
 import { openaiJsonWithMeta, type OpenAiJsonResult } from '../ai/openaiJson';
 import { AMAZON_CATEGORIES, categorizeAmazonItem } from './categories';
+import { categoryLeafSegment } from '../categories/path';
 
 export const AMAZON_ITEM_CATEGORIZATION_PROMPT_VERSION =
   'amazon-item-categorization-v1';
@@ -335,12 +336,22 @@ export async function categorizeAmazonItemsWithAi(
 
 export async function applyAmazonItemCategorySuggestions(
   suggestions: AmazonItemCategorySuggestion[],
+  householdId: number | null,
 ): Promise<number> {
+  const { ensureCategory } = await import('../util/ensureCategory');
   let updated = 0;
   for (const suggestion of suggestions) {
+    // A static update bypasses the beforeSave category-id hook, so resolve the
+    // id here and store the leaf's FLAT name — the model echoes back path-form
+    // hints, and a path form in a category mirror joins nothing. Same shape as
+    // aiBatchOverColdRows; the fallback is the leaf segment, never the raw
+    // string, because the raw string may itself be the path form.
+    const leaf =
+      householdId == null ? null : await ensureCategory(householdId, suggestion.category);
     const [count] = await ExternalOrderItem.update(
       {
-        inferredCategory: suggestion.category,
+        inferredCategory: leaf?.name ?? categoryLeafSegment(suggestion.category),
+        inferredCategoryId: leaf?.id ?? null,
         businessUsePercent:
           suggestion.businessUsePercent == null
             ? null

@@ -26,6 +26,7 @@ import {
 } from '../computeImportConfidence';
 import { mergeSignals } from './computeReviewFlag';
 import { resolveFinalCategory } from '../calculateShares';
+import { categoryLeafSegment } from '../../categories/path';
 import type { Signal } from './types';
 import type { MerchantMemoryMatch } from '../../ai/merchantMemory';
 import { Transaction, TransactionSignal } from '../../models';
@@ -133,38 +134,55 @@ export function aiSuggestionToSignal(sug: {
   };
 }
 
-async function persistAiEnhancement(c: ColdRow, aiSignal: Signal, householdId: number | null): Promise<boolean> {
+/** Exported for tests — see dedupeColdRowsByMerchantKey, aiSuggestionToSignal. */
+export async function persistAiEnhancement(c: ColdRow, aiSignal: Signal, householdId: number | null): Promise<boolean> {
   const merged = mergeSignals([...c.signals, aiSignal]);
   // `final_category` is the column every read path aggregates on (spend
   // rollups, the Sankey aggregator, the uncategorised bucket), so a row this
   // stage resolves has to land there or the whole fallback is inert. The
   // user's own `categoryOverride` still wins — see resolveFinalCategory.
   const finalCategory = resolveFinalCategory(c.categoryOverride, merged.fields.autoCategory);
-  // Re-classify import confidence with the merged enrichment fields. An AI
-  // suggestion that fills a category and turns reviewFlag off should move
-  // the row from 'needs_review' back to 'clean' on the dashboard. It is told
-  // the value actually persisted below, not a stand-in for it.
-  const confidence = computeImportConfidence({
-    reviewFlag: merged.fields.reviewFlag,
-    finalCategory,
-    autoCategory: merged.fields.autoCategory,
-    autoSplitType: merged.fields.autoSplitType,
-    finalSplitType:
-      merged.fields.autoSplitType === 'partner' ||
-      merged.fields.autoSplitType === 'shared'
-        ? merged.fields.autoSplitType
-        : 'me',
-    txnType: c.txnType,
-    accountVisibility: c.accountVisibility,
-    linkedTransactionId: merged.fields.linkedTransactionId,
-    amount: c.amount,
-  });
   try {
-    // NOTE: static update/bulkCreate bypasses the beforeSave category-id hook, so *_category_id stays null momentarily (auto_category_id and final_category_id alike). Migration 20260623000001 backfills any null FKs where the category string is set.
+    // Resolve BEFORE the write. A static update bypasses the beforeSave
+    // category-id hook, so the ids have to be supplied explicitly — and the
+    // string mirrors have to be the resolved node's FLAT name, because
+    // loadCategoryHints feeds the model path-form hints it echoes back, and
+    // every budget and spend rollup joins final_category as an exact string.
+    const { ensureCategory } = await import('../../util/ensureCategory');
+    const autoLeaf =
+      householdId == null ? null : await ensureCategory(householdId, merged.fields.autoCategory);
+    const finalLeaf =
+      householdId == null ? null : await ensureCategory(householdId, finalCategory);
+    // When resolution comes back null (null household, empty name, malformed
+    // path) fall back to the LEAF SEGMENT, never the raw string — writing the
+    // raw string back is the bug, since it may itself be the path form.
+    const autoCategoryName = autoLeaf?.name ?? categoryLeafSegment(merged.fields.autoCategory);
+    const finalCategoryName = finalLeaf?.name ?? categoryLeafSegment(finalCategory);
+    // Re-classify import confidence with the merged enrichment fields. An AI
+    // suggestion that fills a category and turns reviewFlag off should move
+    // the row from 'needs_review' back to 'clean' on the dashboard. It is told
+    // the values actually persisted below, not stand-ins for them.
+    const confidence = computeImportConfidence({
+      reviewFlag: merged.fields.reviewFlag,
+      finalCategory: finalCategoryName,
+      autoCategory: autoCategoryName,
+      autoSplitType: merged.fields.autoSplitType,
+      finalSplitType:
+        merged.fields.autoSplitType === 'partner' ||
+        merged.fields.autoSplitType === 'shared'
+          ? merged.fields.autoSplitType
+          : 'me',
+      txnType: c.txnType,
+      accountVisibility: c.accountVisibility,
+      linkedTransactionId: merged.fields.linkedTransactionId,
+      amount: c.amount,
+    });
     await Transaction.update(
       {
-        autoCategory: merged.fields.autoCategory,
-        finalCategory,
+        autoCategory: autoCategoryName,
+        autoCategoryId: autoLeaf?.id ?? null,
+        finalCategory: finalCategoryName,
+        finalCategoryId: finalLeaf?.id ?? null,
         autoBusiness: merged.fields.autoBusiness,
         autoSplitType: merged.fields.autoSplitType,
         autoPctMe: merged.fields.autoPctMe,
@@ -184,10 +202,6 @@ async function persistAiEnhancement(c: ColdRow, aiSignal: Signal, householdId: n
       fields: aiSignal.fields,
       rationale: aiSignal.rationale ?? null,
     });
-    if (householdId != null) {
-      const { ensureCategory } = await import('../../util/ensureCategory');
-      await ensureCategory(householdId, merged.fields.autoCategory);
-    }
     return true;
   } catch (err) {
     logger.warn({ err, txnId: c.txnId, module: 'enrichment' }, 'enrichment_ai_batch_post_update_failed');

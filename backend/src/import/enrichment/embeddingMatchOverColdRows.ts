@@ -30,6 +30,7 @@ import {
 } from './embeddingMatchStage';
 import { mergeSignals } from './computeReviewFlag';
 import { resolveFinalCategory } from '../calculateShares';
+import { categoryLeafSegment } from '../../categories/path';
 import {
   computeImportConfidence,
   serializeFlags,
@@ -106,31 +107,44 @@ async function persistEmbeddingMatch(
   // rollups, the Sankey aggregator, the uncategorised bucket), so a row this
   // stage matches has to land there or the match is invisible downstream. The
   // user's own `categoryOverride` still wins — see resolveFinalCategory.
-  // computeImportConfidence is told the value actually persisted below.
+  // computeImportConfidence is told the values actually persisted below.
   const finalCategory = resolveFinalCategory(c.categoryOverride, merged.fields.autoCategory);
-  const confidence = computeImportConfidence({
-    reviewFlag: merged.fields.reviewFlag,
-    finalCategory,
-    autoCategory: merged.fields.autoCategory,
-    autoSplitType: merged.fields.autoSplitType,
-    finalSplitType:
-      merged.fields.autoSplitType === 'partner' || merged.fields.autoSplitType === 'shared'
-        ? merged.fields.autoSplitType
-        : 'me',
-    txnType: c.txnType,
-    accountVisibility: c.accountVisibility,
-    linkedTransactionId: merged.fields.linkedTransactionId,
-    amount: c.amount,
-  });
   try {
-    // NOTE: static update bypasses the beforeSave category-id hook, so
-    // *_category_id stays null momentarily (auto_category_id and
-    // final_category_id alike). Migration 20260623000001 backfills any null
-    // FKs where the category string is set.
+    // Resolve BEFORE the write. A static update bypasses the beforeSave
+    // category-id hook, so the ids have to be supplied explicitly — and the
+    // string mirrors have to be the resolved node's FLAT name, because every
+    // budget and spend rollup joins final_category as an exact string, so a
+    // path form there matches no budget at all.
+    const { ensureCategory } = await import('../../util/ensureCategory');
+    const autoLeaf =
+      householdId == null ? null : await ensureCategory(householdId, merged.fields.autoCategory);
+    const finalLeaf =
+      householdId == null ? null : await ensureCategory(householdId, finalCategory);
+    // When resolution comes back null (null household, empty name, malformed
+    // path) fall back to the LEAF SEGMENT, never the raw string — writing the
+    // raw string back is the bug, since it may itself be the path form.
+    const autoCategoryName = autoLeaf?.name ?? categoryLeafSegment(merged.fields.autoCategory);
+    const finalCategoryName = finalLeaf?.name ?? categoryLeafSegment(finalCategory);
+    const confidence = computeImportConfidence({
+      reviewFlag: merged.fields.reviewFlag,
+      finalCategory: finalCategoryName,
+      autoCategory: autoCategoryName,
+      autoSplitType: merged.fields.autoSplitType,
+      finalSplitType:
+        merged.fields.autoSplitType === 'partner' || merged.fields.autoSplitType === 'shared'
+          ? merged.fields.autoSplitType
+          : 'me',
+      txnType: c.txnType,
+      accountVisibility: c.accountVisibility,
+      linkedTransactionId: merged.fields.linkedTransactionId,
+      amount: c.amount,
+    });
     await Transaction.update(
       {
-        autoCategory: merged.fields.autoCategory,
-        finalCategory,
+        autoCategory: autoCategoryName,
+        autoCategoryId: autoLeaf?.id ?? null,
+        finalCategory: finalCategoryName,
+        finalCategoryId: finalLeaf?.id ?? null,
         autoBusiness: merged.fields.autoBusiness,
         autoSplitType: merged.fields.autoSplitType,
         autoPctMe: merged.fields.autoPctMe,
@@ -150,10 +164,6 @@ async function persistEmbeddingMatch(
       fields: signal.fields,
       rationale: signal.rationale ?? null,
     });
-    if (householdId != null) {
-      const { ensureCategory } = await import('../../util/ensureCategory');
-      await ensureCategory(householdId, merged.fields.autoCategory);
-    }
     return true;
   } catch (err) {
     logger.warn({ err, txnId: c.txnId, module: 'enrichment' }, 'enrichment_embedding_persist_failed');

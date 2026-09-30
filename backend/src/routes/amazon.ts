@@ -287,7 +287,7 @@ router.post('/categorize/run', aiSuggestLimiter, async (req, res, next) => {
       itemIds,
       limit,
     });
-    const updated = await applyAmazonItemCategorySuggestions(result.suggestions);
+    const updated = await applyAmazonItemCategorySuggestions(result.suggestions, household.id);
     // Recompute review flags for any transactions linked to the categorized order.
     if (orderId != null) {
       await recomputeTransactionsReviewFromItems(await transactionIdsForOrder(orderId));
