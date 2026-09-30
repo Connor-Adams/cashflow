@@ -16,6 +16,8 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { Router } from 'express';
 import { currentAuth } from '../auth/middleware';
+import { ratesFor } from '../tax/engine/brackets';
+import { assertRatesUsable } from '../tax/engine/rateProvenance';
 import { Entity, Scenario } from '../models';
 import { logger } from '../observability/logger';
 import {
@@ -324,6 +326,25 @@ router.get(
   '/:kind/:id',
   withScenario(async (_req, res, { scenario }) => {
     const cfg = cfgOf(res);
+    // Enforced HERE — at the request boundary — and deliberately not inside
+    // `computeScenarioReturn`. A projection resolves its parent by computing it
+    // (`projectPersonalFactsFromPrevYear` calls `computeScenario`), so a refusal
+    // sitting inside compute cascades: a 2026 chain rooted at the unverified 2024
+    // table would refuse to show 2026, which is the opposite of the point.
+    // Refusing to SERVE a closed year's return computed from recalled constants
+    // is the claim worth making; an ancestor computed as machinery is not that
+    // claim. Surfacing weaker-provenance inputs is part 3's completeness report.
+    //
+    // Pre-cache by construction: nothing is read before this runs.
+    //
+    // `${year}-12-31` is right for corp too — `resolveCorpScenario` builds every
+    // corp scenario's fiscal year as the calendar year. The off-calendar case
+    // exists only on `/api/tax/corp/:fiscalYear/return`, which passes the real
+    // end date.
+    assertRatesUsable(ratesFor(scenario.year), {
+      periodEnd: `${scenario.year}-12-31`,
+      now: new Date(),
+    });
     const computed = await cfg.compute(scenario.id);
     res.json({ scenario, computed });
   }),

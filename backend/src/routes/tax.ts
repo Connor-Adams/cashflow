@@ -9,6 +9,7 @@ import { buildT1 } from '../tax/engine/t1';
 import { buildT2 } from '../tax/engine/t2';
 import { ratesFor, supportedYears, RateTableMissingError } from '../tax/engine/brackets';
 import { computeEntityReturn } from '../tax/services/computeEntityReturn';
+import { assertRatesUsable, ProjectedRatesError } from '../tax/engine/rateProvenance';
 import type { CorpFiscalYear } from '../tax/engine/types';
 import { rollPersonalCarryforwards } from '../tax/services/rollPersonalCarryforwards';
 import { buildReconciliationReport } from '../tax/reconciliation/buildReport';
@@ -378,6 +379,7 @@ router.get('/personal/:year/return', async (req, res, next) => {
 
     const facts = await buildPersonalFacts(entity.id, year);
     const rates = ratesFor(year);
+    assertRatesUsable(rates, { periodEnd: `${year}-12-31`, now: new Date() });
     const result = await computeEntityReturn({
       entityId: entity.id,
       cacheYear: year,
@@ -418,6 +420,14 @@ router.get('/personal/:year/return', async (req, res, next) => {
       res.status(409).json({
         error: 'rate_table_missing',
         message: (err as Error).message,
+      });
+      return;
+    }
+    if (err instanceof ProjectedRatesError) {
+      res.status(409).json({
+        error: 'rate_table_projected',
+        message: err.message,
+        year: err.year,
       });
       return;
     }
@@ -786,6 +796,9 @@ router.get('/corp/:fiscalYear/return', async (req, res, next) => {
     // year the facts cover — an off-calendar year end straddles two.
     const snapshotYear = Number(fiscalYear.startDate.slice(0, 4));
     const rateTable = ratesFor(snapshotYear);
+    // The fiscal year's own end date, not December 31: an off-calendar year end
+    // closes mid-calendar-year and a year-based check would call it open.
+    assertRatesUsable(rateTable, { periodEnd: fiscalYear.endDate, now: new Date() });
     const result = await computeEntityReturn({
       entityId: entity.id,
       cacheYear: snapshotYear,
@@ -805,6 +818,14 @@ router.get('/corp/:fiscalYear/return', async (req, res, next) => {
       res.status(409).json({
         error: 'rate_table_missing',
         message: (err as Error).message,
+      });
+      return;
+    }
+    if (err instanceof ProjectedRatesError) {
+      res.status(409).json({
+        error: 'rate_table_projected',
+        message: err.message,
+        year: err.year,
       });
       return;
     }

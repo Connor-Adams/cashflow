@@ -84,3 +84,4 @@ test('the stored key is the versioned key, so the next call hits', async () => {
   assert.equal(rows.length, 1);
   assert.equal(rows[0].factsHash, a.factsHash);
 });
+
