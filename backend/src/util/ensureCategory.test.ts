@@ -85,6 +85,16 @@ test('ensureCategory: swallows an invalid path (empty segment) without throwing 
   assert.equal(rows.length, 0);
 });
 
+test('ensureCategory: swallows a repeated-segment path without throwing or writing', async () => {
+  // `ensureCategory` matches the rejection by `err.message === 'invalid category
+  // path'`, so the repeated-name rejection must reuse that exact message —
+  // otherwise a bad enrichment mirror name would fail the whole batch.
+  const hh = await Household.create({ name: 'H' });
+  await ensureCategory(hh.id, 'Food / Bar / Food');
+  const rows = await Category.findAll({ where: { householdId: hh.id } });
+  assert.equal(rows.length, 0);
+});
+
 test('ensureCategory: preserves existing icon on re-upsert', async () => {
   const hh = await Household.create({ name: 'H' });
   await ensureCategory(hh.id, 'Coffee');
