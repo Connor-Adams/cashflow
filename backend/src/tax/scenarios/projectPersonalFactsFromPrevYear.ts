@@ -54,11 +54,11 @@ export async function projectPersonalFactsFromPrevYear(
       // computeScenario returns serialised totals/lines; rollPersonalCarryforwards
       // needs a TaxReturn-shape struct. Reconstruct only the fields it reads.
       year: parent.year,
-      lines: parentReturn.lines as never,
+      lines: parentReturn.result.lines as never,
       totals: {
-        ...(parentReturn.totals as Record<string, unknown>),
+        ...(parentReturn.result.totals as Record<string, unknown>),
       } as never,
-      warnings: parentReturn.warnings,
+      warnings: parentReturn.result.warnings,
     } as never,
     parentFacts,
     rates,

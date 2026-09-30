@@ -2309,3 +2309,71 @@ export interface SplitTransactionResponse {
    *  reimbursements list endpoint's `data[]`). */
   claims: unknown[];
 }
+
+// ---------------------------------------------------------------------------
+// Tax completeness — what a return does not know
+// ---------------------------------------------------------------------------
+
+/** Worst-wins across every completeness item. */
+export type CompletenessStatus = 'complete' | 'gaps' | 'blocked'
+
+/**
+ * `blocker` — known-missing money whose size is known or boundable; the total is
+ * demonstrably wrong. `gap` — a correctness risk of unknown size; the total may be
+ * right.
+ */
+export type CompletenessSeverity = 'blocker' | 'gap'
+
+/** Where the reader goes to clear an item. */
+export type CompletenessFixSurface =
+  | 'classify'
+  | 'import'
+  | 'duplicates'
+  | 'slips'
+  | 'carryforwards'
+  | 'securities'
+  | 'rates'
+  | 'transactions'
+
+export interface CompletenessItemDto {
+  kind: string
+  severity: CompletenessSeverity
+  title: string
+  detail: string
+  /** Money missing or at risk, signed as the ledger holds it. `null` where no honest figure exists. */
+  amount: string | null
+  /**
+   * Tax this would add if fixed. `null` where the money's character is unknown —
+   * rendering an invented figure is worse than rendering none.
+   */
+  taxEstimate: string | null
+  fix: { surface: CompletenessFixSurface; label: string }
+  references: number[]
+}
+
+export interface CompletenessReportDto {
+  status: CompletenessStatus
+  checkedAt: string
+  /**
+   * Latest transaction date the report saw, or `null` for an empty period. Rendered
+   * even when complete: absence of warning must be affirmative, or "no problems" and
+   * "nobody checked" look identical.
+   */
+  coverageThrough: string | null
+  blockers: CompletenessItemDto[]
+  gaps: CompletenessItemDto[]
+}
+
+/** The personal T1 / corp T2 return as the scenario and return routes serve it. */
+export interface TaxReturnDto {
+  cached: boolean
+  computedAt: string
+  lines: unknown[]
+  totals: Record<string, unknown>
+  warnings: string[]
+  /**
+   * Present on the personal T1 paths. Absent for corp returns — the same hole exists
+   * on the T2 side and is deliberately out of scope for now.
+   */
+  completeness?: CompletenessReportDto
+}

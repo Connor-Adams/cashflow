@@ -18,6 +18,19 @@ export interface ScenarioReturnResult {
   cached: boolean;
 }
 
+/**
+ * A computation plus the facts it ran on.
+ *
+ * The facts are deliberately NOT a field on `ScenarioReturnResult`: six routes do
+ * `res.json({ computed })` with that object, and putting the resolved fact set on it
+ * shipped every transaction amount to the client. A caller that wants the facts asks
+ * for them here, so the wire-shaped result cannot carry them by accident.
+ */
+export interface ScenarioComputation<F> {
+  result: ScenarioReturnResult;
+  facts: F;
+}
+
 /** What an engine (buildT1 / buildT2) yields after computing a return. */
 export interface EngineReturn {
   lines: unknown;
@@ -37,7 +50,7 @@ export async function computeScenarioReturn<F>(
   resolveFacts: (scenarioId: number) => Promise<F>,
   runEngine: (facts: F) => EngineReturn,
   options: ComputeScenarioReturnOptions = {},
-): Promise<ScenarioReturnResult> {
+): Promise<ScenarioComputation<F>> {
   const scenario = await Scenario.findByPk(scenarioId);
   if (!scenario) throw new Error(`scenario id=${scenarioId} not found`);
 
@@ -51,7 +64,7 @@ export async function computeScenarioReturn<F>(
       where: { scenarioId, factsHash },
     });
     if (cached) {
-      return {
+      return { facts, result: {
         scenarioId,
         factsHash,
         computedAt: cached.computedAt.toISOString(),
@@ -59,7 +72,7 @@ export async function computeScenarioReturn<F>(
         totals: cached.totals as Record<string, unknown>,
         warnings: cached.warnings as string[],
         cached: true,
-      };
+      } };
     }
   }
 
@@ -88,13 +101,16 @@ export async function computeScenarioReturn<F>(
       });
 
   return {
-    scenarioId,
-    factsHash,
-    computedAt: row.computedAt.toISOString(),
-    lines,
-    totals,
-    warnings,
-    cached: false,
+    facts,
+    result: {
+      scenarioId,
+      factsHash,
+      computedAt: row.computedAt.toISOString(),
+      lines,
+      totals,
+      warnings,
+      cached: false,
+    },
   };
 }
 

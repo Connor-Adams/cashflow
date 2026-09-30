@@ -35,7 +35,7 @@ async function seedEntity() {
 test('computeScenario returns a TaxReturn shape with lines + totals + warnings', async () => {
   const { entity } = await seedEntity();
   const baseline = await ensureBaselineScenario(entity.id, 2025);
-  const result = await computeScenario(baseline.id);
+  const result = (await computeScenario(baseline.id)).result;
   assert.ok(Array.isArray(result.lines));
   assert.ok('totalPayable' in result.totals);
   assert.ok(Array.isArray(result.warnings));
@@ -44,7 +44,7 @@ test('computeScenario returns a TaxReturn shape with lines + totals + warnings',
 test('computeScenario writes a ScenarioReturn cache row on first call', async () => {
   const { entity } = await seedEntity();
   const baseline = await ensureBaselineScenario(entity.id, 2025);
-  await computeScenario(baseline.id);
+  (await computeScenario(baseline.id)).result;
   const cached = await ScenarioReturn.findAll({ where: { scenarioId: baseline.id } });
   assert.equal(cached.length, 1);
 });
@@ -52,8 +52,8 @@ test('computeScenario writes a ScenarioReturn cache row on first call', async ()
 test('computeScenario reuses cache on second call with same inputs', async () => {
   const { entity } = await seedEntity();
   const baseline = await ensureBaselineScenario(entity.id, 2025);
-  const r1 = await computeScenario(baseline.id);
-  const r2 = await computeScenario(baseline.id);
+  const r1 = (await computeScenario(baseline.id)).result;
+  const r2 = (await computeScenario(baseline.id)).result;
   const cached = await ScenarioReturn.findAll({ where: { scenarioId: baseline.id } });
   assert.equal(cached.length, 1);
   assert.equal(r1.totals.totalPayable, r2.totals.totalPayable);
@@ -68,9 +68,9 @@ test('computeScenario recomputes when overrides change (different facts_hash)', 
     overrides: { 'income.employment': 120000 },
     assumptions: {}, nextYearId: null, notes: null,
   });
-  await computeScenario(fork.id);
+  (await computeScenario(fork.id)).result;
   await fork.update({ overrides: { 'income.employment': 150000 } });
-  await computeScenario(fork.id);
+  (await computeScenario(fork.id)).result;
   const cached = await ScenarioReturn.findAll({ where: { scenarioId: fork.id } });
   assert.equal(cached.length, 2); // two distinct facts_hash rows
 });
@@ -78,8 +78,8 @@ test('computeScenario recomputes when overrides change (different facts_hash)', 
 test('computeScenario({ force: true }) bypasses cache and writes a new row', async () => {
   const { entity } = await seedEntity();
   const baseline = await ensureBaselineScenario(entity.id, 2025);
-  await computeScenario(baseline.id);
-  await computeScenario(baseline.id, { force: true });
+  (await computeScenario(baseline.id)).result;
+  (await computeScenario(baseline.id, { force: true })).result;
   // Even if hash matches, the force path writes a fresh row.
   const cached = await ScenarioReturn.findAll({ where: { scenarioId: baseline.id } });
   assert.ok(cached.length >= 1);

@@ -47,7 +47,7 @@ test('a second call with identical facts and engine is served from cache', async
   const first = countingEngine('100');
   await computeScenarioReturn(scenario.id, resolve, first.engine);
   const second = countingEngine('100');
-  const result = await computeScenarioReturn(scenario.id, resolve, second.engine);
+  const { result } = await computeScenarioReturn(scenario.id, resolve, second.engine);
   assert.equal(result.cached, true);
   assert.equal(second.runs(), 0, 'engine must not re-run on a cache hit');
 });
@@ -69,7 +69,7 @@ test('a row keyed without the engine version is ignored, not served', async () =
   } as never);
 
   const fresh = countingEngine('100');
-  const result = await computeScenarioReturn(scenario.id, resolve, fresh.engine);
+  const { result } = await computeScenarioReturn(scenario.id, resolve, fresh.engine);
   assert.equal(result.cached, false, 'a legacy-keyed row must not satisfy the cache');
   assert.equal(fresh.runs(), 1);
   assert.equal(result.totals.totalPayable, '100');
@@ -79,7 +79,7 @@ test('a row keyed without the engine version is ignored, not served', async () =
 test('the stored key is the versioned key, so the next call hits', async () => {
   const scenario = await seedScenario();
   const first = countingEngine('100');
-  const a = await computeScenarioReturn(scenario.id, resolve, first.engine);
+  const { result: a } = await computeScenarioReturn(scenario.id, resolve, first.engine);
   const rows = await ScenarioReturn.findAll({ where: { scenarioId: scenario.id } });
   assert.equal(rows.length, 1);
   assert.equal(rows[0].factsHash, a.factsHash);

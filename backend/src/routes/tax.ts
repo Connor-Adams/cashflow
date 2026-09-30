@@ -10,6 +10,7 @@ import { buildT2 } from '../tax/engine/t2';
 import { ratesFor, supportedYears, RateTableMissingError } from '../tax/engine/brackets';
 import { computeEntityReturn } from '../tax/services/computeEntityReturn';
 import { assertRatesUsable, ProjectedRatesError } from '../tax/engine/rateProvenance';
+import { buildCompletenessReport } from '../tax/completeness/buildCompletenessReport';
 import type { CorpFiscalYear } from '../tax/engine/types';
 import { rollPersonalCarryforwards } from '../tax/services/rollPersonalCarryforwards';
 import { buildReconciliationReport } from '../tax/reconciliation/buildReport';
@@ -387,6 +388,17 @@ router.get('/personal/:year/return', async (req, res, next) => {
       run: (f) => buildT1(f, rates),
     });
 
+    // Computed on EVERY request and merged into BOTH responses. The cache-hit path
+    // below returns early, so attaching this only to the miss path would ship a gate
+    // that vanishes whenever the cache is warm — a gate that disappears under exactly
+    // the common case is worse than none.
+    //
+    // Deliberately not part of `factsHash`: import coverage changes without any fact
+    // changing.
+    const completeness = await buildCompletenessReport({
+      entityId: entity.id, year, facts, rates,
+    });
+
     if (result.cached) {
       res.json({
         cached: true,
@@ -394,6 +406,7 @@ router.get('/personal/:year/return', async (req, res, next) => {
         lines: result.lines,
         totals: result.totals,
         warnings: result.warnings,
+        completeness,
       });
       return;
     }
@@ -414,6 +427,7 @@ router.get('/personal/:year/return', async (req, res, next) => {
       lines: result.lines,
       totals: result.totals,
       warnings: result.warnings,
+      completeness,
     });
   } catch (err) {
     if (err instanceof RateTableMissingError) {

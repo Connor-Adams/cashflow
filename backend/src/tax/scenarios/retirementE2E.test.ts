@@ -120,7 +120,7 @@ test('age-72 senior — $74.5k retirement income → no OAS clawback, pension cr
     'income.pensionIncome override should stamp facts.pensionIncome for credit calc',
   );
 
-  const computed = await computeScenario(scenario.id);
+  const computed = (await computeScenario(scenario.id)).result;
 
   // Total income = sum of the three retirement amounts (no other actuals seeded).
   // Compute returns Decimal values as plain strings (Decimal.toJSON); normalise.
@@ -196,7 +196,7 @@ test('age-72 senior — $144.5k retirement income → OAS clawback fires (L23500
     notes: null,
   });
 
-  const computed = await computeScenario(scenario.id);
+  const computed = (await computeScenario(scenario.id)).result;
 
   assert.equal(
     D(computed.totals.totalIncome as string).toFixed(2),

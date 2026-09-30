@@ -2,14 +2,16 @@
 import { resolveScenario } from './resolveScenario';
 import { ratesFor } from '../engine/brackets';
 import { buildT1 } from '../engine/t1';
+import type { TaxYearFacts } from '../engine/types';
 import {
   computeScenarioReturn,
   type ComputeScenarioReturnOptions,
-  type ScenarioReturnResult,
+  type ScenarioComputation,
 } from './computeScenarioReturn';
 
 export type ComputeScenarioOptions = ComputeScenarioReturnOptions;
-export type ComputeScenarioResult = ScenarioReturnResult;
+/** Result plus the facts it ran on — the completeness gate needs the latter. */
+export type ComputeScenarioResult = ScenarioComputation<TaxYearFacts>;
 
 /**
  * Compute a scenario's T1 return: resolve facts → hash → check cache → run the
