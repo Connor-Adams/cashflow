@@ -4,6 +4,7 @@ import { loadCategoryHints } from '../ai/suggestTransaction'
 import { openaiJsonWithMeta, type OpenAiJsonResult } from '../ai/openaiJson'
 import { logger } from '../observability/logger'
 import { RECEIPT_CATEGORIES } from './receiptCategories'
+import { categoryLeafSegment } from '../categories/path'
 import {
   recomputeTransactionsReviewFromItems,
   transactionIdsForOrder,
@@ -209,12 +210,23 @@ export async function categorizeReceiptItemsWithAi(
 
 export async function applyReceiptItemCategorySuggestions(
   suggestions: ReceiptItemCategorySuggestion[],
+  householdId: number | null,
 ): Promise<number> {
+  const { ensureCategory } = await import('../util/ensureCategory')
   let updated = 0
   for (const s of suggestions) {
-    // NOTE: static update/bulkCreate bypasses the beforeSave category-id hook, so *_category_id stays null momentarily. Migration 20260623000001 backfills any null FKs where the category string is set.
+    // A static update bypasses the beforeSave category-id hook, so resolve the
+    // id here and store the leaf's FLAT name — the model echoes back path-form
+    // hints, and a path form in a category mirror joins nothing. Same shape as
+    // applyAmazonItemCategorySuggestions; the fallback is the leaf segment,
+    // never the raw string, because the raw string may itself be the path form.
+    const leaf = householdId == null ? null : await ensureCategory(householdId, s.category)
     const [count] = await ExternalOrderItem.update(
-      { inferredCategory: s.category, confidence: String(s.confidence) },
+      {
+        inferredCategory: leaf?.name ?? categoryLeafSegment(s.category),
+        inferredCategoryId: leaf?.id ?? null,
+        confidence: String(s.confidence),
+      },
       { where: { id: s.itemId } },
     )
     updated += count
@@ -237,7 +249,7 @@ export async function categorizeAndApplyReceiptItems(
       { householdId: args.householdId, orderId: args.orderId, orderIds: args.orderIds, limit: args.limit },
       opts,
     )
-    const updated = await applyReceiptItemCategorySuggestions(result.suggestions)
+    const updated = await applyReceiptItemCategorySuggestions(result.suggestions, args.householdId)
     // Recompute review flags for any transactions linked to the categorized orders.
     // Start with any explicit order ids from the caller.
     const explicit = args.orderId != null ? [args.orderId] : (args.orderIds ?? [])
