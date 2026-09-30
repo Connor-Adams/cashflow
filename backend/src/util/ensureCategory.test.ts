@@ -110,3 +110,27 @@ test('ensureCategory: preserves existing icon on re-upsert', async () => {
   const after = await Category.findOne({ where: { householdId: hh.id, name: 'Coffee' } });
   assert.equal(after?.icon, 'Coffee');
 });
+
+test('ensureCategory: returns the leaf id and its FLAT name for a path', async () => {
+  const hh = await Household.create({ name: 'H' });
+  const leaf = await ensureCategory(hh.id, 'Household / Rent');
+  assert.ok(leaf);
+  assert.equal(leaf!.name, 'Rent', 'the caller writes this into final_category, so it must be flat');
+  assert.equal((await Category.findByPk(leaf!.id))?.name, 'Rent');
+});
+
+test('ensureCategory: returns the existing node for a flat name already nested elsewhere', async () => {
+  const hh = await Household.create({ name: 'H' });
+  const subs = await Category.create({ householdId: hh.id, name: 'Subscriptions', parentId: null, icon: null });
+  const ai = await Category.create({ householdId: hh.id, name: 'Ai', parentId: subs.id, icon: null });
+  const leaf = await ensureCategory(hh.id, 'Ai');
+  assert.equal(leaf?.id, ai.id);
+  assert.equal(leaf?.name, 'Ai');
+});
+
+test('ensureCategory: returns null for an empty name and for a malformed path', async () => {
+  const hh = await Household.create({ name: 'H' });
+  assert.equal(await ensureCategory(hh.id, null), null);
+  assert.equal(await ensureCategory(hh.id, '   '), null);
+  assert.equal(await ensureCategory(hh.id, 'Work//Internet'), null);
+});
