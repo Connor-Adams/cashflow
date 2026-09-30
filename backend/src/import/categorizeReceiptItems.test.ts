@@ -8,6 +8,7 @@ import {
   categorizeAndApplyReceiptItems,
   type ReceiptOpenAiCaller,
 } from './categorizeReceiptItems'
+import { assertApplyWriterResolvesCategories } from '../../test/helpers/categoryMirrorApplyCases'
 
 before(async () => {
   await sequelize.sync({ force: true })
@@ -183,59 +184,21 @@ test('categorizeAndApply swallows caller errors (graceful degradation)', async (
 // Same coverage as the other three AI writers fixed alongside this one.
 // ---------------------------------------------------------------------------
 
-// Arrange-and-apply for the category-mirror tests below: one item, one
-// suggestion, and the row read back after the write.
-async function applyOne(
-  title: string,
-  category: string,
-  householdId: number | null,
-): Promise<{ count: number; row: ExternalOrderItem }> {
+test('apply resolves the category id and a FLAT name in every case', async () => {
+  // The five behaviours live in one shared matrix with the Amazon writer, which
+  // takes the same suggestion-plus-nullable-household shape and must behave
+  // identically: flat known name, path form, MALFORMED path, unknown name, and
+  // no household.
   const order = await makeOrder('other')
-  const id = await makeItem(order, title, null)
-  const count = await applyReceiptItemCategorySuggestions(
-    [{ itemId: id, category, confidence: 88, rationale: 'x' }],
-    householdId,
-  )
-  return { count, row: (await ExternalOrderItem.findByPk(id))! }
-}
-
-test('apply resolves a path-form name to the leaf id and a flat name, never a path', async () => {
-  const houseRoot = await Category.create({ householdId: HH, name: 'Household', parentId: null } as never)
-  const rent = await Category.create({ householdId: HH, name: 'Rent', parentId: houseRoot.id } as never)
-
-  // The model echoes back a hint from loadCategoryHints, which is path-form.
-  const { count, row } = await applyOne('RENT', 'Household / Rent', HH)
-  assert.equal(count, 1)
-  assert.equal(row.inferredCategory, 'Rent', 'the path form must never reach inferred_category')
-  assert.equal(row.inferredCategoryId, rent.id)
-  assert.equal(await Category.count({ where: { householdId: HH } }), 2, 'no new category is created')
-})
-
-test('apply resolves a flat known name to that existing category id', async () => {
-  const dairy = await Category.create({ householdId: HH, name: 'Dairy', parentId: null } as never)
-
-  const { count, row } = await applyOne('EGGS', 'Dairy', HH)
-  assert.equal(count, 1)
-  assert.equal(row.inferredCategory, 'Dairy')
-  assert.equal(row.inferredCategoryId, dairy.id)
-  assert.equal(await Category.count({ where: { householdId: HH } }), 1, 'no new category is created')
-})
-
-test('apply creates an unknown flat name and stores its new id', async () => {
-  const { count, row } = await applyOne('MYSTERY JAR', 'Sundries', HH)
-  assert.equal(count, 1)
-  assert.equal(row.inferredCategory, 'Sundries')
-  const created = await Category.findOne({ where: { householdId: HH, name: 'Sundries' } })
-  assert.notEqual(created, null)
-  assert.equal(row.inferredCategoryId, created!.id)
-})
-
-test('apply with no household falls back to the leaf segment and a null id', async () => {
-  const { count, row } = await applyOne('RENT', 'Household / Rent', null)
-  assert.equal(count, 1)
-  assert.equal(row.inferredCategory, 'Rent', 'the path form must never reach inferred_category')
-  assert.equal(row.inferredCategoryId, null)
-  assert.equal(await Category.count({ where: { householdId: HH } }), 0, 'nothing is created')
+  await assertApplyWriterResolvesCategories({
+    householdId: HH,
+    makeItem: (title) => makeItem(order, title, null),
+    apply: (itemId, category, householdId) =>
+      applyReceiptItemCategorySuggestions(
+        [{ itemId, category, confidence: 88, rationale: 'x' }],
+        householdId,
+      ),
+  })
 })
 
 test('categorizeAndApply threads the household so the id lands too', async () => {

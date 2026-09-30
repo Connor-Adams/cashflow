@@ -368,48 +368,54 @@ test('embedding stage import_confidence matches the final_category actually pers
   assert.equal(fresh.importConfidence, fromFinalCategoryAlone.state);
 });
 
-test('a match on a path-form prior persists the flat leaf name and the category id', async () => {
-  const hh = await models.Household.create({ name: 'H' } as never);
-  const acc = await models.Account.create({ householdId: hh.id, name: 'C', visibility: 'private' } as never);
-  const houseRoot = await models.Category.create({
-    householdId: hh.id, name: 'Household', parentId: null,
-  } as never);
-  const rent = await models.Category.create({
-    householdId: hh.id, name: 'Rent', parentId: houseRoot.id,
-  } as never);
-  // ~200 production rows carry a path-form string in final_category, so a prior
-  // this stage generalises from really can hand the writer a path. A path form
-  // in that column matches no budget: every budget and spend rollup joins it as
-  // an exact string.
-  //
-  // The prior has to be planted with a STATIC update, because that is the only
-  // way such a row can exist: an instance save runs reconcileCategoryField,
-  // which tries to mint a category named "Household / Rent" and the Category
-  // beforeValidate hook rejects any name containing "/". The static writers this
-  // test covers are the only door a path form can come through — which is also
-  // why they must not write one.
-  await seedReviewedMerchant(hh.id, acc.id, 'Blue Bottle Coffee', 'Coffee');
-  await models.Transaction.update(
-    { finalCategory: 'Household / Rent', finalCategoryId: null },
-    { where: { merchantClean: 'Blue Bottle Coffee' } },
-  );
+// The well-formed path and the MALFORMED one (empty segment) take DIFFERENT
+// routes through resolveCategoryMirror — the first resolves in one step, the
+// second only after the leaf segment is re-resolved on its own — and must land
+// on the same leaf with the same id. One body, two named tests.
+for (const priorCategory of ['Household / Rent', 'Household // Rent']) {
+  test(`a match on a prior carrying "${priorCategory}" persists the flat leaf name and the category id`, async () => {
+    const hh = await models.Household.create({ name: 'H' } as never);
+    const acc = await models.Account.create({ householdId: hh.id, name: 'C', visibility: 'private' } as never);
+    const houseRoot = await models.Category.create({
+      householdId: hh.id, name: 'Household', parentId: null,
+    } as never);
+    const rent = await models.Category.create({
+      householdId: hh.id, name: 'Rent', parentId: houseRoot.id,
+    } as never);
+    // ~200 production rows carry a path-form string in final_category, so a prior
+    // this stage generalises from really can hand the writer a path. A path form
+    // in that column matches no budget: every budget and spend rollup joins it as
+    // an exact string.
+    //
+    // The prior has to be planted with a STATIC update, because that is the only
+    // way such a row can exist: an instance save runs reconcileCategoryField,
+    // which tries to mint a category named "Household / Rent" and the Category
+    // beforeValidate hook rejects any name containing "/". The static writers this
+    // test covers are the only door a path form can come through — which is also
+    // why they must not write one.
+    await seedReviewedMerchant(hh.id, acc.id, 'Blue Bottle Coffee', 'Coffee');
+    await models.Transaction.update(
+      { finalCategory: priorCategory, finalCategoryId: null },
+      { where: { merchantClean: 'Blue Bottle Coffee' } },
+    );
 
-  const cold = await coldTxn(hh.id, acc.id, 'SQ *BLUE BOTTLE');
-  const result = await orch.maybeRunEmbeddingMatchOverColdRows([cold], hh.id, {
-    embedder: toyEmbedder,
-    threshold: 0.85,
+    const cold = await coldTxn(hh.id, acc.id, 'SQ *BLUE BOTTLE');
+    const result = await orch.maybeRunEmbeddingMatchOverColdRows([cold], hh.id, {
+      embedder: toyEmbedder,
+      threshold: 0.85,
+    });
+    assert.equal(result.summary.matched, 1);
+
+    const fresh = await models.Transaction.findByPk(cold.txnId);
+    assert.ok(fresh);
+    assert.equal(fresh.finalCategory, 'Rent', 'the path form must never reach final_category');
+    assert.equal(fresh.finalCategoryId, rent.id, 'the FK must be resolved, not left NULL');
+    assert.equal(fresh.autoCategory, 'Rent');
+    assert.equal(fresh.autoCategoryId, rent.id);
+    // The seed's own instance save minted a 'Coffee' node, so the household holds
+    // Household + Rent + Coffee and nothing else: the writer reused the existing
+    // Rent node rather than forking a new one off the path string.
+    assert.equal(await models.Category.count({ where: { householdId: hh.id } }), 3);
+    assert.equal(await models.Category.count({ where: { householdId: hh.id, name: 'Rent' } }), 1);
   });
-  assert.equal(result.summary.matched, 1);
-
-  const fresh = await models.Transaction.findByPk(cold.txnId);
-  assert.ok(fresh);
-  assert.equal(fresh.finalCategory, 'Rent', 'the path form must never reach final_category');
-  assert.equal(fresh.finalCategoryId, rent.id);
-  assert.equal(fresh.autoCategory, 'Rent');
-  assert.equal(fresh.autoCategoryId, rent.id);
-  // The seed's own instance save minted a 'Coffee' node, so the household holds
-  // Household + Rent + Coffee and nothing else: the writer reused the existing
-  // Rent node rather than forking a new one off the path string.
-  assert.equal(await models.Category.count({ where: { householdId: hh.id } }), 3);
-  assert.equal(await models.Category.count({ where: { householdId: hh.id, name: 'Rent' } }), 1);
-});
+}

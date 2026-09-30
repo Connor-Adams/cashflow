@@ -4,7 +4,6 @@ import { loadCategoryHints } from '../ai/suggestTransaction'
 import { openaiJsonWithMeta, type OpenAiJsonResult } from '../ai/openaiJson'
 import { logger } from '../observability/logger'
 import { RECEIPT_CATEGORIES } from './receiptCategories'
-import { categoryLeafSegment } from '../categories/path'
 import {
   recomputeTransactionsReviewFromItems,
   transactionIdsForOrder,
@@ -212,19 +211,24 @@ export async function applyReceiptItemCategorySuggestions(
   suggestions: ReceiptItemCategorySuggestion[],
   householdId: number | null,
 ): Promise<number> {
-  const { ensureCategory } = await import('../util/ensureCategory')
+  const { resolveCategoryMirror } = await import('../util/ensureCategory')
   let updated = 0
   for (const s of suggestions) {
-    // A static update bypasses the beforeSave category-id hook, so resolve the
-    // id here and store the leaf's FLAT name — the model echoes back path-form
-    // hints, and a path form in a category mirror joins nothing. Same shape as
-    // applyAmazonItemCategorySuggestions; the fallback is the leaf segment,
-    // never the raw string, because the raw string may itself be the path form.
-    const leaf = householdId == null ? null : await ensureCategory(householdId, s.category)
+    // A static update bypasses the beforeSave category-id hook, so the id has to
+    // be supplied here and the string has to be the resolved leaf's FLAT name —
+    // the model echoes back path-form hints, and a path form in a category
+    // mirror joins nothing. Same shape as applyAmazonItemCategorySuggestions.
+    //
+    // This is NOT the hook's resolution: the hook's `resolveCategoryIdByName`
+    // cannot read a path and prefers a ROOT of that name, while this goes
+    // through `resolveCategoryPath` (household-global, lowest id wins). They
+    // differ only for a household holding a duplicate name whose nested node is
+    // older than the root — a state the Task 6 unique index removes.
+    const mirror = await resolveCategoryMirror(householdId, s.category)
     const [count] = await ExternalOrderItem.update(
       {
-        inferredCategory: leaf?.name ?? categoryLeafSegment(s.category),
-        inferredCategoryId: leaf?.id ?? null,
+        inferredCategory: mirror.name,
+        inferredCategoryId: mirror.id,
         confidence: String(s.confidence),
       },
       { where: { id: s.itemId } },

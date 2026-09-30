@@ -1,6 +1,6 @@
 import type { Transaction } from 'sequelize';
 import type { ExtractedReceiptItem } from '../ai/extractReceiptItems';
-import type { EnsuredCategory } from '../util/ensureCategory';
+import type { CategoryMirror } from '../util/ensureCategory';
 import { categoryLeafSegment } from '../categories/path';
 
 /** Sequelize DECIMAL columns take strings; an absent amount stays null. */
@@ -11,9 +11,9 @@ function decimalOrNull(value: number | null | undefined): string | null {
 /**
  * Resolve every DISTINCT category name across the items, once each.
  *
- * Deduping matters because this feeds a BULK write: `ensureCategory` costs two
- * SELECTs for an existing flat name, so resolving per ITEM would turn one
- * `bulkCreate` into 60 category queries for a 30-line receipt across 6
+ * Deduping matters because this feeds a BULK write: `resolveCategoryMirror`
+ * costs two SELECTs for an existing flat name, so resolving per ITEM would turn
+ * one `bulkCreate` into 60 category queries for a 30-line receipt across 6
  * categories instead of 12. Keyed by the TRIMMED name, because `ensureCategory`
  * trims before resolving — so `"Coffee"` and `" Coffee "` are one resolution.
  *
@@ -23,40 +23,36 @@ function decimalOrNull(value: number | null | undefined): string | null {
  * uncommitted order's transaction entirely.
  */
 async function resolveDistinctCategoryNames(
-  householdId: number,
+  householdId: number | null,
   items: ExtractedReceiptItem[],
   transaction: Transaction | undefined,
-): Promise<Map<string, EnsuredCategory | null>> {
-  const { ensureCategory } = await import('../util/ensureCategory');
+): Promise<Map<string, CategoryMirror>> {
+  const { resolveCategoryMirror } = await import('../util/ensureCategory');
   const names = new Set(
     items.map((it) => it.inferredCategory?.trim()).filter((name): name is string => !!name),
   );
-  const resolved = new Map<string, EnsuredCategory | null>();
+  const resolved = new Map<string, CategoryMirror>();
   for (const name of names) {
-    resolved.set(name, await ensureCategory(householdId, name, { transaction }));
+    resolved.set(name, await resolveCategoryMirror(householdId, name, { transaction }));
   }
   return resolved;
 }
 
-/** The resolved leaf for one item's raw category value, or null. */
-function leafFor(
-  resolved: Map<string, EnsuredCategory | null>,
-  raw: string | null | undefined,
-): EnsuredCategory | null {
-  if (raw == null) return null;
-  return resolved.get(raw.trim()) ?? null;
-}
-
-/** The `inferred_category` / `inferred_category_id` pair for one item. */
+/**
+ * The `inferred_category` / `inferred_category_id` pair for one item.
+ *
+ * The map miss is only reachable for a whitespace-only value (those are filtered
+ * out of the resolution set above), which degrades to a null pair.
+ */
 function categoryFields(
-  leaf: EnsuredCategory | null,
+  resolved: Map<string, CategoryMirror>,
   raw: string | null | undefined,
 ): { inferredCategory: string | null; inferredCategoryId: number | null } {
-  if (leaf) return { inferredCategory: leaf.name, inferredCategoryId: leaf.id };
-  // Nothing resolved (no household, empty name, malformed path): fall back to
-  // the LEAF SEGMENT, never the raw string — writing the raw string back is the
-  // bug, since the raw string may itself be the path form.
-  return { inferredCategory: categoryLeafSegment(raw), inferredCategoryId: null };
+  const mirror: CategoryMirror =
+    raw == null
+      ? { name: null, id: null }
+      : resolved.get(raw.trim()) ?? { name: categoryLeafSegment(raw), id: null };
+  return { inferredCategory: mirror.name, inferredCategoryId: mirror.id };
 }
 
 /**
@@ -80,8 +76,19 @@ function categoryFields(
  * same column an unconstrained string — `extractReceiptFromText` /
  * `extractReceiptFromImage`, `categorizeUberTrip`, and the user's own
  * purchase-history CSV — so a path form is reachable, and is resolved through
- * the same `ensureCategory` seam as the four AI writers. All seven behave
+ * the same `resolveCategoryMirror` seam as the four AI writers. All seven behave
  * identically, and a future parser that emits a path is handled for free.
+ *
+ * ## How this differs from the `beforeSave` hook it stands in for
+ *
+ * It is NOT the same resolution. The hook calls `resolveCategoryIdByName`, which
+ * cannot read a path at all and prefers a ROOT with that name, then a single
+ * nested match, else find-or-creates a root. `resolveCategoryMirror` goes
+ * through `resolveCategoryPath`, whose lookup is household-GLOBAL and breaks
+ * ties to the LOWEST id. The two agree unless a household holds a duplicate name
+ * whose nested node is older than the root — then the hook picks the root and
+ * this picks the nested node. That divergence is deliberate and transient: the
+ * Task 6 household-wide unique index removes the duplicate that causes it.
  */
 export async function buildExternalOrderItemRows(args: {
   externalOrderId: number;
@@ -89,14 +96,14 @@ export async function buildExternalOrderItemRows(args: {
   items: ExtractedReceiptItem[];
   transaction?: Transaction | null;
 }): Promise<Record<string, unknown>[]> {
-  const resolved =
-    args.householdId == null
-      ? new Map<string, EnsuredCategory | null>()
-      : await resolveDistinctCategoryNames(
-          args.householdId,
-          args.items,
-          args.transaction ?? undefined,
-        );
+  // A null household is NOT short-circuited here: `resolveCategoryMirror`
+  // already returns the leaf-segment-with-null-id pair for that case, and
+  // routing every path through it keeps one description of the behaviour.
+  const resolved = await resolveDistinctCategoryNames(
+    args.householdId,
+    args.items,
+    args.transaction ?? undefined,
+  );
 
   return args.items.map((it) => ({
     externalOrderId: args.externalOrderId,
@@ -104,7 +111,7 @@ export async function buildExternalOrderItemRows(args: {
     quantity: it.quantity,
     unitPrice: decimalOrNull(it.unitPrice),
     totalPrice: decimalOrNull(it.totalPrice),
-    ...categoryFields(leafFor(resolved, it.inferredCategory), it.inferredCategory),
+    ...categoryFields(resolved, it.inferredCategory),
     businessUsePercent: decimalOrNull(it.businessUsePercent),
     confidence: null,
     itemNumber: it.vendorItemId ?? null,

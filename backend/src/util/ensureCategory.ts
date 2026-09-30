@@ -1,6 +1,7 @@
 import type { Transaction as SequelizeTransaction } from 'sequelize';
 import { Category } from '../models/Category';
 import { resolveCategoryPath } from '../categories/resolvePath';
+import { categoryLeafSegment } from '../categories/path';
 
 /**
  * The category a free-text enrichment value resolved to. `name` is the leaf's
@@ -43,4 +44,58 @@ export async function ensureCategory(
     if (err instanceof Error && err.message === 'invalid category path') return null;
     throw err;
   }
+}
+
+/**
+ * The `<x>_category` / `<x>_category_id` pair a STATIC writer has to supply for
+ * itself. `name` is always the resolved node's FLAT name (or, when nothing
+ * resolved, the raw value's last path segment) — never a path, because every
+ * budget and spend rollup joins these string columns as an exact value.
+ */
+export interface CategoryMirror {
+  name: string | null;
+  id: number | null;
+}
+
+/**
+ * Resolve a free-text category value into the mirror pair above, in TWO steps.
+ *
+ * Step 1 is {@link ensureCategory} on the raw value, which handles a flat name
+ * and a well-formed `"Parent / Child"` path alike. Step 2 exists because step 1
+ * returns null for a MALFORMED path — `"Household // Rent"`, `"Rent/"`,
+ * `"/Rent"` all make `parseCategoryPath` throw on the empty segment. Writing
+ * just the leaf segment in that case would persist `category='Rent'` with a NULL
+ * FK: precisely the flat-name-plus-NULL-FK row these writers exist to stop
+ * producing, and one the repair migration would then have to clean up again. So
+ * when a household is present the leaf segment is re-resolved on its own — it is
+ * a flat name by construction and cannot contain an empty segment — and its id
+ * is used.
+ *
+ * The FK is therefore null ONLY when there is no household to resolve against,
+ * or no non-empty segment to resolve at all.
+ *
+ * This is the one place that two-step fallback lives: all seven static category
+ * writers call it, so they cannot drift apart. Note this resolves through
+ * `resolveCategoryPath` (household-GLOBAL lookup, lowest id wins) rather than
+ * the `beforeSave` hooks' `resolveCategoryIdByName` (root-preferring, then a
+ * single nested match, else find-or-create a root) — see the writers' comments.
+ */
+export async function resolveCategoryMirror(
+  householdId: number | null | undefined,
+  raw: string | null | undefined,
+  options: { transaction?: SequelizeTransaction | null } = {}
+): Promise<CategoryMirror> {
+  const leafSegment = categoryLeafSegment(raw);
+  // Nothing to resolve against, or nothing resolvable: the leaf segment is all
+  // that can be salvaged, and writing the RAW string back is the original bug.
+  if (householdId == null || leafSegment == null) return { name: leafSegment, id: null };
+
+  const direct = await ensureCategory(householdId, raw, options);
+  if (direct) return { name: direct.name, id: direct.id };
+  // The raw value already WAS its own leaf (a flat name), so re-resolving it
+  // would just repeat the query that returned null.
+  if (leafSegment === raw!.trim()) return { name: leafSegment, id: null };
+
+  const viaLeaf = await ensureCategory(householdId, leafSegment, options);
+  return { name: viaLeaf?.name ?? leafSegment, id: viaLeaf?.id ?? null };
 }

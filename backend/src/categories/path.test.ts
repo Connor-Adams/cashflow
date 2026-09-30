@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCategoryPath } from './path';
+import { categoryLeafSegment, parseCategoryPath } from './path';
 
 test('splits and trims segments', () => {
   assert.deepEqual(parseCategoryPath('Work / Expenses / Internet'), ['Work', 'Expenses', 'Internet']);
@@ -42,4 +42,45 @@ test('the rejection message stays exactly "invalid category path" (both callers 
       return true;
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// categoryLeafSegment — the fallback every static category writer uses when
+// nothing resolved. Unlike parseCategoryPath it must NEVER throw: it runs inside
+// fire-and-forget enrichment writers, and a throw there would fail the batch.
+// ---------------------------------------------------------------------------
+
+test('categoryLeafSegment: a flat name is its own leaf', () => {
+  assert.equal(categoryLeafSegment('Rent'), 'Rent');
+  assert.equal(categoryLeafSegment('  Rent  '), 'Rent', 'segments are trimmed');
+});
+
+test('categoryLeafSegment: a path form degrades to its LAST segment', () => {
+  // This is the whole point: "Household / Rent" in final_category matches no
+  // budget, because every budget and spend rollup joins that column exactly.
+  assert.equal(categoryLeafSegment('Household / Rent'), 'Rent');
+  assert.equal(categoryLeafSegment('A / B / C'), 'C');
+});
+
+test('categoryLeafSegment: empty segments are SKIPPED, not rejected', () => {
+  // Each of these makes parseCategoryPath throw; here they must resolve quietly.
+  assert.equal(categoryLeafSegment('Household // Rent'), 'Rent');
+  assert.equal(categoryLeafSegment('Rent/'), 'Rent');
+  assert.equal(categoryLeafSegment('/Rent'), 'Rent');
+  assert.equal(categoryLeafSegment('Household / / Rent'), 'Rent');
+});
+
+test('categoryLeafSegment: null when there is no non-empty segment at all', () => {
+  assert.equal(categoryLeafSegment('///'), null, 'separators only');
+  assert.equal(categoryLeafSegment(''), null);
+  assert.equal(categoryLeafSegment('   '), null);
+  assert.equal(categoryLeafSegment(null), null);
+  assert.equal(categoryLeafSegment(undefined), null);
+});
+
+test('categoryLeafSegment: a repeated-name path still yields the last segment', () => {
+  // parseCategoryPath accepts these and resolveCategoryPath truncates at the
+  // repetition; the fallback makes no such judgement, it just takes the leaf.
+  assert.equal(categoryLeafSegment('Food / Food'), 'Food');
+  assert.equal(categoryLeafSegment('Food / Bar / Food'), 'Food');
 });

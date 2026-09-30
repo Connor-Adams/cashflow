@@ -3,7 +3,6 @@ import { ExternalOrder, ExternalOrderItem } from '../models';
 import { loadCategoryHints } from '../ai/suggestTransaction';
 import { openaiJsonWithMeta, type OpenAiJsonResult } from '../ai/openaiJson';
 import { AMAZON_CATEGORIES, categorizeAmazonItem } from './categories';
-import { categoryLeafSegment } from '../categories/path';
 
 export const AMAZON_ITEM_CATEGORIZATION_PROMPT_VERSION =
   'amazon-item-categorization-v1';
@@ -338,20 +337,24 @@ export async function applyAmazonItemCategorySuggestions(
   suggestions: AmazonItemCategorySuggestion[],
   householdId: number | null,
 ): Promise<number> {
-  const { ensureCategory } = await import('../util/ensureCategory');
+  const { resolveCategoryMirror } = await import('../util/ensureCategory');
   let updated = 0;
   for (const suggestion of suggestions) {
-    // A static update bypasses the beforeSave category-id hook, so resolve the
-    // id here and store the leaf's FLAT name — the model echoes back path-form
-    // hints, and a path form in a category mirror joins nothing. Same shape as
-    // aiBatchOverColdRows; the fallback is the leaf segment, never the raw
-    // string, because the raw string may itself be the path form.
-    const leaf =
-      householdId == null ? null : await ensureCategory(householdId, suggestion.category);
+    // A static update bypasses the beforeSave category-id hook, so the id has to
+    // be supplied here and the string has to be the resolved leaf's FLAT name —
+    // the model echoes back path-form hints, and a path form in a category
+    // mirror joins nothing. Same shape as applyReceiptItemCategorySuggestions.
+    //
+    // This is NOT the hook's resolution: the hook's `resolveCategoryIdByName`
+    // cannot read a path and prefers a ROOT of that name, while this goes
+    // through `resolveCategoryPath` (household-global, lowest id wins). They
+    // differ only for a household holding a duplicate name whose nested node is
+    // older than the root — a state the Task 6 unique index removes.
+    const mirror = await resolveCategoryMirror(householdId, suggestion.category);
     const [count] = await ExternalOrderItem.update(
       {
-        inferredCategory: leaf?.name ?? categoryLeafSegment(suggestion.category),
-        inferredCategoryId: leaf?.id ?? null,
+        inferredCategory: mirror.name,
+        inferredCategoryId: mirror.id,
         businessUsePercent:
           suggestion.businessUsePercent == null
             ? null

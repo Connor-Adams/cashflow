@@ -7,6 +7,7 @@ let sequelize: import('sequelize').Sequelize;
 let Category: typeof import('../models/Category').Category;
 let Household: typeof import('../models/Household').Household;
 let ensureCategory: typeof import('./ensureCategory').ensureCategory;
+let resolveCategoryMirror: typeof import('./ensureCategory').resolveCategoryMirror;
 
 before(async () => {
   const models = await import('../models');
@@ -15,6 +16,7 @@ before(async () => {
   Household = models.Household;
   const util = await import('./ensureCategory');
   ensureCategory = util.ensureCategory;
+  resolveCategoryMirror = util.resolveCategoryMirror;
   await sequelize.sync({ force: true });
 });
 
@@ -133,4 +135,75 @@ test('ensureCategory: returns null for an empty name and for a malformed path', 
   assert.equal(await ensureCategory(hh.id, null), null);
   assert.equal(await ensureCategory(hh.id, '   '), null);
   assert.equal(await ensureCategory(hh.id, 'Work//Internet'), null);
+});
+
+// ---------------------------------------------------------------------------
+// resolveCategoryMirror — the two-step resolution all seven static category
+// writers share. Step 2 is the point: a MALFORMED path makes step 1 return
+// null, and persisting the leaf segment with a NULL FK would recreate exactly
+// the flat-name-plus-NULL-id row these writers exist to stop producing.
+// ---------------------------------------------------------------------------
+
+test('resolveCategoryMirror: a flat known name gives that node id and name', async () => {
+  const hh = await Household.create({ name: 'H' });
+  const dairy = await Category.create({ householdId: hh.id, name: 'Dairy', parentId: null, icon: null });
+  assert.deepEqual(await resolveCategoryMirror(hh.id, 'Dairy'), { name: 'Dairy', id: dairy.id });
+});
+
+test('resolveCategoryMirror: a path form gives the leaf id and the leaf FLAT name', async () => {
+  const hh = await Household.create({ name: 'H' });
+  const root = await Category.create({ householdId: hh.id, name: 'Household', parentId: null, icon: null });
+  const rent = await Category.create({ householdId: hh.id, name: 'Rent', parentId: root.id, icon: null });
+  assert.deepEqual(await resolveCategoryMirror(hh.id, 'Household / Rent'), { name: 'Rent', id: rent.id });
+  assert.equal(await Category.count({ where: { householdId: hh.id } }), 2, 'nothing new is created');
+});
+
+test('resolveCategoryMirror: an unknown flat name is created and its id returned', async () => {
+  const hh = await Household.create({ name: 'H' });
+  const mirror = await resolveCategoryMirror(hh.id, 'Sundries');
+  assert.equal(mirror.name, 'Sundries');
+  const created = await Category.findOne({ where: { householdId: hh.id, name: 'Sundries' } });
+  assert.equal(mirror.id, created?.id);
+});
+
+test('resolveCategoryMirror: a MALFORMED path re-resolves its leaf, so the FK is never left null', async () => {
+  const hh = await Household.create({ name: 'H' });
+  const root = await Category.create({ householdId: hh.id, name: 'Household', parentId: null, icon: null });
+  const rent = await Category.create({ householdId: hh.id, name: 'Rent', parentId: root.id, icon: null });
+  // Every shape that makes parseCategoryPath throw on an empty segment. Step 1
+  // returns null for all three; step 2 resolves the leaf segment on its own.
+  for (const raw of ['Household // Rent', 'Rent/', '/Rent', 'Household / / Rent']) {
+    assert.deepEqual(
+      await resolveCategoryMirror(hh.id, raw),
+      { name: 'Rent', id: rent.id },
+      `${raw} must not persist a flat name with a NULL id`,
+    );
+  }
+  assert.equal(await Category.count({ where: { householdId: hh.id } }), 2, 'nothing new is created');
+});
+
+test('resolveCategoryMirror: a malformed path whose leaf is unknown CREATES the leaf and links it', async () => {
+  const hh = await Household.create({ name: 'H' });
+  const mirror = await resolveCategoryMirror(hh.id, 'Household // Vape');
+  assert.equal(mirror.name, 'Vape');
+  // Only the leaf is minted — the malformed path says nothing trustworthy about
+  // the parent, so no "Household" root is invented from it.
+  const rows = await Category.findAll({ where: { householdId: hh.id } });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].name, 'Vape');
+  assert.equal(rows[0].parentId, null);
+  assert.equal(mirror.id, rows[0].id);
+});
+
+test('resolveCategoryMirror: no household degrades to the leaf segment with a null id', async () => {
+  assert.deepEqual(await resolveCategoryMirror(null, 'Household / Rent'), { name: 'Rent', id: null });
+  assert.deepEqual(await resolveCategoryMirror(undefined, 'Rent'), { name: 'Rent', id: null });
+});
+
+test('resolveCategoryMirror: nothing resolvable at all is a null pair, and writes nothing', async () => {
+  const hh = await Household.create({ name: 'H' });
+  for (const raw of [null, undefined, '', '   ', '///']) {
+    assert.deepEqual(await resolveCategoryMirror(hh.id, raw), { name: null, id: null });
+  }
+  assert.equal(await Category.count({ where: { householdId: hh.id } }), 0);
 });

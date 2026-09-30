@@ -22,7 +22,9 @@ import type { ExtractedReceiptItem } from '../../src/ai/extractReceiptItems';
 /**
  * One item per behaviour under test: a flat KNOWN name, the same leaf in PATH
  * form, an UNKNOWN name, no name at all, and a MALFORMED path (empty segment) —
- * the one unresolvable case reachable even when a household is present.
+ * the one case a household-present write cannot resolve in a single step, and
+ * which must therefore fall back to re-resolving the leaf segment rather than to
+ * a NULL foreign key.
  */
 export function inferredCategoryFixtureItems(): ExtractedReceiptItem[] {
   return [
@@ -68,10 +70,27 @@ export async function assertInferredCategoriesResolved(args: {
   assert.equal(items[3].inferredCategory, null);
   assert.equal(items[3].inferredCategoryId, null);
 
-  // A MALFORMED path resolves to nothing, so it degrades to the LAST PATH
-  // SEGMENT — never the raw string, which is itself the path form.
-  assert.equal(items[4].inferredCategory, 'Rent');
-  assert.equal(items[4].inferredCategoryId, null);
+  // (c) A MALFORMED path (empty segment) cannot be parsed, so the first
+  // resolution returns null — but the FK must NOT be left null: writing a flat
+  // name beside a NULL id is exactly the state this whole change exists to stop
+  // producing. `resolveCategoryMirror` re-resolves the LAST PATH SEGMENT on its
+  // own, so this lands on the same Rent leaf as the well-formed path above.
+  assert.equal(items[4].inferredCategory, 'Rent', 'never the raw string, which is the path form');
+  assert.equal(
+    items[4].inferredCategoryId,
+    args.rentId,
+    'a household was present, so the FK must be resolved, not left NULL',
+  );
+
+  // Every row keeps confidence null. These writers set it to null unconditionally
+  // — which also PINS that the AI item categorizer (`categorizeAndApplyReceiptItems`,
+  // called right after ingest by scanInbox and persistHighConfidenceOrder) did not
+  // run: its selector is `{ confidence: null }`, so had it run it would have
+  // rewritten every row here, not just the null-category one. It stays inert in
+  // tests only because `backend/test/setup.ts` deletes OPENAI_API_KEY.
+  for (const [index, item] of items.entries()) {
+    assert.equal(item.confidence, null, `item ${index} must not have been re-categorized`);
+  }
 }
 
 /**
