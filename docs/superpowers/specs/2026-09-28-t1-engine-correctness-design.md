@@ -1,5 +1,32 @@
 # T1 Engine Correctness — published 2026 rates, slip box mapping, AMT fractions
 
+> **STATUS: SHIPPED 2026-09-29.** Commits `e3c2cbae`..`f8234983` on
+> `claude/personal-tax-accuracy`. Every item in *Testing* below is covered except
+> the AMT work, which was **cut** — see the AMT row in the changes table for the
+> arithmetic showing it cannot reach Connor at any plausible draw level.
+>
+> Two things shipped that the spec did not ask for, both because the spec's own
+> items could not land without them:
+>
+> - **`engineVersion.ts`** — the cache key now carries an engine fingerprint. The
+>   spec treated the facts-only cache key as a separate blocker; it is not
+>   separate. Without it every correction in this part changes no number on
+>   screen. Rate constants fold into the fingerprint automatically; engine logic
+>   needs a hand bump (`ENGINE_VERSION`, now 2).
+> - **`computeEntityReturn.ts`** — both return handlers carried the same 45-line
+>   compute-and-cache block, reachable only through a seeded household over
+>   supertest, and its one test asserted `status === 404 || status === 200`.
+>   Extracting it is what made the versioned key testable.
+>
+> One spec instruction proved wrong in the writing: the provenance guard is
+> enforced at the **request boundary**, not inside compute. Inside compute it
+> cascaded — `projectPersonalFactsFromPrevYear` resolves a projection by computing
+> its parent, so refusing the unverified 2024 table refused to serve 2026 as well.
+>
+> Live consequence: 2024 returns now answer **409**, because `rates-2024.ts` is
+> "encoded from plan recall, never cross-checked". 2024 owed $0.00.
+
+
 **Date:** 2026-09-28
 **Status:** Design; not yet implemented
 **Type:** Correctness fix, backend only
