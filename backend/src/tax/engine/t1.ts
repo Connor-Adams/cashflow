@@ -402,8 +402,20 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
     'sum(T4.box22)');
 
   const instalmentsPaid = facts.carryforwards.instalmentsPaid;
+  // Its own line. The CRA instalment-threshold test is defined on net tax owing
+  // BEFORE instalments are credited — crediting them first would let paying
+  // instalments remove the obligation to pay them — and there was no line isolating
+  // them to read.
+  push('L47600', 'Instalments paid', instalmentsPaid);
   const totalCredits = taxDeductedAtSource.plus(instalmentsPaid);
   push('L48200', 'Total credits (tax deducted + instalments)', totalCredits);
+
+  /**
+   * Net tax owing for the CRA instalment test: payable less tax withheld at source,
+   * and NOT less instalments. Signed — a negative is a refund, and on a rising-income
+   * year the sign is what the two-year test reads.
+   */
+  const netTaxOwing = totalPayable.minus(taxDeductedAtSource);
 
   const refundOrOwing = totalPayable.minus(totalCredits);
   push('L48500', refundOrOwing.greaterThan(0) ? 'Balance owing' : 'Refund', refundOrOwing);
@@ -420,6 +432,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       cppContrib: cppEmployee.plus(seCppContrib),
       eiPremium: eiEmployee,
       totalPayable,
+      netTaxOwing,
       refundOrOwing,
     },
     warnings,

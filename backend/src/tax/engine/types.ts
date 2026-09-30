@@ -205,6 +205,12 @@ export type TaxReturn = {
     cppContrib: Decimal;
     eiPremium: Decimal;
     totalPayable: Decimal;
+    /**
+     * Payable less tax withheld at source, and NOT less instalments — the quantity
+     * the CRA instalment-threshold test is defined on. Signed: a negative is a
+     * refund, and on a rising-income year the sign is what the two-year test reads.
+     */
+    netTaxOwing: Decimal;
     refundOrOwing: Decimal;
   };
   warnings: string[];
