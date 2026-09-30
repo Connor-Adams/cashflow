@@ -154,6 +154,19 @@ export type TaxYearFacts = {
   capitalGainEvents: CapGainEvent[];
   rrspContribs: RrspContrib[];
   slips: SlipFact[];
+  /**
+   * Warnings `computeAcb` raised while pricing this year's dispositions — clamped
+   * sells, zero-cost `transfer_in`, mixed currency.
+   *
+   * Carried on the facts because `buildPersonalFacts` is the only place the ACB walk
+   * runs, over FULL history, and it previously discarded them. The completeness gate
+   * reads them from here rather than re-running that walk, which would mean
+   * duplicating ~60 lines of input assembly for a diagnostic.
+   *
+   * Optional: the corp builder does not produce them, and every existing test
+   * constructs facts without them.
+   */
+  acbWarnings?: string[];
   carryforwards: PersonalCarryforwards;
   donations: IncomeItem[];
   fhsaContribs: RrspContrib[]; // reuse shape

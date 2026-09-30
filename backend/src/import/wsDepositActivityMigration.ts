@@ -174,6 +174,35 @@ function buildTransactionIndex(transactions: Transaction[]): Map<string, TxnInde
   return index;
 }
 
+/**
+ * Activity ids for which a transaction already records the same event.
+ *
+ * Exported for part 3's completeness gate, which must know whether a cash-leg
+ * activity is already in the ledger but cannot call `classifyWsDepositActivities` —
+ * that function scans an account's entire history, and the gate is period-bounded
+ * because it runs on every T1 request.
+ *
+ * Built on this module's own index so the gate's notion of "already recorded" is the
+ * same one the migration uses when it decides what to convert. Matching is on
+ * (account, date, amount, currency); merchant text is deliberately not compared,
+ * because the point here is only whether the event exists, not which row describes
+ * it better.
+ */
+export function activityIdsWithTransaction(
+  activities: InvestmentActivity[],
+  transactions: Transaction[],
+): Set<number> {
+  const index = buildTransactionIndex(transactions);
+  const matched = new Set<number>();
+  for (const a of activities) {
+    const f = activityFields(a);
+    if (index.has(pairKey(f.accountId, f.date, f.amount, f.currency))) {
+      matched.add(f.activityId);
+    }
+  }
+  return matched;
+}
+
 /** The shape shared by both classifications, read off one activity row. */
 function activityFields(a: InvestmentActivity): {
   activityId: number;

@@ -363,6 +363,12 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
 
   // Capital gain events from sells, using the ACB helper.
   //
+  /**
+   * Cost-base warnings the ACB walk raises. Accumulated across securities and
+   * de-duplicated on the way out; previously computed and thrown away.
+   */
+  const acbWarnings: string[] = [];
+
   // ACB is a weighted-average running balance, so computeAcb needs the FULL
   // per-security history up to year-end — NOT just this tax year's rows. A
   // year-windowed feed makes prior-year buys (and return_of_capital) invisible,
@@ -426,6 +432,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     const denials = new Map<number, Decimal>();
     const processed = new Set<number>();
     let acb = computeAcb(acbInput);
+    // Kept rather than discarded: these say the cost base a capital gain was priced
+    // against is uncertain, which is exactly what a completeness report exists to say.
+    acbWarnings.push(...acb.warnings);
     for (;;) {
       const next = acb.realizedEvents.find(
         ev => !processed.has(ev.activityId) && ev.qtySold > 0
@@ -449,6 +458,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
         acb = computeAcb([...acbInput, ...injected]);
       }
     }
+    // The loop above re-runs computeAcb on each superficial-loss injection, so take
+    // the final walk's warnings too; duplicates are collapsed at the end.
+    acbWarnings.push(...acb.warnings);
     for (const realized of acb.realizedEvents) {
       // Prior-year dispositions are already reported on their own year's return;
       // here they only serve to advance the ACB state. Keep just this year's.
@@ -543,5 +555,6 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     medicalExpenses,
     rentalIncome,
     rentalExpenses,
+    acbWarnings: [...new Set(acbWarnings)],
   };
 }
