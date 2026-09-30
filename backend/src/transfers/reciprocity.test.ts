@@ -14,7 +14,7 @@ import {
   aggregateMoneyMovement,
   type ReciprocityLeg,
   type MovementRow,
-} from '../src/transfers/reciprocity.js';
+} from './reciprocity.js';
 
 // ------------------- summarizeReciprocity -------------------
 

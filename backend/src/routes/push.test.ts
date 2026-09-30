@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSubscribeBody } from '../src/routes/push';
+import { parseSubscribeBody } from './push';
 
 const valid = {
   endpoint: 'https://fcm.googleapis.com/fcm/send/abc',

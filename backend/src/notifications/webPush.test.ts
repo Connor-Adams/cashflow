@@ -13,16 +13,16 @@ import assert from 'node:assert/strict';
 process.env.VAPID_PUBLIC_KEY = 'test-public-key';
 process.env.VAPID_PRIVATE_KEY = 'test-private-key';
 
-let models: typeof import('../src/models');
-let fanOutWebPush: typeof import('../src/notifications/webPush').fanOutWebPush;
-let defaultWebPushSender: typeof import('../src/notifications/webPush').defaultWebPushSender;
-let isAllowedPushEndpoint: typeof import('../src/notifications/webPush').isAllowedPushEndpoint;
+let models: typeof import('../models');
+let fanOutWebPush: typeof import('./webPush').fanOutWebPush;
+let defaultWebPushSender: typeof import('./webPush').defaultWebPushSender;
+let isAllowedPushEndpoint: typeof import('./webPush').isAllowedPushEndpoint;
 let userId: number;
 
 before(async () => {
-  models = await import('../src/models');
+  models = await import('../models');
   ({ fanOutWebPush, defaultWebPushSender, isAllowedPushEndpoint } = await import(
-    '../src/notifications/webPush'
+    './webPush'
   ));
   await models.sequelize.sync({ force: true });
 });

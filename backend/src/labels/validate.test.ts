@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateLabelColor } from '../src/labels/validate.js';
+import { validateLabelColor } from './validate.js';
 
 test('validateLabelColor accepts a 6-digit hex string', () => {
   const r = validateLabelColor('#3B82F6');
