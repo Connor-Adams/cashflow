@@ -903,6 +903,13 @@ export function DashboardPage() {
                     : null
                 const label = item.category ?? 'Overall'
                 const percentRounded = Math.round(item.percentUsed)
+                // Only surfaced when rollover actually moved the target. Sub-cent
+                // carries are noise, not information.
+                const carriedRaw = Number(item.carriedIn ?? 0)
+                const carriedIn =
+                  Number.isFinite(carriedRaw) && Math.abs(carriedRaw) >= 0.01
+                    ? carriedRaw
+                    : null
                 const elapsedRounded =
                   typeof item.periodElapsedPercent === 'number'
                     ? Math.round(item.periodElapsedPercent)
@@ -1000,6 +1007,20 @@ export function DashboardPage() {
                       {/* formerly .budgetPill__currency */}
                       <span className="ml-1 opacity-70">{item.currency}</span>
                     </p>
+                    {carriedIn !== null && (
+                      // A rollover budget's target above is already carry-
+                      // adjusted, which would otherwise look like the user had
+                      // silently edited their budget. Name the carry so the
+                      // number is explicable.
+                      <p className="m-0 truncate text-xs text-muted-foreground opacity-80">
+                        {carriedIn > 0 ? 'includes ' : ''}
+                        {carriedIn > 0 ? '+' : '\u2212'}
+                        {formatCurrency(Math.abs(carriedIn), item.currency)}{' '}
+                        {carriedIn > 0
+                          ? `rolled over from last ${periodWord}`
+                          : `overspent last ${periodWord}`}
+                      </p>
+                    )}
                     {item.pacingState && elapsedRounded !== null && (
                       <p className="mt-1">
                         <span

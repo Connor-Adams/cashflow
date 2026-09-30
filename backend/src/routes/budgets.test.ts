@@ -565,3 +565,142 @@ test('pacingState: never returns over for percentUsed exactly 100', () => {
   // 100% spent, 100% elapsed → maxed out but on-pace exactly.
   assert.equal(pacingState(100, 100), 'on-pace');
 });
+
+// ---- computeBudgetProgress: rollover carry -------------------------------
+//
+// `carriedIn` is the signed remainder accumulated from the budget's completed
+// prior periods (positive = unspent surplus, negative = overspend). It is
+// UNCLAMPED, so `effectiveTarget = baseTarget + carriedIn` may reach zero or go
+// negative; the `percentUsed` branch below is the defined behavior there.
+
+const CARRY_BOUNDS = { periodStart: '2026-05-01', periodEnd: '2026-05-31' };
+
+/** One per-category budget against a single 'CAD\0Dining' spend bucket. */
+function progressWithCarry(
+  amount: string,
+  spent: number,
+  carriedIn?: number
+): ReturnType<typeof computeBudgetProgress>[number] {
+  const [item] = computeBudgetProgress(
+    [{ id: 7, category: 'Dining', currency: 'CAD', amount, carriedIn }],
+    new Map([
+      ['CAD\0Dining', { currency: 'CAD', category: 'Dining', spent }],
+    ]),
+    CARRY_BOUNDS
+  );
+  return item;
+}
+
+test('computeBudgetProgress: an omitted carriedIn is identical to today (no rollover)', () => {
+  const item = progressWithCarry('1000.0000', 250);
+  assert.equal(item.target, 1000);
+  assert.equal(item.baseTarget, 1000);
+  assert.equal(item.carriedIn, 0);
+  assert.equal(item.remaining, 750);
+  assert.equal(item.percentUsed, 25);
+});
+
+test('computeBudgetProgress: carriedIn of exactly 0 is identical to an omitted one', () => {
+  const omitted = progressWithCarry('1000.0000', 250);
+  const explicitZero = progressWithCarry('1000.0000', 250, 0);
+  assert.deepEqual(explicitZero, omitted);
+});
+
+test('computeBudgetProgress: a positive carry raises the effective target', () => {
+  // $400 unspent last period, $900 spent this one against a $1000 base.
+  const item = progressWithCarry('1000.0000', 900, 400);
+  assert.equal(item.baseTarget, 1000);
+  assert.equal(item.carriedIn, 400);
+  assert.equal(item.target, 1400);
+  assert.equal(item.remaining, 500);
+  assert.equal(item.percentUsed, (900 / 1400) * 100);
+  // Still under the envelope, so this must NOT read as overspent.
+  assert.ok(item.percentUsed < 100);
+});
+
+test('computeBudgetProgress: a negative carry lowers the effective target', () => {
+  // Overspent by $500 last period, so this period only has $500 to work with.
+  const item = progressWithCarry('1000.0000', 200, -500);
+  assert.equal(item.carriedIn, -500);
+  assert.equal(item.target, 500);
+  assert.equal(item.remaining, 300);
+  assert.equal(item.percentUsed, 40);
+});
+
+test('computeBudgetProgress: a negative carry can push percentUsed over 100 on modest spend', () => {
+  // $200 spent looks fine against a $1000 base but is 80% of the $250 envelope.
+  const item = progressWithCarry('1000.0000', 200, -750);
+  assert.equal(item.target, 250);
+  assert.equal(item.percentUsed, 80);
+  const worse = progressWithCarry('1000.0000', 300, -750);
+  assert.equal(worse.percentUsed, 120);
+  assert.equal(worse.remaining, -50);
+});
+
+test('computeBudgetProgress: an effective target of exactly 0 reads 100% used at zero spend', () => {
+  // The envelope is empty before the period even starts. `spent / 0` is not a
+  // number, so the defined branch is 100 + (spent / baseTarget) * 100.
+  const item = progressWithCarry('1000.0000', 0, -1000);
+  assert.equal(item.target, 0);
+  assert.equal(item.remaining, 0);
+  assert.equal(item.percentUsed, 100);
+});
+
+test('computeBudgetProgress: a negative effective target keeps percentUsed monotone in spend', () => {
+  const idle = progressWithCarry('1000.0000', 0, -1200);
+  assert.equal(idle.target, -200);
+  assert.equal(idle.remaining, -200);
+  assert.equal(idle.percentUsed, 100);
+
+  const spending = progressWithCarry('1000.0000', 300, -1200);
+  assert.equal(spending.target, -200);
+  assert.equal(spending.remaining, -500);
+  // 100% for being underwater, plus 30% of a base allowance spent on top.
+  assert.equal(spending.percentUsed, 130);
+  assert.ok(spending.percentUsed > idle.percentUsed);
+});
+
+test('computeBudgetProgress: carry more negative than a full base allowance still reports', () => {
+  const item = progressWithCarry('1000.0000', 1000, -2500);
+  assert.equal(item.target, -1500);
+  assert.equal(item.remaining, -2500);
+  assert.equal(item.percentUsed, 200);
+});
+
+test('computeBudgetProgress: carry applies to an overall (category=null) budget too', () => {
+  const [item] = computeBudgetProgress(
+    [{ id: 9, category: null, currency: 'CAD', amount: '1000.0000', carriedIn: 250 }],
+    new Map([
+      ['CAD\0Dining', { currency: 'CAD', category: 'Dining', spent: 600 }],
+      ['CAD\0Rent', { currency: 'CAD', category: 'Rent', spent: 400 }],
+    ]),
+    CARRY_BOUNDS
+  );
+  assert.equal(item.spent, 1000);
+  assert.equal(item.target, 1250);
+  assert.equal(item.remaining, 250);
+  assert.equal(item.percentUsed, (1000 / 1250) * 100);
+});
+
+test('computeBudgetProgress: carry applies on top of a parent subtree rollup', () => {
+  const [item] = computeBudgetProgress(
+    [
+      {
+        id: 11,
+        category: 'Dining',
+        currency: 'CAD',
+        amount: '400.0000',
+        categoryNames: ['Dining', 'Coffee'],
+        carriedIn: -100,
+      },
+    ],
+    new Map([
+      ['CAD\0Dining', { currency: 'CAD', category: 'Dining', spent: 150 }],
+      ['CAD\0Coffee', { currency: 'CAD', category: 'Coffee', spent: 50 }],
+    ]),
+    CARRY_BOUNDS
+  );
+  assert.equal(item.spent, 200);
+  assert.equal(item.target, 300);
+  assert.equal(item.percentUsed, (200 / 300) * 100);
+});
