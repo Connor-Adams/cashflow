@@ -69,12 +69,18 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   const t5s = facts.slips.filter(s => s.slipType === 'T5');
   const t5Box13Total = sumD(t5s.map(s => s.boxes['box13'] ?? D('0')));
   const t5Box25Total = sumD(t5s.map(s => s.boxes['box25'] ?? D('0')));
-  const t5Box26Total = sumD(t5s.map(s => s.boxes['box26'] ?? D('0')));
+  // CRA T5 box 11 is the TAXABLE amount of dividends other than eligible. Box 26
+  // is the dividend tax credit for ELIGIBLE dividends — reading it here both put a
+  // ~15% credit figure on the non-eligible income line and suppressed the computed
+  // dividends entirely, which for an owner-managed corp is tens of thousands.
+  const t5Box11Total = sumD(t5s.map(s => s.boxes['box11'] ?? D('0')));
 
   // T3 slip reconciliation
   const t3s = facts.slips.filter(s => s.slipType === 'T3');
   const t3Box26Total = sumD(t3s.map(s => s.boxes['box26'] ?? D('0')));
-  const t3Box49Total = sumD(t3s.map(s => s.boxes['box49'] ?? D('0')));
+  // CRA T3 box 50 is the TAXABLE amount of eligible dividends; box 49 is the
+  // actual amount. Taking box 49 understated eligible dividends by the 38% gross-up.
+  const t3Box50Total = sumD(t3s.map(s => s.boxes['box50'] ?? D('0')));
   const t3Box32Total = sumD(t3s.map(s => s.boxes['box32'] ?? D('0')));
 
   // Interest L12100 — prefer T5 box 13 + T3 box 26 when slips exist
@@ -94,11 +100,11 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
          ...t3s.map(s => ({ source: `Slip T3 #${s.slipId} box 26`, amount: s.boxes['box26'] ?? D('0') }))]
       : facts.interestIncome.map(i => ({ source: i.source, amount: i.cadAmount })));
 
-  // Eligible dividends L12000 — T5 box 25 / T3 box 49 are already grossed-up (taxable amount)
+  // Eligible dividends L12000 — T5 box 25 / T3 box 50 are already grossed-up (taxable amount)
   const eligibleActual = sumD(facts.eligibleDividends.map(i => i.cadAmount));
-  const slipEligibleGrossed = t5Box25Total.plus(t3Box49Total);
+  const slipEligibleGrossed = t5Box25Total.plus(t3Box50Total);
   const hasEligibleSlips = t5s.some(s => (s.boxes['box25'] ?? D('0')).greaterThan(0))
-    || t3s.some(s => (s.boxes['box49'] ?? D('0')).greaterThan(0));
+    || t3s.some(s => (s.boxes['box50'] ?? D('0')).greaterThan(0));
   const eligibleGrossed = hasEligibleSlips ? slipEligibleGrossed : grossUpEligible(eligibleActual, r);
   if (hasEligibleSlips) {
     const computedGrossed = grossUpEligible(eligibleActual, r);
@@ -111,14 +117,17 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   push('L12000', 'Taxable amount of eligible dividends', eligibleGrossed,
     hasEligibleSlips
       ? [...t5s.map(s => ({ source: `Slip T5 #${s.slipId} box 25`, amount: s.boxes['box25'] ?? D('0') })),
-         ...t3s.map(s => ({ source: `Slip T3 #${s.slipId} box 49`, amount: s.boxes['box49'] ?? D('0') }))]
+         ...t3s.map(s => ({ source: `Slip T3 #${s.slipId} box 50`, amount: s.boxes['box50'] ?? D('0') }))]
       : facts.eligibleDividends.map(i => ({ source: i.source, amount: i.cadAmount })),
     hasEligibleSlips ? 'from T5/T3 slips (pre-grossed)' : `${r.dividendGrossUpEligible.plus(1).toString()} × actual`);
 
   // Non-eligible dividends L12010
   const nonElActual = sumD(facts.nonEligibleDividends.map(i => i.cadAmount));
-  const slipNonElGrossed = t5Box26Total.plus(t3Box32Total);
-  const hasNonElSlips = t5s.some(s => (s.boxes['box26'] ?? D('0')).greaterThan(0))
+  const slipNonElGrossed = t5Box11Total.plus(t3Box32Total);
+  // Gated on the boxes actually read. Gating on box 26 meant a pure non-eligible
+  // T5 — boxes 10/11/12, box 26 empty — never triggered the reconciliation at all,
+  // so the slip was decorative and no warning could fire.
+  const hasNonElSlips = t5s.some(s => (s.boxes['box11'] ?? D('0')).greaterThan(0))
     || t3s.some(s => (s.boxes['box32'] ?? D('0')).greaterThan(0));
   const nonElGrossed = hasNonElSlips ? slipNonElGrossed : grossUpNonEligible(nonElActual, r);
   if (hasNonElSlips) {
@@ -131,7 +140,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   }
   push('L12010', 'Taxable amount of non-eligible dividends', nonElGrossed,
     hasNonElSlips
-      ? [...t5s.map(s => ({ source: `Slip T5 #${s.slipId} box 26`, amount: s.boxes['box26'] ?? D('0') })),
+      ? [...t5s.map(s => ({ source: `Slip T5 #${s.slipId} box 11`, amount: s.boxes['box11'] ?? D('0') })),
          ...t3s.map(s => ({ source: `Slip T3 #${s.slipId} box 32`, amount: s.boxes['box32'] ?? D('0') }))]
       : facts.nonEligibleDividends.map(i => ({ source: i.source, amount: i.cadAmount })));
 
