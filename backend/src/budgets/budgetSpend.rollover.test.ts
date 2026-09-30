@@ -109,7 +109,6 @@ async function load(budget: Awaited<ReturnType<typeof makeBudget>>) {
   const tree = await loadCategoryTree(householdId);
   return loadBudgetSpend({
     budget: toBudgetSpendInput(budget),
-    householdWhere: { householdId },
     tree,
     now: NOW,
   });

@@ -175,20 +175,21 @@ const SPEND_ATTRIBUTES = [
 /**
  * Compute one budget's current-period spend, target and (when enabled) carry.
  *
- * `householdWhere` is passed in rather than derived because the route and the
- * cron scope differently on purpose: the route uses `householdWhere(req)`, which
- * returns `{}` for a superadmin, while the cron pins `{ householdId }`. Taking
- * it as a parameter preserves both behaviors verbatim instead of silently
- * changing one of them during the extraction.
+ * The household scope is derived from `budget.householdId`, NOT from the
+ * caller. A budget belongs to exactly one household and its spend is compared
+ * against that household's target, so any other scope produces a number with no
+ * meaning. This used to be a `householdWhere` parameter, which let the route
+ * pass `householdWhere(req)` — `{}` for a superadmin — and sum every
+ * household's transactions against one household's budget.
  */
 export async function loadBudgetSpend(args: {
   budget: BudgetSpendInput;
-  householdWhere: WhereOptions;
   tree: CategoryTree;
   now?: Date;
   maxLookbackPeriods?: number;
 }): Promise<BudgetSpendResult> {
-  const { budget, householdWhere, tree } = args;
+  const { budget, tree } = args;
+  const householdScope = { householdId: budget.householdId };
   const now = args.now ?? new Date();
   const bounds = currentPeriodBounds(budget.period, now);
 
@@ -221,7 +222,7 @@ export async function loadBudgetSpend(args: {
   if (budget.excludeRefundedPurchases) {
     const refunds = await Transaction.findAll({
       where: {
-        ...householdWhere,
+        ...householdScope,
         currency: budget.currency,
         txnType: 'refund',
         linkedTransactionId: { [Op.ne]: null },
@@ -243,7 +244,7 @@ export async function loadBudgetSpend(args: {
 
   const rows = (await Transaction.findAll({
     where: {
-      ...householdWhere,
+      ...householdScope,
       currency: budget.currency,
       date: { [Op.gte]: lookback.anchorStart, [Op.lte]: bounds.periodEnd },
       ...scopeWhereClause(budget.scope),
@@ -348,28 +349,38 @@ export type BudgetStatusItem = ProgressItem & {
  * Each budget is computed independently because budgets in different
  * scopes/periods cannot share their underlying transaction aggregate, so this is
  * one query per budget — unchanged by rollover, which only widens each query's
- * date range rather than adding queries. The category tree is loaded once.
+ * date range rather than adding queries.
+ *
+ * Both the spend scope and the category tree come from each budget's own
+ * `householdId`, never from the caller — see {@link loadBudgetSpend}. Category
+ * ids are per-household, so a tree from the wrong household resolves none of a
+ * budget's ids and silently drops its subtree rollup. In practice every caller
+ * passes a single household's budgets, so the dedupe below is one tree load.
  */
 export async function loadBudgetStatuses(args: {
   budgets: BudgetSpendInput[];
-  householdId: number;
-  householdWhere: WhereOptions;
   now?: Date;
 }): Promise<BudgetStatusItem[]> {
-  const { budgets, householdId, householdWhere } = args;
+  const { budgets } = args;
   if (budgets.length === 0) return [];
   const now = args.now ?? new Date();
 
-  // Load the category tree once so a budget on a parent rolls its subtree's
-  // spend up (a budget on "Dining" counts "Dining / Coffee" too).
-  const tree = await loadCategoryTree(householdId);
+  // A budget on a parent rolls its subtree's spend up (a budget on "Dining"
+  // counts "Dining / Coffee" too), which needs that household's tree.
+  const householdIds = Array.from(new Set(budgets.map((b) => b.householdId)));
+  const treeByHousehold = new Map(
+    await Promise.all(
+      householdIds.map(
+        async (id) => [id, await loadCategoryTree(id)] as const,
+      ),
+    ),
+  );
 
   return Promise.all(
     budgets.map(async (budget) => {
       const { bounds, progress } = await loadBudgetSpend({
         budget,
-        householdWhere,
-        tree,
+        tree: treeByHousehold.get(budget.householdId)!,
         now,
       });
       const elapsed = periodElapsedPercent(now, bounds);

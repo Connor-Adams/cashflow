@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import { OptimisticLockError } from 'sequelize';
 import {
   BudgetTarget,
@@ -11,11 +11,7 @@ import {
 import { BudgetExclusion, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
-import {
-  loadBudgetStatuses,
-  toBudgetSpendInput,
-  type BudgetStatusItem,
-} from '../budgets/budgetSpend';
+import { loadBudgetStatuses, toBudgetSpendInput } from '../budgets/budgetSpend';
 
 const router = Router();
 
@@ -349,77 +345,51 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.get('/progress', async (req, res, next) => {
-  try {
-    const where: Record<string, unknown> = { ...householdWhere(req) };
-    if (req.query.currency) {
-      where.currency = String(req.query.currency).toUpperCase().slice(0, 3);
-    }
-
-    const budgets = await BudgetTarget.findAll({
-      where,
-      order: [
-        ['currency', 'ASC'],
-        ['category', 'ASC'],
-        ['createdAt', 'ASC'],
-      ],
-    });
-
-    const items = await computeStatusForBudgets(req, budgets);
-    res.json({ items });
-  } catch (e) {
-    next(e);
-  }
-});
-
 /**
- * GET /api/budgets/status — issue #201's "status" endpoint. Returns the same
- * shape as /progress (kept identical to avoid splitting the dashboard widget
- * code path) but the canonical name from the issue spec. Adopt this endpoint
- * for new clients; /progress is preserved for back-compat with the existing
- * DashboardPage widget.
- */
-router.get('/status', async (req, res, next) => {
-  try {
-    const where: Record<string, unknown> = { ...householdWhere(req) };
-    if (req.query.currency) {
-      where.currency = String(req.query.currency).toUpperCase().slice(0, 3);
-    }
-
-    const budgets = await BudgetTarget.findAll({
-      where,
-      order: [
-        ['currency', 'ASC'],
-        ['category', 'ASC'],
-        ['createdAt', 'ASC'],
-      ],
-    });
-
-    const items = await computeStatusForBudgets(req, budgets);
-    res.json({ items });
-  } catch (e) {
-    next(e);
-  }
-});
-
-/**
- * Thin adapter over the shared spend pipeline in `budgets/budgetSpend.ts`, which
- * the daily breach cron calls too. No budget math lives here any more — this
- * only maps the request's household scope onto the loader's inputs.
+ * `GET /api/budgets/progress` and `GET /api/budgets/status` — issue #201's
+ * budget status payload. `/status` is the canonical name from the issue spec;
+ * `/progress` predates it and is preserved for the existing DashboardPage
+ * widget. They share one handler so the two can never drift.
  *
- * `householdWhere(req)` is forwarded rather than reduced to a household id
- * because it returns `{}` for a superadmin, and the loader must preserve that.
+ * Unlike `GET /api/budgets`, these PIN the caller's household even for a
+ * superadmin (for whom `householdWhere(req)` is `{}`). Each item pairs one
+ * household's target with that household's spend and pacing, so a
+ * cross-household list is a set of rows with no common frame; the plain listing
+ * above returns rows rather than aggregates and stays cross-household.
+ *
+ * The aggregate itself is scoped by each budget's own `householdId` inside
+ * `loadBudgetStatuses` regardless of caller — this only narrows WHICH budgets
+ * are listed, never how any one of them is computed.
  */
-async function computeStatusForBudgets(
-  req: import('express').Request,
-  budgets: InstanceType<typeof BudgetTarget>[]
-): Promise<BudgetStatusItem[]> {
-  return loadBudgetStatuses({
-    budgets: budgets.map(toBudgetSpendInput),
-    householdId: currentAuth(req).household.id,
-    householdWhere: householdWhere(req),
-  });
-}
+const budgetStatusHandler: RequestHandler = async (req, res, next) => {
+  try {
+    const where: Record<string, unknown> = {
+      householdId: currentAuth(req).household.id,
+    };
+    if (req.query.currency) {
+      where.currency = String(req.query.currency).toUpperCase().slice(0, 3);
+    }
+
+    const budgets = await BudgetTarget.findAll({
+      where,
+      order: [
+        ['currency', 'ASC'],
+        ['category', 'ASC'],
+        ['createdAt', 'ASC'],
+      ],
+    });
+
+    const items = await loadBudgetStatuses({
+      budgets: budgets.map(toBudgetSpendInput),
+    });
+    res.json({ items });
+  } catch (e) {
+    next(e);
+  }
+};
+
+router.get('/progress', budgetStatusHandler);
+router.get('/status', budgetStatusHandler);
 
 router.post('/', async (req, res, next) => {
   try {

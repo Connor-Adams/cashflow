@@ -206,13 +206,12 @@ export async function processBudget(
 
   // One shared pipeline with the /status route — see `budgets/budgetSpend.ts`.
   // This used to be a ~90-line copy of the route's query sequence, and had
-  // already drifted from it. The cron pins the household explicitly rather than
-  // going through the request-scope helper, which is why `loadBudgetSpend` takes
-  // `householdWhere` as a parameter.
+  // already drifted from it. `loadBudgetSpend` scopes itself by
+  // `budget.householdId`, so the route and this cron now agree for every caller
+  // role.
   const tree = await loadCategoryTree(budget.householdId);
   const { bounds, progress } = await loadBudgetSpend({
     budget: toBudgetSpendInput(budget),
-    householdWhere: { householdId: budget.householdId },
     tree,
     now,
   });
