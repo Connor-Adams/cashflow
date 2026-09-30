@@ -178,25 +178,26 @@ export const FIXTURE_CATEGORIES: FixtureCategory[] = [
 /**
  * Total references per category id across transactions.{final,auto,category_override}_category_id,
  * rules.category_id, budget_targets.category_id, income_entries.category_id and
- * external_order_items.{inferred,category_override}_category_id, measured in prod 2026-09-30.
+ * external_order_items.{inferred,category_override}_category_id. Measured against
+ * prod on 2026-09-30 with a single UNION ALL count, not derived by hand.
  * Only the ids inside a duplicate group matter to Rule W; everything else is 0 here.
  */
 export const FIXTURE_REF_COUNTS: Record<number, number> = {
-  28: 16, 85: 2,
-  30: 63, 81: 7,
-  31: 217, 72: 3,
-  13: 15, 75: 1,
-  24: 43, 83: 2,
-  59: 17, 79: 0,
-  55: 9, 78: 0,
-  22: 1226, 71: 15,
-  37: 67, 77: 2,
-  19: 36, 76: 1,
-  32: 453, 69: 13,
-  14: 134, 74: 0,
-  6: 54, 73: 0,
-  40: 41, 82: 9,
-  20: 87, 80: 0,
+  28: 16, 85: 2,       // Ai
+  30: 63, 81: 7,       // Alcohol
+  31: 218, 72: 3,      // cc fees
+  13: 15, 75: 1,       // Clothing
+  24: 44, 83: 2,       // Diabetes
+  59: 17, 79: 0,       // Discord Nitro
+  55: 9, 78: 0,        // Domains
+  22: 1241, 71: 15,    // Eating Out
+  37: 70, 77: 2,       // Gas
+  19: 36, 76: 1,       // Golf
+  32: 454, 69: 13,     // Groceries
+  14: 135, 74: 0,      // Office Equipment — the ROOT is canonical here
+  6: 54, 73: 0,        // Travel
+  40: 41, 82: 9,       // Vape
+  20: 87, 80: 0,       // Weed
 };
 
 export const FIXTURE_BUDGETS: FixtureBudget[] = [
@@ -1070,14 +1071,18 @@ export type CategoryErrorCode =
   | 'not_found'
   | 'parent_not_found'
   | 'cycle'
-  | 'sibling_conflict'
   | 'name_conflict'
   | 'has_children'
   | 'has_references'
   | 'invalid_name';
 ```
 
-`sibling_conflict` stays in the union: removing it would be a breaking API change for any client matching on it, and it costs nothing to keep.
+`sibling_conflict` is **replaced, not kept alongside**. Verified before writing
+this plan: it is thrown only from `createCategory.ts:19` and `reparent.ts:32`,
+returned only from `routes/categories.ts:175`, and matched only by those two
+modules' own tests. Nothing in `frontend/src` or `shared/` reads it. Once this
+task widens all three checks nothing can throw it, so leaving it in the union
+would be dead code. Delete it and update the two tests that assert it.
 
 - [ ] **Step 4: Widen the three lookups**
 
