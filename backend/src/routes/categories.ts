@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import { Op } from 'sequelize';
 import { Category } from '../models';
 import { householdWhere } from '../auth/scope';
 import { currentAuth } from '../auth/middleware';
@@ -10,6 +9,7 @@ import { deleteCategory } from '../categories/deleteCategory';
 import { createCategory } from '../categories/createCategory';
 import { CategoryError } from '../categories/errors';
 import { normalizeCategoryName } from '../categories/normalizeName';
+import { findCategoryNameConflict } from '../categories/nameConflict';
 import { syncCategoryLeafNameMirrors } from '../categories/syncMirrors';
 import { sequelize } from '../db';
 
@@ -168,9 +168,7 @@ router.patch('/:id', async (req, res, next) => {
       }
       const newName = b.name.trim();
       const newKey = normalizeCategoryName(newName);
-      const conflict = await Category.findOne({
-        where: { householdId: row.householdId, nameKey: newKey, id: { [Op.ne]: row.id } },
-      });
+      const conflict = await findCategoryNameConflict(row.householdId, newKey, row.id);
       if (conflict) {
         res.status(409).json({
           error: `a category named "${newName}" already exists in this household`,
