@@ -18,6 +18,7 @@ import { buildReconciliationReport } from '../tax/reconciliation/buildReport';
 import { computeShareholderLoanBalance } from '../tax/services/shareholderLoanBalance';
 import { resolvePersonalEntity } from '../tax/services/personalEntityOwner';
 import { parseSlipAmount } from '../tax/util/parseSlipAmount';
+import { assertDistributionDirection, entityKindsFor } from '../tax/util/distributionDirection';
 import { apiReadLimiter, apiWriteLimiter } from './apiRateLimit';
 import type { SlipType, TaxSlipBoxValues } from '../models/TaxSlip';
 import { isTaxTreatment, type TaxTreatment } from '@cashflow/shared';
@@ -196,16 +197,8 @@ router.post('/classification-queue/bulk', apiWriteLimiter, async (req, res, next
           err.status = 404;
           throw err;
         }
-        if (treatment != null && DISTRIBUTION_TREATMENTS.has(treatment)
-          && !isDistributionDirection(txn, entityKind)) {
-          // Throwing rolls back the whole batch, like an unknown id.
-          const err = new Error(
-            `Transaction ${id} moves money into the corporation; it cannot be a ${treatment}. `
-            + 'Classify it as a loan or capital instead.',
-          ) as Error & { status?: number };
-          err.status = 400;
-          throw err;
-        }
+        // Throwing rolls back the whole batch, like an unknown id.
+        await assertDistributionDirection(txn, treatment, { kinds: entityKind });
         txn.set('taxTreatmentOverride', treatment);
         txn.set('reviewedAt', reviewedAt);
         await txn.save({ transaction: t });
@@ -254,28 +247,6 @@ router.post('/classification-queue/bulk', apiWriteLimiter, async (req, res, next
     next(e);
   }
 });
-
-/** Treatments that say money went FROM the corporation TO the person. */
-const DISTRIBUTION_TREATMENTS = new Set<string>([
-  'eligible_dividend', 'non_eligible_dividend', 'salary', 'employment_income',
-]);
-
-async function entityKindsFor(householdId: number): Promise<Map<number, string>> {
-  const entities = await Entity.findAll({ where: { householdId }, attributes: ['id', 'kind'] });
-  return new Map(entities.map((e) => [e.id, e.kind]));
-}
-
-/**
- * Whether a row could be one leg of a corp→person distribution: an inflow on a
- * personal entity, or an outflow on a corporate one. The queue only lists such
- * rows, but this route takes ids, so it checks for itself.
- */
-function isDistributionDirection(txn: Transaction, kinds: Map<number, string>): boolean {
-  const amount = Number(txn.amount);
-  const kind = txn.entityId != null ? kinds.get(txn.entityId) : undefined;
-  if (kind === 'corp') return amount < 0;
-  return amount > 0;
-}
 
 // GET /api/tax/entities — list all entities for the authenticated household.
 router.get('/entities', async (req, res, next) => {
