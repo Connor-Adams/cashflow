@@ -209,12 +209,28 @@ export async function categorizeReceiptItemsWithAi(
 
 export async function applyReceiptItemCategorySuggestions(
   suggestions: ReceiptItemCategorySuggestion[],
+  householdId: number | null,
 ): Promise<number> {
+  const { resolveCategoryMirror } = await import('../util/ensureCategory')
   let updated = 0
   for (const s of suggestions) {
-    // NOTE: static update/bulkCreate bypasses the beforeSave category-id hook, so *_category_id stays null momentarily. Migration 20260623000001 backfills any null FKs where the category string is set.
+    // A static update bypasses the beforeSave category-id hook, so the id has to
+    // be supplied here and the string has to be the resolved leaf's FLAT name —
+    // the model echoes back path-form hints, and a path form in a category
+    // mirror joins nothing. Same shape as applyAmazonItemCategorySuggestions.
+    //
+    // This is NOT the hook's resolution: the hook's `resolveCategoryIdByName`
+    // cannot read a path and prefers a ROOT of that name, while this goes
+    // through `resolveCategoryPath` (household-global, lowest id wins). They
+    // differ only for a household holding a duplicate name whose nested node is
+    // older than the root — a state the Task 6 unique index removes.
+    const mirror = await resolveCategoryMirror(householdId, s.category)
     const [count] = await ExternalOrderItem.update(
-      { inferredCategory: s.category, confidence: String(s.confidence) },
+      {
+        inferredCategory: mirror.name,
+        inferredCategoryId: mirror.id,
+        confidence: String(s.confidence),
+      },
       { where: { id: s.itemId } },
     )
     updated += count
@@ -237,7 +253,7 @@ export async function categorizeAndApplyReceiptItems(
       { householdId: args.householdId, orderId: args.orderId, orderIds: args.orderIds, limit: args.limit },
       opts,
     )
-    const updated = await applyReceiptItemCategorySuggestions(result.suggestions)
+    const updated = await applyReceiptItemCategorySuggestions(result.suggestions, args.householdId)
     // Recompute review flags for any transactions linked to the categorized orders.
     // Start with any explicit order ids from the caller.
     const explicit = args.orderId != null ? [args.orderId] : (args.orderIds ?? [])

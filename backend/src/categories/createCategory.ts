@@ -13,11 +13,15 @@ export async function createCategory(
   }
 
   const nameKey = normalizeCategoryName(name.trim());
-  const conflict = await Category.findOne({ where: { householdId, parentId, nameKey } });
+  // Category names are unique per HOUSEHOLD, not per parent
+  // (categories_household_name_key_unique): budgets and spend rollups join on
+  // the name string, so two same-named nodes anywhere are indistinguishable
+  // downstream.
+  const conflict = await Category.findOne({ where: { householdId, nameKey } });
   if (conflict) {
     throw new CategoryError(
-      'sibling_conflict',
-      `a sibling named "${name.trim()}" already exists under the target parent`,
+      'name_conflict',
+      `a category named "${name.trim()}" already exists in this household`,
     );
   }
 
