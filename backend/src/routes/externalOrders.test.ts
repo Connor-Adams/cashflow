@@ -188,3 +188,15 @@ test('the category resolve joins the caller transaction, so a rollback unwinds i
     'the rolled-back transaction must leave no orphan category',
   );
 });
+
+test('persistExtractedOrder stores a null businessUsePercent even when the extractor supplied one', async () => {
+  // This seam has always written null: an extracted guess must not feed the
+  // business/tax split. Only scanInbox and persistHighConfidenceOrder carry it.
+  const { order } = await persistExtractedOrder(
+    baseOrder({ orderId: 'bup-null-1', items: [itemFor({ businessUsePercent: 60 })] }),
+    { userId: null, householdId: null, source: 'test' },
+  );
+  const rows = await models.ExternalOrderItem.findAll({ where: { externalOrderId: order.id } });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].businessUsePercent, null);
+});

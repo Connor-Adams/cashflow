@@ -95,6 +95,14 @@ export async function buildExternalOrderItemRows(args: {
   householdId: number | null;
   items: ExtractedReceiptItem[];
   transaction?: Transaction | null;
+  /**
+   * Whether the extractor's `businessUsePercent` is persisted. Required, not
+   * defaulted, because the writers genuinely differ: `scanInbox` and
+   * `persistHighConfidenceOrder` have always carried it, while
+   * `persistExtractedOrder` has always stored null so an extracted guess never
+   * feeds the business/tax split the user did not set.
+   */
+  carryBusinessUsePercent: boolean;
 }): Promise<Record<string, unknown>[]> {
   // A null household is NOT short-circuited here: `resolveCategoryMirror`
   // already returns the leaf-segment-with-null-id pair for that case, and
@@ -112,7 +120,7 @@ export async function buildExternalOrderItemRows(args: {
     unitPrice: decimalOrNull(it.unitPrice),
     totalPrice: decimalOrNull(it.totalPrice),
     ...categoryFields(resolved, it.inferredCategory),
-    businessUsePercent: decimalOrNull(it.businessUsePercent),
+    businessUsePercent: args.carryBusinessUsePercent ? decimalOrNull(it.businessUsePercent) : null,
     confidence: null,
     itemNumber: it.vendorItemId ?? null,
     rawPayload: it as unknown,

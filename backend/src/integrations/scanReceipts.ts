@@ -908,6 +908,7 @@ export async function scanInbox(
               householdId: opts.householdId,
               items: extracted!.items,
               transaction: t,
+              carryBusinessUsePercent: true,
             })) as never[],
             { transaction: t },
           );

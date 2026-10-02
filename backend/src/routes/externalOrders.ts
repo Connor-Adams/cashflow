@@ -209,6 +209,7 @@ export async function persistExtractedOrder(
           householdId: opts.householdId,
           items: extracted.items,
           transaction: t,
+          carryBusinessUsePercent: false,
         })) as never[],
         { transaction: t },
       );
