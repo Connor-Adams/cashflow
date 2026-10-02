@@ -26,9 +26,10 @@ const DEFAULT_QUEUE = {
     { id: 21, date: '2025-07-01', amount: '3000', currency: 'CAD', merchantClean: 'Employer', accountId: 1, accountName: 'Personal Chk', txnType: 'income' },
   ],
 };
+let queueError: string | null = null;
 let queueData: unknown = DEFAULT_QUEUE;
 vi.mock('../../hooks/useClassificationQueue', () => ({
-  useClassificationQueue: () => ({ data: queueData, error: null, loading: false, reload }),
+  useClassificationQueue: () => ({ data: queueData, error: queueError, loading: false, reload }),
 }));
 vi.mock('../../hooks/useTaxEntities', () => ({
   useTaxEntities: () => ({ entities: [{ id: 5, kind: 'personal' }], error: null }),
@@ -59,6 +60,7 @@ describe('ClassifyTab', () => {
     postJson.mockReset();
     reload.mockClear();
     queueData = DEFAULT_QUEUE;
+    queueError = null;
   });
 
   it('renders corp + payroll sections and classifies a row (instant save + move)', async () => {
@@ -144,5 +146,13 @@ describe('ClassifyTab', () => {
       fireEvent.click(apply);
     }
     expect(postJson).not.toHaveBeenCalled();
+  });
+
+  it('shows the load error instead of hanging on Loading… when the fetch fails', () => {
+    queueData = null;
+    queueError = 'nope';
+    render(<ClassifyTab year={2025} />);
+    expect(screen.getByText('Failed to load queue: nope')).toBeInTheDocument();
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
   });
 });

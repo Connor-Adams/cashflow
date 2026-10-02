@@ -19,9 +19,10 @@ const CLASSIFIED_QUEUE = {
     { id: 21, date: '2025-07-01', amount: '3000', currency: 'CAD', merchantClean: 'Employer', accountId: 1, accountName: 'Personal Chk', txnType: 'income', taxTreatmentOverride: 'employment_income' },
   ],
 };
+let queueError: string | null = null;
 let queueData: unknown = CLASSIFIED_QUEUE;
 vi.mock('../../hooks/useClassificationQueue', () => ({
-  useClassificationQueue: () => ({ data: queueData, error: null, loading: false, reload }),
+  useClassificationQueue: () => ({ data: queueData, error: queueError, loading: false, reload }),
 }));
 vi.mock('../../hooks/useTaxEntities', () => ({
   useTaxEntities: () => ({ entities: [{ id: 5, kind: 'personal' }], error: null }),
@@ -30,7 +31,7 @@ vi.mock('../../hooks/useTaxEntities', () => ({
 import { ClassifiedTab } from './ClassifiedTab';
 
 describe('ClassifiedTab', () => {
-  beforeEach(() => { patchJson.mockClear(); reload.mockClear(); queueData = CLASSIFIED_QUEUE; });
+  beforeEach(() => { patchJson.mockClear(); reload.mockClear(); queueData = CLASSIFIED_QUEUE; queueError = null; });
 
   it('renders classified rows with the current treatment pre-selected', () => {
     render(<ClassifiedTab year={2025} />);
@@ -64,5 +65,13 @@ describe('ClassifiedTab', () => {
     queueData = { corpDistributions: [], payroll: [] };
     render(<ClassifiedTab year={2025} />);
     expect(screen.getByText(/No classified income/i)).toBeInTheDocument();
+  });
+
+  it('shows the load error instead of hanging on Loading… when the fetch fails', () => {
+    queueData = null;
+    queueError = 'nope';
+    render(<ClassifiedTab year={2025} />);
+    expect(screen.getByText('Failed to load classified income: nope')).toBeInTheDocument();
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
   });
 });

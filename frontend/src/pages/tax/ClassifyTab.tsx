@@ -51,8 +51,9 @@ export function ClassifyTab({ year }: { year: number }) {
 
   if (entitiesError) return <p className="error">Failed to load entities: {entitiesError}</p>;
   if (!personalEntity && entities !== null) return <p className="muted">No personal entity for this household.</p>;
-  if (loading || data === null) return <p className="muted">Loading…</p>;
+  // Error before loading: a failed fetch leaves data null, which read as loading forever.
   if (error) return <p className="error">Failed to load queue: {error}</p>;
+  if (loading || data === null) return <p className="muted">Loading…</p>;
 
   function onClassified(targetId: number, treatment: TaxTreatment, label: string) {
     setClassified((prev) => [{ targetId, treatment, label }, ...prev]);
