@@ -7,6 +7,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { getJson, patchJson, postJson } from '@/lib/api';
+import { apiBase } from '@/lib/runtimeConfig';
 
 export type TaxScope = 'personal' | 'shared' | 'business' | 'all';
 
@@ -29,6 +30,15 @@ function buildQuery(filters: TaxHygieneFilters): string {
   if (filters.from) qs.set('from', filters.from);
   if (filters.to) qs.set('to', filters.to);
   return qs.toString();
+}
+
+/**
+ * Tax CSV download URL. Navigated to directly (not fetched) so the cookie rides
+ * along and Content-Disposition names the file, which is why it needs the API
+ * base: a bare `/api/...` path resolves against the static frontend host in prod.
+ */
+export function taxExportUrl(filters: TaxHygieneFilters): string {
+  return `${apiBase()}/api/exports/tax?${buildQuery(filters)}`;
 }
 
 // ----- Summary -----------------------------------------------------------
