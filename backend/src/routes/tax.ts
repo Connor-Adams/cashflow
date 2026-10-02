@@ -18,6 +18,7 @@ import { buildReconciliationReport } from '../tax/reconciliation/buildReport';
 import { computeShareholderLoanBalance } from '../tax/services/shareholderLoanBalance';
 import { resolvePersonalEntity } from '../tax/services/personalEntityOwner';
 import { parseSlipAmount } from '../tax/util/parseSlipAmount';
+import { apiReadLimiter, apiWriteLimiter } from './apiRateLimit';
 import type { SlipType, TaxSlipBoxValues } from '../models/TaxSlip';
 import { isTaxTreatment, type TaxTreatment } from '@cashflow/shared';
 
@@ -145,7 +146,7 @@ router.get('/classification-queue', async (req, res, next) => {
 // Response carries the updated rows so the caller can patch its list in
 // place; a refetch would re-run the whole queue derivation and lose the
 // user's scroll position mid-batch.
-router.post('/classification-queue/bulk', async (req, res, next) => {
+router.post('/classification-queue/bulk', apiWriteLimiter, async (req, res, next) => {
   try {
     const { household } = currentAuth(req);
     const body = (req.body || {}) as { ids?: unknown; taxTreatmentOverride?: unknown };
@@ -515,7 +516,7 @@ router.delete('/entities/:id/spouse', async (req, res, next) => {
 });
 
 // GET /api/tax/personal/:year/return — compute (or return cached) T1 for the personal entity.
-router.get('/personal/:year/return', async (req, res, next) => {
+router.get('/personal/:year/return', apiReadLimiter, async (req, res, next) => {
   try {
     const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
@@ -605,7 +606,7 @@ router.get('/personal/:year/return', async (req, res, next) => {
 });
 
 // GET /api/tax/personal/:year/reconciliation — slip / txn / categorisation issues.
-router.get('/personal/:year/reconciliation', async (req, res, next) => {
+router.get('/personal/:year/reconciliation', apiReadLimiter, async (req, res, next) => {
   try {
     const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
@@ -629,7 +630,7 @@ router.get('/personal/:year/reconciliation', async (req, res, next) => {
 });
 
 // GET /api/tax/carryforwards — list carryforwards for the personal entity.
-router.get('/carryforwards', async (req, res, next) => {
+router.get('/carryforwards', apiReadLimiter, async (req, res, next) => {
   try {
     const { household, user } = currentAuth(req);
     const entity = await resolvePersonalEntity(household.id, user.id);
@@ -737,7 +738,7 @@ router.post('/slips', async (req, res, next) => {
 });
 
 // POST /api/tax/personal/:year/roll-forward — explicit carryforward roll for year N.
-router.post('/personal/:year/roll-forward', async (req, res, next) => {
+router.post('/personal/:year/roll-forward', apiWriteLimiter, async (req, res, next) => {
   try {
     const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
@@ -782,7 +783,7 @@ router.post('/personal/:year/roll-forward', async (req, res, next) => {
 });
 
 // GET /api/tax/personal/years?from=YYYY&to=YYYY — multi-year compare.
-router.get('/personal/years', async (req, res, next) => {
+router.get('/personal/years', apiReadLimiter, async (req, res, next) => {
   try {
     const { household, user } = currentAuth(req);
     const fromYear = req.query.from ? Number(req.query.from) : new Date().getFullYear() - 2;
@@ -830,7 +831,7 @@ router.get('/personal/years', async (req, res, next) => {
 // Not cached. The run-rate projection changes as the calendar advances with no fact
 // changing, which is the same reason the completeness report is recomputed per
 // request.
-router.get('/personal/:year/outlook', async (req, res, next) => {
+router.get('/personal/:year/outlook', apiReadLimiter, async (req, res, next) => {
   try {
     const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
@@ -900,7 +901,7 @@ function serializeOutlook(outlook: Awaited<ReturnType<typeof buildOutlook>>): un
 }
 
 // GET /api/tax/personal/:year/instalments — list instalment payments for the year.
-router.get('/personal/:year/instalments', async (req, res, next) => {
+router.get('/personal/:year/instalments', apiReadLimiter, async (req, res, next) => {
   try {
     const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
@@ -927,7 +928,7 @@ router.get('/personal/:year/instalments', async (req, res, next) => {
 });
 
 // POST /api/tax/personal/:year/instalments — record a new instalment payment.
-router.post('/personal/:year/instalments', async (req, res, next) => {
+router.post('/personal/:year/instalments', apiWriteLimiter, async (req, res, next) => {
   try {
     const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
@@ -966,7 +967,7 @@ router.post('/personal/:year/instalments', async (req, res, next) => {
 });
 
 // GET /api/tax/slips — list slips for the personal entity, optionally filtered by year.
-router.get('/slips', async (req, res, next) => {
+router.get('/slips', apiReadLimiter, async (req, res, next) => {
   try {
     const { household, user } = currentAuth(req);
     const entity = await resolvePersonalEntity(household.id, user.id);
