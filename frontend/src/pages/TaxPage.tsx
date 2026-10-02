@@ -114,7 +114,7 @@ export function TaxPage() {
           {tab === 'reconciliation' && <ReconciliationTab year={year} />}
           {tab === 'classify' && <ClassifyTab year={year} />}
           {tab === 'classified' && <ClassifiedTab year={year} />}
-          {tab === 'corp' && <CorpT2Tab />}
+          {tab === 'corp' && <CorpT2Tab year={year} />}
           {tab === 'shareholder-loans' && <ShareholderLoanTab />}
           {tab === 'planner' && <OwnerCompPlannerTab activePlanId={activePlanId} />}
           {tab === 'hygiene' && <TaxHygieneTab year={year} />}

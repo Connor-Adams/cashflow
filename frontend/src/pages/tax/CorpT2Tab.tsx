@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTaxEntities, type TaxEntity } from '../../hooks/useTaxEntities';
 import {
   useCorpScenarios, type CorpScenarioWithComputed, } from '../../hooks/useCorpScenarios';
@@ -9,6 +9,7 @@ import { ScenarioTree } from './scenarios/ScenarioTree';
 import { CorpOverrideEditor, type OtherCorpOption } from './scenarios/CorpOverrideEditor';
 import { ComparisonView } from './scenarios/ComparisonView';
 import { YearStripNav } from './scenarios/YearStripNav';
+import { useStarterScenario } from './scenarios/useStarterScenario';
 import { AssumptionsEditor } from './scenarios/AssumptionsEditor';
 import type { Scenario } from '../../hooks/useScenarios';
 import { patchJson } from '../../lib/api';
@@ -23,28 +24,13 @@ import { CollapsibleCard } from '@/components/ui/collapsible-card';
 import { Alert } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
 
-const CURRENT_YEAR = new Date().getFullYear().toString();
-
-// Backend corp scenarios API takes an integer year. The tab's fiscal-year
-// input accepts either a bare year ("2024") or a date-range string
-// ("2024-01-01/2024-12-31"); we parse the first 4 chars as the start year for
-// scenario API calls. The standalone fiscal-year input UI is preserved from
-// the pre-scenario CorpT2Tab so existing muscle memory still works.
-function parseYearInt(fiscalYear: string): number | null {
-  const head = fiscalYear.trim().slice(0, 4);
-  const n = Number(head);
-  return Number.isInteger(n) && n >= 1900 && n <= 9999 ? n : null;
+interface CorpT2TabProps {
+  /** The Tax page's selected year; corp scenarios are keyed by its start year. */
+  year: number;
 }
 
-export function CorpT2Tab() {
-  const [fiscalYear, setFiscalYear] = useState<string>(CURRENT_YEAR);
-  const [inputValue, setInputValue] = useState<string>(CURRENT_YEAR);
+export function CorpT2Tab({ year }: CorpT2TabProps) {
   const { entities, error: entitiesError, reload: reloadEntities } = useTaxEntities();
-
-  function handleApply() {
-    const trimmed = inputValue.trim();
-    if (trimmed) setFiscalYear(trimmed);
-  }
 
   if (entitiesError) {
     return (
@@ -73,26 +59,11 @@ export function CorpT2Tab() {
         .filter((e) => e.kind === 'corp' && e.id !== corpEntity.id)
         .map((e) => ({ id: e.id, legalName: e.legalName }))
     : [];
-  const yearInt = parseYearInt(fiscalYear);
 
   return (
     <div>
       <header className="mb-3">
-        <h2>Corp T2</h2>
-        <div className="mb-2 flex items-center gap-2">
-          <label>
-            Fiscal Year{' '}
-            <input
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              placeholder="e.g. 2024 or 2024-01-01/2024-12-31"
-              className="w-72"
-              onKeyDown={(e) => { if (e.key === 'Enter') handleApply(); }}
-            />
-          </label>
-          <Button variant="secondary" size="sm" onClick={handleApply}>Load</Button>
-        </div>
+        <h2>Corp T2 — {year}</h2>
         <p className="muted">
           Each scenario layers overrides on top of actuals. Edit overrides on
           the right to see recomputed totals; add scenarios to the compare bar
@@ -104,15 +75,13 @@ export function CorpT2Tab() {
           title="No corporation yet"
           description="Add a corporate entity to model its T2 return."
         />
-      ) : yearInt === null ? (
-        <p className="error">Fiscal year must start with a 4-digit year (e.g. 2024 or 2024-01-01/2024-12-31).</p>
       ) : (
         <>
           <AssociatedGroupInput corpEntity={corpEntity} onSaved={reloadEntities} />
           <CorpT2ScenarioWorkspace
-            key={`${corpEntity.id}:${yearInt}`}
+            key={`${corpEntity.id}:${year}`}
             entityId={corpEntity.id}
-            year={yearInt}
+            year={year}
             otherCorps={otherCorps}
           />
         </>
@@ -202,10 +171,9 @@ interface WorkspaceProps {
 function CorpT2ScenarioWorkspace({ entityId, year: yearProp, otherCorps }: WorkspaceProps) {
   // Local `selectedYear` overlays the prop so the YearStripNav can pivot to a
   // chained year (year+1 projection, etc.) without round-tripping through
-  // CorpT2Tab's fiscalYear input. When the prop changes (user submits a new
-  // fiscal year via the input) we re-seed local state to match.
+  // the page's year picker. The parent keys this component on the year, so a
+  // new page year remounts it with fresh state.
   const [selectedYear, setSelectedYear] = useState(yearProp);
-  useEffect(() => { setSelectedYear(yearProp); }, [yearProp]);
 
   const {
     scenarios,
@@ -219,36 +187,29 @@ function CorpT2ScenarioWorkspace({ entityId, year: yearProp, otherCorps }: Works
   } = useCorpScenarios(entityId, selectedYear);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [compareIds, setCompareIds] = useState<number[]>([]);
-  const [bootstrapping, setBootstrapping] = useState(false);
   const [isProjecting, setIsProjecting] = useState(false);
 
-  // Auto-create a starter scenario on first load so the baseline materialises
-  // and there is something for the user to edit immediately. The POST handler
-  // auto-creates the baseline as parent + a fork named "Scratch" as the leaf.
-  // Mirrors the P7 T13 PersonalT1Tab bootstrap pattern.
-  useEffect(() => {
-    if (loading || bootstrapping) return;
-    if (scenarios.length === 0) {
-      setBootstrapping(true);
-      create({ name: 'Scratch', overrides: {} })
-        .catch((err: unknown) => {
-          console.error('Failed to bootstrap corp baseline scenario', err);
-        })
-        .finally(() => setBootstrapping(false));
-    }
-  }, [loading, bootstrapping, scenarios.length, create]);
+  // The POST handler auto-creates the baseline as parent + a fork named
+  // "Scratch" as the leaf. Same bootstrap as PersonalT1Tab.
+  const createStarter = useCallback(() => create({ name: 'Scratch', overrides: {} }), [create]);
+  const starterError = useStarterScenario({
+    key: `${entityId}:${selectedYear}`,
+    loading,
+    empty: scenarios.length === 0,
+    create: createStarter,
+  });
 
   // Auto-select the most-recently-created leaf so the detail pane has content
   // as soon as the bootstrap POST resolves (or the user logs in to an existing
   // tree). Picks the latest fork if any, otherwise falls back to the baseline.
   useEffect(() => {
-    if (activeId !== null) return;
+    if (activeId !== null || loading) return;
     if (scenarios.length === 0) return;
     const latestFork = [...scenarios]
       .reverse()
       .find((s) => s.kind !== 'baseline');
     setActiveId((latestFork ?? scenarios[0]).id);
-  }, [activeId, scenarios]);
+  }, [activeId, loading, scenarios]);
 
   // Prune deleted scenarios from the compare set so the comparison view never
   // requests a stale id (the backend would 404 the whole compare).
@@ -349,6 +310,9 @@ function CorpT2ScenarioWorkspace({ entityId, year: yearProp, otherCorps }: Works
 
   if (loading) return <p className="muted">Loading scenarios…</p>;
   if (error) return <p className="error">Failed to load scenarios: {error}</p>;
+  if (starterError && scenarios.length === 0) {
+    return <p className="error">Failed to create a starter scenario: {starterError}</p>;
+  }
 
   return (
     <div>
