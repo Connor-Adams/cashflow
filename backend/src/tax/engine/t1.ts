@@ -5,7 +5,7 @@ import { computeAmt } from './amt';
 import {
   computeCppEmployeeParts,
   computeEiEmployee,
-  computeCppSelfEmployed,
+  computeCppSelfEmployedParts,
   enhancedCppDeduction,
 } from './cpp-ei';
 import { grossUpEligible, grossUpNonEligible, dtcFederal, dtcOntario } from './dividends';
@@ -184,7 +184,10 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
     'sum(SE revenue) − sum(SE expenses)');
 
   // SE CPP — compute immediately after seNet (needed before netIncome)
-  const seCppContrib = seNet.greaterThan(0) ? computeCppSelfEmployed(seNet, r) : D('0');
+  const seCpp = seNet.greaterThan(0)
+    ? computeCppSelfEmployedParts(seNet, r)
+    : { total: D('0'), base: D('0'), enhanced: D('0') };
+  const seCppContrib = seCpp.total;
 
   // Pension income L11500. May be negative when a pension-split transfer-out
   // (deduction L21000 on a real T1) exceeds pension actuals — the net effect
@@ -254,11 +257,18 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
     facts.fhsaContribs.map((c) => ({ source: c.source, amount: c.amount })),
     `min(fhsaContribs, fhsaRoom=${fhsaRoom.toFixed(2)})`);
 
-  // SE CPP deductible half L22200 — deductible against net income (employer half)
-  const seCppDeductible = seCppContrib.dividedBy(2);
+  // SE CPP deduction L22200 — Schedule 8 Part 4 line 17: the employer half of
+  // base CPP plus ALL enhanced CPP (first additional + CPP2, both shares). Only
+  // the employee half of base is left for the L31000 credit.
+  const seCppEmployeeBase = seCpp.base.dividedBy(2);
+  const seCppDeductible = seCppEmployeeBase.plus(seCpp.enhanced);
   if (seCppContrib.greaterThan(0)) {
-    push('L22200', 'CPP on self-employment (deductible half)', seCppDeductible, [],
-      'SE CPP total / 2');
+    push('L22200', 'Deduction for CPP contributions on self-employment income', seCppDeductible,
+      [
+        { source: 'employer half of base SE CPP', amount: seCppEmployeeBase },
+        { source: 'enhanced SE CPP (first additional + CPP2, both shares)', amount: seCpp.enhanced },
+      ],
+      'base SE CPP / 2 + enhanced SE CPP');
   }
 
   // Employee CPP and EI. A T4 is the record of what was actually deducted from pay,
@@ -308,8 +318,13 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   const spousalFedAmt = facts.spouse ? spousalCreditFederal(facts.spouse.netIncome, r) : D('0');
   const ageFedAmt = ageCreditFederal(facts.ageAtYearEnd, netIncome, r);
   const employmentFedAmt = employmentAmountFederalApplied(employmentLine, r);
-  const seCppEmployeeHalf = seCppContrib.dividedBy(2);
-  const cppEiCreditEligible = cppEiCreditAmount(baseCppEmployee.plus(seCppEmployeeHalf), eiEmployee);
+  // L31000 — only the employee half of BASE SE CPP earns the credit (S8 Part 4
+  // line 15); the enhanced share was deducted on L22200 instead.
+  if (seCppEmployeeBase.greaterThan(0)) {
+    push('L31000', 'Base CPP contributions on self-employment income', seCppEmployeeBase, [],
+      'base SE CPP × 50%');
+  }
+  const cppEiCreditEligible = cppEiCreditAmount(baseCppEmployee.plus(seCppEmployeeBase), eiEmployee);
   const fedCreditAmountsTotal = sumD([bpaFedAmt, spousalFedAmt, ageFedAmt, employmentFedAmt, cppEiCreditEligible]);
   const fedNonRefundableLowRatePart = fedCreditAmountsTotal.times(r.donationLowRate);
 
@@ -418,9 +433,9 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   push('L42801', 'ON surtax', onSurtax);
   push('L42802', 'Ontario Health Premium', ohp);
 
-  // SE CPP payable L31000 — both halves owed by SE individual
+  // SE CPP payable L42100 — both halves owed by the SE individual (S8 Part 4 line 14)
   if (seCppContrib.greaterThan(0)) {
-    push('L31000', 'CPP contributions on self-employment', seCppContrib, [],
+    push('L42100', 'CPP contributions payable on self-employment income', seCppContrib, [],
       '2 × computeCppEmployee(seNet)');
   }
 
