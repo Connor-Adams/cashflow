@@ -39,7 +39,11 @@ export async function ensureCategory(
   try {
     const { leafId } = await resolveCategoryPath(householdId, trimmed, { transaction });
     const leaf = await Category.findByPk(leafId, { transaction });
-    return leaf ? { id: leaf.id, name: leaf.name } : null;
+    // resolveCategoryPath just returned this id inside the same transaction, so
+    // a miss is an invariant violation. Returning null here would make callers
+    // write the name with a NULL id, the exact row this function exists to stop.
+    if (!leaf) throw new Error(`ensureCategory: resolved leaf ${leafId} not found`);
+    return { id: leaf.id, name: leaf.name };
   } catch (err) {
     if (err instanceof Error && err.message === 'invalid category path') return null;
     throw err;
