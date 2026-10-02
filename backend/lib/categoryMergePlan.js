@@ -70,6 +70,84 @@ function widens(before, after) {
   return false;
 }
 
+/** Group categories by (householdId, nameKey); only groups of 2+ are duplicates. */
+function duplicateGroups(categories) {
+  const groups = new Map();
+  for (const c of categories) {
+    // NUL-joined so a household id or a name_key containing the separator can
+    // never collide with a neighbouring group. Same joiner the spend map uses.
+    const key = `${c.householdId}\0${c.nameKey}`;
+    const list = groups.get(key) || [];
+    list.push(c);
+    groups.set(key, list);
+  }
+  return Array.from(groups.values()).filter((members) => members.length >= 2);
+}
+
+/** The merges and reparents for one duplicate group. */
+function planGroup(members, categories, refOf, merges, reparents) {
+  // Rule W: most references wins; ties break to the lowest (oldest) id.
+  const winner = members.slice().sort((a, b) => refOf(b.id) - refOf(a.id) || a.id - b.id)[0];
+  for (const loser of members) {
+    if (loser.id === winner.id) continue;
+    merges.push({
+      householdId: loser.householdId, nameKey: loser.nameKey,
+      winnerId: winner.id, loserId: loser.id,
+    });
+    // Skip the winner itself: if the winner is its own loser's child (a
+    // same-named parent/child pair where the child wins), reparenting it
+    // to itself would write parent_id = id -- a self-referential, corrupt
+    // row. The winner already has its real (pre-merge) parentId; leave it.
+    for (const child of categories) {
+      if (child.parentId === loser.id && child.id !== winner.id) {
+        reparents.push({ childId: child.id, newParentId: winner.id });
+      }
+    }
+  }
+}
+
+/** The post-merge shape, so Rule B compares against what the budget WILL count. */
+function postMergeCategories(categories, merges, reparents) {
+  const losers = new Set(merges.map((m) => m.loserId));
+  const reparentTo = new Map(reparents.map((r) => [r.childId, r.newParentId]));
+  return categories
+    .filter((c) => !losers.has(c.id))
+    .map((c) => (reparentTo.has(c.id) ? Object.assign({}, c, { parentId: reparentTo.get(c.id) }) : c));
+}
+
+/**
+ * Rule B for one anchored budget, or null when it needs no write.
+ *
+ * Rule B applies to EVERY anchored budget, not only the ones pointing at a
+ * loser: a budget sitting on a WINNER also widens when that winner adopts a
+ * loser's children through the `reparents` this planner emits.
+ *
+ * A merge must never widen what a budget counts. If the post-merge name set
+ * gains a name, detach (category_id = NULL, name string retained) -- the
+ * exact-match no-rollup form budgets 'Household' and 'Hobbies' already use.
+ * Narrowing is fine, and must NOT detach: see `widens` above.
+ *
+ * Compare NORMALIZED names, the same key grouping used to decide which rows are
+ * duplicates. Comparing raw `name` here (Defect: Rule W groups by nameKey, Rule
+ * B compared raw names) made a case-only duplicate group (e.g. {'Weed', 'weed'})
+ * always look like it widens -- the winner's own raw name never appears in the
+ * raw-name "before" set built from the as-is `categories` rows -- so every such
+ * merge wrongly detached instead of repointing.
+ */
+function budgetAction(budget, categories, after, winnerByLoser) {
+  const pointsAtLoser = winnerByLoser.has(budget.categoryId);
+  const afterId = pointsAtLoser ? winnerByLoser.get(budget.categoryId) : budget.categoryId;
+  const normalized = (c) => normalizeName(c.name);
+  if (widens(
+    subtreeNames(categories, budget.categoryId, normalized),
+    subtreeNames(after, afterId, normalized),
+  )) {
+    return { budgetId: budget.id, action: 'detach', categoryId: null };
+  }
+  // Only a budget whose anchor row is about to be DELETED needs rewriting.
+  return pointsAtLoser ? { budgetId: budget.id, action: 'repoint', categoryId: afterId } : null;
+}
+
 /**
  * @param {Array<{id:number, householdId:number, parentId:number|null, name:string, nameKey:string}>} categories
  * @param {Record<number, number>|Map<number, number>} refCounts total references per category id
@@ -82,77 +160,18 @@ function planCategoryMerges(categories, refCounts, budgets) {
     return typeof n === 'number' ? n : 0;
   };
 
-  const groups = new Map();
-  for (const c of categories) {
-    // NUL-joined so a household id or a name_key containing the separator can
-    // never collide with a neighbouring group. Same joiner the spend map uses.
-    const key = `${c.householdId}\0${c.nameKey}`;
-    const list = groups.get(key) || [];
-    list.push(c);
-    groups.set(key, list);
-  }
-
   const merges = [];
   const reparents = [];
-  for (const [, members] of groups) {
-    if (members.length < 2) continue;
-    // Rule W: most references wins; ties break to the lowest (oldest) id.
-    const winner = members.slice().sort((a, b) => refOf(b.id) - refOf(a.id) || a.id - b.id)[0];
-    for (const loser of members) {
-      if (loser.id === winner.id) continue;
-      merges.push({
-        householdId: loser.householdId, nameKey: loser.nameKey,
-        winnerId: winner.id, loserId: loser.id,
-      });
-      for (const child of categories) {
-        // Skip the winner itself: if the winner is its own loser's child (a
-        // same-named parent/child pair where the child wins), reparenting it
-        // to itself would write parent_id = id -- a self-referential, corrupt
-        // row. The winner already has its real (pre-merge) parentId; leave it.
-        if (child.parentId === loser.id && child.id !== winner.id) {
-          reparents.push({ childId: child.id, newParentId: winner.id });
-        }
-      }
-    }
+  for (const members of duplicateGroups(categories)) {
+    planGroup(members, categories, refOf, merges, reparents);
   }
 
-  // The post-merge shape, so Rule B compares against what the budget WILL count.
-  const losers = new Set(merges.map((m) => m.loserId));
-  const reparentTo = new Map(reparents.map((r) => [r.childId, r.newParentId]));
-  const after = categories
-    .filter((c) => !losers.has(c.id))
-    .map((c) => (reparentTo.has(c.id) ? Object.assign({}, c, { parentId: reparentTo.get(c.id) }) : c));
-
+  const after = postMergeCategories(categories, merges, reparents);
   const winnerByLoser = new Map(merges.map((m) => [m.loserId, m.winnerId]));
-  const budgetActions = [];
-  for (const b of budgets) {
-    if (b.categoryId == null) continue;
-    // Rule B applies to EVERY anchored budget, not only the ones pointing at a
-    // loser: a budget sitting on a WINNER also widens when that winner adopts a
-    // loser's children through the `reparents` this planner emits.
-    const pointsAtLoser = winnerByLoser.has(b.categoryId);
-    const afterId = pointsAtLoser ? winnerByLoser.get(b.categoryId) : b.categoryId;
-    // Rule B: a merge must never widen what a budget counts. If the post-merge
-    // name set gains a name, detach (category_id = NULL, name string retained) —
-    // the exact-match no-rollup form budgets 'Household' and 'Hobbies' already
-    // use. Narrowing is fine, and must NOT detach: see `widens` above.
-    // Compare NORMALIZED names, the same key grouping used to decide which
-    // rows are duplicates. Comparing raw `name` here (Defect: Rule W groups by
-    // nameKey, Rule B compared raw names) made a case-only duplicate group
-    // (e.g. {'Weed', 'weed'}) always look like it widens -- the winner's own
-    // raw name never appears in the raw-name "before" set built from the
-    // as-is `categories` rows -- so every such merge wrongly detached instead
-    // of repointing.
-    if (widens(
-      subtreeNames(categories, b.categoryId, (c) => normalizeName(c.name)),
-      subtreeNames(after, afterId, (c) => normalizeName(c.name)),
-    )) {
-      budgetActions.push({ budgetId: b.id, action: 'detach', categoryId: null });
-    } else if (pointsAtLoser) {
-      // Only a budget whose anchor row is about to be DELETED needs rewriting.
-      budgetActions.push({ budgetId: b.id, action: 'repoint', categoryId: afterId });
-    }
-  }
+  const budgetActions = budgets
+    .filter((b) => b.categoryId != null)
+    .map((b) => budgetAction(b, categories, after, winnerByLoser))
+    .filter((a) => a !== null);
 
   return { merges, reparents, budgetActions };
 }
