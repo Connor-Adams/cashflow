@@ -11,6 +11,4 @@ import categoryMergePlan = require('../../lib/categoryMergePlan');
 
 export const planCategoryMerges = categoryMergePlan.planCategoryMerges;
 export const subtreeNames = categoryMergePlan.subtreeNames;
-export type {
-  PlanCategory, PlanBudget, Merge, Reparent, BudgetAction, MergePlan,
-} from '../../lib/categoryMergePlan';
+export type { PlanCategory, PlanBudget } from '../../lib/categoryMergePlan';
