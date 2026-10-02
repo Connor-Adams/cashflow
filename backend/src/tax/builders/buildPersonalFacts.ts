@@ -4,13 +4,12 @@ import {
   Carryforward,
   Category,
   Entity,
-  HouseholdMember,
   InvestmentActivity,
   InstalmentPayment,
   Security,
   TaxSlip,
   Transaction,
-  User,
+  TransactionTaxMetadata,
 } from '../../models';
 import { D, Decimal, sumD } from '../util/decimal';
 import type {
@@ -23,8 +22,12 @@ import type {
 } from '../engine/types';
 import { computeAcb, type AcbActivity, type AcbRealizedEvent } from '../../portfolio/acb';
 import { resolveTaxTreatment } from './resolveTaxTreatment';
-import { toCad } from '../../fx/toCad';
+import { createCadConverter } from '../completeness/cadConverter';
 import { dividendDedupDays } from '../../config/env';
+import { resolveDeductiblePercent } from '../util/deductiblePercent';
+import { parseSlipAmount } from '../util/parseSlipAmount';
+import { hasSingleCorp, isOwnerPaidCorpExpense } from './ownerPaidCorpExpense';
+import { resolveEntityPerson } from '../services/personalEntityOwner';
 
 /**
  * CRA superficial-loss denial for one loss disposition: 30 days BEFORE through
@@ -134,6 +137,36 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     },
   });
 
+  // Memoised, and a missing rate degrades to the unconverted amount plus a
+  // warning instead of throwing — raw `toCad` 500'd the whole return.
+  const factWarnings: string[] = [];
+  const convert = createCadConverter({
+    onUnavailable: (currency, date) => {
+      factWarnings.push(
+        `No ${currency}→CAD exchange rate for ${date}; ${currency} amounts on that date `
+        + 'were used unconverted. Add the rate and recompute.',
+      );
+    },
+  });
+  const toCad = async (amount: Decimal, currency: string, date: string) => ({
+    cad: await convert(amount, currency, date),
+  });
+
+  // With exactly one corporation, buildCorpFacts deducts owner-paid business
+  // costs on the T2. Routing them to self-employment expenses as well deducted
+  // the same dollar on both returns.
+  const corpOwnsOwnerPaid = await hasSingleCorp(entity.householdId);
+
+  // Deductible percent for business rows (meals at 50%, …). One query, keyed by id.
+  const businessTxnIds = txns.filter((t) => t.finalBusiness).map((t) => t.id as number);
+  const taxMeta = businessTxnIds.length
+    ? await TransactionTaxMetadata.findAll({
+        where: { transactionId: { [Op.in]: businessTxnIds } },
+        attributes: ['transactionId', 'deductiblePercent'],
+      })
+    : [];
+  const deductibleById = new Map(taxMeta.map((m) => [m.transactionId, m.deductiblePercent]));
+
   const employmentIncome: IncomeItem[] = [];
   const eligibleDividends: IncomeItem[] = [];
   const nonEligibleDividends: IncomeItem[] = [];
@@ -151,7 +184,7 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   const rrspContribRows: ContribRow[] = [];
   const fhsaContribRows: ContribRow[] = [];
   const medicalExpenses: IncomeItem[] = [];
-  let pensionTotal = D('0');
+  let pensionTxnTotal = D('0');
   const rentalIncome: IncomeItem[] = [];
   const rentalExpenses: IncomeItem[] = [];
   /**
@@ -181,7 +214,8 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     if (treatment === 'salary' || treatment === 'employment_income') employmentIncome.push(item);
     else if (treatment === 'eligible_dividend') eligibleDividends.push(item);
     else if (treatment === 'non_eligible_dividend') nonEligibleDividends.push(item);
-    else if (treatment === 'donations') donations.push(item);
+    // Charges are negative in this app; the credit is on the amount given.
+    else if (treatment === 'donations') donations.push({ ...item, cadAmount: cad.abs(), amount: item.amount.abs() });
     else if (
       treatment === 'loan_advance' || treatment === 'loan_repayment'
       || treatment === 'not_income' || treatment === 'expense_reimbursement'
@@ -203,21 +237,40 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
         txnId: t.id as number, linkedId: t.linkedTransactionId ?? null, positive: cad.greaterThan(0),
       });
     }
+    // Expenses by sign: a charge (negative) adds to the claim, a refund (positive)
+    // reduces it. abs() turned every refund into more expense.
     else if (treatment === 'medical_expense') {
-      medicalExpenses.push({ ...item, cadAmount: cad.abs(), amount: D(t.amount as unknown as string).abs() });
+      medicalExpenses.push({ ...item, cadAmount: cad.negated(), amount: item.amount.negated() });
     }
     else if (treatment === 'pension_income') {
-      pensionTotal = pensionTotal.plus(cad);
+      pensionTxnTotal = pensionTxnTotal.plus(cad);
     }
     else if (treatment === 'rental_income') {
       rentalIncome.push(item);
     }
     else if (treatment === 'rental_expense') {
-      rentalExpenses.push({ ...item, cadAmount: cad.abs(), amount: D(t.amount as unknown as string).abs() });
+      rentalExpenses.push({ ...item, cadAmount: cad.negated(), amount: item.amount.negated() });
     }
-    else if (t.finalBusiness && cad.greaterThan(0)) selfEmploymentIncome.push(item);
-    else if (t.finalBusiness && cad.lessThan(0))
-      selfEmploymentExpenses.push({ ...item, cadAmount: cad.abs(), amount: D(t.amount as unknown as string).abs() });
+    else if (t.finalBusiness) {
+      const isRefund = t.txnType === 'refund';
+      if (corpOwnsOwnerPaid && (isOwnerPaidCorpExpense(t) || isRefund)) {
+        // The corporation's cost (and so its refund) — on the T2, not here.
+      } else if (cad.greaterThan(0) && !isRefund) {
+        selfEmploymentIncome.push(item);
+      } else if (!cad.isZero()) {
+        // A charge or a refund of one, netted by sign: the expense is the negated
+        // amount, so a refund comes through as a negative expense.
+        const share = myShareFraction(t);
+        const pct = resolveDeductiblePercent(deductibleById.get(t.id as number), true);
+        const factor = share.times(pct);
+        selfEmploymentExpenses.push({
+          ...item,
+          source: pct < 1 ? `${item.source} (${Math.round(pct * 100)}% deductible)` : item.source,
+          cadAmount: cad.negated().times(factor),
+          amount: item.amount.negated().times(factor),
+        });
+      }
+    }
   }
 
   // Investment activity for INCOME (interest, dividends, DRIP, staking) — this
@@ -478,25 +531,29 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     }
   }
 
-  // Slips
+  // Slips. Box values are typed in by hand from the paper slip ("1,200.50");
+  // an unparseable one is dropped with a warning rather than failing the return.
   const slipRows = await TaxSlip.findAll({ where: { entityId, year } });
-  const slips: SlipFact[] = slipRows.map((s) => ({
-    slipId: s.id,
-    slipType: s.slipType as any,
-    issuer: s.issuer,
-    boxes: Object.fromEntries(
-      Object.entries((s.boxValues ?? {}) as Record<string, number | string>).map(([k, v]) => [k, D(v as any)])
-    ),
-  }));
+  const slips: SlipFact[] = slipRows.map((s) => {
+    const boxes: Record<string, Decimal> = {};
+    for (const [k, v] of Object.entries((s.boxValues ?? {}) as Record<string, unknown>)) {
+      const parsed = parseSlipAmount(v);
+      if (parsed) boxes[k] = parsed;
+      else factWarnings.push(`Slip ${s.slipType} #${s.id} ${k}: "${String(v)}" is not a number and was ignored.`);
+    }
+    return { slipId: s.id, slipType: s.slipType as SlipFact['slipType'], issuer: s.issuer, boxes };
+  });
 
-  // T4A box 016 (pension) + box 024 (annuity) → pension income
-  const t4aSlips = slipRows.filter(s => s.slipType === 'T4A');
-  for (const s of t4aSlips) {
-    const boxes = (s.boxValues ?? {}) as Record<string, number | string>;
-    const box016 = D(boxes['box016'] ?? boxes['box16'] ?? 0);
-    const box024 = D(boxes['box024'] ?? boxes['box24'] ?? 0);
-    pensionTotal = pensionTotal.plus(box016).plus(box024);
+  // T4A box 016 (pension) + box 024 (annuity) → pension income. The slip is the
+  // authoritative figure: when one carries pension, pension_income transactions
+  // are the same money arriving and are not added on top (as for T5 interest).
+  let slipPension = D('0');
+  for (const s of slips.filter((x) => x.slipType === 'T4A')) {
+    const box016 = s.boxes['box016'] ?? s.boxes['box16'] ?? D('0');
+    const box024 = s.boxes['box024'] ?? s.boxes['box24'] ?? D('0');
+    slipPension = slipPension.plus(box016).plus(box024);
   }
+  const pensionTotal = slipPension.greaterThan(0) ? slipPension : pensionTxnTotal;
 
   // Carryforwards as of prior year
   const cf = await Carryforward.findAll({ where: { entityId, asOfYear: year - 1 } });
@@ -517,22 +574,13 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     carryforwards.instalmentsPaid = sumD(instalments.map((p) => D(p.amount as unknown as string)));
   }
 
-  // Phase 2: age at year end — load User via HouseholdMember; fall back to 0 if no DOB
+  // Age at Dec 31 of the person this entity is filed for — resolved through
+  // account ownership, not whichever household member the database returns
+  // first. Every birthday has passed by Dec 31, so it is the year difference.
   let ageAtYearEnd = 0;
-  const membership = await HouseholdMember.findOne({ where: { householdId: entity.householdId } });
-  if (membership) {
-    const user = await User.findByPk(membership.userId);
-    if (user?.dob) {
-      const dobYear = parseInt(user.dob.slice(0, 4), 10);
-      const dobMonth = parseInt(user.dob.slice(5, 7), 10); // 1-based
-      const dobDay = parseInt(user.dob.slice(8, 10), 10);
-      let age = year - dobYear;
-      // Subtract 1 if birthday hasn't occurred yet by Dec 31
-      if (dobMonth > 12 || (dobMonth === 12 && dobDay > 31)) {
-        age -= 1;
-      }
-      ageAtYearEnd = Math.max(0, age);
-    }
+  const person = await resolveEntityPerson(entity);
+  if (person?.dob) {
+    ageAtYearEnd = Math.max(0, year - parseInt(person.dob.slice(0, 4), 10));
   }
 
   return {
@@ -556,5 +604,20 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     rentalIncome,
     rentalExpenses,
     acbWarnings: [...new Set(acbWarnings)],
+    factWarnings,
   };
+}
+
+/**
+ * The fraction of a transaction that is the filer's own: `my_share_amount` over
+ * `amount`, so a split with a partner deducts only this person's half. A zero
+ * share is the column default, so it means "never computed" (count in full)
+ * unless the row is explicitly the partner's.
+ */
+function myShareFraction(t: Transaction): Decimal {
+  const amount = D((t.amount as unknown as string) ?? 0);
+  const mine = D((t.myShareAmount as unknown as string) ?? 0);
+  if (mine.isZero() && t.finalSplitType === 'partner') return D('0');
+  if (amount.isZero() || mine.isZero()) return D('1');
+  return Decimal.min(D('1'), Decimal.max(D('0'), mine.dividedBy(amount)));
 }

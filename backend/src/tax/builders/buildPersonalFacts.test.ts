@@ -43,7 +43,7 @@ test.skip('USD interest converted to CAD via FxRate', async () => {
   // then assert interestIncome[0].cadAmount = amount * 1.35
 });
 
-test.skip('donations, rrspContribs, fhsaContribs sourced from transactions by category', async () => {
+test('donations, rrspContribs, fhsaContribs sourced from transactions by category', async () => {
   const household = await Household.create({ name: 'Donation Test' });
   const entity = await Entity.create({
     householdId: household.id, kind: 'personal', legalName: 'Donation Test', jurisdiction: 'CA-ON', fiscalYearEnd: null,
@@ -56,7 +56,8 @@ test.skip('donations, rrspContribs, fhsaContribs sourced from transactions by ca
   // Donation transaction
   await Transaction.create({
     accountId: account.id, householdId: household.id, entityId: entity.id,
-    date: '2024-06-01', amount: '500.0000', currency: 'CAD',
+    // Charges are negative in this app; the credit is on the amount given.
+    date: '2024-06-01', amount: '-500.0000', currency: 'CAD',
     finalCategory: 'donations',
     merchantRaw: 'CHARITY', merchantClean: 'CHARITY',
     importBatch: 'seed-donations', sourceRowFingerprint: 'fp-don-001',
@@ -253,7 +254,7 @@ test('transaction taxTreatmentOverride wins over the category default', async ()
   await Category.create({ householdId: household.id, name: 'Misc' } as never);
   await Transaction.create({
     accountId: account.id, householdId: household.id, entityId: entity.id,
-    date: '2025-03-01', amount: '500.0000', currency: 'CAD', finalCategory: 'Misc',
+    date: '2025-03-01', amount: '-500.0000', currency: 'CAD', finalCategory: 'Misc',
     taxTreatmentOverride: 'donations',
     merchantRaw: 'CH', merchantClean: 'CH', importBatch: 's',
     sourceRowFingerprint: 'fp-tt-ovr-1', sourceIdentityFingerprint: 'sif-tt-ovr-1',

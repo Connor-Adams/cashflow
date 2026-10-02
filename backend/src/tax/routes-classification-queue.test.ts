@@ -394,3 +394,37 @@ test('classified mode excludes another member private classified pair', async ()
   const ids = res.body.corpDistributions.map((d: { personal: { id: number } }) => d.personal.id);
   assert.ok(!ids.includes(pPriv.id), 'another member private classified pair must be excluded');
 });
+
+test('a capital injection INTO the corp is not offered for classification as a draw', async () => {
+  // Money leaving Connor for the corp is a loan or capital, never a dividend.
+  // detectUnclassifiedCorpDraws already filters on cadAmount > 0; the queue
+  // listed both directions, so an injection could be classified as a dividend.
+  const models = await import('../models/index.js');
+  const ts = `${Date.now()}-inj`;
+  const personalOut = await models.Transaction.create({
+    accountId: personalAccountId, householdId, entityId: personalEntityId,
+    date: '2024-03-01', amount: '-10000', currency: 'CAD', txnType: 'transfer',
+    visibility: 'shared', merchantRaw: 'TO CORP', merchantClean: 'TO CORP', importBatch: 'b',
+    sourceRowFingerprint: `fp-inj-p-${ts}`, sourceIdentityFingerprint: `sif-inj-p-${ts}`,
+  } as never);
+  const corpIn = await models.Transaction.create({
+    accountId: corpAccountId, householdId, entityId: corpEntityId,
+    date: '2024-03-01', amount: '10000', currency: 'CAD', txnType: 'transfer',
+    visibility: 'shared', merchantRaw: 'FROM OWNER', merchantClean: 'FROM OWNER', importBatch: 'b',
+    sourceRowFingerprint: `fp-inj-c-${ts}`, sourceIdentityFingerprint: `sif-inj-c-${ts}`,
+  } as never);
+  await personalOut.update({ linkedTransactionId: corpIn.id });
+  await corpIn.update({ linkedTransactionId: personalOut.id });
+  // An outflow mis-typed as income is not payroll either.
+  await models.Transaction.create({
+    accountId: personalAccountId, householdId, entityId: personalEntityId,
+    date: '2024-03-02', amount: '-250', currency: 'CAD', txnType: 'income',
+    visibility: 'shared', merchantRaw: 'REVERSAL', merchantClean: 'REVERSAL', importBatch: 'b',
+    sourceRowFingerprint: `fp-inj-r-${ts}`, sourceIdentityFingerprint: `sif-inj-r-${ts}`,
+  } as never);
+
+  const res = await authed.get(`/api/tax/classification-queue?entityId=${personalEntityId}&year=2024`);
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.corpDistributions.length, 0, 'injection must not appear as a distribution');
+  assert.equal(res.body.payroll.length, 0, 'an outflow is not payroll');
+});

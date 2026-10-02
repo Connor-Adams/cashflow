@@ -167,6 +167,12 @@ export type TaxYearFacts = {
    * constructs facts without them.
    */
   acbWarnings?: string[];
+  /**
+   * Caveats raised while assembling the facts — a missing FX rate, an
+   * unparseable slip box. buildT1 seeds its warnings from these, as buildT2 does
+   * from the corp facts' own `factWarnings`.
+   */
+  factWarnings?: string[];
   carryforwards: PersonalCarryforwards;
   donations: IncomeItem[];
   fhsaContribs: RrspContrib[]; // reuse shape

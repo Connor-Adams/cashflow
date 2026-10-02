@@ -53,7 +53,9 @@ test('T1 totalPayable excludes employment CPP/EI (L43500 bug fix)', () => {
         slipId: 1,
         slipType: 'T4',
         issuer: 'Employer',
-        boxes: { box14: D('28514'), box22: D('3775.16') },
+        // Boxes 16 and 18 carry what the employer actually deducted; the engine
+        // reads them rather than recomputing from box 14.
+        boxes: { box14: D('28514'), box16: D('1488.33'), box18: D('473.33'), box22: D('3775.16') },
       },
     ],
     carryforwards: {
@@ -73,8 +75,8 @@ test('T1 totalPayable excludes employment CPP/EI (L43500 bug fix)', () => {
 
   // cppContrib + eiPremium are still reported in totals (needed for credit line
   // and downstream reporting), just not in totalPayable.
-  assert.equal(ret.totals.cppContrib.toFixed(2), '1488.33', 'cppContrib should still be computed');
-  assert.equal(ret.totals.eiPremium.toFixed(2), '473.33', 'eiPremium should still be computed');
+  assert.equal(ret.totals.cppContrib.toFixed(2), '1488.33', 'cppContrib is reported from T4 box 16');
+  assert.equal(ret.totals.eiPremium.toFixed(2), '473.33', 'eiPremium is reported from T4 box 18');
 
   // totalPayable must equal federalTax + onTax + onSurtax + ohp + oasRepayment only.
   // For this income level: 1412.15 + 714.74 + 0.00 + 300.00 + 0.00 = 2426.89

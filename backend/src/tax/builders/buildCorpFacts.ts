@@ -12,6 +12,7 @@ import { computeAcb } from '../../portfolio/acb';
 import { toCad } from '../../fx/toCad';
 import { partitionCorpPerimeter } from './corpPerimeter';
 import { loadCorpPerimeterInputs } from './loadCorpPerimeterInputs';
+import { isOwnerPaidCorpExpense } from './ownerPaidCorpExpense';
 import type {
   CapGainEvent,
   CorpCarryforwards,
@@ -291,15 +292,10 @@ export async function buildCorpFacts(
     let ownerPaidTotal = D(0);
     let ownerPaidCount = 0;
     for (const t of ownerPaid) {
+      // Shared with buildPersonalFacts, which skips exactly these rows so the
+      // same cost is not also a self-employment expense on the T1.
+      if (!isOwnerPaidCorpExpense(t)) continue;
       const raw = D(t.amount as unknown as string);
-      // Inflows are refunds or the reimbursement itself, not costs.
-      if (!raw.lessThan(0)) continue;
-      const txnType = (t as unknown as { txnType?: string | null }).txnType ?? null;
-      // Moving money is not spending it; buying securities is capital.
-      if (txnType === 'payment' || txnType === 'transfer' || txnType === 'investment') continue;
-      // A row already classified as something else (a donation, an RRSP
-      // contribution, a shareholder-loan leg) is not a corporate cost.
-      if (t.taxTreatmentOverride != null && t.taxTreatmentOverride !== 'none') continue;
       const { cad } = await toCad(raw, t.currency ?? 'CAD', t.date as unknown as string);
       activeBusinessIncome.push({
         source: `Txn #${t.id} ${t.merchantClean ?? t.merchantRaw ?? ''} (owner-paid)`.trim(),

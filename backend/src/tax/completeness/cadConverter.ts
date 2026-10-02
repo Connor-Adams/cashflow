@@ -20,7 +20,10 @@ import { logger } from '../../observability/logger';
  * degrades instead: the raw amount is used, which understates a foreign figure rather
  * than hiding the return.
  */
-export function createCadConverter(): (
+export function createCadConverter(options: {
+  /** Called once per currency/date pair that has no rate, so a caller can surface it. */
+  onUnavailable?: (currency: string, date: string) => void;
+} = {}): (
   amount: Decimal,
   currency: string,
   date: string,
@@ -41,6 +44,7 @@ export function createCadConverter(): (
             { err, currency, date },
             'completeness_fx_unavailable: using the unconverted amount',
           );
+          options.onUnavailable?.(currency, date);
           return null;
         });
       cache.set(key, rate);

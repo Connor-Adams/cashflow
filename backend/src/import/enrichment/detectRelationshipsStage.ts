@@ -30,6 +30,14 @@ export interface RelationshipCandidate {
    * suggested-link with reviewFlag for the user to confirm/split.
    */
   alreadyLinkedByRefundId?: number | null;
+  /** The candidate's own `linked_transaction_id`. */
+  linkedTransactionId?: number | null;
+  /**
+   * A row (other than the candidate's own partner) whose `linked_transaction_id`
+   * points at this candidate. Set by the loader; a transfer leg pointed at by
+   * someone else is already taken.
+   */
+  linkedFromId?: number | null;
 }
 
 export interface DetectRelationshipsInput {
@@ -50,6 +58,24 @@ export interface DetectRelationshipsInput {
    * canonical brand matches between refund and original.
    */
   merchantCanonical?: string | null;
+  /**
+   * Id of the transaction being enriched, when it already exists (the backfill
+   * re-enriches persisted rows). Its own partner is not "taken" from its point
+   * of view. Null for a row being imported.
+   */
+  selfId?: number | null;
+}
+
+/**
+ * Whether a candidate is free to become this row's transfer partner. A transfer
+ * has exactly one partner: a candidate that links elsewhere, or that another
+ * row already points at, is taken — linking it anyway left two rows pointing at
+ * one (prod txns 5456 and 2895 both at 992).
+ */
+function isFreeForTransfer(c: RelationshipCandidate, selfId: number | null): boolean {
+  const own = c.linkedTransactionId ?? null;
+  const from = c.linkedFromId ?? null;
+  return (own === null || own === selfId) && (from === null || from === selfId);
 }
 
 function daysBetween(a: string, b: string): number {
@@ -145,12 +171,14 @@ function findRefundSuggestedOriginal(input: DetectRelationshipsInput): Relations
 }
 
 function findTransferSibling(input: DetectRelationshipsInput): RelationshipCandidate | null {
+  const selfId = input.selfId ?? null;
+  const free = input.candidates.filter((c) => c.id !== selfId && isFreeForTransfer(c, selfId));
   // 1) sourceReference match: when both legs of a cross-account transfer carry
   // the same bank-supplied id (e.g. Wise `BALANCE-<id>` on the matching CAD +
   // USD statements), link regardless of amount. FX conversions move different
   // numbers between currencies, so the equal-amount path below would miss it.
   if (input.sourceReference) {
-    const byRef = input.candidates
+    const byRef = free
       .filter((c) => c.accountId !== input.accountId)
       .filter((c) => input.householdAccountIds.includes(c.accountId))
       .filter((c) => c.sourceReference != null && c.sourceReference === input.sourceReference)
@@ -165,7 +193,7 @@ function findTransferSibling(input: DetectRelationshipsInput): RelationshipCandi
   // move identical amounts in opposite signs within the transfer window.
   // Uses businessDaysBetween so that a Fri-out / Mon-in pair (1 business day,
   // but 3 calendar days) still falls within the default 2-business-day window.
-  const matches = input.candidates
+  const matches = free
     .filter((c) => c.accountId !== input.accountId)
     .filter((c) => input.householdAccountIds.includes(c.accountId))
     .filter((c) => Math.sign(c.amount) === -Math.sign(input.amount))

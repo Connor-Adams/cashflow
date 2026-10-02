@@ -112,3 +112,26 @@ test('the 2026 table declares itself published, not projected', () => {
   // closed year rather than trusting a comment.
   assert.equal(RATES_2026.provenance, 'published');
 });
+
+// Values the table once carried as placeholders ("2025 value reused", "×1.027
+// PROJECTED") under a `published` banner — some of them below the 2025 figures.
+// Sources: CRA Form TD1ON 2026 (td1on-26e.pdf), CRA Form TD1 2026 (td1-26e.pdf),
+// and CRA "Indexation adjustment for personal income tax and benefit amounts".
+const PLACEHOLDERS_REPLACED: [string, keyof typeof RATES_2026, string][] = [
+  ['Ontario age amount', 'ageAmountOntario', '6342'],
+  ['Ontario age threshold', 'ageAmountOntarioThreshold', '47210'],
+  ['Ontario pension income amount', 'pensionIncomeAmountCapOntario', '1796'],
+  ['Ontario disability amount', 'dtcBaseOntario', '10494'],
+  ['federal disability amount', 'dtcBaseFederal', '10341'],
+  ['federal disability supplement', 'dtcSupplementFederal', '6032'],
+  ['federal disability supplement care threshold', 'dtcSupplementThreshold', '3533'],
+  ['federal caregiver amount (infirm 18+)', 'caregiverAmountFederalInfirmAdult', '8773'],
+  ['federal caregiver reduction threshold', 'caregiverThresholdFederal', '20601'],
+];
+
+test('2026 formerly-placeholder credit amounts are the published amounts', () => {
+  for (const [label, key, expected] of PLACEHOLDERS_REPLACED) {
+    const got = RATES_2026[key] as unknown as { toString(): string };
+    assert.equal(got.toString(), expected, label);
+  }
+});

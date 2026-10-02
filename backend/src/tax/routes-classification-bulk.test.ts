@@ -339,3 +339,56 @@ test('bulk with a null treatment clears the rows (undo for a whole batch)', asyn
   assert.equal(res.status, 200, JSON.stringify(res.body));
   assert.equal(await treatmentOf(a.id), null);
 });
+
+/** A linked personal→corp injection pair (money INTO the corp). */
+async function injectionPair(date = '2025-03-01', amount = '10000') {
+  const { personal, corp } = await corpDrawPair(date, amount);
+  await personal.update({ amount: `-${amount}` });
+  await corp.update({ amount });
+  return { personal, corp };
+}
+
+test('bulk refuses to classify an injection into the corp as a dividend', async () => {
+  const { personal, corp } = await injectionPair('2025-03-03', '10000');
+
+  const res = await authed
+    .post('/api/tax/classification-queue/bulk')
+    .send({ ids: [personal.id], taxTreatmentOverride: 'non_eligible_dividend' });
+
+  assert.equal(res.status, 400, `expected 400, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(await treatmentOf(personal.id), null);
+  assert.equal(await treatmentOf(corp.id), null);
+});
+
+test('bulk refuses salary on the corp leg of an injection too', async () => {
+  const { corp } = await injectionPair('2025-03-04', '5000');
+  const res = await authed
+    .post('/api/tax/classification-queue/bulk')
+    .send({ ids: [corp.id], taxTreatmentOverride: 'salary' });
+  assert.equal(res.status, 400, `expected 400, got ${res.status}: ${JSON.stringify(res.body)}`);
+});
+
+test('an injection can still be classified as a loan', async () => {
+  const { personal } = await injectionPair('2025-03-05', '7000');
+  const res = await authed
+    .post('/api/tax/classification-queue/bulk')
+    .send({ ids: [personal.id], taxTreatmentOverride: 'loan_advance' });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(await treatmentOf(personal.id), 'loan_advance');
+});
+
+test('bulk does not mirror onto a sibling that is linked to a different row', async () => {
+  // Prod had two rows (5456, 2895) both pointing at 992. Classifying one must
+  // not overwrite the treatment of the other pair's leg.
+  const { personal, corp } = await corpDrawPair('2025-03-06', '3000');
+  const { personal: stray } = await corpDrawPair('2025-03-06', '3000');
+  await stray.update({ linkedTransactionId: corp.id }); // one-way: corp still points at `personal`
+
+  const res = await authed
+    .post('/api/tax/classification-queue/bulk')
+    .send({ ids: [stray.id], taxTreatmentOverride: 'non_eligible_dividend' });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(await treatmentOf(stray.id), 'non_eligible_dividend');
+  assert.equal(await treatmentOf(corp.id), null, 'a non-reciprocal sibling is not ours to write');
+  assert.equal(await treatmentOf(personal.id), null);
+});
