@@ -1,4 +1,7 @@
-// PROJECTED 2026-09-14 — NOT filing-grade. CRA publishes the real 2027
+// PROJECTED — NOT filing-grade. Re-derived 2026-10-02 from the PUBLISHED 2026
+// table (rates-2026.ts); earlier revisions indexed some amounts off the 2026
+// pre-announcement placeholders. A web check on 2026-10-02 found no CRA 2027
+// indexation yet (it uses CPI through Sept 2026, released 2026-10-19). CRA publishes the real 2027
 // indexation factor in ~Nov 2026 and Ontario follows in its own release; an
 // engineer MUST replace these numbers once both are out.
 //
@@ -58,22 +61,22 @@ export const RATES_2027: RateTable = {
     { upTo: D('220000'), rate: D('0.1216') },
     { upTo: null, rate: D('0.1316') },
   ],
-  basicPersonalAmountFederal: D('16781'), // 16564 × 1.02
+  basicPersonalAmountFederal: D('16781'), // 16452 × 1.02
   // Phaseout runs between the bottom of the 4th and 5th federal brackets.
   bpaFederalPhaseoutStart: D('185069'),
   bpaFederalPhaseoutEnd: D('263652'),
-  bpaFederalMin: D('15126'), // 14931 × 1.02
-  basicPersonalAmountOntario: D('13249'), // 12747 × 1.02
+  bpaFederalMin: D('15126'), // 14829 × 1.02
+  basicPersonalAmountOntario: D('13249'), // 12989 × 1.02
   spousalAmountFederal: D('16781'), // tracks the federal BPA
-  spousalAmountOntario: D('11250'), // 10818 × 1.02
-  ageAmountFederal: D('9392'), // 9272 × 1.02
-  ageAmountOntario: D('6200'), // 6078 × 1.02
+  spousalAmountOntario: D('11250'), // 11029 × 1.02
+  ageAmountFederal: D('9392'), // 9208 × 1.02
+  ageAmountOntario: D('6469'), // 6342 × 1.02
   ageAmountAge: 65,
-  ageAmountFederalThreshold: D('47361'), // 46751 × 1.02
-  ageAmountOntarioThreshold: D('45209'), // 44323 × 1.02
+  ageAmountFederalThreshold: D('47361'), // 46432 × 1.02
+  ageAmountOntarioThreshold: D('48154'), // 47210 × 1.02
   ageAmountFederalClawbackRate: D('0.15'),
   ageAmountOntarioClawbackRate: D('0.15'),
-  employmentAmountFederal: D('1531'), // 1511 × 1.02
+  employmentAmountFederal: D('1531'), // 1501 × 1.02
   dividendGrossUpEligible: D('0.38'),
   dividendGrossUpNonEligible: D('0.15'),
   dtcFederalEligible: D('0.150198'),
@@ -83,8 +86,8 @@ export const RATES_2027: RateTable = {
   // CPP: wage-indexed in reality; CPI factor used as a proxy. Rates are the
   // legislated steady-state (base 5.95% + CPP2 4.00%).
   cpp: {
-    ympe: D('76092'), // 73200 × 1.02 — PROXY
-    yampe: D('86700'), // 83400 × 1.02 — PROXY
+    ympe: D('76092'), // 74600 × 1.02 — PROXY
+    yampe: D('86700'), // 85000 × 1.02 — PROXY
     basicExemption: D('3500'), // fixed by statute
     employeeRate: D('0.0595'),
     cpp2Rate: D('0.04'),
@@ -92,15 +95,15 @@ export const RATES_2027: RateTable = {
   // EI: MIE is wage-indexed; rate is set annually by the EI Commission and is
   // carried forward from 2026 for want of an announcement.
   ei: {
-    maxInsurable: D('70278'), // 67500 × 1.02 — PROXY
-    employeeRate: D('0.0166'),
+    maxInsurable: D('70278'), // 68900 × 1.02 — PROXY
+    employeeRate: D('0.0163'), // carried from 2026
   },
   capitalGainsInclusion: D('0.5'),
   capitalGainsInclusionHigh: D('0.5'),
   capitalGainsInclusionThreshold: D('250000'), // fixed
   onSurtaxBands: [
-    { threshold: D('5934'), rate: D('0.20') }, // 5864 × 1.02
-    { threshold: D('7595'), rate: D('0.36') }, // 7504 × 1.02
+    { threshold: D('5934'), rate: D('0.20') }, // 5818 × 1.02
+    { threshold: D('7595'), rate: D('0.36') }, // 7446 × 1.02
   ],
   // ON health premium bands are fixed statutory amounts — copied verbatim.
   ontarioHealthPremium: [
@@ -122,18 +125,18 @@ export const RATES_2027: RateTable = {
   donationLowRateOntario: D('0.0505'),
   donationHighRateOntario: D('0.1116'),
   medicalThresholdPercent: D('0.03'),
-  medicalThresholdCap: D('2948'), // 2914 × 1.02
-  rrspAnnualLimit: D('34486'), // 33367 × 1.02 — PROXY (wage-indexed in reality)
+  medicalThresholdCap: D('2948'), // 2890 × 1.02
+  rrspAnnualLimit: D('34486'), // 33810 × 1.02 — PROXY (wage-indexed in reality)
   fhsaLifetimeLimit: D('40000'), // fixed
-  dtcBaseFederal: D('10620'), // 10412 × 1.02
-  dtcSupplementFederal: D('6197'), // 6075 × 1.02
-  dtcSupplementThreshold: D('3629'), // 3558 × 1.02
-  dtcBaseOntario: D('10049'), // 9852 × 1.02
-  caregiverAmountFederalInfirmAdult: D('8606'), // 8437 × 1.02
-  caregiverThresholdFederal: D('20207'), // 19811 × 1.02
+  dtcBaseFederal: D('10548'), // 10341 × 1.02
+  dtcSupplementFederal: D('6153'), // 6032 × 1.02
+  dtcSupplementThreshold: D('3604'), // 3533 × 1.02
+  dtcBaseOntario: D('10704'), // 10494 × 1.02
+  caregiverAmountFederalInfirmAdult: D('8948'), // 8773 × 1.02
+  caregiverThresholdFederal: D('21013'), // 20601 × 1.02
   pensionIncomeAmountCap: D('2000'), // fixed by statute, never indexed
-  pensionIncomeAmountCapOntario: D('1720'), // 1686 × 1.02
-  oasClawbackThreshold: D('97229'), // 95977 × 1.02
+  pensionIncomeAmountCapOntario: D('1832'), // 1796 × 1.02
+  oasClawbackThreshold: D('97229'), // 95323 × 1.02
   oasClawbackRate: D('0.15'),
   fhsaAnnualLimit: D('8000'), // fixed
   amtRate: D('0.205'),
