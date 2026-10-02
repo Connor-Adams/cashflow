@@ -32,7 +32,7 @@ import {
 } from './credits';
 
 export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
-  const warnings: string[] = [];
+  const warnings: string[] = [...(facts.factWarnings ?? [])];
   const lines: TaxLine[] = [];
   const push = (
     code: string,
