@@ -26,7 +26,11 @@ import {
 } from '../models';
 import type { PlannedEvent } from '../models/PlannedEvent';
 import { normalizeMerchantName } from '../subscriptions/detect';
-import { creditCardReservation } from './creditCardReservation';
+import {
+  creditCardReservation,
+  isCardPaymentInflow,
+  isStatementStale,
+} from './creditCardReservation';
 import { CASHFLOW_SETTINGS_DEFAULTS } from '../models/CashflowSettings';
 import { balanceAtDate } from '../networth/balanceAtDate';
 import { loadLiabilities, toDebtInputs } from '../debt/loadLiabilities';
@@ -125,6 +129,12 @@ export type SafeToSpendBreakdown = {
   requiredSavingsContributions: number;
   expectedCreditCardPayments: number;
   minimumBuffer: number;
+  /**
+   * Names of cards whose reserved statement is more than one billing cycle old
+   * — a newer statement has not been imported, so that reservation may be out
+   * of date. Empty when every reserved statement is current.
+   */
+  staleCreditCardStatements: string[];
 };
 
 export type SafeToSpendResult = {
@@ -172,6 +182,8 @@ export function composeSafeToSpend(input: {
   requiredSavingsContributions: number;
   expectedCreditCardPayments: number;
   minimumBuffer: number;
+  /** Cards whose reserved statement is stale (see the breakdown field). */
+  staleCreditCardStatements?: string[];
   settings: SafeToSpendSettingsLike;
 }): SafeToSpendResult {
   const goalContrib = input.settings.includeGoalContributions
@@ -211,6 +223,7 @@ export function composeSafeToSpend(input: {
       requiredSavingsContributions: round2(goalContrib),
       expectedCreditCardPayments: round2(ccPayments),
       minimumBuffer: round2(input.minimumBuffer),
+      staleCreditCardStatements: [...(input.staleCreditCardStatements ?? [])],
     },
     settings: { ...input.settings },
   };
@@ -621,14 +634,22 @@ export async function getRequiredSavingsContributions(
   return proRateMonthlyToWindow(fromUnits(totalU), windowDays);
 }
 
+/** The credit-card leg of safe-to-spend, plus which reserved statements are stale. */
+export type CreditCardPaymentsLeg = {
+  total: number;
+  staleCreditCardStatements: string[];
+};
+
 /**
  * Sum the cash safe-to-spend should reserve for credit-card payments in the
  * requested currency. Per card we reserve the *statement balance* (what is
- * billed and due), gated by the card's due day so a balance due next cycle is
- * not reserved this window — see `creditCardReservation`. When no statement
- * data is captured we fall back to the full current running balance
- * (sign-flipped from the negative charge balance) so we never under-reserve.
- * Positive (credit) balances contribute 0.
+ * billed and due) less any payments into the card dated after the statement
+ * date, gated by the card's due day so a balance due next cycle is not
+ * reserved this window — see `creditCardReservation`. When no statement data
+ * is captured we fall back to the full current running balance (sign-flipped
+ * from the negative charge balance) so we never under-reserve. Positive
+ * (credit) balances contribute 0. Cards whose reserved statement is more than
+ * one billing cycle old are named in `staleCreditCardStatements`.
  */
 export async function getExpectedCreditCardPayments(
   householdId: number,
@@ -636,7 +657,7 @@ export async function getExpectedCreditCardPayments(
   asOfDate: string,
   windowEndDate: string,
   corpEntityIds: ReadonlySet<number> = new Set(),
-): Promise<number> {
+): Promise<CreditCardPaymentsLeg> {
   const accounts = await Account.findAll({ where: { householdId } });
   const cards = accounts.filter(
     (acc) =>
@@ -644,41 +665,109 @@ export async function getExpectedCreditCardPayments(
       !isCorpAccount(acc, corpEntityIds) &&
       !(acc.closedAt && acc.closedAt <= asOfDate),
   );
-  if (cards.length === 0) return 0;
+  if (cards.length === 0) return { total: 0, staleCreditCardStatements: [] };
 
   const profiles = await LiabilityAccount.findAll({
     where: { accountId: { [Op.in]: cards.map((c) => c.id) } },
   });
   const profileByAccount = new Map(profiles.map((p) => [p.accountId, p]));
+  const paymentsByAccount = await getCardPaymentsSinceStatement(
+    profiles,
+    currency,
+    asOfDate,
+  );
 
   let totalU = 0;
+  const staleCreditCardStatements: string[] = [];
   for (const acc of cards) {
-    const bal = await balanceAtDate(acc, asOfDate);
-    let currentOwedU = 0;
-    for (const { currency: ccy, amount } of bal) {
-      if (ccy === currency && amount < 0) currentOwedU += toUnits(-amount);
-    }
-    // Statement balance lives in the account's default currency; only gate by
-    // it when that matches the requested currency, otherwise fall back.
     const profile = profileByAccount.get(acc.id);
-    const statementBalance =
-      profile != null &&
-      profile.statementBalance != null &&
-      acc.defaultCurrency === currency
-        ? Number(profile.statementBalance)
-        : null;
+    const statementBalance = statementBalanceIn(profile, acc, currency);
     const reservation = creditCardReservation(
       {
-        currentBalanceOwed: fromUnits(currentOwedU),
+        currentBalanceOwed: await cardOwedAt(acc, currency, asOfDate),
         statementBalance,
-        dueDay: profile != null ? profile.dueDay : null,
+        dueDay: profile?.dueDay ?? null,
+        paymentsSinceStatement: paymentsByAccount.get(acc.id) ?? 0,
       },
       asOfDate,
       windowEndDate,
     );
     totalU += toUnits(reservation);
+    if (statementBalance != null && isStatementStale(profile?.statementDate ?? null, asOfDate)) {
+      staleCreditCardStatements.push(acc.name);
+    }
   }
-  return fromUnits(totalU);
+  return { total: fromUnits(totalU), staleCreditCardStatements };
+}
+
+/** Magnitude owed on a card in `currency` at `asOfDate` (0 for a credit balance). */
+async function cardOwedAt(acc: Account, currency: string, asOfDate: string): Promise<number> {
+  let owedU = 0;
+  for (const { currency: ccy, amount } of await balanceAtDate(acc, asOfDate)) {
+    if (ccy === currency && amount < 0) owedU += toUnits(-amount);
+  }
+  return fromUnits(owedU);
+}
+
+/**
+ * The card's stored statement balance, or null when none is captured. It lives
+ * in the account's default currency, so a request in any other currency gets
+ * null and falls back to the live balance.
+ */
+function statementBalanceIn(
+  profile: LiabilityAccount | undefined,
+  acc: Account,
+  currency: string,
+): number | null {
+  if (profile?.statementBalance == null || acc.defaultCurrency !== currency) return null;
+  return Number(profile.statementBalance);
+}
+
+/**
+ * Per card, the sum of payments into it (see `isCardPaymentInflow`) dated
+ * strictly after its stored statement date and on or before `asOfDate`, in the
+ * requested currency. Cards without a statement date contribute nothing — with
+ * no cut date there is no way to tell which payments the bill already reflects.
+ */
+async function getCardPaymentsSinceStatement(
+  profiles: readonly LiabilityAccount[],
+  currency: string,
+  asOfDate: string,
+): Promise<Map<number, number>> {
+  const statementDateByAccount = new Map<number, string>();
+  for (const p of profiles) {
+    if (p.statementDate != null) statementDateByAccount.set(p.accountId, p.statementDate);
+  }
+  const out = new Map<number, number>();
+  if (statementDateByAccount.size === 0) return out;
+
+  const earliest = [...statementDateByAccount.values()].sort()[0];
+  const rows = await Transaction.findAll({
+    where: {
+      accountId: { [Op.in]: [...statementDateByAccount.keys()] },
+      currency,
+      amount: { [Op.gt]: 0 },
+      date: { [Op.gt]: earliest, [Op.lte]: asOfDate },
+    },
+    attributes: ['accountId', 'date', 'amount', 'txnType', 'merchantRaw', 'merchantClean', 'finalCategory'],
+  });
+  const totalsU = new Map<number, number>();
+  for (const r of rows) {
+    const cut = statementDateByAccount.get(r.accountId);
+    if (cut == null || r.date <= cut) continue;
+    const amount = Number(r.amount);
+    const isPayment = isCardPaymentInflow({
+      amount,
+      txnType: r.txnType,
+      merchantRaw: r.merchantRaw,
+      merchantClean: r.merchantClean,
+      category: r.finalCategory,
+    });
+    if (!isPayment) continue;
+    totalsU.set(r.accountId, (totalsU.get(r.accountId) ?? 0) + toUnits(amount));
+  }
+  for (const [accountId, u] of totalsU) out.set(accountId, fromUnits(u));
+  return out;
 }
 
 /** Lazy-load (or default) the user's settings row. */
@@ -724,7 +813,7 @@ export async function computeSafeToSpend(params: {
     incomeLegs,
     upcomingRequiredExpenses,
     requiredSavingsContributions,
-    expectedCreditCardPayments,
+    creditCardLeg,
   ] = await Promise.all([
     getCurrentCash(params.householdId, currency, params.asOfDate, corpEntityIds),
     getIncomeLegs(
@@ -765,7 +854,8 @@ export async function computeSafeToSpend(params: {
     ownerDrawIncome: incomeLegs.ownerDrawIncome,
     upcomingRequiredExpenses,
     requiredSavingsContributions,
-    expectedCreditCardPayments,
+    expectedCreditCardPayments: creditCardLeg.total,
+    staleCreditCardStatements: creditCardLeg.staleCreditCardStatements,
     minimumBuffer: Number(settings.minimumCashBuffer),
     settings,
   });
