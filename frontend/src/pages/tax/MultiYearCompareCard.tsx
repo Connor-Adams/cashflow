@@ -1,5 +1,5 @@
 import { useTaxYearCompare } from '../../hooks/useTaxYears';
-import { fmtCurrency } from './util/format';
+import { fmtCurrency, refundOrOwing } from './util/format';
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@connor-adams/designsystem'
 
@@ -31,7 +31,7 @@ export function MultiYearCompareCard({ from, to }: Props) {
         </TableHeader>
         <TableBody>
           {years.map((y) => {
-            const owing = parseFloat(y.totals.totalPayable ?? '0');
+            const balance = refundOrOwing(y.totals.refundOrOwing);
             return (
               <TableRow key={y.year}>
                 <TableCell>{y.year}</TableCell>
@@ -40,9 +40,7 @@ export function MultiYearCompareCard({ from, to }: Props) {
                 <TableCell className="text-right tabular-nums">{fmtCurrency(y.totals.provincialTax)}</TableCell>
                 <TableCell className="text-right tabular-nums">{fmtCurrency(y.totals.totalPayable)}</TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {owing >= 0
-                    ? `Owing ${fmtCurrency(owing)}`
-                    : `Refund ${fmtCurrency(Math.abs(owing))}`}
+                  {balance ? `${balance.label} ${balance.amount}` : '—'}
                 </TableCell>
               </TableRow>
             );
