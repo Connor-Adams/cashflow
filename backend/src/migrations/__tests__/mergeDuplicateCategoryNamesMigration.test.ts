@@ -342,7 +342,7 @@ test('refuses a plain non-empty reparents plan, naming the pairs, before any wri
   await assert.rejects(() => migration.up(qi, Sequelize), (e: Error) => {
     assert.match(e.message, /refuses to run/);
     assert.match(e.message, /childId 2 -> newParentId 4/, 'the message must name the pair');
-    assert.match(e.message, /convergent/, 'and say why the no-transaction design needs this');
+    assert.match(e.message, /cycle/, 'and say why a raw-SQL reparent is unsafe');
     return true;
   });
   const [r] = await db.query('SELECT id, parent_id FROM categories ORDER BY id');
@@ -434,5 +434,79 @@ test('the acknowledgement must match the computed plan exactly', async () => {
   await migration.up(qi, Sequelize, { reviewedReparents: [[2, 4]] });
   const [r] = await db.query('SELECT id, parent_id FROM categories ORDER BY id');
   assert.deepEqual(r, [{ id: 2, parent_id: 4 }, { id: 3, parent_id: null }, { id: 4, parent_id: 3 }]);
+  await db.close();
+});
+
+test('refuses a pair spelled differently, because spend matches the string exactly', async () => {
+  const db = await freshDb();
+  const qi = db.getQueryInterface();
+  // Only ids are repointed; `final_category = 'weed'` would stay, so a budget
+  // repointed onto 'Weed' would stop counting it.
+  await qi.bulkInsert('categories', [
+    { id: 1, household_id: 1, parent_id: null, name: 'Weed', name_key: 'weed' },
+    { id: 2, household_id: 1, parent_id: null, name: 'Other', name_key: 'other' },
+    { id: 3, household_id: 1, parent_id: 2, name: 'weed', name_key: 'weed' },
+  ]);
+  await qi.bulkInsert('transactions', [{ final_category_id: 1 }, { final_category_id: 3 }]);
+  await assert.rejects(() => migration.up(qi, Sequelize), (e: Error) => {
+    assert.match(e.message, /differ in spelling/);
+    assert.match(e.message, /loser 3 "weed" -> winner 1 "Weed"/);
+    return true;
+  });
+  const [r] = await db.query('SELECT final_category_id FROM transactions ORDER BY id');
+  assert.deepEqual(r, [{ final_category_id: 1 }, { final_category_id: 3 }]);
+  await db.close();
+});
+
+/** A clean two-node duplicate: root 1 'Dup' (loser, 1 ref), nested 3 'Dup' (winner, 2 refs). */
+async function seedSimpleDuplicate(qi: ReturnType<Sequelize['getQueryInterface']>) {
+  await qi.bulkInsert('categories', [
+    { id: 1, household_id: 1, parent_id: null, name: 'Dup', name_key: 'dup' },
+    { id: 2, household_id: 1, parent_id: null, name: 'Other', name_key: 'other' },
+    { id: 3, household_id: 1, parent_id: 2, name: 'Dup', name_key: 'dup' },
+  ]);
+  await qi.bulkInsert('transactions', [
+    { final_category_id: 1 }, { final_category_id: 3 }, { final_category_id: 3 },
+  ]);
+}
+
+test('a failure at any step rolls the whole merge back', async () => {
+  const db = await freshDb();
+  const qi = db.getQueryInterface();
+  await seedSimpleDuplicate(qi);
+  // Make the loser DELETE (step 4) fail AFTER the repoints (step 2) ran.
+  await db.query(
+    "CREATE TRIGGER no_delete BEFORE DELETE ON categories BEGIN SELECT RAISE(ABORT, 'boom'); END",
+  );
+  // Sequelize surfaces a SQLite RAISE(ABORT) as a generic 'Validation error'.
+  await assert.rejects(() => migration.up(qi, Sequelize));
+  const [r] = await db.query('SELECT final_category_id FROM transactions ORDER BY id');
+  assert.deepEqual(
+    r, [{ final_category_id: 1 }, { final_category_id: 3 }, { final_category_id: 3 }],
+    'the step-2 repoint must be rolled back with the failed DELETE',
+  );
+  const idx = (await qi.showIndex('categories') as Array<{ name: string }>).map((i) => i.name);
+  assert.ok(!idx.includes('categories_household_name_key_unique'));
+  await db.close();
+});
+
+test('aborts before the DELETE if a loser reference appears after the repoint', async () => {
+  const db = await freshDb();
+  const qi = db.getQueryInterface();
+  await seedSimpleDuplicate(qi);
+  // Stand-in for a concurrent writer: once the repoint reaches the LAST REFS
+  // table, write a fresh loser id into one already repointed. Postgres blocks
+  // this with LOCK TABLE; the post-condition is the backstop either way.
+  await qi.bulkInsert('external_order_items', [{ inferred_category_id: 1 }]);
+  await qi.bulkInsert('transactions', [{ final_category_id: 3 }]); // keep 3 the winner
+  await db.query(
+    'CREATE TRIGGER late_writer AFTER UPDATE ON external_order_items ' +
+      'BEGIN INSERT INTO transactions (final_category_id) VALUES (1); END',
+  );
+  await assert.rejects(
+    () => migration.up(qi, Sequelize), /references to merged-away categories remain.*transactions\.final_category_id=1/,
+  );
+  const [cats] = await db.query('SELECT id FROM categories ORDER BY id');
+  assert.deepEqual(cats, [{ id: 1 }, { id: 2 }, { id: 3 }], 'the loser must not be deleted');
   await db.close();
 });

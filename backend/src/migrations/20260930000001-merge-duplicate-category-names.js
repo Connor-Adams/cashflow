@@ -10,37 +10,44 @@
 // same pure function src/categories/mergePlan.budgetInvariance.test.ts proves
 // leaves every budget's spend unchanged.
 //
-// NOT TRANSACTIONAL, AND CONVERGENT ONLY WHILE THE PLAN HAS NO REPARENTS.
+// ONE TRANSACTION, WITH THE WRITERS LOCKED OUT.
 //
-// Steps 2-6 are each derived from the CURRENT state by the planner, so a re-run
-// after a partial failure recomputes a fresh plan and finishes the job (repoints
-// find nothing left to move, an already-detached budget has a null category_id
-// and is skipped, the index swap is guarded).
+// Everything after the reads runs in a single transaction, so a failure at any
+// step rolls the whole merge back -- there is no partially-merged state to
+// re-run from. On Postgres the transaction first takes SHARE ROW EXCLUSIVE on
+// `categories` and every table in REFS: reads carry on, but no app process can
+// write a loser's id between the repoint and the DELETE. That matters because
+// migrations run at container start while the previous container may still be
+// serving, six of the eight REFS columns have no DB-level FK (a late loser id
+// would dangle silently), and `income_entries.category_id` is ON DELETE SET
+// NULL (a late loser id would be nulled silently). A post-condition before the
+// DELETE re-counts loser references and aborts if any remain.
 //
-// Step 1 -- the reparents -- is NOT convergent, so the design above only holds
-// for a plan whose `reparents` is empty:
-//   * Rule B goes blind. Once a loser's child has been moved onto the winner,
-//     the winner's `before` name set already contains that child, nothing
-//     widens, and NO budget action is emitted for a budget anchored on the
-//     winner. It stays anchored and silently starts counting the adopted
-//     child's spend -- the exact widening Rule B exists to prevent. Re-planning
-//     that state returns an EMPTY plan, so no post-condition catches it either.
+// TWO PRE-FLIGHTS refuse a plan before any write.
+//
+// 1. Reparents. The planner can emit a reparent that this raw-SQL path cannot
+//    apply safely:
 //   * The planner can emit a cycle. Its only cycle guard is
 //     `child.id !== winner.id`, which covers a direct parent/child pair. When
 //     the winner is a GRANDCHILD of the loser the planner emits
 //     `reparent C -> W` while `W.parent_id` is still `C`, and because these are
-//     raw writes `src/categories/cycle.ts` never runs: up() finishes with no
+//     raw writes `src/categories/cycle.ts` never runs: up() would finish with no
 //     error, leaving a two-node parent cycle orphaned from every root that the
 //     step-5 duplicate guard happily passes.
 //   * A loser's child whose name collides with an existing child of the winner
 //     aborts on the unique index with a bare `SequelizeUniqueConstraintError`
 //     carrying no diagnostic content.
+//   * A budget anchored on a winner that adopts children is the one class of
+//     budget write with no FK safety net behind it (see step 3).
+//    Production had 0 reparents when this plan was approved; the plan is
+//    recomputed against LIVE data at run time, so drift is refused, not run.
 //
-// The PRE-FLIGHT in up() therefore refuses to run at all when the plan has any
-// reparents. Production had 0 of them when this plan was approved; the plan is
-// recomputed against LIVE data at run time, and this is the one path where
-// drift corrupts silently instead of failing. Enforcing that precondition is
-// what makes the no-transaction design safe to run by hand.
+// 2. Spelling. Only the id columns are repointed; the string mirrors
+//    (`transactions.final_category` etc.) keep the loser's spelling, and budget
+//    spend matches those strings EXACTLY. A merge whose loser is spelled
+//    differently from its winner ('weed' into 'Weed') would therefore shift a
+//    repointed budget's spend. Production's 15 pairs are all exact-case, so the
+//    migration refuses any pair that is not rather than rewriting strings.
 const { planCategoryMerges } = require('../../lib/categoryMergePlan');
 
 /**
@@ -66,14 +73,32 @@ function assertReparentsReviewed(reparents, options) {
     '20260930000001 refuses to run: the plan computed against the CURRENT database ' +
     `contains ${reparents.length} category reparent(s) -- ` +
     reparents.map((r) => `(childId ${r.childId} -> newParentId ${r.newParentId})`).join(', ') +
-    '. This migration has no wrapping transaction and is only convergent on re-run ' +
-    'while the reparent list is empty: a re-run after a partial failure leaves a ' +
-    'budget anchored on a winner that has already adopted the loser\'s children ' +
-    'silently counting their spend, and a winner that is a grandchild of its loser ' +
-    'yields a two-node parent cycle that up() writes without erroring. Production ' +
-    'had 0 reparents when this plan was approved. Reconcile these parents by hand ' +
-    '-- and re-check every budget anchored on the new parents -- before running ' +
-    'the merge.',
+    '. A reparent written by raw SQL bypasses src/categories/cycle.ts: a winner that ' +
+    'is a grandchild of its loser yields a two-node parent cycle that up() writes ' +
+    'without erroring, a child whose name collides with one under the winner aborts ' +
+    'on a bare unique-constraint error, and a budget anchored on the adopting winner ' +
+    'has no FK behind its detach. Production had 0 reparents when this plan was ' +
+    'approved. Reconcile these parents by hand -- and re-check every budget anchored ' +
+    'on the new parents -- before running the merge.',
+  );
+}
+
+/**
+ * Refuse a merge whose loser is spelled differently from its winner. Only id
+ * columns are repointed and budget spend matches the string mirrors exactly, so
+ * such a merge would silently shift what a repointed budget counts.
+ */
+function assertSameSpelling(merges, rows) {
+  const nameById = new Map(rows.map((r) => [r.id, r.name]));
+  const bad = merges.filter((m) => nameById.get(m.loserId) !== nameById.get(m.winnerId));
+  if (bad.length === 0) return;
+  throw new Error(
+    '20260930000001 refuses to run: ' + bad.length + ' duplicate pair(s) differ in spelling -- ' +
+    bad.map((m) => `(loser ${m.loserId} ${JSON.stringify(nameById.get(m.loserId))} -> ` +
+      `winner ${m.winnerId} ${JSON.stringify(nameById.get(m.winnerId))})`).join(', ') +
+    '. Only the id columns are repointed and budget spend matches the category STRING ' +
+    'exactly, so merging these would shift budget spend. Rename one side to match the ' +
+    'other first.',
   );
 }
 
@@ -92,107 +117,146 @@ const REFS = [
 module.exports = {
   async up(queryInterface, _Sequelize, options) {
     const sql = queryInterface.sequelize;
+    const isPostgres = sql.getDialect() === 'postgres';
 
-    const [categories] = await sql.query(
-      'SELECT id, household_id, parent_id, name, name_key FROM categories',
-    );
-    const rows = categories.map((c) => ({
-      id: c.id, householdId: c.household_id, parentId: c.parent_id,
-      name: c.name, nameKey: c.name_key,
-    }));
+    await sql.transaction(async (transaction) => {
+      const q = (text, replacements) => sql.query(text, { replacements, transaction });
 
-    const refCounts = {};
-    for (const [table, column] of REFS) {
-      const [counts] = await sql.query(
-        `SELECT ${column} AS id, COUNT(*) AS n FROM ${table} ` +
-        `WHERE ${column} IS NOT NULL GROUP BY ${column}`,
+      if (isPostgres) {
+        // Fail rather than hang behind a long-running app transaction.
+        await q("SET LOCAL lock_timeout = '30s'");
+        const tables = Array.from(new Set(['categories', ...REFS.map(([t]) => t)]));
+        await q(`LOCK TABLE ${tables.join(', ')} IN SHARE ROW EXCLUSIVE MODE`);
+      }
+
+      const [categories] = await q(
+        'SELECT id, household_id, parent_id, name, name_key FROM categories',
       );
-      for (const r of counts) refCounts[r.id] = (refCounts[r.id] || 0) + Number(r.n);
-    }
+      const rows = categories.map((c) => ({
+        id: c.id, householdId: c.household_id, parentId: c.parent_id,
+        name: c.name, nameKey: c.name_key,
+      }));
 
-    const [budgets] = await sql.query('SELECT id, category_id FROM budget_targets');
-    const plan = planCategoryMerges(
-      rows, refCounts, budgets.map((b) => ({ id: b.id, categoryId: b.category_id })),
-    );
-
-    // 0. PRE-FLIGHT. Before ANY write: see the reparent discussion in the header.
-    assertReparentsReviewed(plan.reparents, options);
-
-    // 1. Children first — categories_parent_id_fkey is ON DELETE RESTRICT.
-    for (const r of plan.reparents) {
-      await sql.query('UPDATE categories SET parent_id = :p WHERE id = :id', {
-        replacements: { p: r.newParentId, id: r.childId },
-      });
-    }
-
-    // 2. Repoint every non-budget reference, then delete the loser.
-    for (const m of plan.merges) {
+      const refCounts = {};
       for (const [table, column] of REFS) {
-        if (table === 'budget_targets') continue; // decided per-row in step 3
-        await sql.query(
-          `UPDATE ${table} SET ${column} = :w WHERE ${column} = :l`,
-          { replacements: { w: m.winnerId, l: m.loserId } },
+        const [counts] = await q(
+          `SELECT ${column} AS id, COUNT(*) AS n FROM ${table} ` +
+          `WHERE ${column} IS NOT NULL GROUP BY ${column}`,
+        );
+        for (const r of counts) refCounts[r.id] = (refCounts[r.id] || 0) + Number(r.n);
+      }
+
+      const [budgets] = await q('SELECT id, category_id FROM budget_targets');
+      const plan = planCategoryMerges(
+        rows, refCounts, budgets.map((b) => ({ id: b.id, categoryId: b.category_id })),
+      );
+
+      // 0. PRE-FLIGHTS. Before ANY write: see the header.
+      assertReparentsReviewed(plan.reparents, options);
+      assertSameSpelling(plan.merges, rows);
+
+      // The merge deletes rows irreversibly; leave a record of what it decided.
+      console.log('[20260930000001] merge plan ' + JSON.stringify({
+        merges: plan.merges.map((m) => ({ winnerId: m.winnerId, loserId: m.loserId, nameKey: m.nameKey })),
+        reparents: plan.reparents,
+        budgetActions: plan.budgetActions,
+      }));
+
+      // 1. Children first — categories_parent_id_fkey is ON DELETE RESTRICT.
+      for (const r of plan.reparents) {
+        await q('UPDATE categories SET parent_id = :p WHERE id = :id', {
+          p: r.newParentId, id: r.childId,
+        });
+      }
+
+      // 2. Repoint every non-budget reference.
+      for (const m of plan.merges) {
+        for (const [table, column] of REFS) {
+          if (table === 'budget_targets') continue; // decided per-row in step 3
+          await q(`UPDATE ${table} SET ${column} = :w WHERE ${column} = :l`, {
+            w: m.winnerId, l: m.loserId,
+          });
+        }
+      }
+
+      // 3. Budget actions. Raw SQL on purpose: reconcileCategoryField nulls the
+      //    `category` string whenever categoryId changes, and a detached row must
+      //    keep its name — that string IS the exact-match the budget rolls up on.
+      //
+      //    Iterate plan.budgetActions DIRECTLY, never inside the per-loser loop
+      //    above: Rule B applies to every anchored budget, so an action can name a
+      //    budget whose anchor row SURVIVES (one sitting on a winner that adopts
+      //    the loser's children). Such a budget has no FK behind it — a missed
+      //    write raises nothing and the budget silently widens.
+      //
+      //    `BudgetTarget` declares `version: true`, so a raw UPDATE that left
+      //    `version` alone would let a concurrent app process holding a stale
+      //    instance save straight over this detach with no version conflict — and
+      //    since `budget_targets.category_id` has no DB-level FK, write back a
+      //    now-deleted id. Bumping `version` (and `updated_at`, which the model's
+      //    timestamps would otherwise have touched) makes that race fail loudly.
+      for (const a of plan.budgetActions) {
+        await q(
+          'UPDATE budget_targets SET category_id = :c, version = COALESCE(version, 0) + 1, ' +
+            'updated_at = :now WHERE id = :id',
+          { c: a.categoryId, id: a.budgetId, now: new Date() },
         );
       }
-    }
 
-    // 3. Budget actions. Raw SQL on purpose: reconcileCategoryField nulls the
-    //    `category` string whenever categoryId changes, and a detached row must
-    //    keep its name — that string IS the exact-match the budget rolls up on.
-    //
-    //    Iterate plan.budgetActions DIRECTLY, never inside the per-loser loop
-    //    above: Rule B applies to every anchored budget, so an action can name a
-    //    budget whose anchor row SURVIVES (one sitting on a winner that adopts
-    //    the loser's children). Such a budget has no FK behind it — a missed
-    //    write raises nothing and the budget silently widens.
-    //
-    //    `BudgetTarget` declares `version: true`, so a raw UPDATE that left
-    //    `version` alone would let a concurrent app process holding a stale
-    //    instance save straight over this detach with no version conflict — and
-    //    since `budget_targets.category_id` has no DB-level FK, write back a
-    //    now-deleted id. Bumping `version` (and `updated_at`, which the model's
-    //    timestamps would otherwise have touched) makes that race fail loudly.
-    for (const a of plan.budgetActions) {
-      await sql.query(
-        'UPDATE budget_targets SET category_id = :c, version = COALESCE(version, 0) + 1, ' +
-          'updated_at = :now WHERE id = :id',
-        { replacements: { c: a.categoryId, id: a.budgetId, now: new Date() } },
+      // 4. Post-condition, then delete the losers. Nothing may still point at a
+      //    loser: six REFS columns have no FK (the DELETE would leave a dangling
+      //    id) and income_entries is ON DELETE SET NULL (it would be nulled).
+      const loserIds = plan.merges.map((m) => m.loserId);
+      if (loserIds.length > 0) {
+        const remaining = [];
+        for (const [table, column] of REFS) {
+          const [[r]] = await q(
+            `SELECT COUNT(*) AS n FROM ${table} WHERE ${column} IN (:ids)`, { ids: loserIds },
+          );
+          if (Number(r.n) > 0) remaining.push(`${table}.${column}=${Number(r.n)}`);
+        }
+        if (remaining.length > 0) {
+          throw new Error(
+            'references to merged-away categories remain after the repoint: ' +
+              remaining.join(', '),
+          );
+        }
+      }
+      for (const m of plan.merges) {
+        await q('DELETE FROM categories WHERE id = :id', { id: m.loserId });
+      }
+
+      // 5. Guard before the unique index, mirroring 20260621000001 step 3.
+      const [dupes] = await q(
+        'SELECT household_id, name_key, COUNT(*) AS c FROM categories ' +
+          'GROUP BY household_id, name_key HAVING COUNT(*) > 1',
       );
-    }
+      if (dupes.length > 0) {
+        throw new Error(
+          'category name_key collisions remain after the merge: ' + JSON.stringify(dupes),
+        );
+      }
 
-    // 4. Delete the losers, now that nothing references them.
-    for (const m of plan.merges) {
-      await sql.query('DELETE FROM categories WHERE id = :id', { replacements: { id: m.loserId } });
-    }
-
-    // 5. Guard before the unique index, mirroring 20260621000001 step 3.
-    const [dupes] = await sql.query(
-      'SELECT household_id, name_key, COUNT(*) AS c FROM categories ' +
-        'GROUP BY household_id, name_key HAVING COUNT(*) > 1',
-    );
-    if (dupes.length > 0) {
-      throw new Error(
-        'category name_key collisions remain after the merge: ' + JSON.stringify(dupes),
-      );
-    }
-
-    // 6. Swap the indexes. Guarded so a manual re-run is a no-op rather than an
-    //    "index already exists" abort; sequelize-cli itself never re-runs a
-    //    migration, but this one is the kind someone runs by hand while checking
-    //    a merge, and a half-applied index swap is a bad place to land.
-    const existing = (await queryInterface.showIndex('categories')).map((i) => i.name);
-    if (!existing.includes('categories_household_name_key_unique')) {
-      await queryInterface.addIndex('categories', ['household_id', 'name_key'], {
-        name: 'categories_household_name_key_unique',
-        unique: true,
-      });
-    }
-    for (const stale of [
-      'categories_household_parent_name_key_unique',
-      'categories_household_root_name_key_unique',
-    ]) {
-      if (existing.includes(stale)) await queryInterface.removeIndex('categories', stale);
-    }
+      // 6. Swap the indexes. Guarded so a manual re-run is a no-op rather than an
+      //    "index already exists" abort.
+      const existing = (await queryInterface.showIndex('categories', { transaction }))
+        .map((i) => i.name);
+      if (!existing.includes('categories_household_name_key_unique')) {
+        await queryInterface.addIndex('categories', ['household_id', 'name_key'], {
+          name: 'categories_household_name_key_unique',
+          unique: true,
+          transaction,
+        });
+      }
+      for (const stale of [
+        'categories_household_parent_name_key_unique',
+        'categories_household_root_name_key_unique',
+      ]) {
+        if (existing.includes(stale)) {
+          await queryInterface.removeIndex('categories', stale, { transaction });
+        }
+      }
+    });
   },
 
   async down(queryInterface, Sequelize) {
