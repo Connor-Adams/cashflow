@@ -64,16 +64,24 @@ before(async () => {
 
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   migration = require('../20260930000001-merge-duplicate-category-names.js');
-  await migration.up(qi, Sequelize);
+  // This fixture is deliberately the one shape the pre-flight refuses: the winner
+  // adopts `Clublink`, so `plan.reparents` is non-empty. That refusal is a HARD
+  // stop for an operator (`sequelize-cli` calls `up(queryInterface, Sequelize)`
+  // with two arguments); a caller that has reviewed the move enumerates the exact
+  // pair. Keep it — this is the only fixture that produces a detach for a budget
+  // whose anchor row SURVIVES, the class with no FK safety net behind it.
+  await migration.up(qi, Sequelize, { reviewedReparents: [[clublinkId, nestedGolfId]] });
 });
 
 /** Read the row as the database holds it: no model, no getters, no hooks. */
 async function budgetRow() {
   const [r] = await sequelize.query(
-    'SELECT category, category_id FROM budget_targets WHERE id = :id',
+    'SELECT category, category_id, version FROM budget_targets WHERE id = :id',
     { replacements: { id: budgetId } },
   );
-  return (r as Array<{ category: string | null; category_id: number | null }>)[0];
+  return (r as Array<{
+    category: string | null; category_id: number | null; version: number;
+  }>)[0];
 }
 
 test('the detached budget keeps its `category` string — the hook must never run', async () => {
@@ -83,6 +91,12 @@ test('the detached budget keeps its `category` string — the hook must never ru
     row.category, 'Golf',
     'reconcileCategoryField nulls `category` on an id change; a null `category` prices as ' +
     'the whole currency total in computeBudgetProgress. The migration must use raw SQL.',
+  );
+  assert.equal(
+    row.version, 1,
+    'raw SQL bypasses `version: true`, so the UPDATE must bump `version` itself — otherwise a ' +
+      'concurrent app process holding a stale instance saves over this detach with no version ' +
+      'conflict, and `budget_targets.category_id` has no FK to stop it writing a deleted id',
   );
 });
 

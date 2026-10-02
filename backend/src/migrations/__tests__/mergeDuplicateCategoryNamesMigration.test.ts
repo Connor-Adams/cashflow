@@ -36,6 +36,11 @@ async function buildSchema(qi: ReturnType<Sequelize['getQueryInterface']>) {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     category: { type: DataTypes.STRING(128), allowNull: true },
     category_id: { type: DataTypes.INTEGER, allowNull: true },
+    // `BudgetTarget` has `version: true` and `timestamps: true`; the migration
+    // bumps both so a concurrent stale full-instance save fails its version
+    // check instead of silently overwriting a detach.
+    version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    updated_at: { type: DataTypes.DATE, allowNull: true },
   });
   for (const table of ['rules', 'income_entries']) {
     await qi.createTable(table, {
@@ -89,7 +94,15 @@ before(async () => {
     // test, which adds one.
   ]);
   await qi.bulkInsert('rules', [{ category_id: 12 }]);
-  await qi.bulkInsert('income_entries', [{ category_id: 11 }]);
+  // Seed the LOSER (12), not just the winner: repointing the winner is a no-op,
+  // so a winner-only row leaves `income_entries` with ZERO discriminating
+  // coverage (deleting its REFS entry still passed). It is the one reference
+  // column with a real DB-level FK — `references: { model: 'categories' },
+  // onDelete: 'SET NULL'` in 20260612000001-create-income-entries.js — so a
+  // missed repoint does NOT raise on the loser DELETE; Postgres quietly NULLs
+  // the category instead. The other seven columns were added without a
+  // references clause.
+  await qi.bulkInsert('income_entries', [{ category_id: 11 }, { category_id: 12 }]);
   await qi.bulkInsert('external_order_items', [{ inferred_category_id: 11, category_override_id: 12 }]);
   await qi.bulkInsert('budget_targets', [
     { id: 1, category: 'Golf', category_id: 23 },       // winner 21 has Clublink -> detach
@@ -122,17 +135,30 @@ test('merges a nested duplicate into the reference-heavy node and repoints every
   );
   assert.deepEqual(await rows('SELECT category_id FROM rules'), [{ category_id: 11 }]);
   assert.deepEqual(
+    await rows('SELECT category_id FROM income_entries ORDER BY id'),
+    [{ category_id: 11 }, { category_id: 11 }],
+    'income_entries.category_id is the only ref column with a real FK: an unrepointed ' +
+      'row is SET NULL by the loser DELETE, losing the category silently',
+  );
+  assert.deepEqual(
     await rows('SELECT inferred_category_id, category_override_id FROM external_order_items'),
     [{ inferred_category_id: 11, category_override_id: 11 }],
   );
 });
 
 test('detaches a budget whose winner would widen what it counts', async () => {
-  const [budget] = await rows<{ category: string; category_id: number | null }>(
-    'SELECT category, category_id FROM budget_targets WHERE id = 1',
-  );
+  const [budget] = await rows<{
+    category: string; category_id: number | null; version: number; updated_at: string | null;
+  }>('SELECT category, category_id, version, updated_at FROM budget_targets WHERE id = 1');
   assert.equal(budget.category_id, null, 'winner 21 rolls up Clublink, so the id must be dropped');
   assert.equal(budget.category, 'Golf', 'the name string is the exact-match key and must survive');
+  assert.equal(
+    budget.version, 1,
+    '`BudgetTarget` has `version: true`; the raw UPDATE must bump it so a concurrent stale ' +
+      'full-instance save fails its version check instead of overwriting this detach — ' +
+      '`budget_targets.category_id` has no FK, so it could write back a deleted id',
+  );
+  assert.notEqual(budget.updated_at, null, 'timestamps: true — the raw UPDATE must touch it too');
 });
 
 test('repoints a budget whose winner counts exactly the same names', async () => {
@@ -141,6 +167,14 @@ test('repoints a budget whose winner counts exactly the same names', async () =>
   );
   assert.equal(budget.category_id, 31, 'both nodes are childless, so the name set is unchanged');
   assert.equal(budget.category, 'Groceries');
+});
+
+test('an untouched budget keeps version 0 — only the planned rows are written', async () => {
+  const [budget] = await rows<{ version: number; updated_at: string | null }>(
+    'SELECT version, updated_at FROM budget_targets WHERE id = 3',
+  );
+  assert.equal(budget.version, 0, 'Clublink is not in plan.budgetActions; nothing may touch it');
+  assert.equal(budget.updated_at, null);
 });
 
 test('leaves a budget anchored on an untouched node exactly as it was', async () => {
@@ -243,7 +277,13 @@ test('moves a loser’s children onto the winner before deleting it', async () =
     { id: 42, household_id: 1, parent_id: 43, name: 'Legacy', name_key: 'legacy' },
   ]);
   await qi.bulkInsert('transactions', [{ final_category_id: 42 }, { final_category_id: 42 }]);
-  await migration.up(qi, Sequelize);
+
+  // The pre-flight refuses a plan with ANY reparent, and it runs before the
+  // first write — see the "refuses" tests below. A caller that has reviewed the
+  // move enumerates the exact pair; `sequelize-cli` passes only two arguments,
+  // so production can never take this path.
+  await assert.rejects(() => migration.up(qi, Sequelize), /refuses to run/);
+  await migration.up(qi, Sequelize, { reviewedReparents: [[41, 42]] });
 
   const [r] = await db.query('SELECT id, parent_id FROM categories WHERE id IN (40, 41, 42) ORDER BY id');
   assert.deepEqual(r, [{ id: 41, parent_id: 42 }, { id: 42, parent_id: 43 }],
@@ -268,5 +308,131 @@ test('down restores the two partial indexes and drops the household-wide one', a
     { id: 3, household_id: 1, parent_id: 1, name: 'Dup', name_key: 'dup' },
     { id: 4, household_id: 1, parent_id: 2, name: 'Dup', name_key: 'dup' },
   ]);
+  await db.close();
+});
+
+
+/**
+ * PRE-FLIGHT: a plan with any reparent must fail fast.
+ *
+ * `up()` has no wrapping transaction, and the header's convergence argument only
+ * holds while `plan.reparents` is empty — step 1 is the one step a re-run cannot
+ * redo correctly. Three concrete shapes, each of which used to corrupt or
+ * bare-error instead of refusing. A fresh in-memory DB per shape, and each
+ * asserts the tree is UNCHANGED: the pre-flight runs before the first write.
+ */
+async function freshDb() {
+  const db = new Sequelize({ dialect: 'sqlite', storage: ':memory:', logging: false });
+  await buildSchema(db.getQueryInterface());
+  return db;
+}
+
+test('refuses a plain non-empty reparents plan, naming the pairs, before any write', async () => {
+  const db = await freshDb();
+  const qi = db.getQueryInterface();
+  // root 1 'Dup' (loser, 0 refs) with child 2 'Kid'; nested 4 'Dup' (2 refs) wins.
+  await qi.bulkInsert('categories', [
+    { id: 1, household_id: 1, parent_id: null, name: 'Dup', name_key: 'dup' },
+    { id: 2, household_id: 1, parent_id: 1, name: 'Kid', name_key: 'kid' },
+    { id: 3, household_id: 1, parent_id: null, name: 'Other', name_key: 'other' },
+    { id: 4, household_id: 1, parent_id: 3, name: 'Dup', name_key: 'dup' },
+  ]);
+  await qi.bulkInsert('transactions', [{ final_category_id: 4 }, { final_category_id: 4 }]);
+
+  await assert.rejects(() => migration.up(qi, Sequelize), (e: Error) => {
+    assert.match(e.message, /refuses to run/);
+    assert.match(e.message, /childId 2 -> newParentId 4/, 'the message must name the pair');
+    assert.match(e.message, /convergent/, 'and say why the no-transaction design needs this');
+    return true;
+  });
+  const [r] = await db.query('SELECT id, parent_id FROM categories ORDER BY id');
+  assert.deepEqual(r, [
+    { id: 1, parent_id: null }, { id: 2, parent_id: 1 },
+    { id: 3, parent_id: null }, { id: 4, parent_id: 3 },
+  ], 'nothing may be written: the pre-flight is step 0');
+  await db.close();
+});
+
+test('refuses the grandchild shape that used to write a two-node parent cycle', async () => {
+  const db = await freshDb();
+  const qi = db.getQueryInterface();
+  // L root 'Dup' (1) > C 'Mid' (2) > W 'Dup' (3). The winner is a GRANDCHILD of
+  // its loser, so the planner emits `reparent 2 -> 3` while 3.parent_id is still
+  // 2. `child.id !== winner.id` does not catch that, and because up() writes raw
+  // SQL, src/categories/cycle.ts never runs: it used to finish with NO error,
+  // leaving {2 -> 3, 3 -> 2} orphaned from every root. The step-5 duplicate guard
+  // passes (each name_key appears once) and the unique index is created, so the
+  // migration reported success on a corrupt tree.
+  await qi.bulkInsert('categories', [
+    { id: 1, household_id: 1, parent_id: null, name: 'Dup', name_key: 'dup' },
+    { id: 2, household_id: 1, parent_id: 1, name: 'Mid', name_key: 'mid' },
+    { id: 3, household_id: 1, parent_id: 2, name: 'Dup', name_key: 'dup' },
+  ]);
+  await qi.bulkInsert('transactions', [{ final_category_id: 3 }]);
+
+  await assert.rejects(
+    () => migration.up(qi, Sequelize),
+    /refuses to run[\s\S]*childId 2 -> newParentId 3/,
+  );
+  const [r] = await db.query('SELECT id, parent_id FROM categories ORDER BY id');
+  assert.deepEqual(r, [
+    { id: 1, parent_id: null }, { id: 2, parent_id: 1 }, { id: 3, parent_id: 2 },
+  ], 'no cycle written — the tree is exactly as it was');
+  await db.close();
+});
+
+test('refuses the same-named-children collision instead of a bare unique-constraint error', async () => {
+  const db = await freshDb();
+  const qi = db.getQueryInterface();
+  // The loser's child 'Kid' collides with an existing 'Kid' under the winner, so
+  // the reparent used to abort mid-migration on the unique index with a bare
+  // `SequelizeUniqueConstraintError | Validation error` and no diagnostics.
+  await qi.bulkInsert('categories', [
+    { id: 1, household_id: 1, parent_id: null, name: 'Dup', name_key: 'dup' },
+    { id: 2, household_id: 1, parent_id: 1, name: 'Kid', name_key: 'kid' },
+    { id: 3, household_id: 1, parent_id: null, name: 'Other', name_key: 'other' },
+    { id: 4, household_id: 1, parent_id: 3, name: 'Dup', name_key: 'dup' },
+    { id: 5, household_id: 1, parent_id: 4, name: 'Kid', name_key: 'kid' },
+  ]);
+  await qi.bulkInsert('transactions', [{ final_category_id: 4 }, { final_category_id: 4 }]);
+
+  await assert.rejects(() => migration.up(qi, Sequelize), (e: Error) => {
+    assert.match(e.message, /refuses to run/);
+    assert.doesNotMatch(
+      e.message, /SequelizeUniqueConstraintError|Validation error/,
+      'the operator must get the reparent diagnosis, not a bare constraint error',
+    );
+    assert.match(e.message, /childId 2 -> newParentId 4/);
+    return true;
+  });
+  const [r] = await db.query('SELECT id, parent_id FROM categories ORDER BY id');
+  assert.deepEqual(r, [
+    { id: 1, parent_id: null }, { id: 2, parent_id: 1 }, { id: 3, parent_id: null },
+    { id: 4, parent_id: 3 }, { id: 5, parent_id: 4 },
+  ]);
+  await db.close();
+});
+
+test('the acknowledgement must match the computed plan exactly', async () => {
+  const db = await freshDb();
+  const qi = db.getQueryInterface();
+  await qi.bulkInsert('categories', [
+    { id: 1, household_id: 1, parent_id: null, name: 'Dup', name_key: 'dup' },
+    { id: 2, household_id: 1, parent_id: 1, name: 'Kid', name_key: 'kid' },
+    { id: 3, household_id: 1, parent_id: null, name: 'Other', name_key: 'other' },
+    { id: 4, household_id: 1, parent_id: 3, name: 'Dup', name_key: 'dup' },
+  ]);
+  await qi.bulkInsert('transactions', [{ final_category_id: 4 }, { final_category_id: 4 }]);
+  // A plan that DRIFTED away from the reviewed one must still refuse — the plan
+  // is recomputed against live data, so it may not be the plan that was approved.
+  await assert.rejects(
+    () => migration.up(qi, Sequelize, { reviewedReparents: [[2, 99]] }), /refuses to run/,
+  );
+  await assert.rejects(
+    () => migration.up(qi, Sequelize, { reviewedReparents: [[2, 4], [7, 8]] }), /refuses to run/,
+  );
+  await migration.up(qi, Sequelize, { reviewedReparents: [[2, 4]] });
+  const [r] = await db.query('SELECT id, parent_id FROM categories ORDER BY id');
+  assert.deepEqual(r, [{ id: 2, parent_id: 4 }, { id: 3, parent_id: null }, { id: 4, parent_id: 3 }]);
   await db.close();
 });

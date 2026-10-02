@@ -10,12 +10,72 @@
 // same pure function src/categories/mergePlan.budgetInvariance.test.ts proves
 // leaves every budget's spend unchanged.
 //
-// CONVERGENT, NOT TRANSACTIONAL: every step is derived from the CURRENT state by
-// the planner, so a re-run after a partial failure recomputes a fresh plan and
-// finishes the job (repoints find nothing left to move, an already-detached
-// budget has a null category_id and is skipped, the index swap is guarded).
-// That is what makes running this by hand safe.
+// NOT TRANSACTIONAL, AND CONVERGENT ONLY WHILE THE PLAN HAS NO REPARENTS.
+//
+// Steps 2-6 are each derived from the CURRENT state by the planner, so a re-run
+// after a partial failure recomputes a fresh plan and finishes the job (repoints
+// find nothing left to move, an already-detached budget has a null category_id
+// and is skipped, the index swap is guarded).
+//
+// Step 1 -- the reparents -- is NOT convergent, so the design above only holds
+// for a plan whose `reparents` is empty:
+//   * Rule B goes blind. Once a loser's child has been moved onto the winner,
+//     the winner's `before` name set already contains that child, nothing
+//     widens, and NO budget action is emitted for a budget anchored on the
+//     winner. It stays anchored and silently starts counting the adopted
+//     child's spend -- the exact widening Rule B exists to prevent. Re-planning
+//     that state returns an EMPTY plan, so no post-condition catches it either.
+//   * The planner can emit a cycle. Its only cycle guard is
+//     `child.id !== winner.id`, which covers a direct parent/child pair. When
+//     the winner is a GRANDCHILD of the loser the planner emits
+//     `reparent C -> W` while `W.parent_id` is still `C`, and because these are
+//     raw writes `src/categories/cycle.ts` never runs: up() finishes with no
+//     error, leaving a two-node parent cycle orphaned from every root that the
+//     step-5 duplicate guard happily passes.
+//   * A loser's child whose name collides with an existing child of the winner
+//     aborts on the unique index with a bare `SequelizeUniqueConstraintError`
+//     carrying no diagnostic content.
+//
+// The PRE-FLIGHT in up() therefore refuses to run at all when the plan has any
+// reparents. Production had 0 of them when this plan was approved; the plan is
+// recomputed against LIVE data at run time, and this is the one path where
+// drift corrupts silently instead of failing. Enforcing that precondition is
+// what makes the no-transaction design safe to run by hand.
 const { planCategoryMerges } = require('../../lib/categoryMergePlan');
+
+/**
+ * Refuse a plan that has to move a category, unless the caller has reviewed and
+ * enumerated the exact `[childId, newParentId]` pairs.
+ *
+ * `options.reviewedReparents` is a TEST-ONLY acknowledgement hook: `sequelize-cli`
+ * invokes `up(queryInterface, Sequelize)` with two arguments, so an operator can
+ * never reach the acknowledged path -- for production this is a hard stop. The
+ * pairs must match the computed plan EXACTLY (in both directions), so a plan that
+ * drifted away from the reviewed one still fails rather than running.
+ */
+function assertReparentsReviewed(reparents, options) {
+  if (reparents.length === 0) return;
+  const key = (childId, newParentId) => `${childId}->${newParentId}`;
+  const computed = Array.from(new Set(reparents.map((r) => key(r.childId, r.newParentId)))).sort();
+  const reviewedInput = (options && options.reviewedReparents) || [];
+  const reviewed = Array.from(
+    new Set(reviewedInput.map((pair) => key(pair[0], pair[1]))),
+  ).sort();
+  if (computed.length === reviewed.length && computed.every((k, i) => k === reviewed[i])) return;
+  throw new Error(
+    '20260930000001 refuses to run: the plan computed against the CURRENT database ' +
+    `contains ${reparents.length} category reparent(s) -- ` +
+    reparents.map((r) => `(childId ${r.childId} -> newParentId ${r.newParentId})`).join(', ') +
+    '. This migration has no wrapping transaction and is only convergent on re-run ' +
+    'while the reparent list is empty: a re-run after a partial failure leaves a ' +
+    'budget anchored on a winner that has already adopted the loser\'s children ' +
+    'silently counting their spend, and a winner that is a grandchild of its loser ' +
+    'yields a two-node parent cycle that up() writes without erroring. Production ' +
+    'had 0 reparents when this plan was approved. Reconcile these parents by hand ' +
+    '-- and re-check every budget anchored on the new parents -- before running ' +
+    'the merge.',
+  );
+}
 
 /** Every column that points at categories.id. */
 const REFS = [
@@ -30,7 +90,7 @@ const REFS = [
 ];
 
 module.exports = {
-  async up(queryInterface) {
+  async up(queryInterface, _Sequelize, options) {
     const sql = queryInterface.sequelize;
 
     const [categories] = await sql.query(
@@ -54,6 +114,9 @@ module.exports = {
     const plan = planCategoryMerges(
       rows, refCounts, budgets.map((b) => ({ id: b.id, categoryId: b.category_id })),
     );
+
+    // 0. PRE-FLIGHT. Before ANY write: see the reparent discussion in the header.
+    assertReparentsReviewed(plan.reparents, options);
 
     // 1. Children first — categories_parent_id_fkey is ON DELETE RESTRICT.
     for (const r of plan.reparents) {
@@ -82,10 +145,19 @@ module.exports = {
     //    budget whose anchor row SURVIVES (one sitting on a winner that adopts
     //    the loser's children). Such a budget has no FK behind it — a missed
     //    write raises nothing and the budget silently widens.
+    //
+    //    `BudgetTarget` declares `version: true`, so a raw UPDATE that left
+    //    `version` alone would let a concurrent app process holding a stale
+    //    instance save straight over this detach with no version conflict — and
+    //    since `budget_targets.category_id` has no DB-level FK, write back a
+    //    now-deleted id. Bumping `version` (and `updated_at`, which the model's
+    //    timestamps would otherwise have touched) makes that race fail loudly.
     for (const a of plan.budgetActions) {
-      await sql.query('UPDATE budget_targets SET category_id = :c WHERE id = :id', {
-        replacements: { c: a.categoryId, id: a.budgetId },
-      });
+      await sql.query(
+        'UPDATE budget_targets SET category_id = :c, version = COALESCE(version, 0) + 1, ' +
+          'updated_at = :now WHERE id = :id',
+        { replacements: { c: a.categoryId, id: a.budgetId, now: new Date() } },
+      );
     }
 
     // 4. Delete the losers, now that nothing references them.
