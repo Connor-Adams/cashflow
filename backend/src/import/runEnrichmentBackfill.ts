@@ -34,6 +34,7 @@ import {
   enrichmentEmbeddingEnabled,
 } from '../config/env';
 import { recomputeTransactionAmounts } from './calculateShares';
+import { isEstablishedLink } from '../transfers/linkProtection';
 import { runBackfillBatchTrace } from './backfillTrace';
 import {
   maybeRunAiBatchOverColdRows,
@@ -368,6 +369,7 @@ export async function runBackfill(
               memory,
               recurringHistory,
               relationshipCandidates,
+              selfId: txn.id,
               refundWindowDays: enrichmentRefundWindowDays,
               transferWindowDays: enrichmentTransferWindowDays,
               recurringMinSupport: enrichmentRecurringMinSupport,
@@ -430,6 +432,16 @@ export async function runBackfill(
               continue;
             }
 
+            // An established link is the user's (or a whole pair); the matcher's
+            // fresh guess never replaces or clears it.
+            const keepLink = txn.linkedTransactionId != null && isEstablishedLink(
+              txn,
+              (await Transaction.findByPk(txn.linkedTransactionId, {
+                attributes: ['id', 'linkedTransactionId'],
+              }))?.linkedTransactionId === txn.id,
+            );
+            const nextLinkedTransactionId = keepLink ? txn.linkedTransactionId : f.linkedTransactionId;
+
             await sequelize.transaction(async (t) => {
               txn.set({
                 merchantClean: f.merchantClean,
@@ -443,7 +455,7 @@ export async function runBackfill(
                 autoPctMe: f.autoPctMe,
                 autoPctPartner: f.autoPctPartner,
                 appliedRuleId: f.appliedRuleId,
-                linkedTransactionId: f.linkedTransactionId,
+                linkedTransactionId: nextLinkedTransactionId,
                 isRecurring: f.isRecurring,
               });
               // Only fill notes if the row had none — don't overwrite user-authored notes.

@@ -35,6 +35,8 @@ export interface EnrichInputs {
   memory: MerchantMemoryMatch | null;
   recurringHistory: RecurringHistoryRow[];
   relationshipCandidates: RelationshipCandidate[];
+  /** Id of the row being re-enriched (backfill); null/absent on import. */
+  selfId?: number | null;
   refundWindowDays: number;
   transferWindowDays: number;
   recurringMinSupport: number;
@@ -164,6 +166,7 @@ export async function enrichTransaction(input: EnrichInputs): Promise<Enrichment
     transferWindowDays: input.transferWindowDays,
     candidates: input.relationshipCandidates,
     sourceReference: input.raw.sourceReference,
+    selfId: input.selfId ?? null,
   }), []));
 
   // Stage 9: compute-review-flag (merge)

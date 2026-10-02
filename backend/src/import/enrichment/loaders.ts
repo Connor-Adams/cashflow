@@ -150,6 +150,8 @@ export async function loadRelationshipCandidates(
     finalBusiness: number;
     sourceReference: string | null;
     alreadyLinkedByRefundId: number | null;
+    linkedTransactionId: number | null;
+    linkedFromId: number | null;
   }>(
     `SELECT t.id, t.account_id AS "accountId", CAST(t.amount AS REAL) AS amount, t.date,
             t.merchant_clean AS "merchantClean",
@@ -160,7 +162,13 @@ export async function loadRelationshipCandidates(
             (SELECT r.id FROM transactions r
               WHERE r.linked_transaction_id = t.id
                 AND r.txn_type = 'refund'
-              LIMIT 1) AS "alreadyLinkedByRefundId"
+              LIMIT 1) AS "alreadyLinkedByRefundId",
+            t.linked_transaction_id AS "linkedTransactionId",
+            -- Any OTHER row pointing at this one (its own partner excluded), so
+            -- the transfer matcher can tell a taken leg from a free one.
+            (SELECT MIN(p.id) FROM transactions p
+              WHERE p.linked_transaction_id = t.id
+                AND p.id <> COALESCE(t.linked_transaction_id, -1)) AS "linkedFromId"
        FROM transactions t
        WHERE t.account_id IN (${placeholders})
          AND t.date BETWEEN ? AND ?
@@ -182,5 +190,7 @@ export async function loadRelationshipCandidates(
     finalBusiness: Boolean(r.finalBusiness),
     sourceReference: r.sourceReference ?? null,
     alreadyLinkedByRefundId: r.alreadyLinkedByRefundId ?? null,
+    linkedTransactionId: r.linkedTransactionId ?? null,
+    linkedFromId: r.linkedFromId ?? null,
   }));
 }
