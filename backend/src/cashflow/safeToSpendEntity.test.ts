@@ -172,6 +172,7 @@ async function seedLiabilityProfile(
   accountId: number,
   statementBalance: number | null,
   dueDay: number | null,
+  statementDate: string | null = null,
 ): Promise<void> {
   const { LiabilityAccount } = await import('../models');
   await LiabilityAccount.create({
@@ -179,8 +180,62 @@ async function seedLiabilityProfile(
     householdId: HH,
     statementBalance: statementBalance == null ? null : statementBalance.toFixed(4),
     dueDay,
+    statementDate,
   } as never);
 }
+
+/**
+ * A personal card owing `owed`, whose stored statement is `statementBalance`
+ * cut on `statementDate`, beside a chequing account holding 10k. Returns both.
+ */
+async function seedCardWithStatement(
+  name: string,
+  owed: number,
+  statementBalance: number,
+  statementDate: string,
+): Promise<{ chequingId: number; cardId: number }> {
+  const chequing = await mkAccount('Personal Chequing', PERSONAL);
+  await seedCash(chequing.id, 10000);
+  const cc = await mkAccount(name, PERSONAL, 'credit_card');
+  await seedCash(cc.id, -owed);
+  await seedLiabilityProfile(cc.id, statementBalance, null, statementDate);
+  return { chequingId: chequing.id, cardId: cc.id };
+}
+
+async function cardLegAt(asOfDate: string) {
+  const res = await computeSafeToSpend({ userId: USER, householdId: HH, currency: 'CAD', asOfDate });
+  return res.breakdown;
+}
+
+test('a card paid after its statement is not reserved again (cash already dropped)', async () => {
+  const { chequingId, cardId } = await seedCardWithStatement('Amex Reserve', 11922.9, 11922.9, '2026-06-24');
+  // The bill is paid from chequing on Jul 15: a linked payment pair.
+  const out = await seedTxn(chequingId, '2026-07-15', -11922.9, 'AMEX BILL PYMT', 'payment');
+  await seedTxn(cardId, '2026-07-15', 11922.9, 'PAYMENT RECEIVED - THANK YOU', 'payment', {
+    linkedTransactionId: out,
+  });
+
+  assert.equal((await cardLegAt('2026-07-20')).expectedCreditCardPayments, 0);
+});
+
+test('only payments after the statement date, not refunds or earlier payments, are netted', async () => {
+  const { cardId } = await seedCardWithStatement('WS Visa', 5000, 4000, '2026-06-14');
+  await seedTxn(cardId, '2026-06-10', 700, 'From chequing account', 'payment'); // before the statement
+  await seedTxn(cardId, '2026-06-20', 1000, 'From chequing account', 'transfer'); // after: counts
+  await seedTxn(cardId, '2026-06-21', 50, 'INSTACART', 'refund'); // a refund, not a payment
+
+  const leg = await cardLegAt('2026-06-25');
+  assert.equal(leg.expectedCreditCardPayments, 3000);
+  assert.deepEqual(leg.staleCreditCardStatements, []);
+});
+
+test('a statement older than one billing cycle is flagged stale in the breakdown', async () => {
+  await seedCardWithStatement('WS Visa', 4738.22, 4738.22, '2026-08-14');
+
+  const leg = await cardLegAt('2026-10-02');
+  assert.equal(leg.expectedCreditCardPayments, 4738.22);
+  assert.deepEqual(leg.staleCreditCardStatements, ['WS Visa']);
+});
 
 test('reserves the statement balance, not the full current balance, when due in window', async () => {
   const personalAcct = await mkAccount('Personal Chequing', PERSONAL);

@@ -21,7 +21,8 @@ type Opts = {
  *  - strictly-older statement than the stored statementDate: no-op (newer-wins).
  *  - missing statement balance OR due date: persist what parsed, but DO NOT
  *    auto-place an event (never trust a partial parse to write money to the
- *    calendar).
+ *    calendar). A newer statement with no parsed balance clears the stored one
+ *    rather than leaving the previous bill paired with the new date.
  */
 export async function applyCreditCardStatementSummary(opts: Opts): Promise<void> {
   const { account, header, userId, householdId } = opts;
@@ -46,11 +47,21 @@ export async function applyCreditCardStatementSummary(opts: Opts): Promise<void>
 
   const dueDay = paymentDueDate ? Number(paymentDueDate.slice(8, 10)) : null;
 
-  // Upsert only the fields that parsed (non-null), never wiping existing values.
+  // statementDate and statementBalance are one pair: readers (safe-to-spend's
+  // card reservation, the payment planner) treat the balance as the bill cut on
+  // that date. Advancing the date while keeping the previous balance would
+  // present an already-paid bill as the new one, so a newer statement whose
+  // balance did not parse clears it — every reader then falls back to the live
+  // running balance. A re-import of the same statement keeps what it had.
+  // Other fields upsert only when they parsed, never wiping existing values.
   const updates: Partial<{
-    statementBalance: string; minimumPayment: string; dueDay: number; statementDate: string;
+    statementBalance: string | null; minimumPayment: string; dueDay: number; statementDate: string;
   }> = { statementDate: incomingStatementDate };
-  if (statementBalance != null) updates.statementBalance = statementBalance.toFixed(4);
+  if (statementBalance != null) {
+    updates.statementBalance = statementBalance.toFixed(4);
+  } else if (existing?.statementDate !== incomingStatementDate) {
+    updates.statementBalance = null;
+  }
   if (minimumPayment != null) updates.minimumPayment = minimumPayment.toFixed(4);
   if (dueDay != null) updates.dueDay = dueDay;
 
