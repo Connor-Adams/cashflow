@@ -16,6 +16,9 @@ import type { CorpFiscalYear } from '../tax/engine/types';
 import { rollPersonalCarryforwards } from '../tax/services/rollPersonalCarryforwards';
 import { buildReconciliationReport } from '../tax/reconciliation/buildReport';
 import { computeShareholderLoanBalance } from '../tax/services/shareholderLoanBalance';
+import { resolvePersonalEntity } from '../tax/services/personalEntityOwner';
+import { parseSlipAmount } from '../tax/util/parseSlipAmount';
+import type { SlipType, TaxSlipBoxValues } from '../models/TaxSlip';
 import { isTaxTreatment, type TaxTreatment } from '@cashflow/shared';
 
 const router = Router();
@@ -63,6 +66,10 @@ router.get('/classification-queue', async (req, res, next) => {
         txnType: 'transfer',
         linkedTransactionId: { [Op.ne]: null },
         taxTreatmentOverride: overrideWhere,
+        // Money ARRIVING only. A personal→corp leg is a loan or an injection of
+        // capital; listing it let an injection be classified as a dividend.
+        // Mirrors detectUnclassifiedCorpDraws' cadAmount > 0.
+        amount: { [Op.gt]: 0 },
       },
     });
 
@@ -88,6 +95,7 @@ router.get('/classification-queue', async (req, res, next) => {
         date: { [Op.between]: [start, end] },
         txnType: 'income',
         taxTreatmentOverride: overrideWhere,
+        amount: { [Op.gt]: 0 },
       },
     });
 
@@ -139,6 +147,7 @@ router.get('/classification-queue', async (req, res, next) => {
 // user's scroll position mid-batch.
 router.post('/classification-queue/bulk', async (req, res, next) => {
   try {
+    const { household } = currentAuth(req);
     const body = (req.body || {}) as { ids?: unknown; taxTreatmentOverride?: unknown };
     if (!Array.isArray(body.ids) || body.ids.length === 0) {
       res.status(400).json({ error: 'ids must be a non-empty array' });
@@ -169,6 +178,7 @@ router.post('/classification-queue/bulk', async (req, res, next) => {
       return;
     }
 
+    const entityKind = await entityKindsFor(household.id);
     const written = await sequelize.transaction(async (t) => {
       const rows: Transaction[] = [];
       const reviewedAt = new Date();
@@ -185,6 +195,16 @@ router.post('/classification-queue/bulk', async (req, res, next) => {
           err.status = 404;
           throw err;
         }
+        if (treatment != null && DISTRIBUTION_TREATMENTS.has(treatment)
+          && !isDistributionDirection(txn, entityKind)) {
+          // Throwing rolls back the whole batch, like an unknown id.
+          const err = new Error(
+            `Transaction ${id} moves money into the corporation; it cannot be a ${treatment}. `
+            + 'Classify it as a loan or capital instead.',
+          ) as Error & { status?: number };
+          err.status = 400;
+          throw err;
+        }
         txn.set('taxTreatmentOverride', treatment);
         txn.set('reviewedAt', reviewedAt);
         await txn.save({ transaction: t });
@@ -198,7 +218,11 @@ router.post('/classification-queue/bulk', async (req, res, next) => {
             where: { id: txn.linkedTransactionId, ...visibleTransactionWhere(req) },
             transaction: t,
           });
-          if (sibling && sibling.taxTreatmentOverride !== treatment) {
+          // Only a RECIPROCAL sibling is this row's other leg. A one-way link
+          // (two rows both pointing at one) would otherwise overwrite the
+          // treatment of a different pair.
+          if (sibling && sibling.linkedTransactionId === txn.id
+            && sibling.taxTreatmentOverride !== treatment) {
             sibling.set('taxTreatmentOverride', treatment);
             sibling.set('reviewedAt', reviewedAt);
             await sibling.save({ transaction: t });
@@ -229,6 +253,28 @@ router.post('/classification-queue/bulk', async (req, res, next) => {
     next(e);
   }
 });
+
+/** Treatments that say money went FROM the corporation TO the person. */
+const DISTRIBUTION_TREATMENTS = new Set<string>([
+  'eligible_dividend', 'non_eligible_dividend', 'salary', 'employment_income',
+]);
+
+async function entityKindsFor(householdId: number): Promise<Map<number, string>> {
+  const entities = await Entity.findAll({ where: { householdId }, attributes: ['id', 'kind'] });
+  return new Map(entities.map((e) => [e.id, e.kind]));
+}
+
+/**
+ * Whether a row could be one leg of a corp→person distribution: an inflow on a
+ * personal entity, or an outflow on a corporate one. The queue only lists such
+ * rows, but this route takes ids, so it checks for itself.
+ */
+function isDistributionDirection(txn: Transaction, kinds: Map<number, string>): boolean {
+  const amount = Number(txn.amount);
+  const kind = txn.entityId != null ? kinds.get(txn.entityId) : undefined;
+  if (kind === 'corp') return amount < 0;
+  return amount > 0;
+}
 
 // GET /api/tax/entities — list all entities for the authenticated household.
 router.get('/entities', async (req, res, next) => {
@@ -471,14 +517,14 @@ router.delete('/entities/:id/spouse', async (req, res, next) => {
 // GET /api/tax/personal/:year/return — compute (or return cached) T1 for the personal entity.
 router.get('/personal/:year/return', async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
+    const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
       res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
       return;
     }
 
-    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.status(404).json({
         error: 'no_personal_entity',
@@ -561,15 +607,13 @@ router.get('/personal/:year/return', async (req, res, next) => {
 // GET /api/tax/personal/:year/reconciliation — slip / txn / categorisation issues.
 router.get('/personal/:year/reconciliation', async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
+    const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
       res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
       return;
     }
-    const entity = await Entity.findOne({
-      where: { householdId: household.id, kind: 'personal' },
-    });
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.status(404).json({
         error: 'no_personal_entity',
@@ -587,8 +631,8 @@ router.get('/personal/:year/reconciliation', async (req, res, next) => {
 // GET /api/tax/carryforwards — list carryforwards for the personal entity.
 router.get('/carryforwards', async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
-    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const { household, user } = currentAuth(req);
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.json({ carryforwards: [] });
       return;
@@ -629,6 +673,41 @@ router.post('/carryforwards', async (req, res, next) => {
   }
 });
 
+const SLIP_TYPES: readonly SlipType[] = ['T4', 'T5', 'T3', 'T4A', 'T5008'];
+
+/**
+ * Validate a slip before it is stored. Box values are typed in by hand from the
+ * paper slip, and anything stored here is read by buildPersonalFacts on every
+ * return — an unchecked "twelve" used to surface as a 500 on the whole T1.
+ * Values are normalised to plain decimal strings ("1,200.50" → "1200.50").
+ */
+function parseSlipInput(body: { year: unknown; slipType: unknown; issuer: unknown; boxValues: unknown }):
+  | { value: { year: number; slipType: SlipType; issuer: string; boxValues: TaxSlipBoxValues } }
+  | { error: string } {
+  const year = Number(body.year);
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    return { error: 'year must be an integer between 2000 and 2100' };
+  }
+  if (!SLIP_TYPES.includes(body.slipType as SlipType)) {
+    return { error: `slipType must be one of ${SLIP_TYPES.join(', ')}` };
+  }
+  if (typeof body.issuer !== 'string' || body.issuer.trim() === '') {
+    return { error: 'issuer is required' };
+  }
+  const raw = body.boxValues ?? {};
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return { error: 'boxValues must be an object of box → amount' };
+  }
+  const boxValues: TaxSlipBoxValues = {};
+  for (const [key, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^box\d{1,3}[A-Za-z]?$/.test(key)) return { error: `"${key}" is not a box key (e.g. box14, box16A)` };
+    const amount = parseSlipAmount(v);
+    if (!amount) return { error: `${key}: "${String(v)}" is not an amount` };
+    boxValues[key] = amount.toFixed(2);
+  }
+  return { value: { year, slipType: body.slipType as SlipType, issuer: body.issuer.trim(), boxValues } };
+}
+
 // POST /api/tax/slips — create a tax slip.
 router.post('/slips', async (req, res, next) => {
   try {
@@ -637,6 +716,11 @@ router.post('/slips', async (req, res, next) => {
       string,
       unknown
     >;
+    const parsed = parseSlipInput({ year, slipType, issuer, boxValues });
+    if ('error' in parsed) {
+      res.status(400).json({ error: 'invalid_slip', message: parsed.error });
+      return;
+    }
     const entity = await Entity.findOne({
       where: { id: entityId as number, householdId: household.id },
     });
@@ -644,14 +728,7 @@ router.post('/slips', async (req, res, next) => {
       res.status(404).json({ error: 'entity_not_found' });
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const slip = await (TaxSlip.create as any)({
-      entityId: entity.id,
-      year,
-      slipType,
-      issuer,
-      boxValues,
-    });
+    const slip = await TaxSlip.create({ entityId: entity.id, ...parsed.value });
     res.status(201).json({ slip });
   } catch (err) {
     next(err);
@@ -661,14 +738,14 @@ router.post('/slips', async (req, res, next) => {
 // POST /api/tax/personal/:year/roll-forward — explicit carryforward roll for year N.
 router.post('/personal/:year/roll-forward', async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
+    const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
       res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
       return;
     }
 
-    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.status(404).json({
         error: 'no_personal_entity',
@@ -706,7 +783,7 @@ router.post('/personal/:year/roll-forward', async (req, res, next) => {
 // GET /api/tax/personal/years?from=YYYY&to=YYYY — multi-year compare.
 router.get('/personal/years', async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
+    const { household, user } = currentAuth(req);
     const fromYear = req.query.from ? Number(req.query.from) : new Date().getFullYear() - 2;
     const toYear = req.query.to ? Number(req.query.to) : new Date().getFullYear();
 
@@ -715,7 +792,7 @@ router.get('/personal/years', async (req, res, next) => {
       return;
     }
 
-    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.status(404).json({ error: 'no_personal_entity', message: 'No Personal entity for this household.' });
       return;
@@ -754,14 +831,14 @@ router.get('/personal/years', async (req, res, next) => {
 // request.
 router.get('/personal/:year/outlook', async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
+    const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
       res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
       return;
     }
 
-    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.status(404).json({ error: 'no_personal_entity', message: 'No Personal entity for this household.' });
       return;
@@ -824,14 +901,14 @@ function serializeOutlook(outlook: Awaited<ReturnType<typeof buildOutlook>>): un
 // GET /api/tax/personal/:year/instalments — list instalment payments for the year.
 router.get('/personal/:year/instalments', async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
+    const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
       res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
       return;
     }
 
-    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.status(404).json({ error: 'no_personal_entity', message: 'No Personal entity for this household.' });
       return;
@@ -851,14 +928,14 @@ router.get('/personal/:year/instalments', async (req, res, next) => {
 // POST /api/tax/personal/:year/instalments — record a new instalment payment.
 router.post('/personal/:year/instalments', async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
+    const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
       res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
       return;
     }
 
-    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.status(404).json({ error: 'no_personal_entity', message: 'No Personal entity for this household.' });
       return;
@@ -890,8 +967,8 @@ router.post('/personal/:year/instalments', async (req, res, next) => {
 // GET /api/tax/slips — list slips for the personal entity, optionally filtered by year.
 router.get('/slips', async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
-    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const { household, user } = currentAuth(req);
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.json({ slips: [] });
       return;
