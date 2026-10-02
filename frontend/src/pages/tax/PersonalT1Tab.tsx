@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
 import {
   useScenarios, useScenarioDetail, type ScenarioWithComputed, } from '../../hooks/useScenarios';
@@ -9,6 +9,7 @@ import { pickDefaultScenarioId, describeProvenance } from './scenarios/provenanc
 import { OverrideEditor } from './scenarios/OverrideEditor';
 import { ComparisonView } from './scenarios/ComparisonView';
 import { YearStripNav } from './scenarios/YearStripNav';
+import { useStarterScenario } from './scenarios/useStarterScenario';
 import { AssumptionsEditor } from './scenarios/AssumptionsEditor';
 import { RrifMinCalc } from './scenarios/RrifMinCalc';
 import { fmtCurrency } from './util/format';
@@ -74,7 +75,15 @@ function PersonalT1ScenarioWorkspace({ year: yearProp, entityId, onNavigate }: W
   // TaxPage's year selector. When the prop changes (user picks a year in the
   // top-level selector) we re-seed local state to match.
   const [selectedYear, setSelectedYear] = useState(yearProp);
-  useEffect(() => { setSelectedYear(yearProp); }, [yearProp]);
+  const [activeId, setActiveId] = useState<number | null>(null);
+  const [compareIds, setCompareIds] = useState<number[]>([]);
+  // A new page year is a different scenario list: drop the old year's selection
+  // and compare set too, or last year's scenario stays on screen.
+  useEffect(() => {
+    setSelectedYear(yearProp);
+    setActiveId(null);
+    setCompareIds([]);
+  }, [yearProp]);
 
   const {
     scenarios,
@@ -86,37 +95,27 @@ function PersonalT1ScenarioWorkspace({ year: yearProp, entityId, onNavigate }: W
     remove,
     projectNextYear,
   } = useScenarios(entityId, selectedYear);
-  const [activeId, setActiveId] = useState<number | null>(null);
-  const [compareIds, setCompareIds] = useState<number[]>([]);
-  const [bootstrapping, setBootstrapping] = useState(false);
   const [isProjecting, setIsProjecting] = useState(false);
 
-  // Auto-create a starter scenario on first load so the baseline materialises
-  // and there is something for the user to edit immediately. The POST handler
-  // auto-creates the baseline as parent + a fork named "Scratch" as the leaf.
-  useEffect(() => {
-    if (loading || bootstrapping) return;
-    if (scenarios.length === 0) {
-      setBootstrapping(true);
-      create({ name: 'Scratch', overrides: {} })
-        .catch((err: unknown) => {
-          // Surface but don't crash — user can retry via the tree controls in
-          // future iterations. Keeping inline so the existing error UX stays.
-          console.error('Failed to bootstrap baseline scenario', err);
-        })
-        .finally(() => setBootstrapping(false));
-    }
-  }, [loading, bootstrapping, scenarios.length, create]);
+  // The POST handler auto-creates the baseline as parent + a fork named
+  // "Scratch" as the leaf.
+  const createStarter = useCallback(() => create({ name: 'Scratch', overrides: {} }), [create]);
+  const starterError = useStarterScenario({
+    key: `${entityId}:${selectedYear}`,
+    loading,
+    empty: scenarios.length === 0,
+    create: createStarter,
+  });
 
   // Select the year's actuals so the detail pane has content as soon as the
   // bootstrap POST resolves. This used to pick the most-recently-created
   // non-baseline scenario, which in prod was a `projection_root` holding no
   // transactions from the year on screen — see `pickDefaultScenarioId`.
   useEffect(() => {
-    if (activeId !== null) return;
+    if (activeId !== null || loading) return;
     const id = pickDefaultScenarioId(scenarios);
     if (id !== null) setActiveId(id);
-  }, [activeId, scenarios]);
+  }, [activeId, loading, scenarios]);
 
   // Prune deleted scenarios from the compare set so the comparison view never
   // requests a stale id (the backend would 404 the whole compare).
@@ -217,6 +216,9 @@ function PersonalT1ScenarioWorkspace({ year: yearProp, entityId, onNavigate }: W
 
   if (loading) return <p className="muted">Loading scenarios…</p>;
   if (error) return <p className="error">Failed to load scenarios: {error}</p>;
+  if (starterError && scenarios.length === 0) {
+    return <p className="error">Failed to create a starter scenario: {starterError}</p>;
+  }
 
   return (
     <div>

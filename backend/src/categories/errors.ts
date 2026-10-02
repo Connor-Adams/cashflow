@@ -2,7 +2,7 @@ export type CategoryErrorCode =
   | 'not_found'
   | 'parent_not_found'
   | 'cycle'
-  | 'sibling_conflict'
+  | 'name_conflict'
   | 'has_children'
   | 'has_references'
   | 'invalid_name';

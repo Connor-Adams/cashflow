@@ -12,8 +12,9 @@
  */
 import { useMemo, useState } from 'react';
 import {
-  TAX_SCOPE_LABELS, patchTransactionTax, useMissingReceipts, useReviewQueue, useTaxSummary, useTaxTags, type TaxScope, } from '../../hooks/useTaxHygiene';
+  TAX_SCOPE_LABELS, patchTransactionTax, taxExportUrl, useMissingReceipts, useReviewQueue, useTaxSummary, useTaxTags, type TaxPatchInput, type TaxScope, } from '../../hooks/useTaxHygiene';
 import { Button } from '@connor-adams/designsystem'
+import { useToast } from '@/components/ui/toast';
 import { fmtCurrency, fmtPct } from './util/format';
 import {
   Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@connor-adams/designsystem'
@@ -43,14 +44,8 @@ export function TaxHygieneTab({ year }: Props) {
   const handleScopeChange = (s: TaxScope) => setScope(s);
 
   const handleExport = () => {
-    const qs = new URLSearchParams({
-      scope,
-      from: filters.from,
-      to: filters.to,
-    });
-    // The export endpoint sets Content-Disposition; let the browser pick up
-    // the filename. Use a full navigation so cookies + CD trigger download.
-    window.location.href = `/api/exports/tax?${qs.toString()}`;
+    // Full navigation so cookies + Content-Disposition trigger the download.
+    window.location.href = taxExportUrl(filters);
   };
 
   const refreshAll = () => {
@@ -206,29 +201,29 @@ function ReviewQueueSection({
   tags,
   onUpdated,
 }: ReviewQueueSectionProps) {
+  const { showToast } = useToast();
   if (loading) return <p className="muted">Loading review queue…</p>;
   if (error) return <p className="error">Failed to load queue: {error}</p>;
 
-  const handleApprove = async (rowId: number) => {
+  // A failed save used to reach only the console, so the row looked saved.
+  const save = async (rowId: number, patch: TaxPatchInput, failureTitle: string) => {
     try {
-      await patchTransactionTax(rowId, { reviewedForTax: true });
+      await patchTransactionTax(rowId, patch);
       onUpdated();
     } catch (e) {
-      console.error('Failed to mark reviewed', e);
+      showToast({
+        variant: 'destructive',
+        title: failureTitle,
+        description: e instanceof Error ? e.message : String(e),
+      });
     }
   };
 
-  const handleTagChange = async (
-    rowId: number,
-    newTagId: number | null,
-  ) => {
-    try {
-      await patchTransactionTax(rowId, { taxTagId: newTagId });
-      onUpdated();
-    } catch (e) {
-      console.error('Failed to set tag', e);
-    }
-  };
+  const handleApprove = (rowId: number) =>
+    save(rowId, { reviewedForTax: true }, 'Failed to mark reviewed');
+
+  const handleTagChange = (rowId: number, newTagId: number | null) =>
+    save(rowId, { taxTagId: newTagId }, 'Failed to set tax tag');
 
   return (
     <section>

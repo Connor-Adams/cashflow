@@ -24,6 +24,7 @@ export function useTaxReturn(year: number) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setError(null);
     getJson<TaxReturnDto>(`/api/tax/personal/${year}/return`)
       .then((d) => { if (!cancelled) { setData(d); setLoading(false); } })
       .catch((e) => { if (!cancelled) { setError(String(e?.message ?? e)); setLoading(false); } });

@@ -335,12 +335,26 @@ export async function categorizeAmazonItemsWithAi(
 
 export async function applyAmazonItemCategorySuggestions(
   suggestions: AmazonItemCategorySuggestion[],
+  householdId: number | null,
 ): Promise<number> {
+  const { resolveCategoryMirror } = await import('../util/ensureCategory');
   let updated = 0;
   for (const suggestion of suggestions) {
+    // A static update bypasses the beforeSave category-id hook, so the id has to
+    // be supplied here and the string has to be the resolved leaf's FLAT name —
+    // the model echoes back path-form hints, and a path form in a category
+    // mirror joins nothing. Same shape as applyReceiptItemCategorySuggestions.
+    //
+    // This is NOT the hook's resolution: the hook's `resolveCategoryIdByName`
+    // cannot read a path and prefers a ROOT of that name, while this goes
+    // through `resolveCategoryPath` (household-global, lowest id wins). They
+    // differ only for a household holding a duplicate name whose nested node is
+    // older than the root — a state the Task 6 unique index removes.
+    const mirror = await resolveCategoryMirror(householdId, suggestion.category);
     const [count] = await ExternalOrderItem.update(
       {
-        inferredCategory: suggestion.category,
+        inferredCategory: mirror.name,
+        inferredCategoryId: mirror.id,
         businessUsePercent:
           suggestion.businessUsePercent == null
             ? null

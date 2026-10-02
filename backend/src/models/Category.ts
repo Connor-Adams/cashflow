@@ -1,7 +1,6 @@
 import {
   Model,
   DataTypes,
-  Op,
   type Sequelize,
   type ModelAttributes,
   InferAttributes,
@@ -65,17 +64,17 @@ export function initCategory(sequelize: Sequelize): typeof Category {
         },
       },
       indexes: [
+        // One name per household, wherever it sits in the tree. Replaced the two
+        // partial (root / nested) uniques in migration
+        // 20260930000001-merge-duplicate-category-names.js: parent-scoped
+        // uniqueness let the nightly enrichment job fork 15 categories in
+        // household 1 into a root/child pair sharing one name, and every
+        // name-keyed consumer (budget spend buckets, the `final_category` string
+        // mirror) then double-counted or lost spend.
         {
-          name: 'categories_household_parent_name_key_unique',
-          unique: true,
-          fields: ['household_id', 'parent_id', 'name_key'],
-          where: { parent_id: { [Op.ne]: null } },
-        },
-        {
-          name: 'categories_household_root_name_key_unique',
+          name: 'categories_household_name_key_unique',
           unique: true,
           fields: ['household_id', 'name_key'],
-          where: { parent_id: null },
         },
       ],
     }

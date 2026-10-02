@@ -1572,6 +1572,11 @@ export type SafeToSpendBreakdown = {
   upcomingRequiredExpenses: number;
   requiredSavingsContributions: number;
   expectedCreditCardPayments: number;
+  /**
+   * Names of cards whose reserved statement is more than one billing cycle old
+   * (a newer statement hasn't been imported). Empty when all are current.
+   */
+  staleCreditCardStatements: string[];
   minimumBuffer: number;
 };
 

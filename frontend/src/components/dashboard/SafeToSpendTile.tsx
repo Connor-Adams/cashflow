@@ -5,7 +5,7 @@ import { BentoTile } from './BentoTile'
 import { useSafeToSpend } from '@/hooks/useSafeToSpend'
 import { formatMoney } from '@/lib/formatMoney'
 import { payoffVsInvestSentence } from '@/lib/surplusCopy'
-import type { SafeToSpendBreakdown, Surplus } from '@/types/api'
+import type { SafeToSpendBreakdown, SafeToSpendResponse, Surplus } from '@/types/api'
 
 type Props = {
   /**
@@ -90,7 +90,7 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
           label: 'Expected credit-card payments',
           amount: data.breakdown.expectedCreditCardPayments,
           sign: '-',
-          note: data.settings.includeCreditCardBalance ? undefined : 'disabled',
+          note: creditCardNote(data),
         },
         {
           label: 'Minimum cash buffer',
@@ -231,6 +231,13 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
  * salaried user never sees a draw line and an owner-operator never sees a
  * paycheck line. Both zero means no attribution is worth showing.
  */
+/** Disabled, or naming any card whose reserved statement is out of date. */
+function creditCardNote(data: SafeToSpendResponse): string | undefined {
+  if (!data.settings.includeCreditCardBalance) return 'disabled'
+  const stale = data.breakdown.staleCreditCardStatements ?? []
+  return stale.length > 0 ? `statement is stale: ${stale.join(', ')}` : undefined
+}
+
 function incomeSubRows(breakdown: SafeToSpendBreakdown): BreakdownRow[] {
   const legs: BreakdownRow[] = [
     { label: 'Recurring income', amount: breakdown.recurringIncome, sign: '+', sub: true },

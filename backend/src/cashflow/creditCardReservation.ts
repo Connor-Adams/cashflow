@@ -7,7 +7,13 @@
  * window. Falls back to the full current balance when no statement data is
  * captured — still gated by the due day when it's known, and reserved in full
  * only when the due day is also unknown, so we never silently under-reserve.
+ *
+ * Payments made into the card after the statement was cut are netted off the
+ * statement balance: the cash that paid them has already left the bank
+ * accounts safe-to-spend counts, so reserving the full bill again would count
+ * a paid card twice.
  */
+import { classifyPositiveAmount } from '../summary/classifyTransactionFlow';
 
 export type CreditCardReservationInput = {
   /** Magnitude of the full current running balance owed (positive), 0 if none. */
@@ -16,7 +22,16 @@ export type CreditCardReservationInput = {
   statementBalance: number | null;
   /** Day-of-month the payment is due, or null when unknown. */
   dueDay: number | null;
+  /**
+   * Sum of payments into the card dated after the statement date (positive).
+   * Only applied against the statement balance; the no-statement fallback uses
+   * the live running balance, which already nets them.
+   */
+  paymentsSinceStatement?: number;
 };
+
+/** One billing cycle plus slack: a statement older than this is stale. */
+const STALE_STATEMENT_DAYS = 35;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -51,12 +66,51 @@ export function creditCardReservation(
       ? card.currentBalanceOwed
       : 0;
   }
-  // Nothing billed (or a credit balance) — reserve nothing.
-  if (card.statementBalance <= 0) return 0;
+  // What is still unpaid of the bill: max(0, statement − payments since).
+  const unpaid = card.statementBalance - Math.max(0, card.paymentsSinceStatement ?? 0);
+  // Nothing billed, a credit balance, or already paid — reserve nothing.
+  if (unpaid <= 0) return 0;
   // Statement balance known but no due day — reserve it (cannot gate by window).
-  if (card.dueDay == null) return card.statementBalance;
+  if (card.dueDay == null) return unpaid;
   // Reserve only when the due day actually falls inside the window.
-  return dueDayInWindow(card.dueDay, windowStartIso, windowEndIso)
-    ? card.statementBalance
-    : 0;
+  return dueDayInWindow(card.dueDay, windowStartIso, windowEndIso) ? unpaid : 0;
+}
+
+/**
+ * True when a card-account row is a payment INTO the card: a positive amount
+ * typed `payment` or `transfer` (the bank-side leg of a bill payment, as the
+ * transfer-link stage pairs them), or an untyped inflow whose narrative reads as
+ * a statement payment per the shared `classifyPositiveAmount` router. Refunds,
+ * rewards and other credits are not payments.
+ */
+export function isCardPaymentInflow(row: {
+  amount: number;
+  txnType?: string | null;
+  merchantRaw?: string | null;
+  merchantClean?: string | null;
+  category?: string | null;
+}): boolean {
+  if (!(row.amount > 0)) return false;
+  if (row.txnType === 'transfer') return true;
+  return (
+    classifyPositiveAmount({ ...row, accountType: 'credit_card' }) === 'payment'
+  );
+}
+
+/**
+ * True when the stored statement is more than one billing cycle old relative
+ * to `asOfIso` — a newer statement should exist but has not been imported, so
+ * the reserved bill may be out of date. Null dates are never stale.
+ */
+export function isStatementStale(
+  statementDateIso: string | null,
+  asOfIso: string,
+): boolean {
+  if (statementDateIso == null) return false;
+  const cutoff = new Date(
+    Date.parse(`${asOfIso}T00:00:00Z`) - STALE_STATEMENT_DAYS * MS_PER_DAY,
+  )
+    .toISOString()
+    .slice(0, 10);
+  return statementDateIso < cutoff;
 }

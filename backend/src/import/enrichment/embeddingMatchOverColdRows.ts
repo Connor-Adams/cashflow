@@ -28,18 +28,12 @@ import {
   runEmbeddingMatchStage,
   type PriorEmbedding,
 } from './embeddingMatchStage';
-import { mergeSignals } from './computeReviewFlag';
-import { resolveFinalCategory } from '../calculateShares';
-import {
-  computeImportConfidence,
-  serializeFlags,
-} from '../computeImportConfidence';
-import { Transaction, TransactionSignal } from '../../models';
 import { logger } from '../../observability/logger';
 import {
   enrichmentEmbeddingEnabled,
   enrichmentEmbeddingThreshold,
 } from '../../config/env';
+import { persistColdRowEnrichment } from './persistColdRowEnrichment';
 import type { Signal } from './types';
 import type { ColdRow } from './aiBatchOverColdRows';
 
@@ -96,69 +90,22 @@ function emptyResult(
   };
 }
 
+/**
+ * The write is shared with the AI-batch stage (see persistColdRowEnrichment.ts);
+ * only the signal source and the failure event name are this stage's own.
+ */
 async function persistEmbeddingMatch(
   c: ColdRow,
   signal: Signal,
   householdId: number | null,
 ): Promise<boolean> {
-  const merged = mergeSignals([...c.signals, signal]);
-  // `final_category` is the column every read path aggregates on (spend
-  // rollups, the Sankey aggregator, the uncategorised bucket), so a row this
-  // stage matches has to land there or the match is invisible downstream. The
-  // user's own `categoryOverride` still wins — see resolveFinalCategory.
-  // computeImportConfidence is told the value actually persisted below.
-  const finalCategory = resolveFinalCategory(c.categoryOverride, merged.fields.autoCategory);
-  const confidence = computeImportConfidence({
-    reviewFlag: merged.fields.reviewFlag,
-    finalCategory,
-    autoCategory: merged.fields.autoCategory,
-    autoSplitType: merged.fields.autoSplitType,
-    finalSplitType:
-      merged.fields.autoSplitType === 'partner' || merged.fields.autoSplitType === 'shared'
-        ? merged.fields.autoSplitType
-        : 'me',
-    txnType: c.txnType,
-    accountVisibility: c.accountVisibility,
-    linkedTransactionId: merged.fields.linkedTransactionId,
-    amount: c.amount,
+  return persistColdRowEnrichment({
+    row: c,
+    signal,
+    householdId,
+    signalSource: 'embedding',
+    failureEvent: 'enrichment_embedding_persist_failed',
   });
-  try {
-    // NOTE: static update bypasses the beforeSave category-id hook, so
-    // *_category_id stays null momentarily (auto_category_id and
-    // final_category_id alike). Migration 20260623000001 backfills any null
-    // FKs where the category string is set.
-    await Transaction.update(
-      {
-        autoCategory: merged.fields.autoCategory,
-        finalCategory,
-        autoBusiness: merged.fields.autoBusiness,
-        autoSplitType: merged.fields.autoSplitType,
-        autoPctMe: merged.fields.autoPctMe,
-        autoPctPartner: merged.fields.autoPctPartner,
-        autoSource: merged.fields.autoSource,
-        autoConfidence: merged.fields.autoConfidence,
-        reviewFlag: merged.fields.reviewFlag,
-        importConfidence: confidence.state,
-        importConfidenceFlags: serializeFlags(confidence.flags),
-      },
-      { where: { id: c.txnId } },
-    );
-    await TransactionSignal.create({
-      transactionId: c.txnId,
-      source: 'embedding',
-      confidence: signal.confidence,
-      fields: signal.fields,
-      rationale: signal.rationale ?? null,
-    });
-    if (householdId != null) {
-      const { ensureCategory } = await import('../../util/ensureCategory');
-      await ensureCategory(householdId, merged.fields.autoCategory);
-    }
-    return true;
-  } catch (err) {
-    logger.warn({ err, txnId: c.txnId, module: 'enrichment' }, 'enrichment_embedding_persist_failed');
-    return false;
-  }
 }
 
 /** Embed every distinct household prior merchant, via the read-through cache. */

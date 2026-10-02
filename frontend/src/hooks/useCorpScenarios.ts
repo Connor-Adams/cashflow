@@ -83,6 +83,11 @@ export function useCorpScenarios(entityId: number, year: number): UseCorpScenari
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  // Which (entity, year) the held list belongs to. Until the new key's fetch
+  // settles, the previous year's list is still in state and the effect has not
+  // yet flipped `loading`, so callers would read it as the new year's.
+  const key = `${entityId}:${year}`;
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,10 +96,13 @@ export function useCorpScenarios(entityId: number, year: number): UseCorpScenari
     getJson<{ scenarios: CorpScenario[] }>(
       `/api/tax/scenarios/corp?entityId=${entityId}&year=${year}`,
     )
-      .then((d) => { if (!cancelled) { setScenarios(d.scenarios); setLoading(false); } })
+      .then((d) => {
+        if (!cancelled) { setScenarios(d.scenarios); setLoadedKey(`${entityId}:${year}`); setLoading(false); }
+      })
       .catch((e: unknown) => {
         if (!cancelled) {
           setError(String((e as Error)?.message ?? e));
+          setLoadedKey(`${entityId}:${year}`);
           setLoading(false);
         }
       });
@@ -165,7 +173,7 @@ export function useCorpScenarios(entityId: number, year: number): UseCorpScenari
 
   return {
     scenarios,
-    loading,
+    loading: loading || loadedKey !== key,
     error,
     reload,
     create,

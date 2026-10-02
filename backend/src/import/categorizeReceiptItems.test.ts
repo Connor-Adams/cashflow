@@ -1,6 +1,6 @@
 import { test, before, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { sequelize, ExternalOrder, ExternalOrderItem, Household } from '../models'
+import { sequelize, Category, ExternalOrder, ExternalOrderItem, Household } from '../models'
 import {
   parseReceiptItemCategorySuggestions,
   categorizeReceiptItemsWithAi,
@@ -8,6 +8,7 @@ import {
   categorizeAndApplyReceiptItems,
   type ReceiptOpenAiCaller,
 } from './categorizeReceiptItems'
+import { assertApplyWriterResolvesCategories } from '../../test/helpers/categoryMirrorApplyCases'
 
 before(async () => {
   await sequelize.sync({ force: true })
@@ -123,7 +124,10 @@ test('categorize batches items in groups of 20', async () => {
 test('apply writes inferredCategory + confidence, leaves businessUsePercent null', async () => {
   const order = await makeOrder('other')
   const id = await makeItem(order, 'EGGS', null)
-  const n = await applyReceiptItemCategorySuggestions([{ itemId: id, category: 'Dairy', confidence: 88, rationale: 'x' }])
+  const n = await applyReceiptItemCategorySuggestions(
+    [{ itemId: id, category: 'Dairy', confidence: 88, rationale: 'x' }],
+    HH,
+  )
   assert.equal(n, 1)
   const row = await ExternalOrderItem.findByPk(id)
   assert.equal(row!.inferredCategory, 'Dairy')
@@ -165,4 +169,49 @@ test('categorizeAndApply swallows caller errors (graceful degradation)', async (
   assert.equal(n, 0)
   const row = await ExternalOrderItem.findByPk(id)
   assert.equal(row!.inferredCategory, null)
+})
+
+// ---------------------------------------------------------------------------
+// category id + flat name persistence.
+//
+// `ExternalOrderItem.update` is a STATIC update, so it bypasses the
+// `beforeSave` hook that reconciles `inferred_category` into
+// `inferred_category_id`. The writer therefore has to resolve the category
+// itself, and it has to write the resolved leaf's FLAT name:
+// `loadCategoryHints` feeds the model path-form hints ("Household / Rent")
+// which it echoes back, and every budget and spend rollup joins the category
+// mirror as an exact string — so a path form in that column joins nothing.
+// Same coverage as the other three AI writers fixed alongside this one.
+// ---------------------------------------------------------------------------
+
+test('apply resolves the category id and a FLAT name in every case', async () => {
+  // The five behaviours live in one shared matrix with the Amazon writer, which
+  // takes the same suggestion-plus-nullable-household shape and must behave
+  // identically: flat known name, path form, MALFORMED path, unknown name, and
+  // no household.
+  const order = await makeOrder('other')
+  await assertApplyWriterResolvesCategories({
+    householdId: HH,
+    makeItem: (title) => makeItem(order, title, null),
+    apply: (itemId, category, householdId) =>
+      applyReceiptItemCategorySuggestions(
+        [{ itemId, category, confidence: 88, rationale: 'x' }],
+        householdId,
+      ),
+  })
+})
+
+test('categorizeAndApply threads the household so the id lands too', async () => {
+  const order = await makeOrder('other')
+  const id = await makeItem(order, 'DIET COKE', null)
+  const bev = await Category.create({ householdId: HH, name: 'Beverages', parentId: null } as never)
+
+  const n = await categorizeAndApplyReceiptItems(
+    { householdId: HH, orderId: order },
+    { openaiCaller: stubCaller('Beverages') },
+  )
+  assert.equal(n, 1)
+  const row = await ExternalOrderItem.findByPk(id)
+  assert.equal(row!.inferredCategory, 'Beverages')
+  assert.equal(row!.inferredCategoryId, bev.id)
 })

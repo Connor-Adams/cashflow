@@ -271,3 +271,59 @@ test('import_confidence matches the final_category actually persisted', async ()
   );
   assert.equal(fresh.importConfidence, fromFinalCategoryAlone.state);
 });
+
+// ---------------------------------------------------------------------------
+// category id + flat name persistence.
+//
+// `Transaction.update` is a STATIC update, so it bypasses the `beforeSave` hook
+// that reconciles `auto_category` / `final_category` into their `*_category_id`
+// columns. The writer therefore has to resolve the category itself. It also has
+// to write the resolved leaf's FLAT name: `loadCategoryHints` feeds the model
+// path-form hints ("Household / Rent") which it echoes back, and every budget
+// and spend rollup joins `final_category` as an exact string — so a path form
+// in that column matches no budget at all.
+// ---------------------------------------------------------------------------
+
+// The well-formed path and the MALFORMED one (empty segment) take DIFFERENT
+// routes through resolveCategoryMirror: the first resolves in one step, the
+// second only after the leaf segment is re-resolved on its own, because the empty
+// segment makes parseCategoryPath throw. Both must land on the same existing leaf
+// with the same id — persisting 'Rent' beside a NULL id would be precisely the
+// flat-name-plus-NULL-FK row this writer exists to stop producing, and one the
+// repair migration would then have to clean up all over again. One body, two
+// named tests.
+for (const autoCategory of ['Household / Rent', 'Household // Rent']) {
+  test(`persistAiEnhancement turns "${autoCategory}" into a flat name plus the leaf id`, async () => {
+    const { hh, acc } = await household();
+    const houseRoot = await models.Category.create({
+      householdId: hh.id,
+      name: 'Household',
+      parentId: null,
+    } as never);
+    const rent = await models.Category.create({
+      householdId: hh.id,
+      name: 'Rent',
+      parentId: houseRoot.id,
+    } as never);
+    const { txn, row } = await coldTxnRow(hh, acc);
+
+    // The model echoes back a hint from loadCategoryHints, which is path-form.
+    const persisted = await orch.persistAiEnhancement(
+      row,
+      { source: 'ai', confidence: 'high', fields: { autoCategory } },
+      hh.id,
+    );
+    assert.equal(persisted, true);
+
+    await txn.reload();
+    assert.equal(txn.finalCategory, 'Rent', 'the path form must never reach final_category');
+    assert.equal(txn.finalCategoryId, rent.id, 'the FK must be resolved, not left NULL');
+    assert.equal(txn.autoCategory, 'Rent');
+    assert.equal(txn.autoCategoryId, rent.id);
+    assert.equal(
+      await models.Category.count({ where: { householdId: hh.id } }),
+      2,
+      'no new category is created',
+    );
+  });
+}

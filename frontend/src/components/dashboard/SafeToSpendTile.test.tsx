@@ -25,6 +25,7 @@ function mockSafe(
   isNegative = false,
   surplus?: SurplusOverride,
   income?: IncomeOverride,
+  staleCreditCardStatements: string[] = [],
 ) {
   const recurringIncome = income?.recurringIncome ?? 0
   const ownerDrawIncome = income?.ownerDrawIncome ?? 0
@@ -45,6 +46,7 @@ function mockSafe(
         requiredSavingsContributions: 200,
         expectedCreditCardPayments: 300,
         minimumBuffer: 100,
+        staleCreditCardStatements,
       },
       settings: {
         minimumCashBuffer: '100.0000',
@@ -319,6 +321,24 @@ describe('SafeToSpendTile', () => {
       expect(screen.getByText(/committed past your cash on hand/i)).toBeInTheDocument()
       expect(screen.queryByText(/surplus/i)).not.toBeInTheDocument()
     })
+  })
+
+  it('flags a stale card statement on the credit-card payments line, and only then', async () => {
+    const openBreakdown = async (stale: string[]) => {
+      vi.resetModules()
+      vi.doMock('@/hooks/useSafeToSpend', () => ({
+        useSafeToSpend: () => mockSafe(1000, false, undefined, undefined, stale),
+      }))
+      const { SafeToSpendTile: T } = await import('./SafeToSpendTile')
+      const view = render(<MemoryRouter><T /></MemoryRouter>)
+      fireEvent.click(screen.getByText('Show breakdown'))
+      return view
+    }
+    const fresh = await openBreakdown([])
+    expect(screen.queryByText(/statement is stale/i)).not.toBeInTheDocument()
+    fresh.unmount()
+    await openBreakdown(['WS Visa'])
+    expect(screen.getByText('(statement is stale: WS Visa)')).toBeInTheDocument()
   })
 
   it('breaks expected income into its paycheck and owner-draw sources', () => {

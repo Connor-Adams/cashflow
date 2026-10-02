@@ -35,6 +35,7 @@ export function useShareholderLoans() {
       const d = await getJson<ShareholderLoansResponse>('/api/tax/corp/shareholder-loans');
       setLoans(d.shareholderLoans ?? []);
       setBalance(d.balance ?? '0.00');
+      setError(null);
     } catch (e: unknown) {
       setError(String((e as Error)?.message ?? e));
     }

@@ -20,16 +20,9 @@ import {
 import { openaiJson } from '../../ai/openaiJson';
 import { getOpenAiConfig } from '../../config/openai';
 import { loadCategoryHints } from '../../ai/suggestTransaction';
-import {
-  computeImportConfidence,
-  serializeFlags,
-} from '../computeImportConfidence';
-import { mergeSignals } from './computeReviewFlag';
-import { resolveFinalCategory } from '../calculateShares';
+import { persistColdRowEnrichment } from './persistColdRowEnrichment';
 import type { Signal } from './types';
 import type { MerchantMemoryMatch } from '../../ai/merchantMemory';
-import { Transaction, TransactionSignal } from '../../models';
-import { logger } from '../../observability/logger';
 import {
   enrichmentAiEnabled,
   enrichmentAiMaxMerchants,
@@ -133,66 +126,25 @@ export function aiSuggestionToSignal(sug: {
   };
 }
 
-async function persistAiEnhancement(c: ColdRow, aiSignal: Signal, householdId: number | null): Promise<boolean> {
-  const merged = mergeSignals([...c.signals, aiSignal]);
-  // `final_category` is the column every read path aggregates on (spend
-  // rollups, the Sankey aggregator, the uncategorised bucket), so a row this
-  // stage resolves has to land there or the whole fallback is inert. The
-  // user's own `categoryOverride` still wins — see resolveFinalCategory.
-  const finalCategory = resolveFinalCategory(c.categoryOverride, merged.fields.autoCategory);
-  // Re-classify import confidence with the merged enrichment fields. An AI
-  // suggestion that fills a category and turns reviewFlag off should move
-  // the row from 'needs_review' back to 'clean' on the dashboard. It is told
-  // the value actually persisted below, not a stand-in for it.
-  const confidence = computeImportConfidence({
-    reviewFlag: merged.fields.reviewFlag,
-    finalCategory,
-    autoCategory: merged.fields.autoCategory,
-    autoSplitType: merged.fields.autoSplitType,
-    finalSplitType:
-      merged.fields.autoSplitType === 'partner' ||
-      merged.fields.autoSplitType === 'shared'
-        ? merged.fields.autoSplitType
-        : 'me',
-    txnType: c.txnType,
-    accountVisibility: c.accountVisibility,
-    linkedTransactionId: merged.fields.linkedTransactionId,
-    amount: c.amount,
+/**
+ * Exported for tests — see dedupeColdRowsByMerchantKey, aiSuggestionToSignal.
+ *
+ * The write itself is shared with the embedding stage (see
+ * persistColdRowEnrichment.ts); only the signal source and the failure event
+ * name are this stage's own.
+ */
+export async function persistAiEnhancement(
+  c: ColdRow,
+  aiSignal: Signal,
+  householdId: number | null,
+): Promise<boolean> {
+  return persistColdRowEnrichment({
+    row: c,
+    signal: aiSignal,
+    householdId,
+    signalSource: 'ai',
+    failureEvent: 'enrichment_ai_batch_post_update_failed',
   });
-  try {
-    // NOTE: static update/bulkCreate bypasses the beforeSave category-id hook, so *_category_id stays null momentarily (auto_category_id and final_category_id alike). Migration 20260623000001 backfills any null FKs where the category string is set.
-    await Transaction.update(
-      {
-        autoCategory: merged.fields.autoCategory,
-        finalCategory,
-        autoBusiness: merged.fields.autoBusiness,
-        autoSplitType: merged.fields.autoSplitType,
-        autoPctMe: merged.fields.autoPctMe,
-        autoPctPartner: merged.fields.autoPctPartner,
-        autoSource: merged.fields.autoSource,
-        autoConfidence: merged.fields.autoConfidence,
-        reviewFlag: merged.fields.reviewFlag,
-        importConfidence: confidence.state,
-        importConfidenceFlags: serializeFlags(confidence.flags),
-      },
-      { where: { id: c.txnId } },
-    );
-    await TransactionSignal.create({
-      transactionId: c.txnId,
-      source: 'ai',
-      confidence: aiSignal.confidence,
-      fields: aiSignal.fields,
-      rationale: aiSignal.rationale ?? null,
-    });
-    if (householdId != null) {
-      const { ensureCategory } = await import('../../util/ensureCategory');
-      await ensureCategory(householdId, merged.fields.autoCategory);
-    }
-    return true;
-  } catch (err) {
-    logger.warn({ err, txnId: c.txnId, module: 'enrichment' }, 'enrichment_ai_batch_post_update_failed');
-    return false;
-  }
 }
 
 function emptyAiSummary(coldRowCount: number, skipReason: AiBatchSkipReason): AiBatchSummary {
