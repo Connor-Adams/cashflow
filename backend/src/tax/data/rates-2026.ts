@@ -23,7 +23,8 @@ export const RATES_2026: RateTable = {
     { upTo: D('258482'), rate: D('0.29') },
     { upTo: null, rate: D('0.33') },
   ],
-  // ON brackets: 2025 values — ON 2026 indexation not yet available; MUST update
+  // ON brackets: 2026 thresholds (bottom two indexed 1.9%; top two are statutory
+  // and unindexed) — pinned by rates-2026.test.ts.
   provincialBrackets: [
     { upTo: D('53891'), rate: D('0.0505') },
     { upTo: D('107785'), rate: D('0.0915') },
@@ -36,20 +37,20 @@ export const RATES_2026: RateTable = {
   bpaFederalPhaseoutStart: D('181440'),
   bpaFederalPhaseoutEnd: D('258482'),
   bpaFederalMin: D('14829'),
-  // ON BPA: 2025 value — update when ON publishes 2026
+  // ON BPA — CRA Form TD1ON 2026 line 1
   basicPersonalAmountOntario: D('12989'),
   spousalAmountFederal: D('16452'),
-  // ON spousal: 2025 value — update when ON publishes 2026
+  // ON spousal — CRA Form TD1ON 2026 line 5
   spousalAmountOntario: D('11029'),
   // Federal age amount: 2025 × 1.027 ≈ 9,272
   ageAmountFederal: D('9208'),
-  // ON age amount: 2025 value — update when ON publishes 2026
-  ageAmountOntario: D('6078'),
+  // ON age amount — CRA Form TD1ON 2026, line 2 (td1on-26e.pdf)
+  ageAmountOntario: D('6342'),
   ageAmountAge: 65,
   // Federal age amount income threshold: 2025 × 1.027 ≈ 46,751
   ageAmountFederalThreshold: D('46432'),
-  // ON age amount threshold: 2025 value — update when ON publishes 2026
-  ageAmountOntarioThreshold: D('44323'),
+  // ON age amount threshold — CRA Form TD1ON 2026, line 2 (td1on-26e.pdf)
+  ageAmountOntarioThreshold: D('47210'),
   ageAmountFederalClawbackRate: D('0.15'),
   ageAmountOntarioClawbackRate: D('0.15'),
   // Employment amount federal: 2025 × 1.027 ≈ 1,511
@@ -107,19 +108,22 @@ export const RATES_2026: RateTable = {
   // 2026 projected RRSP limit: $33,367 (2025 $32,490 × 1.027 ≈ 33,367). Verify when CRA announces.
   rrspAnnualLimit: D('33810'),
   fhsaLifetimeLimit: D('40000'),
-  // Disability Tax Credit — PROJECTED: 2025 values × 1.027 (2.7% federal indexation)
-  dtcBaseFederal: D('10412'),          // 10138 × 1.027 ≈ 10412 — PROJECTED
-  dtcSupplementFederal: D('6075'),     // 5916 × 1.027 ≈ 6076; rnd 6075 — PROJECTED
-  dtcSupplementThreshold: D('3558'),   // 3464 × 1.027 ≈ 3558 — PROJECTED
-  dtcBaseOntario: D('9852'),           // 2025 value reused — ON 2026 indexation not yet published; MUST update
-  // Caregiver amount — PROJECTED
-  caregiverAmountFederalInfirmAdult: D('8437'),  // 8215 × 1.027 ≈ 8437 — PROJECTED
-  caregiverThresholdFederal: D('19811'),          // 19290 × 1.027 ≈ 19811 — PROJECTED
-  // Pension income amount — PROJECTED
+  // Disability amounts. Federal: CRA "Indexation adjustment for personal income
+  // tax and benefit amounts" (2026 column) and CRA Form TD1 2026 line 6.
+  // Ontario: CRA Form TD1ON 2026 line 4.
+  dtcBaseFederal: D('10341'),
+  dtcSupplementFederal: D('6032'),
+  dtcSupplementThreshold: D('3533'),
+  dtcBaseOntario: D('10494'),
+  // Canada caregiver amount (infirm dependant 18+) and its reduction threshold —
+  // CRA indexation table (2026 column) and CRA Form TD1 2026 line 10.
+  caregiverAmountFederalInfirmAdult: D('8773'),
+  caregiverThresholdFederal: D('20601'),
+  // Pension income amount. Ontario — CRA Form TD1ON 2026 line 3.
   pensionIncomeAmountCap: D('2000'),              // fixed statutory amount, not indexed
-  pensionIncomeAmountCapOntario: D('1686'),       // 2025 value reused — PROJECTED
-  // OAS clawback threshold — PROJECTED
-  oasClawbackThreshold: D('95323'),               // 93454 × 1.027 ≈ 95977 — PROJECTED
+  pensionIncomeAmountCapOntario: D('1796'),
+  // OAS recovery threshold — CRA indexation table (2026 column)
+  oasClawbackThreshold: D('95323'),
   oasClawbackRate: D('0.15'),
   // FHSA annual deduction limit (fixed at $8,000 — not indexed)
   fhsaAnnualLimit: D('8000'),
@@ -129,8 +133,9 @@ export const RATES_2026: RateTable = {
   amtNonRefCreditFraction: D('0.5'),
   amtDtcFraction: D('0'), // dividend tax credit fully denied under AMT (gross-up excluded from ATI)
   sources: [
-    { name: 'CRA 2026 indexation announcement (projected)', url: 'https://www.canada.ca/en/revenue-agency/news/newsroom/tax-tips/tax-tips-2025.html' },
-    { name: 'ON Min of Finance 2026 personal income tax rates (TBD)', url: 'https://www.fin.gov.on.ca/en/tax/pit/rates.html' },
+    { name: 'CRA indexation adjustment for personal income tax and benefit amounts (2026)', url: 'https://www.canada.ca/en/revenue-agency/services/tax/individuals/frequently-asked-questions-individuals/adjustment-personal-income-tax-benefit-amounts.html' },
+    { name: 'CRA Form TD1 2026 (federal personal tax credits)', url: 'https://www.canada.ca/content/dam/cra-arc/formspubs/pbg/td1/td1-26e.pdf' },
+    { name: 'CRA Form TD1ON 2026 (Ontario personal tax credits)', url: 'https://www.canada.ca/content/dam/cra-arc/formspubs/pbg/td1on/td1on-26e.pdf' },
   ],
 
   // Phase 3 — Corp T2 (stable since 2019; verify before filing-grade use)

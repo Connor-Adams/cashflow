@@ -16,8 +16,15 @@ import { RATE_TABLES } from './brackets';
  *   2 — T1 slip boxes corrected (T5 box 11 replaces box 26 as the taxable
  *       non-eligible amount; T3 box 50 replaces box 49 as the taxable eligible
  *       amount) and the FHSA deduction bounded by accumulated participation room.
+ *   3 — catch-up: L47600 / netTaxOwing (c5914eae) and the FHSA lifetime cap
+ *       (119148c3) changed t1.ts after 2 shipped without a bump.
+ *   4 — CPP/EI read from T4 boxes 16/16A/18 with enhanced CPP on L22215; tax
+ *       withheld on T4A/T5/T3 slips counted on L43700; donations credited as a
+ *       positive amount; self-employment expenses at their deductible percent
+ *       with refunds netted and no longer duplicated onto the T2; pension slips
+ *       preferred over pension transactions.
  */
-export const ENGINE_VERSION = 2;
+export const ENGINE_VERSION = 4;
 
 /**
  * A digest over the engine version and every encoded rate constant.

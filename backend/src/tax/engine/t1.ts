@@ -1,8 +1,13 @@
 import { D, Decimal, sumD, maxZero } from '../util/decimal';
-import type { RateTable, TaxLine, TaxReturn, TaxYearFacts } from './types';
+import type { RateTable, SlipFact, TaxLine, TaxReturn, TaxYearFacts } from './types';
 import { applyBrackets } from './brackets';
 import { computeAmt } from './amt';
-import { computeCppEmployee, computeEiEmployee, computeCppSelfEmployed } from './cpp-ei';
+import {
+  computeCppEmployeeParts,
+  computeEiEmployee,
+  computeCppSelfEmployed,
+  enhancedCppDeduction,
+} from './cpp-ei';
 import { grossUpEligible, grossUpNonEligible, dtcFederal, dtcOntario } from './dividends';
 import { taxableCapitalGains } from './capital-gains';
 import {
@@ -39,13 +44,17 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
     lines.push({ code, label, amount, inputs, formula });
   };
 
-  // Employment income L10100 — prefer T4 box 14 totals over computed txns; warn if diff > $50.
+  // Employment income L10100 — prefer T4 box 14 totals over computed txns.
   const t4s = facts.slips.filter((s) => s.slipType === 'T4');
   const t4Box14Total = sumD(t4s.map((s) => s.boxes['box14'] ?? D('0')));
   const computedEmployment = sumD(facts.employmentIncome.map((i) => i.cadAmount));
-  if (t4s.length > 0 && t4Box14Total.minus(computedEmployment).abs().greaterThan(50)) {
+  // Employment transactions are pay DEPOSITS, i.e. box 14 net of what was held
+  // back. Comparing them with gross box 14 made this warning fire on every return.
+  const t4NetPay = t4Box14Total.minus(sumD(t4s.map(t4PayrollDeductions)));
+  if (t4s.length > 0 && t4NetPay.minus(computedEmployment).abs().greaterThan(50)) {
     warnings.push(
-      `T4 box 14 total $${t4Box14Total.toFixed(2)} differs from computed employment income $${computedEmployment.toFixed(2)} by more than $50.`
+      `T4 net pay $${t4NetPay.toFixed(2)} (box 14 less boxes 16, 16A, 18, 20, 22, 40 and 44) `
+      + `differs from employment deposits $${computedEmployment.toFixed(2)} by more than $50.`
     );
   }
   // Plan-scoped additions (routed ownerComp salary) are covered by no T4 slip,
@@ -252,8 +261,26 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       'SE CPP total / 2');
   }
 
+  // Employee CPP and EI. A T4 is the record of what was actually deducted from pay,
+  // so its boxes win: box 16 (CPP), 16A (CPP2), 18 (EI). A T4 without box 18 means
+  // insurable earnings were nil (e.g. employment by a related person), so EI is
+  // zero — recomputing it from box 14 would invent a premium that was never paid.
+  // Only with no T4 at all are contributions computed from the employment line.
+  const employeeCpp = employeeCppAndEi(t4s, t4Box14Total, employmentLine, employmentAdditionsTotal, r);
+  const cppEmployee = employeeCpp.firstTier.plus(employeeCpp.cpp2);
+  const eiEmployee = employeeCpp.ei;
+  // Enhanced CPP L22215 — deducted, not credited (L30800 takes base CPP only).
+  const enhancedCpp = enhancedCppDeduction(employeeCpp.firstTier, employeeCpp.cpp2, r);
+  if (enhancedCpp.greaterThan(0)) {
+    push('L22215', 'Deduction for CPP enhanced contributions on employment income', enhancedCpp,
+      [], 'first-additional share of CPP + CPP2');
+  }
+  const baseCppEmployee = cppEmployee.minus(enhancedCpp);
+
   // Net income L23600
-  const netIncome = maxZero(totalIncome.minus(rrsp).minus(fhsa).minus(seCppDeductible));
+  const netIncome = maxZero(
+    totalIncome.minus(rrsp).minus(fhsa).minus(seCppDeductible).minus(enhancedCpp),
+  );
   push('L23600', 'Net income', netIncome);
 
   // OAS clawback / social benefits repayment L23500 — computed on net income
@@ -281,10 +308,8 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   const spousalFedAmt = facts.spouse ? spousalCreditFederal(facts.spouse.netIncome, r) : D('0');
   const ageFedAmt = ageCreditFederal(facts.ageAtYearEnd, netIncome, r);
   const employmentFedAmt = employmentAmountFederalApplied(employmentLine, r);
-  const cppEmployee = computeCppEmployee(employmentLine, r);
-  const eiEmployee = computeEiEmployee(employmentLine, r);
   const seCppEmployeeHalf = seCppContrib.dividedBy(2);
-  const cppEiCreditEligible = cppEiCreditAmount(cppEmployee.plus(seCppEmployeeHalf), eiEmployee);
+  const cppEiCreditEligible = cppEiCreditAmount(baseCppEmployee.plus(seCppEmployeeHalf), eiEmployee);
   const fedCreditAmountsTotal = sumD([bpaFedAmt, spousalFedAmt, ageFedAmt, employmentFedAmt, cppEiCreditEligible]);
   const fedNonRefundableLowRatePart = fedCreditAmountsTotal.times(r.donationLowRate);
 
@@ -403,11 +428,17 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   const totalPayable = sumD([federalTaxWithAmt, onTax, ohp, oasRepayment, seCppContrib]);
   push('L43500', 'Total payable', totalPayable);
 
-  // Tax deducted at source: sum T4 box 22 across all T4 slips.
-  const taxDeductedAtSource = sumD(t4s.map((s) => s.boxes['box22'] ?? D('0')));
-  push('L43700', 'Total income tax deducted', taxDeductedAtSource,
-    t4s.map((s) => ({ source: `Slip T4 #${s.slipId} box 22`, amount: s.boxes['box22'] ?? D('0') })),
-    'sum(T4.box22)');
+  // Tax deducted at source: every slip that carries a withholding box, not just
+  // the T4 — a pension or other-income T4A withholds in box 022.
+  const withheld = facts.slips.flatMap((s) => {
+    const keys = WITHHOLDING_BOXES[s.slipType];
+    if (!keys) return [];
+    const found = keys.find((k) => s.boxes[k] !== undefined);
+    return found ? [{ source: `Slip ${s.slipType} #${s.slipId} ${found}`, amount: s.boxes[found] }] : [];
+  });
+  const taxDeductedAtSource = sumD(withheld.map((w) => w.amount));
+  push('L43700', 'Total income tax deducted', taxDeductedAtSource, withheld,
+    'sum(T4.box22 + T4A.box022)');
 
   const instalmentsPaid = facts.carryforwards.instalmentsPaid;
   // Its own line. The CRA instalment-threshold test is defined on net tax owing
@@ -444,6 +475,66 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       refundOrOwing,
     },
     warnings,
+  };
+}
+
+/**
+ * Box holding income tax deducted, per slip type. Alternatives are spellings of
+ * the same box (slips are entered by hand as `box022` or `box22`); only the
+ * first present is read so an alias never counts twice. T5, T3 and T5008 carry
+ * no withholding for a resident.
+ */
+const WITHHOLDING_BOXES: Partial<Record<SlipFact['slipType'], string[]>> = {
+  T4: ['box22'],
+  T4A: ['box022', 'box22'],
+};
+
+function slipBox(s: SlipFact, ...keys: string[]): Decimal {
+  for (const k of keys) {
+    const v = s.boxes[k];
+    if (v !== undefined) return v;
+  }
+  return D('0');
+}
+
+/** Amounts in box 14 that never reach the bank: withholdings plus taxable benefits. */
+function t4PayrollDeductions(s: SlipFact): Decimal {
+  return sumD([
+    slipBox(s, 'box16'), slipBox(s, 'box16A', 'box16a'), slipBox(s, 'box18'),
+    slipBox(s, 'box20'), slipBox(s, 'box22'), slipBox(s, 'box40'), slipBox(s, 'box44'),
+  ]);
+}
+
+/**
+ * Employee CPP (split into first tier and CPP2) and EI. From the T4 boxes when
+ * any T4 exists; computed only when none does. Plan-scoped additions sit on no
+ * slip, so their incremental CPP is computed on top — and incremental EI only
+ * when the T4 shows the employment is insurable at all.
+ */
+function employeeCppAndEi(
+  t4s: SlipFact[],
+  box14Total: Decimal,
+  employmentLine: Decimal,
+  additionsTotal: Decimal,
+  r: RateTable,
+): { firstTier: Decimal; cpp2: Decimal; ei: Decimal } {
+  if (t4s.length === 0) {
+    const parts = computeCppEmployeeParts(employmentLine, r);
+    return { ...parts, ei: computeEiEmployee(employmentLine, r) };
+  }
+  const slipFirstTier = sumD(t4s.map((s) => slipBox(s, 'box16')));
+  const slipCpp2 = sumD(t4s.map((s) => slipBox(s, 'box16A', 'box16a')));
+  const slipEi = sumD(t4s.map((s) => slipBox(s, 'box18')));
+  if (!additionsTotal.greaterThan(0)) return { firstTier: slipFirstTier, cpp2: slipCpp2, ei: slipEi };
+  const before = computeCppEmployeeParts(box14Total, r);
+  const after = computeCppEmployeeParts(box14Total.plus(additionsTotal), r);
+  const extraEi = slipEi.greaterThan(0)
+    ? maxZero(computeEiEmployee(box14Total.plus(additionsTotal), r).minus(computeEiEmployee(box14Total, r)))
+    : D('0');
+  return {
+    firstTier: slipFirstTier.plus(maxZero(after.firstTier.minus(before.firstTier))),
+    cpp2: slipCpp2.plus(maxZero(after.cpp2.minus(before.cpp2))),
+    ei: slipEi.plus(extraEi),
   };
 }
 

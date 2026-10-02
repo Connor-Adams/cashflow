@@ -86,6 +86,15 @@ test('different facts under the same engine produce different keys', () => {
   assert.notEqual(returnCacheKey('a'.repeat(64), 'fp'), returnCacheKey('b'.repeat(64), 'fp'));
 });
 
+test('the version covers every logic change shipped to the engine', () => {
+  // 3 — L47600 / netTaxOwing (c5914eae) and the FHSA lifetime cap (119148c3)
+  //     changed t1.ts output after version 2 without a bump, so cached returns
+  //     (and /personal/years, which reads snapshots) kept the old lines.
+  // 4 — the tax-engine correctness pass (T4 CPP/EI, donation sign, SE
+  //     deductible %, slip withholding, pension dedup).
+  assert.ok(ENGINE_VERSION >= 4, `ENGINE_VERSION is ${ENGINE_VERSION}; expected >= 4`);
+});
+
 test('the key is deterministic', () => {
   assert.equal(returnCacheKey('a'.repeat(64), 'fp'), returnCacheKey('a'.repeat(64), 'fp'));
 });
