@@ -71,6 +71,7 @@ import { isTransactionStatus } from '../transactions/types';
 import { streamCsvExport } from '../services/transactionsExport';
 import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
 import { isTaxTreatment } from '@cashflow/shared';
+import { assertDistributionDirection } from '../tax/util/distributionDirection';
 
 const router = Router();
 
@@ -641,8 +642,10 @@ export async function applyPatchBody(
  * Mirrors ONLY the tax treatment; review state and every other field are left
  * alone (syncing those is the dedicated transfers endpoint's job). Idempotent:
  * no-ops when the patch doesn't touch the treatment, when the row is unlinked,
- * when the sibling is not visible, or when it already matches. Must run inside
- * the same transaction as the primary save so the pair can never half-commit.
+ * when the sibling is not visible or does not link back, or when it already
+ * matches. Refuses (400) a distribution treatment on money moving into the
+ * corp. Must run inside the same transaction as the primary save so the pair
+ * can never half-commit.
  */
 async function syncLinkedLegTaxTreatment(
   req: import('express').Request,
@@ -651,13 +654,18 @@ async function syncLinkedLegTaxTreatment(
   t: import('sequelize').Transaction,
 ): Promise<void> {
   if (!Object.prototype.hasOwnProperty.call(patch, 'taxTreatmentOverride')) return;
+  // A dividend or salary on money moving INTO the corp is refused; the throw
+  // rolls back the primary save too (same rule as the classification bulk route).
+  await assertDistributionDirection(txn, txn.get('taxTreatmentOverride'), { transaction: t });
   const siblingId = txn.linkedTransactionId;
   if (siblingId == null) return;
   const sibling = await Transaction.findOne({
     where: { id: siblingId, ...visibleTransactionWhere(req) },
     transaction: t,
   });
-  if (!sibling) return;
+  // Only a RECIPROCAL sibling is this row's other leg — a one-way link (two
+  // rows both pointing at one) would otherwise overwrite a different pair.
+  if (!sibling || sibling.linkedTransactionId !== txn.id) return;
   const value = txn.get('taxTreatmentOverride');
   if (sibling.get('taxTreatmentOverride') === value) return;
   sibling.set('taxTreatmentOverride', value);

@@ -23,8 +23,12 @@ import { RATE_TABLES } from './brackets';
  *       positive amount; self-employment expenses at their deductible percent
  *       with refunds netted and no longer duplicated onto the T2; pension slips
  *       preferred over pension transactions.
+ *   5 — self-employed CPP split per Schedule 8 Part 4: the enhanced share
+ *       (first additional + CPP2, both halves) joins the employer half of base
+ *       on L22200, only the employee half of base is credited on L31000, and the
+ *       payable moves to L42100.
  */
-export const ENGINE_VERSION = 4;
+export const ENGINE_VERSION = 5;
 
 /**
  * A digest over the engine version and every encoded rate constant.

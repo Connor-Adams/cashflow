@@ -31,6 +31,7 @@ import { serializeTransaction } from '../util/serializeTransaction';
 import { visibleTransactionWhere } from '../auth/scope';
 import { logger } from '../observability/logger';
 import { isTaxTreatment, type TaxTreatment } from '@cashflow/shared';
+import { assertDistributionDirection } from '../tax/util/distributionDirection';
 import {
   aggregateMoneyMovement,
   summarizeReciprocity,
@@ -593,7 +594,7 @@ router.patch('/:id/purpose', async (req, res, next) => {
  * PATCH /api/transfers/:id/tax-treatment
  *
  * Sets `tax_treatment` on a transaction. If the row is linked (a transfer
- * pair), both legs get the same value. Unlinked rows (e.g. a payroll deposit)
+ * pair), both legs get the same value — but only when the sibling links back. Unlinked rows (e.g. a payroll deposit)
  * are allowed — only that row is updated. null/'' clears the treatment.
  */
 router.patch('/:id/tax-treatment', async (req, res, next) => {
@@ -625,17 +626,24 @@ router.patch('/:id/tax-treatment', async (req, res, next) => {
         err.status = 404;
         throw err;
       }
+      // A dividend or salary is money leaving the corp; on an injection the
+      // throw rolls the write back (same rule as the classification bulk route).
+      await assertDistributionDirection(a, treatment, { transaction: t });
       const reviewedAt = new Date();
       a.set('taxTreatmentOverride', treatment);
       a.set('reviewedAt', reviewedAt);
       await a.save({ transaction: t });
       let b = null;
       if (a.linkedTransactionId != null) {
-        b = await Transaction.findOne({
+        const sibling = await Transaction.findOne({
           where: { id: a.linkedTransactionId, ...visibleTransactionWhere(req) },
           transaction: t,
         });
-        if (b) {
+        // Only a RECIPROCAL sibling is this row's other leg. A one-way link
+        // (two rows both pointing at one) would otherwise overwrite the
+        // treatment of a different pair.
+        if (sibling && sibling.linkedTransactionId === a.id) {
+          b = sibling;
           b.set('taxTreatmentOverride', treatment);
           b.set('reviewedAt', reviewedAt);
           await b.save({ transaction: t });

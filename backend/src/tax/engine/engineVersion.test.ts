@@ -92,7 +92,9 @@ test('the version covers every logic change shipped to the engine', () => {
   //     (and /personal/years, which reads snapshots) kept the old lines.
   // 4 — the tax-engine correctness pass (T4 CPP/EI, donation sign, SE
   //     deductible %, slip withholding, pension dedup).
-  assert.ok(ENGINE_VERSION >= 4, `ENGINE_VERSION is ${ENGINE_VERSION}; expected >= 4`);
+  // 5 — self-employed CPP split per Schedule 8: enhanced share deducted on
+  //     L22200, only base employee half credited on L31000, payable on L42100.
+  assert.ok(ENGINE_VERSION >= 5, `ENGINE_VERSION is ${ENGINE_VERSION}; expected >= 5`);
 });
 
 test('the key is deterministic', () => {

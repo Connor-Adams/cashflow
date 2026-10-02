@@ -251,3 +251,79 @@ test('PATCH /api/transfers/:id/tax-treatment set then clear leaves both legs nul
     `expected b.taxTreatmentOverride null, got '${(b as any).taxTreatmentOverride}'`,
   );
 });
+
+/** An unlinked row with the given amount, optionally on a corp entity. */
+async function soloRow(label: string, amount: string, entityId: number | null = null) {
+  const models = await import('../models/index.js');
+  const ts = `${label}-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+  return models.Transaction.create({
+    accountId,
+    householdId,
+    entityId,
+    date: '2025-05-01',
+    amount,
+    currency: 'CAD',
+    txnType: 'transfer',
+    visibility: 'shared',
+    merchantRaw: label,
+    merchantClean: label,
+    importBatch: 'b',
+    sourceRowFingerprint: `fp-${ts}`,
+    sourceIdentityFingerprint: `sif-${ts}`,
+  } as never);
+}
+
+async function treatmentOf(id: number): Promise<unknown> {
+  const models = await import('../models/index.js');
+  const row = await models.Transaction.findByPk(id);
+  return (row as { taxTreatmentOverride?: unknown } | null)?.taxTreatmentOverride ?? null;
+}
+
+test('PATCH /api/transfers/:id/tax-treatment does not mirror onto a non-reciprocal sibling', async () => {
+  // `stray` points at `other`, but `other` is the leg of a different pair.
+  const mate = await soloRow('MATE', '-4000');
+  const other = await soloRow('OTHER', '4000');
+  await other.update({ linkedTransactionId: mate.id });
+  await mate.update({ linkedTransactionId: other.id });
+  const stray = await soloRow('STRAY', '4000');
+  await stray.update({ linkedTransactionId: other.id });
+
+  const res = await authed
+    .patch(`/api/transfers/${stray.id}/tax-treatment`)
+    .send({ taxTreatmentOverride: 'non_eligible_dividend' });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(await treatmentOf(stray.id), 'non_eligible_dividend');
+  assert.equal(await treatmentOf(other.id), null, 'a non-reciprocal sibling is not ours to write');
+  assert.equal(res.body.b, null);
+});
+
+test('PATCH /api/transfers/:id/tax-treatment refuses a dividend on money leaving the person', async () => {
+  const out = await soloRow('INJECT OUT', '-9000');
+  const res = await authed
+    .patch(`/api/transfers/${out.id}/tax-treatment`)
+    .send({ taxTreatmentOverride: 'non_eligible_dividend' });
+  assert.equal(res.status, 400, JSON.stringify(res.body));
+  assert.equal(await treatmentOf(out.id), null);
+});
+
+test('PATCH /api/transfers/:id/tax-treatment refuses salary on money entering the corp', async () => {
+  const models = await import('../models/index.js');
+  const corp = await models.Entity.create({
+    householdId,
+    kind: 'corp',
+    legalName: 'Treatment Corp Inc',
+    jurisdiction: 'CA-ON',
+    fiscalYearEnd: '12-31',
+  } as never);
+  const into = await soloRow('INJECT IN', '9000', corp.id);
+  const res = await authed
+    .patch(`/api/transfers/${into.id}/tax-treatment`)
+    .send({ taxTreatmentOverride: 'salary' });
+  assert.equal(res.status, 400, JSON.stringify(res.body));
+  assert.equal(await treatmentOf(into.id), null);
+
+  const loan = await authed
+    .patch(`/api/transfers/${into.id}/tax-treatment`)
+    .send({ taxTreatmentOverride: 'loan_advance' });
+  assert.equal(loan.status, 200, 'an injection can still be a loan');
+});

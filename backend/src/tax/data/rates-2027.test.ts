@@ -99,3 +99,53 @@ test('2027 corp T2 rates are unchanged from 2026 (no announced change)', () => {
   assert.equal(RATES_2027.corpInvestmentRateFederal.toString(), RATES_2026.corpInvestmentRateFederal.toString());
   assert.equal(RATES_2027.corpDividendRefundRate.toString(), RATES_2026.corpDividendRefundRate.toString());
 });
+
+// Every scalar the projection indexes, read off both tables by the same picker.
+// A field left on an older 2026 placeholder (rather than the published 2026
+// value) fails here — which is how the ON age amount, disability, caregiver and
+// ON pension amounts drifted before.
+const INDEXED_SCALARS: Array<[string, (r: typeof RATES_2026) => { toString(): string }]> = [
+  ['basicPersonalAmountFederal', (r) => r.basicPersonalAmountFederal],
+  ['bpaFederalMin', (r) => r.bpaFederalMin],
+  ['basicPersonalAmountOntario', (r) => r.basicPersonalAmountOntario],
+  ['spousalAmountOntario', (r) => r.spousalAmountOntario],
+  ['ageAmountFederal', (r) => r.ageAmountFederal],
+  ['ageAmountOntario', (r) => r.ageAmountOntario],
+  ['ageAmountFederalThreshold', (r) => r.ageAmountFederalThreshold],
+  ['ageAmountOntarioThreshold', (r) => r.ageAmountOntarioThreshold],
+  ['employmentAmountFederal', (r) => r.employmentAmountFederal],
+  ['cpp.ympe', (r) => r.cpp.ympe],
+  ['cpp.yampe', (r) => r.cpp.yampe],
+  ['ei.maxInsurable', (r) => r.ei.maxInsurable],
+  ['onSurtaxBands[0]', (r) => r.onSurtaxBands[0].threshold],
+  ['onSurtaxBands[1]', (r) => r.onSurtaxBands[1].threshold],
+  ['medicalThresholdCap', (r) => r.medicalThresholdCap],
+  ['rrspAnnualLimit', (r) => r.rrspAnnualLimit],
+  ['dtcBaseFederal', (r) => r.dtcBaseFederal],
+  ['dtcSupplementFederal', (r) => r.dtcSupplementFederal],
+  ['dtcSupplementThreshold', (r) => r.dtcSupplementThreshold],
+  ['dtcBaseOntario', (r) => r.dtcBaseOntario],
+  ['caregiverAmountFederalInfirmAdult', (r) => r.caregiverAmountFederalInfirmAdult],
+  ['caregiverThresholdFederal', (r) => r.caregiverThresholdFederal],
+  ['pensionIncomeAmountCapOntario', (r) => r.pensionIncomeAmountCapOntario],
+  ['oasClawbackThreshold', (r) => r.oasClawbackThreshold],
+];
+
+test('every indexed 2027 amount is the published 2026 value × the declared factor', () => {
+  for (const [name, pick] of INDEXED_SCALARS) {
+    const base = pick(RATES_2026).toString();
+    assert.equal(pick(RATES_2027).toString(), indexed(base), `${name} (2026 base ${base})`);
+  }
+});
+
+test('2027 federal spousal amount tracks the federal BPA', () => {
+  assert.equal(RATES_2027.spousalAmountFederal.toString(), RATES_2027.basicPersonalAmountFederal.toString());
+});
+
+test('2027 EI premium rate is carried forward from 2026 (set annually, not indexed)', () => {
+  assert.equal(RATES_2027.ei.employeeRate.toString(), RATES_2026.ei.employeeRate.toString());
+});
+
+test('2027 stays marked projected', () => {
+  assert.equal(RATES_2027.provenance, 'projected');
+});

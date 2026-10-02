@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { D } from '../util/decimal';
 import { ratesFor } from './brackets';
-import { computeCppEmployee, computeEiEmployee, computeCppSelfEmployed } from './cpp-ei';
+import { computeCppEmployee, computeEiEmployee, computeCppSelfEmployed, computeCppSelfEmployedParts } from './cpp-ei';
 
 test('CPP employee at $0 employment income = $0', () => {
   const r = ratesFor(2024);
@@ -86,13 +86,30 @@ test('buildT1 includes SE CPP in totalPayable and grants credit for employee hal
   // SE CPP should be 8764.20 (both halves)
   assert.equal(ret.totals.cppContrib.toFixed(2), '8764.20');
 
-  // SE CPP should appear in totalPayable
-  const l31000 = ret.lines.find(l => l.code === 'L31000');
-  assert.ok(l31000, 'L31000 SE CPP line present');
-  assert.equal(l31000!.amount.toFixed(2), '8764.20');
+  // CRA Schedule 8 (5000-S8, 2025) Part 4 for $80,000 of SE earnings:
+  //   line 10 base 9.9% × 67,800            = 6,712.20
+  //   line 11 first additional 2% × 67,800  = 1,356.00
+  //   line 12 second additional 8% × 8,700  =   696.00
+  //   line 14 → L42100 payable (10 + 11 + 12)            = 8,764.20
+  //   line 15 → L31000 base credit (50% of line 10)       = 3,356.10
+  //   line 17 → L22200 deduction (line 15 + lines 11, 12) = 5,408.10
+  const line = (code: string) => ret.lines.find((l) => l.code === code)?.amount.toFixed(2);
+  assert.equal(line('L42100'), '8764.20', 'payable on L42100');
+  assert.equal(line('L31000'), '3356.10', 'credit only on the employee half of BASE CPP');
+  assert.equal(line('L22200'), '5408.10', 'employer base half + every enhanced dollar');
+  assert.equal(line('L22215'), undefined, 'L22215 is enhanced CPP on EMPLOYMENT income only');
+  assert.equal(
+    ret.totals.netIncome.toFixed(2),
+    D('80000').minus('5408.10').toFixed(2),
+    'the whole enhanced share comes off net income',
+  );
+});
 
-  // Deductible half should reduce net income
-  const l22200 = ret.lines.find(l => l.code === 'L22200');
-  assert.ok(l22200, 'L22200 SE CPP deduction present');
-  assert.equal(l22200!.amount.toFixed(2), '4382.10');
+test('computeCppSelfEmployedParts splits base from enhanced (first additional + CPP2, both shares)', () => {
+  const r = ratesFor(2025);
+  const parts = computeCppSelfEmployedParts(D('80000'), r);
+  assert.equal(parts.total.toFixed(2), '8764.20');
+  assert.equal(parts.base.toFixed(2), '6712.20');
+  assert.equal(parts.enhanced.toFixed(2), '2052.00');
+  assert.equal(computeCppSelfEmployedParts(D('3000'), r).total.toFixed(2), '0.00');
 });
