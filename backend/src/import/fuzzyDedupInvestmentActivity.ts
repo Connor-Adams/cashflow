@@ -126,7 +126,14 @@ export function pickFuzzyMatch<T extends DedupCandidate>(
  * Returns the set of stored activityTypes that should be considered the same
  * event as `activityType` for dedup purposes.
  */
-const TRANSFER_EQUIVALENTS = ['transfer', 'transfer_in', 'transfer_out'];
+//
+// `cash_movement` joins the bucket for the same reason: Wealthsimple renames a
+// deposit's code between exports and statement cycles — CONT (`transfer`) in the
+// monthly CSV, DEP (`cash_movement`) or TRFIN (`transfer_in`) in the brokerage
+// PDF — so one 2025-11-06 deposit on "WS Corporate Investing" would otherwise
+// land as two activities. Direction is still kept apart: the amount is matched
+// with its sign, so a withdrawal can never absorb a deposit.
+const TRANSFER_EQUIVALENTS = ['transfer', 'transfer_in', 'transfer_out', 'cash_movement'];
 
 export function dedupEquivalentActivityTypes(activityType: string): string[] {
   if (TRANSFER_EQUIVALENTS.includes(activityType)) {
