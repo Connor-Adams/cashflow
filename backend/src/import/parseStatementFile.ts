@@ -728,6 +728,12 @@ export async function parseStatementFile(opts: {
       profileInferred: resolved.inferred,
       headers,
       rows: previewRows,
+      // The WS monthly CSV is the same statement the brokerage PDF and the
+      // activities export describe, under different codes and dates (CONT
+      // `transfer` vs DEP `cash_movement`; posting day vs execution day). Its
+      // activities must run through the same cross-source matcher those two
+      // already use, or importing it after either one doubles every event.
+      ...(wsMonthly ? { crossSourceDedup: 'fuzzy-window-5d' as const } : {}),
     };
     await markDuplicates(preview);
     return saveStatementPreview(preview);

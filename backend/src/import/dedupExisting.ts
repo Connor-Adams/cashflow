@@ -118,6 +118,43 @@ export function isGenericStatementNarrative(v: string | null | undefined): boole
   return GENERIC_STATEMENT_NARRATIVES.has(s);
 }
 
+/**
+ * The execution date Wealthsimple stamps into a narrative ("Contribution
+ * (executed at 2025-07-16)"), or null when the text carries none.
+ *
+ * The monthly CSV dates a row by the day it POSTED and stamps the day it
+ * EXECUTED into the text, while the brokerage PDF dates the same row by that
+ * execution day — so prod id 917 reads "2025-07-15 ... (executed at
+ * 2025-07-16)" and its PDF twin is dated 2025-07-16. The stamp is the
+ * provider's own record of when the event happened, so it is the date two
+ * formats can agree on.
+ */
+export function executedAtDate(v: string | null | undefined): string | null {
+  const m = String(v ?? '').match(/\(executed at (\d{4}-\d{2}-\d{2})\)\s*$/i);
+  return m ? m[1] : null;
+}
+
+/**
+ * True when two rows of one account describe a cash event on the same day:
+ * either their row dates agree, or their EVENT dates do — a row's event date
+ * being its executed-at stamp when it has one, its row date otherwise.
+ *
+ * Deliberately not a ±1-day window. Two different stamps are two different
+ * events even a day apart, and an unstamped row one day off a stamped one is
+ * left to the near-miss report: a window would also collapse two genuine
+ * consecutive-day movements of equal size.
+ */
+function sameEventDay(
+  row: { date: string; merchantRaw: string | null },
+  incomingDate: string,
+  incomingMerchantRaw: string | undefined,
+): boolean {
+  if (row.date === incomingDate) return true;
+  const rowEvent = executedAtDate(row.merchantRaw) ?? row.date;
+  const incomingEvent = executedAtDate(incomingMerchantRaw) ?? incomingDate;
+  return rowEvent === incomingEvent;
+}
+
 function addDays(isoDate: string, days: number): string {
   const d = new Date(`${isoDate}T00:00:00.000Z`);
   d.setUTCDate(d.getUTCDate() + days);
@@ -406,6 +443,12 @@ export async function findExistingForDedup(args: {
   //              Declining leaves a duplicate, recoverable by deleting a row;
   //              guessing wrong absorbs a real transaction into an unrelated
   //              one, which is not. That asymmetry sets the direction.
+  //
+  // "Date" here is the EVENT day (`sameEventDay`): a row's Wealthsimple
+  // "(executed at ...)" stamp when it carries one. The monthly CSV dates a row
+  // by its posting day and the brokerage PDF by its execution day, so on an
+  // exact row-date match the same deposit missed by a day. Both candidate kinds
+  // count toward the ambiguity gate together.
   let nearMissCandidateIds: number[] | undefined;
   if (
     args.incomingStatus === 'posted' &&
@@ -438,7 +481,10 @@ export async function findExistingForDedup(args: {
           normalizeRef(row.sourceReference) == null ||
           normalizeRef(row.sourceReference) === incomingRef),
     );
-    const sameDate = inWindow.filter((row) => row.date === args.incomingDate);
+    const incomingDate = args.incomingDate;
+    const sameDate = inWindow.filter((row) =>
+      sameEventDay(row, incomingDate, args.incomingMerchantRaw),
+    );
     if (sameDate.length === 1) {
       return { kind: 'duplicate', existingId: sameDate[0].id };
     }
@@ -457,7 +503,7 @@ export async function findExistingForDedup(args: {
         'import_narrative_rename_dedup_ambiguous',
       );
     } else {
-      const shifted = inWindow.filter((row) => row.date !== args.incomingDate);
+      const shifted = inWindow.filter((row) => !sameDate.includes(row));
       if (shifted.length > 0) nearMissCandidateIds = shifted.map((row) => row.id);
     }
   }
