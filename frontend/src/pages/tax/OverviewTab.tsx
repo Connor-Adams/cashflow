@@ -22,7 +22,7 @@ import { HouseholdRollupCard } from './scenarios/HouseholdRollupCard';
 import { SpouseLinkPicker } from './scenarios/SpouseLinkPicker';
 import { MultiYearCompareCard } from './MultiYearCompareCard';
 import { InstalmentTracker } from './InstalmentTracker';
-import { fmtCurrency, fmtPct, numericOrZero, sumNumeric } from './util/format';
+import { fmtCurrency, fmtPct, numericOrZero, refundOrOwing, sumNumeric } from './util/format';
 
 interface Props {
   year: number;
@@ -130,15 +130,21 @@ function TaxReturnSection({ year, data, loading, error }: TaxReturnSectionProps)
   if (loading) return <p className="muted">Computing…</p>;
   if (error) return <p className="error">Error: {error}</p>;
   if (!data) return null;
+  // Headline the refund / balance owing (L48500), not totalPayable (L43500):
+  // gross tax before withholding reads as a bill even when the year is a refund.
+  const headline = refundOrOwing(data.totals.refundOrOwing);
   return (
     <>
-      <h2>Year {year} — Estimated total payable</h2>
-      <p className="big-number">${data.totals.totalPayable}</p>
+      <h2>
+        Year {year} — Estimated {headline ? headline.label.toLowerCase() : 'refund / owing'}
+      </h2>
+      <p className="big-number">{headline ? headline.amount : '—'}</p>
       <ul>
-        <li>Federal tax: ${data.totals.federalTax}</li>
-        <li>Ontario tax (incl. surtax + OHP): ${data.totals.provincialTax}</li>
-        <li>CPP: ${data.totals.cppContrib}</li>
-        <li>EI: ${data.totals.eiPremium}</li>
+        <li>Total tax before withholding: {fmtCurrency(data.totals.totalPayable)}</li>
+        <li>Federal tax: {fmtCurrency(data.totals.federalTax)}</li>
+        <li>Ontario tax (incl. surtax + OHP): {fmtCurrency(data.totals.provincialTax)}</li>
+        <li>CPP: {fmtCurrency(data.totals.cppContrib)}</li>
+        <li>EI: {fmtCurrency(data.totals.eiPremium)}</li>
       </ul>
       {data.warnings.length > 0 && (
         <section>

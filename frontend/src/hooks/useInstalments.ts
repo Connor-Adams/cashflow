@@ -21,6 +21,7 @@ export function useInstalments(year: number) {
         `/api/tax/personal/${year}/instalments`,
       );
       setItems(Array.isArray(d) ? d : d.instalments ?? []);
+      setError(null);
     } catch (e) {
       setError(String((e as Error)?.message ?? e));
     }

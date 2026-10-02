@@ -18,6 +18,7 @@ export function useTaxSlips(year?: number) {
     try {
       const d = await getJson<{ slips: SlipDto[] }>(path);
       setSlips(d.slips);
+      setError(null);
     } catch (e) {
       setError(String((e as Error)?.message ?? e));
     }
