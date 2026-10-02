@@ -691,8 +691,9 @@ function parseSlipInput(body: { year: unknown; slipType: unknown; issuer: unknow
   if (!SLIP_TYPES.includes(body.slipType as SlipType)) {
     return { error: `slipType must be one of ${SLIP_TYPES.join(', ')}` };
   }
-  if (typeof body.issuer !== 'string' || body.issuer.trim() === '') {
-    return { error: 'issuer is required' };
+  // The column is NOT NULL but the form allows a blank issuer, so '' is kept.
+  if (typeof body.issuer !== 'string') {
+    return { error: 'issuer must be a string' };
   }
   const raw = body.boxValues ?? {};
   if (typeof raw !== 'object' || Array.isArray(raw)) {
