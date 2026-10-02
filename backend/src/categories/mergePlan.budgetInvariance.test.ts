@@ -1,7 +1,7 @@
 // backend/src/categories/mergePlan.budgetInvariance.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { categoryAndDescendantNames, computeBudgetProgress } from '../routes/budgets';
+import { categoryAndDescendantNames, computeBudgetProgress } from '../budgets/budgetSpendMath';
 import type { CategoryTree } from './rollup';
 import { normalizeCategoryName } from './normalizeName';
 import { planCategoryMerges, subtreeNames, type PlanBudget, type PlanCategory } from './mergePlan';
