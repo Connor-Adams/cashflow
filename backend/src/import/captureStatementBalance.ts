@@ -104,7 +104,7 @@ async function upsertStatementRow(
  * statement balance and nothing said why. Asset-statement parsers that read a
  * balance already raise their own parse error when it is missing.
  */
-export function missingStatementBalanceWarning(
+function missingStatementBalanceWarning(
   preview: StatementPreview,
   account: Account,
 ): string | null {
@@ -124,32 +124,58 @@ export function missingStatementBalanceWarning(
  * the already-imported path too, so re-importing a statement that predates
  * balance capture backfills its row. Idempotent — keyed on the
  * (account_id, period_start, period_end) unique index.
+ *
+ * A liability statement with a period but no closing balance is not written;
+ * its warning is pushed onto `preview.warnings` AND returned, so the commit
+ * path can also record it on the ImportHistory row.
  */
 export async function captureStatementBalance(
   preview: StatementPreview,
   account: Account,
   userId: number | null,
   parent: SequelizeTransaction | null,
-): Promise<void> {
-  const summary = preview.statementSummary;
-  if (!summary || summary.closingBalance == null) return;
-  if (account.householdId == null) {
-    preview.warnings.push(
-      `Statement balance not saved: account ${account.id} has no household.`,
-    );
-    return;
+): Promise<string[]> {
+  const missing = missingStatementBalanceWarning(preview, account);
+  if (missing) {
+    preview.warnings.push(missing);
+    return [missing];
   }
-  const householdId = account.householdId;
-  const withClosing = { ...summary, closingBalance: summary.closingBalance };
+  await persistStatementBalance(preview, account, userId, parent);
+  return [];
+}
+
+/** The preview's statement summary when it carries a closing balance, else null. */
+function withClosingBalance(
+  preview: StatementPreview,
+): (StatementSummary & { closingBalance: number }) | null {
+  const summary = preview.statementSummary;
+  if (summary?.closingBalance == null) return null;
+  return { ...summary, closingBalance: summary.closingBalance };
+}
+
+function notSavedWarning(summary: StatementSummary, e: unknown): string {
+  const reason = e instanceof Error ? e.message : String(e);
+  return (
+    `Statement balance not saved for ${summary.periodStart} to ${summary.periodEnd}: ` +
+    `${reason}. The rest of the import was unaffected.`
+  );
+}
+
+async function persistStatementBalance(
+  preview: StatementPreview,
+  account: Account,
+  userId: number | null,
+  parent: SequelizeTransaction | null,
+): Promise<void> {
+  const summary = withClosingBalance(preview);
+  if (!summary) return;
   try {
-    await sequelize.transaction(parent ? { transaction: parent } : {}, async (sp) =>
-      upsertStatementRow(preview, withClosing, account, householdId, userId, sp),
+    // An account with no household cannot own a statement row (household_id is
+    // NOT NULL); the insert fails and lands here as a warning like any other.
+    await sequelize.transaction({ transaction: parent ?? undefined }, async (sp) =>
+      upsertStatementRow(preview, summary, account, account.householdId as number, userId, sp),
     );
   } catch (e) {
-    preview.warnings.push(
-      `Statement balance not saved for ${summary.periodStart} to ${summary.periodEnd}: ${
-        e instanceof Error ? e.message : String(e)
-      }. The rest of the import was unaffected.`,
-    );
+    preview.warnings.push(notSavedWarning(summary, e));
   }
 }

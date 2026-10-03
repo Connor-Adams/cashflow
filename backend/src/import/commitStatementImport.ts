@@ -27,7 +27,7 @@ import {
 } from './computeImportConfidence';
 import { extractCounterparty } from './extractCounterparty';
 import { assertStatementReconciles } from './reconciliationGate';
-import { captureStatementBalance, missingStatementBalanceWarning } from './captureStatementBalance';
+import { captureStatementBalance } from './captureStatementBalance';
 import { resolveCounterpartyContact } from '../contacts/findOrCreateContact';
 import { markInterestAllocationPending } from '../contacts/interestAllocationCoordinator';
 import type { AccountType } from '@cashflow/shared';
@@ -455,8 +455,6 @@ export async function commitStatementImport(
     // Statement balances are reference data like the rate windows: idempotent,
     // keyed by period, and only re-importing can backfill them.
     await captureStatementBalance(preview, account, userId, null);
-    const reimportMissingBalance = missingStatementBalanceWarning(preview, account);
-    if (reimportMissingBalance) preview.warnings.push(reimportMissingBalance);
     if (reimportedWindows > 0 && account.householdId != null) {
       markInterestAllocationPending({
         householdId: account.householdId,
@@ -861,7 +859,10 @@ export async function commitStatementImport(
     // captureRatePeriods. Threaded with `t` so the windows land in the same
     // transaction as the ledger they were read off.
     ratePeriodsWritten = await captureRatePeriods(preview, account, t);
-    await captureStatementBalance(preview, account, userId, t);
+    // Warnings for a liability statement whose balance did not parse; also
+    // recorded on the ImportHistory row below (errorMessage is its only
+    // free-text field — the status stays as computed, so this warns, never fails).
+    const statementBalanceWarnings = await captureStatementBalance(preview, account, userId, t);
 
     const inserted =
       insertedTransactions + insertedInvestmentActivities + insertedHoldings;
@@ -878,14 +879,7 @@ export async function commitStatementImport(
     // must still recognise this content hash on a re-commit.
     const historyStatus =
       acceptedUnreconciled && baseStatus === 'success' ? 'partial' : baseStatus;
-    const errorParts: string[] = [];
-    const missingBalance = missingStatementBalanceWarning(preview, account);
-    if (missingBalance) {
-      // errorMessage is the only free-text field on import_histories; the
-      // status stays as computed, so a missing balance warns without failing.
-      errorParts.push(missingBalance);
-      preview.warnings.push(missingBalance);
-    }
+    const errorParts: string[] = [...statementBalanceWarnings];
     if (preview.rowErrors > 0) {
       errorParts.push(`${preview.rowErrors} row(s) could not be parsed`);
     }

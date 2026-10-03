@@ -58,29 +58,42 @@ async function statementMismatches(
   for (const s of statements) {
     const account = byId.get(s.accountId);
     if (!account) continue;
-    const balances = await balanceAtDate(account, s.periodEnd);
-    // Closed before the statement ended: there is no live balance to compare.
-    if (balances.length === 0) continue;
+    const result = await compareStatement(account, s);
+    if (result === 'skipped') continue;
     checked += 1;
-    const signed = balances.find((b) => b.currency === s.currency)?.amount ?? 0;
-    const isLiability = accountKind(account.accountType) === 'liability';
-    const computed = round2(isLiability ? -signed : signed);
-    const statement = round2(Number(s.closingBalance));
-    const delta = round2(computed - statement);
-    if (Math.abs(delta) <= VARIANCE_TOLERANCE) continue;
-    mismatches.push({
-      accountId: account.id,
-      accountName: account.name,
-      accountType: account.accountType,
-      statementId: s.id,
-      statementDate: s.periodEnd,
-      currency: s.currency,
-      computedBalance: computed,
-      statementBalance: statement,
-      delta,
-    });
+    if (result) mismatches.push(result);
   }
   return { checked, mismatches };
+}
+
+/**
+ * One statement vs balanceAtDate at its period end. 'skipped' when the account
+ * was closed before the statement ended (no live balance to compare); null
+ * when the two agree within the reconciliation tolerance.
+ */
+async function compareStatement(
+  account: Account,
+  s: AccountStatement,
+): Promise<StatementBalanceMismatch | null | 'skipped'> {
+  const balances = await balanceAtDate(account, s.periodEnd);
+  if (balances.length === 0) return 'skipped';
+  const signed = balances.find((b) => b.currency === s.currency)?.amount ?? 0;
+  const isLiability = accountKind(account.accountType) === 'liability';
+  const computed = round2(isLiability ? -signed : signed);
+  const statement = round2(Number(s.closingBalance));
+  const delta = round2(computed - statement);
+  if (Math.abs(delta) <= VARIANCE_TOLERANCE) return null;
+  return {
+    accountId: account.id,
+    accountName: account.name,
+    accountType: account.accountType,
+    statementId: s.id,
+    statementDate: s.periodEnd,
+    currency: s.currency,
+    computedBalance: computed,
+    statementBalance: statement,
+    delta,
+  };
 }
 
 export async function checkBalanceIntegrity(input: {

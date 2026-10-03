@@ -1,5 +1,5 @@
 import React from 'react'
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -59,6 +59,21 @@ const loadedSeries = () => ({
   error: null,
   refresh: () => {},
 })
+
+const integrityState = (data: {
+  statementsChecked: number
+  statementMismatches: Array<Record<string, unknown>>
+  undatedOpeningBalances: Array<Record<string, unknown>>
+}) => ({ data, loading: false, error: null, refresh: () => {} })
+
+function renderWithIntegrity(data: Parameters<typeof integrityState>[0]) {
+  vi.mocked(useBalanceIntegrity).mockReturnValue(integrityState(data) as never)
+  render(
+    <MemoryRouter>
+      <NetWorthPage />
+    </MemoryRouter>,
+  )
+}
 
 const cleanIntegrity = () => ({
   data: { statementsChecked: 0, statementMismatches: [], undatedOpeningBalances: [] },
@@ -245,9 +260,13 @@ describe('NetWorthPage', () => {
     expect(screen.queryByText(/no opening-balance date/i)).not.toBeInTheDocument()
   })
 
-  it('lists statement balance mismatches with computed, statement and delta, and badges the row', () => {
-    vi.mocked(useBalanceIntegrity).mockReturnValue({
-      data: {
+  describe('balance integrity', () => {
+    afterEach(() => {
+      vi.mocked(useBalanceIntegrity).mockImplementation(() => cleanIntegrity())
+    })
+
+    it('lists statement balance mismatches with computed, statement and delta, and badges the row', () => {
+      renderWithIntegrity({
         statementsChecked: 3,
         statementMismatches: [
           {
@@ -263,56 +282,29 @@ describe('NetWorthPage', () => {
           },
         ],
         undatedOpeningBalances: [],
-      },
-      loading: false,
-      error: null,
-      refresh: () => {},
-    })
-    try {
-      render(
-        <MemoryRouter>
-          <NetWorthPage />
-        </MemoryRouter>,
-      )
+      })
       const alert = screen.getByRole('alert', { name: /statement balances/i })
       expect(alert).toHaveTextContent(/1 statement balance disagrees with the bank/i)
-      expect(within(alert).getByText('Visa')).toBeInTheDocument()
-      expect(within(alert).getByText('2026-09-03')).toBeInTheDocument()
-      expect(within(alert).getByText(/36,354\.86/)).toBeInTheDocument()
-      expect(within(alert).getByText(/22,700\.00/)).toBeInTheDocument()
-      expect(within(alert).getByText(/13,654\.86/)).toBeInTheDocument()
+      // Account, statement date, computed, statement, difference.
+      for (const cell of ['Visa', '2026-09-03', /36,354\.86/, /22,700\.00/, /13,654\.86/]) {
+        expect(within(alert).getByText(cell)).toBeInTheDocument()
+      }
       expect(screen.getByText(/Statement mismatch/)).toBeInTheDocument()
-    } finally {
-      vi.mocked(useBalanceIntegrity).mockImplementation(() => cleanIntegrity())
-    }
-  })
+    })
 
-  it('warns about an opening balance with no date and badges the row', () => {
-    vi.mocked(useBalanceIntegrity).mockReturnValue({
-      data: {
+    it('warns about an opening balance with no date and badges the row', () => {
+      renderWithIntegrity({
         statementsChecked: 0,
         statementMismatches: [],
         undatedOpeningBalances: [
           { accountId: 7, accountName: 'Visa', openingBalance: -13654.86, currency: 'CAD' },
         ],
-      },
-      loading: false,
-      error: null,
-      refresh: () => {},
-    })
-    try {
-      render(
-        <MemoryRouter>
-          <NetWorthPage />
-        </MemoryRouter>,
-      )
+      })
       const alert = screen.getByRole('alert', { name: /opening balances/i })
       expect(alert).toHaveTextContent(/1 account has an opening balance with no opening-balance date/i)
       expect(within(alert).getByText(/Visa/)).toBeInTheDocument()
       expect(within(alert).getByText(/13,654\.86/)).toBeInTheDocument()
       expect(screen.getByText(/Opening balance undated/)).toBeInTheDocument()
-    } finally {
-      vi.mocked(useBalanceIntegrity).mockImplementation(() => cleanIntegrity())
-    }
+    })
   })
 })

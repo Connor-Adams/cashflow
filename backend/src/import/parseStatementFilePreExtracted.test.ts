@@ -6,30 +6,13 @@ import { sequelize, Account, Household } from '../models';
 // We prove it by passing a non-PDF buffer (extractPdfLines would throw on it) plus
 // valid pre-extracted credit-card lines, and asserting a successful parse.
 test('parseStatementFile uses preExtractedLines and skips extraction', async () => {
-  await sequelize.sync({ force: true });
-  const hh = await Household.create({ name: 'H' } as never);
-  const account = await Account.create({
-    householdId: hh.id, name: 'WS CC', accountType: 'credit_card', owner: 'me',
-    visibility: 'private', defaultCurrency: 'CAD', shortCode: '3338',
-  } as never);
-  const { parseStatementFile } = await import('./parseStatementFile');
-  const lines = [
-    { page: 1, y: 9, text: 'Credit card statement' },
-    { page: 1, y: 8, text: 'Wealthsimple Apr 15 — May 14, 2026' },
-    { page: 1, y: 7, text: '4126 50** **** 3338' },
+  const preview = (await wsCcPreview([
     { page: 1, y: 6, text: 'Statement date May 15, 2026' },
     { page: 2, y: 5, text: 'TRANS. DATE   POSTED DATE   TYPE   DETAILS   AMOUNT ($CAD)' },
     { page: 2, y: 4, text: 'Apr 16   Apr 17   Purchase   A&W #4655   $10.49' },
-  ];
-  const preview = await parseStatementFile({
-    buffer: Buffer.from('not a real pdf'),
-    fileName: 'x.pdf',
-    accountId: account.id,
-    householdId: hh.id,
-    preExtractedLines: lines as never,
-  });
-  assert.ok(!('ok' in preview && preview.ok === false), 'should not error');
-  assert.equal((preview as { transactions: unknown[] }).transactions.length, 1);
+  ])) as { ok?: boolean; transactions?: unknown[] };
+  assert.ok(preview.ok !== false, 'should not error');
+  assert.equal(preview.transactions?.length, 1);
 });
 
 // parseStatementFile is where the PDF parser learns which account the upload
@@ -74,8 +57,8 @@ test('parseStatementFile tells the PDF parser the account type', async () => {
   assert.equal(out.investmentActivities?.length ?? 0, 0);
 });
 
-// The statement period + balances ride on the preview so the commit can write
-// an account_statements row (and warn when the balance did not parse).
+// A WS credit-card statement parsed from pre-extracted lines. The buffer is not
+// a PDF, so a successful parse also proves extractPdfLines was skipped.
 async function wsCcPreview(extra: Array<{ page: number; y: number; text: string }>) {
   await sequelize.sync({ force: true });
   const hh = await Household.create({ name: 'H' } as never);
@@ -96,9 +79,11 @@ async function wsCcPreview(extra: Array<{ page: number; y: number; text: string 
     accountId: account.id,
     householdId: hh.id,
     preExtractedLines: lines as never,
-  }) as Promise<{ statementSummary?: unknown }>;
+  }) as Promise<{ statementSummary?: unknown; ok?: boolean; transactions?: unknown[] }>;
 }
 
+// The statement period + balances ride on the preview so the commit can write
+// an account_statements row (and warn when the balance did not parse).
 test('parseStatementFile carries the statement period and balances onto the preview', async () => {
   const preview = await wsCcPreview([{ page: 1, y: 6, text: ' New balance   $1,234.56' }]);
   assert.deepEqual(preview.statementSummary, {
