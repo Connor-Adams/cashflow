@@ -1,6 +1,7 @@
 import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader } from './types';
 import { normalizeMerchant } from '../normalizeMerchant';
 import { MONTHS_SHORT, toIso, monthDayToIso, type Period } from './dateHelpers';
+import { amexBillFields } from './amexSummary';
 
 // Shared parsing core for American Express statement PDFs. The personal/Cobalt
 // (`amex.ts`) and Aeroplan Reserve (`amexReserve.ts`) statements share an
@@ -291,6 +292,8 @@ export function createAmexParser(opts: AmexParserOptions): PdfParser {
         }
       }
 
+      // The bill feeds the card's statement balance and account_statements.
+      const bill = amexBillFields(lines);
       return {
         transactions,
         warnings,
@@ -302,7 +305,9 @@ export function createAmexParser(opts: AmexParserOptions): PdfParser {
           periodStart: hdr.periodStart,
           periodEnd: hdr.periodEnd,
           accountHolder: hdr.accountHolder || undefined,
+          ...bill.header,
         } as PdfStatementHeader,
+        ...bill.result,
       };
     },
   };
