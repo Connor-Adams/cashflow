@@ -125,6 +125,19 @@ export type NormalizedHoldingSnapshot = {
   duplicate?: boolean;
 };
 
+/**
+ * A statement's period and its own balances. Balances follow the
+ * `account_statements` convention: signed as printed for asset accounts, the
+ * amount OWED (positive) for liability accounts. `closingBalance` null means
+ * the parser read the period but not the balance.
+ */
+export type StatementSummary = {
+  periodStart: string;
+  periodEnd: string;
+  openingBalance: number | null;
+  closingBalance: number | null;
+};
+
 export type StatementPreview = {
   previewToken: string;
   fileName: string;
@@ -169,6 +182,15 @@ export type StatementPreview = {
    * types from here, so a value import would close a runtime cycle.
    */
   ratePeriods?: PdfRatePeriod[];
+  /**
+   * The statement period and the balances printed for it, for sources that
+   * carry a statement header (PDF statements). The commit pipeline upserts an
+   * `account_statements` row from it — keyed on (accountId, periodStart,
+   * periodEnd) — and records a warning on the import when a liability
+   * statement's period parsed but its closing balance did not. Absent for
+   * sources with no statement period (CSV, OFX, SimpleFIN).
+   */
+  statementSummary?: StatementSummary;
   /**
    * When true, every Transaction inserted during commit forces
    * autoBusiness=true, regardless of what the enrichment pipeline produced.

@@ -540,6 +540,9 @@ export const rbcBusinessBankingParser: PdfParser = {
     return {
       transactions,
       header,
+      ...(closingBalance !== null
+        ? { statementBalances: { opening: openingBalance, closing: closingBalance } }
+        : {}),
       warnings: [],
       parseErrors,
     };

@@ -341,3 +341,14 @@ test('overdrawn: the statement reconciles, so no sign is guessed', () => {
   assert.equal(Number((21.88 + sum).toFixed(2)), 100.75);
   assert.deepEqual(parseErrors, []);
 });
+
+test('rbcPersonalBankingParser.parse emits opening + closing statement balances', () => {
+  const result = rbcPersonalBankingParser.parse(CLEAN_MULTI_TXN_LINES, { defaultCurrency: 'CAD' });
+  assert.ok(result.statementBalances, 'expected statementBalances');
+  assert.equal(typeof result.statementBalances.opening, 'number');
+  assert.equal(typeof result.statementBalances.closing, 'number');
+  const sum = result.transactions.reduce((a, t) => a + t.amount, 0);
+  assert.ok(
+    Math.abs(result.statementBalances.opening! + sum - result.statementBalances.closing!) < 0.015,
+  );
+});

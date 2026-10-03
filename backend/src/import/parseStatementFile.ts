@@ -861,6 +861,19 @@ export async function parseStatementFile(opts: {
       ...(out.ratePeriods && out.ratePeriods.length > 0
         ? { ratePeriods: out.ratePeriods }
         : {}),
+      // Statement period + printed balances → account_statements on commit.
+      // Carried whenever the parser read a period, balance or not: a period
+      // with no balance is what the commit warns about.
+      ...(out.header
+        ? {
+            statementSummary: {
+              periodStart: out.header.periodStart,
+              periodEnd: out.header.periodEnd,
+              openingBalance: out.statementBalances?.opening ?? null,
+              closingBalance: out.statementBalances?.closing ?? null,
+            },
+          }
+        : {}),
       transactions,
       investmentActivities,
       holdings,

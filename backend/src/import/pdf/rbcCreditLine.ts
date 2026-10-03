@@ -624,6 +624,9 @@ export const rbcCreditLineParser: PdfParser = {
     return {
       transactions,
       header,
+      ...(closingPrincipal !== null
+        ? { statementBalances: { opening: openingPrincipal, closing: closingPrincipal } }
+        : {}),
       ratePeriods: parseRbcCreditLineRates(lines),
       warnings: [],
       parseErrors,

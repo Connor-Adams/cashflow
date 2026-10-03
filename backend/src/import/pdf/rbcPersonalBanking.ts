@@ -469,6 +469,9 @@ export const rbcPersonalBankingParser: PdfParser = {
     return {
       transactions,
       header,
+      ...(closingBalance !== null
+        ? { statementBalances: { opening: openingBalance, closing: closingBalance } }
+        : {}),
       warnings: [],
       parseErrors,
     };
