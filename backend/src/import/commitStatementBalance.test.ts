@@ -7,18 +7,13 @@
  * but whose balance did not must say so on the import record, instead of
  * quietly leaving every balance reader without a statement figure.
  */
-import { after, before, beforeEach, test } from 'node:test';
+import { after, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { NormalizedCashTransaction, StatementPreview, StatementSummary } from './statementTypes';
 
-let models: typeof import('../models/index.js');
-let commitStatementImport: typeof import('./commitStatementImport.js').commitStatementImport;
-
-before(async () => {
-  models = await import('../models/index.js');
-  await models.sequelize.sync({ force: true });
-  commitStatementImport = (await import('./commitStatementImport.js')).commitStatementImport;
-});
+import * as models from '../models';
+import { commitStatementImport } from './commitStatementImport';
+import { captureStatementBalance } from './captureStatementBalance';
 
 beforeEach(async () => {
   await models.sequelize.sync({ force: true });
@@ -190,4 +185,43 @@ test('a chequing statement with no balance is not flagged', async () => {
   assert.equal(result.warnings.filter((w) => /Statement balance/i.test(w)).length, 0);
   const history = await models.ImportHistory.findOne({ where: { accountId } });
   assert.equal(history?.errorMessage ?? null, null);
+});
+
+test('captureStatementBalance returns the missing-balance warning and writes nothing', async () => {
+  const { householdId, accountId } = await seedAccount('loan');
+  const account = await models.Account.findByPk(accountId);
+  assert.ok(account);
+  const preview = makePreview(accountId, householdId, {
+    summary: summary({ openingBalance: null, closingBalance: null }),
+  });
+  const warnings = await captureStatementBalance(preview, account, null, null);
+  assert.equal(warnings.length, 1);
+  assert.deepEqual(preview.warnings, warnings);
+  assert.equal(await models.AccountStatement.count({ where: { accountId } }), 0);
+});
+
+test('captureStatementBalance never moves a statement the user already reconciled', async () => {
+  const { householdId, accountId } = await seedAccount('loan');
+  const account = await models.Account.findByPk(accountId);
+  assert.ok(account);
+  await captureStatementBalance(makePreview(accountId, householdId, { summary: summary() }), account, null, null);
+  await models.AccountStatement.update({ reconciledAt: new Date() }, { where: { accountId } });
+  const warnings = await captureStatementBalance(
+    makePreview(accountId, householdId, { summary: summary({ closingBalance: 9999 }) }),
+    account,
+    null,
+    null,
+  );
+  assert.deepEqual(warnings, []);
+  const s = await models.AccountStatement.findOne({ where: { accountId } });
+  assert.equal(Number(s?.closingBalance), 4500);
+});
+
+test('captureStatementBalance does nothing for a source with no statement period', async () => {
+  const { householdId, accountId } = await seedAccount('credit_card');
+  const account = await models.Account.findByPk(accountId);
+  assert.ok(account);
+  const warnings = await captureStatementBalance(makePreview(accountId, householdId), account, null, null);
+  assert.deepEqual(warnings, []);
+  assert.equal(await models.AccountStatement.count({ where: { accountId } }), 0);
 });

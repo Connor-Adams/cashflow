@@ -8,25 +8,15 @@
  * balance before all history, so the line showed $36,354 owed against a real
  * $22,700 — and nothing compared the two.
  */
-import { after, before, beforeEach, test } from 'node:test';
+import { after, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-let models: typeof import('../models/index.js');
-let checkBalanceIntegrity: typeof import('./balanceReconciliation.js').checkBalanceIntegrity;
+import * as models from '../models';
+import { checkBalanceIntegrity } from './balanceReconciliation';
 
-before(async () => {
-  models = await import('../models/index.js');
-  await models.sequelize.sync({ force: true });
-  checkBalanceIntegrity = (await import('./balanceReconciliation.js')).checkBalanceIntegrity;
-});
-
-beforeEach(async () => {
-  await models.sequelize.sync({ force: true });
-});
-
-after(async () => {
-  await models.sequelize.close();
-});
+// A fresh schema per test; closed once at the end.
+beforeEach(() => models.sequelize.sync({ force: true }));
+after(() => models.sequelize.close());
 
 let householdId = 0;
 

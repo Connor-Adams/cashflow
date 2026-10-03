@@ -12,6 +12,8 @@ import { Skeleton } from '@connor-adams/designsystem'
 import { SkeletonRow } from '@/lib/ds-extras'
 import { Link } from 'react-router-dom'
 import { formatMoney } from '@/lib/formatMoney'
+import type { NetWorthCurrent } from '@/types/api'
+import type { BalanceIntegrity } from '@cashflow/shared'
 import {
   fromDateInputValue,
   toDateInputValue,
@@ -19,6 +21,32 @@ import {
 } from '@/lib/dateInput'
 
 type Range = '1M' | '3M' | '1Y' | 'All'
+
+type BreakdownRow = NetWorthCurrent['breakdown']['assets'][number]
+
+/** Account ids carrying a statement mismatch / an undated opening balance. */
+function integrityAccountIds(data: BalanceIntegrity | null) {
+  return {
+    mismatchAccountIds: new Set(data?.statementMismatches.map((m) => m.accountId)),
+    undatedAccountIds: new Set(data?.undatedOpeningBalances.map((u) => u.accountId)),
+  }
+}
+
+/** Data-quality badges for one breakdown row (Notes column). */
+function rowBadges(
+  row: BreakdownRow,
+  undatedAccountIds: ReadonlySet<number>,
+  mismatchAccountIds: ReadonlySet<number>,
+): string[] {
+  const isAccount = row.source === 'account'
+  const id = row.accountId ?? -1
+  return [
+    row.dataQualityWarning === 'asset_balance_negative' && 'Negative — excluded',
+    isAccount && !row.openingBalanceSet && 'Opening balance not set',
+    isAccount && undatedAccountIds.has(id) && 'Opening balance undated',
+    isAccount && mismatchAccountIds.has(id) && 'Statement mismatch',
+  ].filter((b): b is string => typeof b === 'string')
+}
 
 function rangeToParams(range: Range): {
   from: string
@@ -181,12 +209,7 @@ export function NetWorthPage() {
   const negativeAssetCount = cur.breakdown.assets.filter(
     (r) => r.dataQualityWarning === 'asset_balance_negative',
   ).length
-  const mismatchAccountIds = new Set(
-    (integrity.data?.statementMismatches ?? []).map((m) => m.accountId),
-  )
-  const undatedAccountIds = new Set(
-    (integrity.data?.undatedOpeningBalances ?? []).map((u) => u.accountId),
-  )
+  const { mismatchAccountIds, undatedAccountIds } = integrityAccountIds(integrity.data)
   const gapCurrencies = Array.from(
     new Set(
       cur.gaps
@@ -321,17 +344,7 @@ export function NetWorthPage() {
           </TableHeader>
           <TableBody>
             {accountRows.map((row, i) => {
-              const badges: string[] = []
-              if (row.dataQualityWarning === 'asset_balance_negative') {
-                badges.push('Negative — excluded')
-              }
-              if (row.source === 'account' && !row.openingBalanceSet) {
-                badges.push('Opening balance not set')
-              }
-              if (row.source === 'account' && row.accountId != null) {
-                if (undatedAccountIds.has(row.accountId)) badges.push('Opening balance undated')
-                if (mismatchAccountIds.has(row.accountId)) badges.push('Statement mismatch')
-              }
+              const badges = rowBadges(row, undatedAccountIds, mismatchAccountIds)
               return (
                 <TableRow key={`${row.source}-${row.accountId}-${row.currency}-${i}`}>
                   <TableCell>{row.label}</TableCell>
