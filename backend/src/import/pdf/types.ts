@@ -103,6 +103,11 @@ export type PdfRatePeriod = {
   applicableInterest: string;
 };
 
+export type PdfStatementBalances = {
+  opening: number | null;
+  closing: number;
+};
+
 export type PdfParseResult = {
   /** Transactions in cashflow's sign convention (positive = credit, negative = charge for credit cards). */
   transactions: Array<{
@@ -153,6 +158,18 @@ export type PdfParseResult = {
    * empty) for statements without a rate table.
    */
   ratePeriods?: PdfRatePeriod[];
+  /**
+   * The statement's own opening and closing balance for `header`'s period,
+   * when the parser can read them. Persisted as an `account_statements` row so
+   * the app's computed balance can be reconciled against the bank's figure.
+   *
+   * Same convention as `account_statements`: the balance as printed — signed
+   * for asset accounts, the amount OWED (positive) for liability accounts
+   * (credit cards, loans, credit lines). `opening` is null when the statement
+   * prints no opening figure. Omit the whole field when there is no closing
+   * balance — there is nothing to reconcile against.
+   */
+  statementBalances?: PdfStatementBalances;
   warnings: string[];
   /**
    * Problems hit while reading the statement. Set `blocking: true` on an error

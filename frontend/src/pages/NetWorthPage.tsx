@@ -2,7 +2,8 @@ import { useMemo, useRef, useState } from 'react'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
 import {
-  useNetWorthCurrent, useNetWorthSeries, updateOpeningBalance, } from '@/hooks/useNetWorth'
+  useBalanceIntegrity, useNetWorthCurrent, useNetWorthSeries, updateOpeningBalance, } from '@/hooks/useNetWorth'
+import { BalanceIntegrityAlerts } from '@/components/networth/BalanceIntegrityAlerts'
 import {
   Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
@@ -48,6 +49,7 @@ export function NetWorthPage() {
   const [drafts, setDrafts] = useState<Record<number, string>>({})
   const [openingErrors, setOpeningErrors] = useState<Record<number, string>>({})
   const current = useNetWorthCurrent()
+  const integrity = useBalanceIntegrity()
   const seriesParams = useMemo(() => rangeToParams(range), [range])
   const series = useNetWorthSeries(seriesParams)
   const editorRef = useRef<HTMLDivElement>(null)
@@ -179,6 +181,12 @@ export function NetWorthPage() {
   const negativeAssetCount = cur.breakdown.assets.filter(
     (r) => r.dataQualityWarning === 'asset_balance_negative',
   ).length
+  const mismatchAccountIds = new Set(
+    (integrity.data?.statementMismatches ?? []).map((m) => m.accountId),
+  )
+  const undatedAccountIds = new Set(
+    (integrity.data?.undatedOpeningBalances ?? []).map((u) => u.accountId),
+  )
   const gapCurrencies = Array.from(
     new Set(
       cur.gaps
@@ -255,6 +263,8 @@ export function NetWorthPage() {
         </div>
       )}
 
+      <BalanceIntegrityAlerts integrity={integrity.data} />
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="rounded border p-4">
           <div className="text-sm text-muted-foreground">Net worth (CAD)</div>
@@ -317,6 +327,10 @@ export function NetWorthPage() {
               }
               if (row.source === 'account' && !row.openingBalanceSet) {
                 badges.push('Opening balance not set')
+              }
+              if (row.source === 'account' && row.accountId != null) {
+                if (undatedAccountIds.has(row.accountId)) badges.push('Opening balance undated')
+                if (mismatchAccountIds.has(row.accountId)) badges.push('Statement mismatch')
               }
               return (
                 <TableRow key={`${row.source}-${row.accountId}-${row.currency}-${i}`}>

@@ -73,3 +73,48 @@ test('parseStatementFile tells the PDF parser the account type', async () => {
   assert.equal(out.transactions[0].amount, -11922.9);
   assert.equal(out.investmentActivities?.length ?? 0, 0);
 });
+
+// The statement period + balances ride on the preview so the commit can write
+// an account_statements row (and warn when the balance did not parse).
+async function wsCcPreview(extra: Array<{ page: number; y: number; text: string }>) {
+  await sequelize.sync({ force: true });
+  const hh = await Household.create({ name: 'H' } as never);
+  const account = await Account.create({
+    householdId: hh.id, name: 'WS CC', accountType: 'credit_card', owner: 'me',
+    visibility: 'private', defaultCurrency: 'CAD', shortCode: '3338',
+  } as never);
+  const { parseStatementFile } = await import('./parseStatementFile');
+  const lines = [
+    { page: 1, y: 9, text: 'Credit card statement' },
+    { page: 1, y: 8, text: 'Wealthsimple Apr 15 — May 14, 2026' },
+    { page: 1, y: 7, text: '4126 50** **** 3338' },
+    ...extra,
+  ];
+  return parseStatementFile({
+    buffer: Buffer.from('not a real pdf'),
+    fileName: 'x.pdf',
+    accountId: account.id,
+    householdId: hh.id,
+    preExtractedLines: lines as never,
+  }) as Promise<{ statementSummary?: unknown }>;
+}
+
+test('parseStatementFile carries the statement period and balances onto the preview', async () => {
+  const preview = await wsCcPreview([{ page: 1, y: 6, text: ' New balance   $1,234.56' }]);
+  assert.deepEqual(preview.statementSummary, {
+    periodStart: '2026-04-15',
+    periodEnd: '2026-05-14',
+    openingBalance: null,
+    closingBalance: 1234.56,
+  });
+});
+
+test('parseStatementFile carries the period with a null balance when none parsed', async () => {
+  const preview = await wsCcPreview([]);
+  assert.deepEqual(preview.statementSummary, {
+    periodStart: '2026-04-15',
+    periodEnd: '2026-05-14',
+    openingBalance: null,
+    closingBalance: null,
+  });
+});

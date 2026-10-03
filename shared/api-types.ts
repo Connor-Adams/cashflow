@@ -273,6 +273,44 @@ export const IMPORT_CONFIDENCE_FLAG_TOKENS = [
 export type ImportConfidenceFlagToken =
   (typeof IMPORT_CONFIDENCE_FLAG_TOKENS)[number]
 
+/**
+ * One statement whose closing balance disagrees with the app's computed
+ * balance at the statement's period end. Balances use the account_statements
+ * convention: signed for assets, the amount OWED (positive) for liabilities.
+ * `delta` = computed − statement.
+ */
+export type StatementBalanceMismatch = {
+  accountId: number
+  accountName: string
+  accountType: string
+  statementId: number
+  /** ISO YYYY-MM-DD — the statement's period end. */
+  statementDate: string
+  currency: string
+  computedBalance: number
+  statementBalance: number
+  delta: number
+}
+
+/** An account with a non-zero opening balance but no opening-balance date. */
+export type UndatedOpeningBalance = {
+  accountId: number
+  accountName: string
+  openingBalance: number
+  currency: string
+}
+
+/**
+ * Balance reconciliation result, served on the data-quality surface
+ * (GET /api/data-quality → `balanceIntegrity`, and GET /api/data-quality/balances).
+ */
+export type BalanceIntegrity = {
+  /** Statements actually compared (investment and closed accounts are skipped). */
+  statementsChecked: number
+  statementMismatches: StatementBalanceMismatch[]
+  undatedOpeningBalances: UndatedOpeningBalance[]
+}
+
 export type ImportHealthResponse = {
   total: number
   clean: number

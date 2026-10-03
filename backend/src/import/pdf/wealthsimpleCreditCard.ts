@@ -206,6 +206,9 @@ export const wealthsimpleCreditCardParser: PdfParser = {
     return {
       transactions,
       header,
+      ...(header.statementBalance != null
+        ? { statementBalances: { opening: null, closing: header.statementBalance } }
+        : {}),
       warnings,
       parseErrors,
     };

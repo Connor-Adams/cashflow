@@ -473,3 +473,8 @@ test('multi-page slicer keeps page-2 transactions (does not stop at the first pe
   const reconErrors = result.parseErrors.filter((e) => e.message.includes('does not reconcile'));
   assert.deepEqual(reconErrors, [], JSON.stringify(result.parseErrors));
 });
+
+test('rbcBusinessBankingParser.parse emits opening + closing statement balances', () => {
+  const result = rbcBusinessBankingParser.parse(SINGLE_TXN_LINES, { defaultCurrency: 'CAD' });
+  assert.deepEqual(result.statementBalances, { opening: 266.8, closing: 260.8 });
+});

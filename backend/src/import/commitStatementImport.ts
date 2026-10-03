@@ -27,6 +27,7 @@ import {
 } from './computeImportConfidence';
 import { extractCounterparty } from './extractCounterparty';
 import { assertStatementReconciles } from './reconciliationGate';
+import { captureStatementBalance, missingStatementBalanceWarning } from './captureStatementBalance';
 import { resolveCounterpartyContact } from '../contacts/findOrCreateContact';
 import { markInterestAllocationPending } from '../contacts/interestAllocationCoordinator';
 import type { AccountType } from '@cashflow/shared';
@@ -240,11 +241,9 @@ async function createHolding(
  * `householdId` and `accountId` come from the Account the commit path already
  * resolved under the caller's household scope, never from the preview payload.
  *
- * `sourceStatementId` is left null: nothing on the import path creates an
- * AccountStatement. Those are registered by hand through
- * `POST /api/accounts/:id/statements` (backend/src/routes/statements.ts is
- * the only `AccountStatement.create` in the codebase), so there is no
- * statement row to point at here. The column is nullable precisely for this.
+ * `sourceStatementId` is left null. Statement imports do now write an
+ * AccountStatement (captureStatementBalance.ts), but rate windows are not yet
+ * linked to it; the column is nullable precisely for this.
  *
  * Sequelize's own `upsert` is deliberately NOT used: on v6 it derives the
  * ON CONFLICT target from `model.uniqueKeys`, which is populated from
@@ -453,6 +452,11 @@ export async function commitStatementImport(
     // No surrounding transaction on this path, so the windows are already
     // durable by the time this returns and the trigger can fire immediately.
     const reimportedWindows = await captureRatePeriods(preview, account, null);
+    // Statement balances are reference data like the rate windows: idempotent,
+    // keyed by period, and only re-importing can backfill them.
+    await captureStatementBalance(preview, account, userId, null);
+    const reimportMissingBalance = missingStatementBalanceWarning(preview, account);
+    if (reimportMissingBalance) preview.warnings.push(reimportMissingBalance);
     if (reimportedWindows > 0 && account.householdId != null) {
       markInterestAllocationPending({
         householdId: account.householdId,
@@ -857,6 +861,7 @@ export async function commitStatementImport(
     // captureRatePeriods. Threaded with `t` so the windows land in the same
     // transaction as the ledger they were read off.
     ratePeriodsWritten = await captureRatePeriods(preview, account, t);
+    await captureStatementBalance(preview, account, userId, t);
 
     const inserted =
       insertedTransactions + insertedInvestmentActivities + insertedHoldings;
@@ -874,6 +879,13 @@ export async function commitStatementImport(
     const historyStatus =
       acceptedUnreconciled && baseStatus === 'success' ? 'partial' : baseStatus;
     const errorParts: string[] = [];
+    const missingBalance = missingStatementBalanceWarning(preview, account);
+    if (missingBalance) {
+      // errorMessage is the only free-text field on import_histories; the
+      // status stays as computed, so a missing balance warns without failing.
+      errorParts.push(missingBalance);
+      preview.warnings.push(missingBalance);
+    }
     if (preview.rowErrors > 0) {
       errorParts.push(`${preview.rowErrors} row(s) could not be parsed`);
     }

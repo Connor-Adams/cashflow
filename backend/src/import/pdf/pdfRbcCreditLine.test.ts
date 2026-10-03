@@ -542,3 +542,15 @@ test('an unrecognised no-balance description still defaults to withdrawal AND re
   assert.equal(parseErrors.length, 1, `expected a parseError: ${JSON.stringify(parseErrors)}`);
   assert.match(parseErrors[0].message, /ZZZ MYSTERY ROW/);
 });
+
+// ─── statement balances (balance reconciliation) ──────────────────────────────
+//
+// The principal balances are what the app's computed balance is reconciled
+// against, so the parser must hand them to the import pipeline rather than
+// only using them for its own reconciliation gate. Owed amounts stay positive,
+// matching the account_statements convention for liability accounts.
+
+test('rbcCreditLineParser.parse emits opening + closing principal as statement balances', () => {
+  const result = rbcCreditLineParser.parse(MULTI_TXN_LINES, { defaultCurrency: 'CAD' });
+  assert.deepEqual(result.statementBalances, { opening: 4000, closing: 7550 });
+});
