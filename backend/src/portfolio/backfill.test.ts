@@ -45,6 +45,8 @@ beforeEach(async () => {
   await models.SecurityDividend.destroy({ where: {}, truncate: true });
   await models.Security.destroy({ where: {}, truncate: true });
   await models.ProviderJobLog.destroy({ where: {}, truncate: true });
+  await models.HoldingSnapshot.destroy({ where: {}, truncate: true });
+  await models.Account.destroy({ where: {}, truncate: true });
   backfill.__resetForTests();
 });
 
@@ -367,4 +369,156 @@ test('ensureDividends rate-limit response is recorded as rate_limited', async ()
   });
   assert.ok(log);
   assert.equal(log.status, 'rate_limited');
+});
+
+function isoDaysAgo(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+function bar(date: string, close: number) {
+  return { date, open: close, high: close, low: close, close, adjClose: close, volume: 100 };
+}
+
+test('a compact refresh overlapping stored bars updates them instead of failing', async () => {
+  // Regression: the model declared no unique key, so upsert targeted
+  // ON CONFLICT (id) and the (security_id, date) unique index rejected every
+  // overlapping bar with "Validation error" — history froze after the first
+  // full backfill.
+  const sec = await models.Security.create({
+    householdId: 1, symbol: 'OVL', name: 'Overlap', assetType: 'EQUITY', currency: 'USD',
+  });
+  await models.SecurityDailyPrice.create({
+    securityId: sec.id, date: isoDaysAgo(5), open: '1', high: '1', low: '1',
+    close: '1', adjClose: '1', volume: 1, source: 'yahoo', fetchedAt: new Date(),
+  });
+  backfill.__setYahooFetchers({
+    fetchQuote: async () => null,
+    fetchDailyHistory: async () => [bar(isoDaysAgo(5), 9), bar(isoDaysAgo(1), 10)],
+    fetchDividends: async () => [],
+    fetchOverview: async () => null,
+  });
+
+  const status = await backfill.ensureDailyPrices(sec.id);
+  assert.equal(status.status, 'stale');
+  await backfill.__drainForTests();
+
+  const rows = await models.SecurityDailyPrice.findAll({
+    where: { securityId: sec.id },
+    order: [['date', 'ASC']],
+  });
+  assert.deepEqual(rows.map((r) => [r.date, Number(r.close)]), [
+    [isoDaysAgo(5), 9],
+    [isoDaysAgo(1), 10],
+  ]);
+  const log = await models.ProviderJobLog.findOne({ where: { function: 'DAILY_HISTORY' } });
+  assert.equal(log?.status, 'ok');
+});
+
+async function makeHeld(symbol: string, currency: string, quantity = '10') {
+  const sec = await models.Security.create({
+    householdId: 1, symbol, name: symbol, assetType: 'EQUITY', currency,
+  });
+  const household = await models.Household.create({ name: `Household ${symbol}` });
+  const account = await models.Account.create({
+    householdId: household.id, name: `Brokerage ${symbol}`, owner: 'shared',
+    accountType: 'investment', currency,
+  });
+  await models.HoldingSnapshot.create({
+    accountId: account.id, householdId: household.id, securityId: sec.id,
+    statementDate: isoDaysAgo(10), quantity, price: null, marketValue: null,
+    costBasis: null, unrealizedGainLoss: null, currency,
+    sourceReference: 'test', sourceRowFingerprint: `test:${symbol}`, importBatch: 'test',
+  });
+  return sec;
+}
+
+test('refreshHeldDailyPrices backfills every held security with stale history', async () => {
+  const never = await makeHeld('NEW', 'USD');
+  const stale = await makeHeld('OLD', 'USD');
+  await models.SecurityDailyPrice.create({
+    securityId: stale.id, date: isoDaysAgo(30), open: '1', high: '1', low: '1',
+    close: '1', adjClose: '1', volume: 1, source: 'yahoo', fetchedAt: new Date(),
+  });
+  await models.Security.create({
+    householdId: 1, symbol: 'NOTHELD', name: 'Not held', assetType: 'EQUITY', currency: 'USD',
+  });
+
+  const fetched: string[] = [];
+  backfill.__setYahooFetchers({
+    fetchQuote: async () => null,
+    fetchDailyHistory: async (symbol) => {
+      fetched.push(symbol);
+      return [bar(isoDaysAgo(1), 5)];
+    },
+    fetchDividends: async () => [],
+    fetchOverview: async () => null,
+  });
+
+  const summary = await backfill.refreshHeldDailyPrices();
+  assert.deepEqual(fetched.sort(), ['NEW', 'OLD']);
+  assert.equal(summary.held, 2);
+  assert.equal(summary.attempted, 2);
+  for (const sec of [never, stale]) {
+    const latest = await models.SecurityDailyPrice.max('date', { where: { securityId: sec.id } });
+    assert.equal(latest, isoDaysAgo(1));
+  }
+});
+
+test('refreshHeldDailyPrices skips fresh history and recently attempted symbols', async () => {
+  const fresh = await makeHeld('FRESH', 'USD');
+  await models.SecurityDailyPrice.create({
+    securityId: fresh.id, date: isoDaysAgo(1), open: '1', high: '1', low: '1',
+    close: '1', adjClose: '1', volume: 1, source: 'yahoo', fetchedAt: new Date(),
+  });
+  // Delisted: every suffix came back not_found an hour ago.
+  await makeHeld('DEAD', 'CAD');
+  for (const symbol of ['DEAD.TO', 'DEAD.V', 'DEAD.CN']) {
+    await models.ProviderJobLog.create({
+      provider: 'yahoo', function: 'DAILY_HISTORY', symbol, status: 'not_found',
+      httpStatus: null, errorMessage: null, fetchedAt: new Date(Date.now() - 3600_000),
+    });
+  }
+  await makeHeld('SOLD', 'USD', '0');
+
+  const fetched: string[] = [];
+  backfill.__setYahooFetchers({
+    fetchQuote: async () => null,
+    fetchDailyHistory: async (symbol) => {
+      fetched.push(symbol);
+      return null;
+    },
+    fetchDividends: async () => [],
+    fetchOverview: async () => null,
+  });
+
+  const summary = await backfill.refreshHeldDailyPrices();
+  assert.deepEqual(fetched, []);
+  assert.equal(summary.held, 2);
+  assert.equal(summary.skippedFresh, 1);
+  assert.equal(summary.skippedBackoff, 1);
+  assert.equal(summary.attempted, 0);
+});
+
+test('refreshHeldDailyPrices retries a failed symbol once the backoff has elapsed', async () => {
+  await makeHeld('DEAD', 'CAD');
+  await models.ProviderJobLog.create({
+    provider: 'yahoo', function: 'DAILY_HISTORY', symbol: 'DEAD.CN', status: 'not_found',
+    httpStatus: null, errorMessage: null, fetchedAt: new Date(Date.now() - 2 * 86400_000),
+  });
+  const fetched: string[] = [];
+  backfill.__setYahooFetchers({
+    fetchQuote: async () => null,
+    fetchDailyHistory: async (symbol) => {
+      fetched.push(symbol);
+      return null;
+    },
+    fetchDividends: async () => [],
+    fetchOverview: async () => null,
+  });
+
+  const summary = await backfill.refreshHeldDailyPrices();
+  assert.deepEqual(fetched, ['DEAD.TO', 'DEAD.V', 'DEAD.CN']);
+  assert.equal(summary.attempted, 1);
 });

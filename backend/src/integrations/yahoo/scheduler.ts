@@ -78,13 +78,14 @@ async function securitiesForYahooSymbol(yahooSymbol: string): Promise<Security[]
   );
 }
 
-async function persistQuote(yahooSymbol: string, quote: QuoteResult): Promise<void> {
-  const securities = await securitiesForYahooSymbol(yahooSymbol);
+async function persistQuote(securities: Security[], quote: QuoteResult): Promise<void> {
   if (securities.length === 0) return;
   const now = new Date();
   await Promise.all(
     securities.map((security) =>
-      SecurityPrice.create({
+      // Upsert: while the market is closed Yahoo keeps returning the same
+      // regularMarketTime, which a plain create() would collide on.
+      SecurityPrice.upsert({
         securityId: security.id,
         provider: YAHOO_PROVIDER,
         symbol: security.symbol,
@@ -97,8 +98,7 @@ async function persistQuote(yahooSymbol: string, quote: QuoteResult): Promise<vo
   );
 }
 
-async function persistOverview(yahooSymbol: string, overview: OverviewResult): Promise<void> {
-  const securities = await securitiesForYahooSymbol(yahooSymbol);
+async function persistOverview(securities: Security[], overview: OverviewResult): Promise<void> {
   if (securities.length === 0) return;
   const now = new Date();
   const metadata = overviewToMetadata(overview);
@@ -110,11 +110,10 @@ async function persistOverview(yahooSymbol: string, overview: OverviewResult): P
 }
 
 async function persistDividends(
-  yahooSymbol: string,
+  securities: Security[],
   events: DividendEvent[],
 ): Promise<void> {
   if (events.length === 0) return;
-  const securities = await securitiesForYahooSymbol(yahooSymbol);
   if (securities.length === 0) return;
   const now = new Date();
   for (const security of securities) {
@@ -141,21 +140,41 @@ async function persistDividends(
 
 interface FunctionHandler<T> {
   fetch: (symbol: string) => Promise<T | null>;
-  persist: (symbol: string, result: T) => Promise<void>;
+  /**
+   * Writes to the securities the picker's primary symbol maps to — not a
+   * lookup by the symbol that resolved, which for a fallback suffix (`X.V`)
+   * never equals any security's primary (`X.TO`).
+   */
+  persist: (securities: Security[], result: T) => Promise<void>;
   notFoundIsEmptyArray?: boolean;
+}
+
+type YahooFetchers = {
+  fetchQuote: (symbol: string) => Promise<QuoteResult | null>;
+  fetchOverview: (symbol: string) => Promise<OverviewResult | null>;
+  fetchDividends: (symbol: string) => Promise<DividendEvent[] | null>;
+};
+const defaultFetchers: YahooFetchers = { fetchQuote, fetchOverview, fetchDividends };
+let fetchers: YahooFetchers = defaultFetchers;
+
+/** Test seam — replaces the Yahoo fetchers; call with no argument to restore. */
+// Consumed by scheduler.test.ts via dynamic import; fallow's static resolver can't follow it.
+// fallow-ignore-next-line unused-export
+export function __setYahooFetchersForTests(stub?: YahooFetchers): void {
+  fetchers = stub ?? defaultFetchers;
 }
 
 const HANDLERS: Record<YahooWorkFunction, FunctionHandler<unknown>> = {
   QUOTE: {
-    fetch: (s) => fetchQuote(s),
+    fetch: (s) => fetchers.fetchQuote(s),
     persist: (s, r) => persistQuote(s, r as QuoteResult),
   } as FunctionHandler<unknown>,
   OVERVIEW: {
-    fetch: (s) => fetchOverview(s),
+    fetch: (s) => fetchers.fetchOverview(s),
     persist: (s, r) => persistOverview(s, r as OverviewResult),
   } as FunctionHandler<unknown>,
   DIVIDENDS: {
-    fetch: (s) => fetchDividends(s),
+    fetch: (s) => fetchers.fetchDividends(s),
     persist: (s, r) => persistDividends(s, r as DividendEvent[]),
     notFoundIsEmptyArray: true,
   } as FunctionHandler<unknown>,
@@ -199,11 +218,16 @@ async function dispatch(
         continue;
       }
       if (!isEmptyArrayOk) {
-        await handler.persist(symbol, result);
+        await handler.persist(matchedSecs, result);
       }
       await recordCall({ function: fnName, symbol, status: 'ok' });
       return { status: 'refreshed', symbol, function: fnName };
     } catch (err) {
+      // A throw (transport failure, 429, schema error) ends the tick rather
+      // than falling through to the next suffix: it says nothing about
+      // whether *this* listing exists, and the next suffix would hit the
+      // same outage and log a misleading row. The logged attempt defers this
+      // security in the picker, so the stop cannot starve the queue.
       if (err instanceof YahooFinanceError) {
         const isRateLimit =
           err.httpStatus === 429 || /rate.?limit/i.test(err.message);
