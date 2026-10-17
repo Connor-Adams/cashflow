@@ -228,3 +228,34 @@ test('parseWsPdfWsid: returns null for anything else', () => {
   assert.equal(parseWsPdfWsid('statement_125041570_CAD_2026-05-01_2026-09-15.pdf'), null);
   assert.equal(parseWsPdfWsid('Chequing Statement-4881 2026-05-05.pdf'), null);
 });
+
+// Wealthsimple renamed statement PDFs again (seen on the 2026-09 statements,
+// downloaded 2026-10): `<Display name>-monthly-statement-<WSID>-<YYYY-MM>-v_<n>.pdf`
+// and `Credit Card-credit-card-statement-<WSID>-<YYYY-MM>-v_<n>.pdf`. Missing
+// the WSID here forked new accounts: the credit card fell back to its body
+// last-4 and the corporate chequing statement to its internal account number.
+test('parseWsPdfWsid: 2026-09 credit-card statement', () => {
+  assert.equal(
+    parseWsPdfWsid('Credit Card-credit-card-statement-C13BRX957CAD-2026-09-v_0.pdf'),
+    'C13BRX957CAD',
+  );
+});
+
+test('parseWsPdfWsid: 2026-09 monthly statements, any display name', () => {
+  assert.equal(parseWsPdfWsid('Corporate chequing-monthly-statement-WK79NVW07CAD-2026-09-v_0.pdf'), 'WK79NVW07CAD');
+  assert.equal(parseWsPdfWsid('Chequing-monthly-statement-WK3DD9X35CAD-2026-09-v_0.pdf'), 'WK3DD9X35CAD');
+  assert.equal(parseWsPdfWsid('Non-registered margin-monthly-statement-HQ4TLFJ02CAD-2026-09-v_0.pdf'), 'HQ4TLFJ02CAD');
+  assert.equal(parseWsPdfWsid('TFSA-monthly-statement-HQ6LMLTK8CAD-2026-09-v_1.pdf'), 'HQ6LMLTK8CAD');
+});
+
+test('parseWsPdfWsid: 2026-09 form tolerates a duplicate-download suffix and a path', () => {
+  assert.equal(
+    parseWsPdfWsid('/tmp/up/Credit Card-credit-card-statement-C13BRX957CAD-2026-09-v_0 (1).pdf'),
+    'C13BRX957CAD',
+  );
+});
+
+test('parseWsPdfWsid: the 2026-09 shape needs the WSID segment', () => {
+  assert.equal(parseWsPdfWsid('Chequing-monthly-statement-2026-09-v_0.pdf'), null);
+  assert.equal(parseWsPdfWsid('Chequing-monthly-statement-WK3DD9X35CAD-2026-09-v_0.csv'), null);
+});
