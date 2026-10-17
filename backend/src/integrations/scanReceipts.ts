@@ -47,6 +47,7 @@ import {
   GMAIL_READONLY_SCOPE,
   OPENID_EMAIL_SCOPE,
   type OauthTokenResponse,
+  type GmailMessageFull,
 } from './gmail';
 import { extractReceiptFromText } from '../ai/extractReceiptItems';
 import { collectPdfParts, extractPdfReceiptText as realExtractPdfReceiptText } from './pdfAttachments';
@@ -151,11 +152,11 @@ export function isRetryableProcessedEmail(
  * terminal outcomes, plus retryable failures whose retry window has closed.
  */
 export async function loadSeenEmailMessageIds(
-  householdId: number,
+  householdId: number | null,
   messageIds: string[],
 ): Promise<Set<string>> {
   const seen = new Set<string>();
-  if (messageIds.length === 0) return seen;
+  if (householdId == null || messageIds.length === 0) return seen;
   const rows = await ProcessedEmailMessage.findAll({
     where: { householdId, provider: 'google', messageId: messageIds },
     attributes: ['messageId', 'status', 'createdAt'],
@@ -165,6 +166,65 @@ export async function loadSeenEmailMessageIds(
     if (!isRetryableProcessedEmail(r, cutoff)) seen.add(r.messageId);
   }
   return seen;
+}
+
+/**
+ * Failed messages the fast scan should re-fetch explicitly because its Gmail
+ * query no longer returns them: the query is bounded by `after:<lastScanAt>`,
+ * which advances on every run (including the one that failed). In-window
+ * retryable rows not already in `listedIds`, oldest attempt first.
+ *
+ * Filtered by sender BEFORE the per-run limit: the table is household-wide and
+ * shared with discovery, whose failures (non-allowlisted senders) the scan
+ * skips without re-recording -- counted toward the limit, they could hold every
+ * retry slot for the whole window. A null fromAddr (the original fetch failed)
+ * is unknown, so it is tried and checked after the re-fetch.
+ */
+async function loadExplicitRetryIds(
+  householdId: number | null,
+  listedIds: string[],
+  allowedSenders: ReadonlySet<string>,
+): Promise<Set<string>> {
+  const ids = new Set<string>();
+  if (householdId == null) return ids;
+  const rows = await ProcessedEmailMessage.findAll({
+    where: {
+      householdId,
+      provider: 'google',
+      status: [...RETRYABLE_EMAIL_STATUSES],
+      createdAt: { [Op.gte]: emailRetryCutoff() },
+      ...(listedIds.length > 0 ? { messageId: { [Op.notIn]: listedIds } } : {}),
+    },
+    attributes: ['messageId', 'fromAddr'],
+    order: [['scannedAt', 'ASC']],
+  });
+  for (const r of rows) {
+    if (ids.size >= MAX_EMAIL_RETRIES_PER_SCAN) break;
+    if (r.fromAddr == null || isAllowedSender(r.fromAddr, allowedSenders)) ids.add(r.messageId);
+  }
+  return ids;
+}
+
+function isAllowedSender(fromHeader: string | null, allowedSenders: ReadonlySet<string>): boolean {
+  const addr = parseEmailAddress(fromHeader);
+  return addr != null && allowedSenders.has(addr);
+}
+
+function emptyScanResult(messageId: string): ScanResultMessage {
+  return {
+    messageId,
+    from: null,
+    subject: null,
+    internalDate: null,
+    status: 'unknown',
+    parser: null,
+    orderId: null,
+    orderCreated: false,
+    itemsCount: 0,
+    vendor: 'other',
+    total: null,
+    error: null,
+  };
 }
 
 /** Gmail answers 404 for an id that is not in THIS mailbox (or was deleted). */
@@ -663,49 +723,23 @@ export async function scanInbox(
   // Pre-load the set of already-seen Gmail message IDs for this household so
   // we can skip them before fetching/extracting. Transient failures still in
   // their retry window are NOT seen -- they get processed again.
-  const seen =
-    opts.householdId != null
-      ? await loadSeenEmailMessageIds(opts.householdId, summaries.map((s) => s.id))
-      : new Set<string>();
+  const seen = await loadSeenEmailMessageIds(opts.householdId, summaries.map((s) => s.id));
   for (const id of opts.forceReprocessMessageIds ?? []) seen.delete(id);
 
-  // Failed messages the query no longer returns: the Gmail query is bounded
-  // by `after:<lastScanAt>`, which advances on every run (including the one
-  // that failed), so a retry has to fetch those ids explicitly. Only ids that
-  // turn out to be from an allowlisted sender in THIS mailbox are processed --
-  // the table is household-wide and shared with discovery (see processOne).
+  // Failed messages the query no longer returns are re-fetched explicitly
+  // (see loadExplicitRetryIds / processRetry).
   const allowedSenders = new Set(senders.map((a) => a.toLowerCase()));
-  const explicitRetryIds = new Set<string>();
-  if (opts.householdId != null) {
-    const listed = summaries.map((s) => s.id);
-    const retryRows = await ProcessedEmailMessage.findAll({
-      where: {
-        householdId: opts.householdId,
-        provider: 'google',
-        status: [...RETRYABLE_EMAIL_STATUSES],
-        createdAt: { [Op.gte]: emailRetryCutoff() },
-        ...(listed.length > 0 ? { messageId: { [Op.notIn]: listed } } : {}),
-      },
-      attributes: ['messageId', 'fromAddr'],
-      order: [['scannedAt', 'ASC']],
-    });
-    // Filter by sender BEFORE applying the per-run limit: discovery's failures
-    // (non-allowlisted senders) are skipped without being re-recorded, so if
-    // they counted toward the limit they could hold every retry slot for the
-    // whole window. A null fromAddr (the fetch itself failed) is unknown — try it.
-    for (const r of retryRows) {
-      if (explicitRetryIds.size >= MAX_EMAIL_RETRIES_PER_SCAN) break;
-      const addr = parseEmailAddress(r.fromAddr);
-      if (r.fromAddr == null || (addr != null && allowedSenders.has(addr))) {
-        explicitRetryIds.add(r.messageId);
-      }
-    }
-  }
-  const toProcess: Array<{ id: string }> = [
-    ...summaries,
-    ...[...explicitRetryIds].map((id) => ({ id })),
+  const explicitRetryIds = await loadExplicitRetryIds(
+    opts.householdId,
+    summaries.map((s) => s.id),
+    allowedSenders,
+  );
+  const fetchListed = (messageId: string) => fetchMessage({ accessToken, messageId });
+  const tasks: Array<() => Promise<ScanResultMessage>> = [
+    ...summaries.map((summary) => () => processOne(summary, fetchListed)),
+    ...[...explicitRetryIds].map((id) => () => processRetry(id)),
   ];
-  callbacks.onPhase?.({ phase: 'processing-start', total: toProcess.length });
+  callbacks.onPhase?.({ phase: 'processing-start', total: tasks.length });
 
   const results: ScanResultMessage[] = [];
   let created = 0;
@@ -758,21 +792,11 @@ export async function scanInbox(
    *  bookkeeping (skipped/filtered/created/...) and DB writes happen here;
    *  the outer loop only handles streaming callbacks.
    */
-  async function processOne(summary: { id: string }): Promise<ScanResultMessage> {
-    const result: ScanResultMessage = {
-      messageId: summary.id,
-      from: null,
-      subject: null,
-      internalDate: null,
-      status: 'unknown',
-      parser: null,
-      orderId: null,
-      orderCreated: false,
-      itemsCount: 0,
-      vendor: 'other',
-      total: null,
-      error: null,
-    };
+  async function processOne(
+    summary: { id: string },
+    fetchFull: (messageId: string) => Promise<GmailMessageFull>,
+  ): Promise<ScanResultMessage> {
+    const result = emptyScanResult(summary.id);
 
     if (seen.has(summary.id)) {
       result.status = 'skipped_already_seen';
@@ -780,36 +804,11 @@ export async function scanInbox(
       return result;
     }
 
-    const isExplicitRetry = explicitRetryIds.has(summary.id);
     try {
-      let full: Awaited<ReturnType<typeof fetchMessage>>;
-      try {
-        full = await fetchMessage({ accessToken, messageId: summary.id });
-      } catch (err) {
-        // An explicit retry id may belong to another household member's
-        // mailbox -- leave its row alone for their scan to retry.
-        if (isExplicitRetry && isGmailNotFound(err)) {
-          result.status = 'skipped_already_seen';
-          skippedAlreadySeen++;
-          return result;
-        }
-        throw err;
-      }
+      const full = await fetchFull(summary.id);
       result.from = getHeader(full.payload, 'From');
       result.subject = getHeader(full.payload, 'Subject');
       result.internalDate = full.internalDate;
-
-      // An explicit retry from a sender outside the allowlist is a discovery
-      // failure (discovery handles non-allowlisted senders) -- the fast scan
-      // must not hijack it into an auto-created order.
-      if (isExplicitRetry) {
-        const addr = parseEmailAddress(result.from);
-        if (addr == null || !allowedSenders.has(addr)) {
-          result.status = 'skipped_already_seen';
-          skippedAlreadySeen++;
-          return result;
-        }
-      }
 
       const subjectVerdict = classifySubject(result.subject);
       if (subjectVerdict.decision === 'block') {
@@ -1076,11 +1075,38 @@ export async function scanInbox(
     return result;
   }
 
-  for (let i = 0; i < toProcess.length; i++) {
-    const result = await processOne(toProcess[i]);
+  /**
+   * Explicit retry of a failed message the listing no longer returns. An id
+   * Gmail 404s belongs to another household member's mailbox, and a sender
+   * outside the allowlist means discovery owns the failure (the fast scan must
+   * not hijack it into an auto-created order) -- both are skipped without
+   * touching their rows. Everything else goes through processOne, including a
+   * fresh fetch error, which it records as a new failed attempt.
+   */
+  async function processRetry(messageId: string): Promise<ScanResultMessage> {
+    let full: GmailMessageFull;
+    try {
+      full = await fetchMessage({ accessToken, messageId });
+    } catch (err) {
+      if (isGmailNotFound(err)) return skippedResult(messageId);
+      return processOne({ id: messageId }, () => Promise.reject(err));
+    }
+    if (!isAllowedSender(getHeader(full.payload, 'From'), allowedSenders)) {
+      return skippedResult(messageId);
+    }
+    return processOne({ id: messageId }, async () => full);
+  }
+
+  function skippedResult(messageId: string): ScanResultMessage {
+    skippedAlreadySeen++;
+    return { ...emptyScanResult(messageId), status: 'skipped_already_seen' };
+  }
+
+  for (let i = 0; i < tasks.length; i++) {
+    const result = await tasks[i]();
     results.push(result);
     callbacks.onMessage?.(result);
-    callbacks.onPhase?.({ phase: 'processed', index: i + 1, total: toProcess.length });
+    callbacks.onPhase?.({ phase: 'processed', index: i + 1, total: tasks.length });
   }
 
   integ.set({ lastScanAt: new Date() });
@@ -1097,7 +1123,7 @@ export async function scanInbox(
   }
 
   return {
-    scannedMessages: toProcess.length,
+    scannedMessages: tasks.length,
     createdOrders: created,
     duplicateOrders: dupes,
     filteredBySubject,

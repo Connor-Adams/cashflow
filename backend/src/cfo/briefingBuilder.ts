@@ -201,6 +201,24 @@ export function incompleteBriefingNote(failedSources: readonly string[]): string
   return `Note: this briefing is incomplete — couldn't load ${failedSources.join(', ')}.`;
 }
 
+/**
+ * The briefing headline: the synthesized summary when there is one, else the
+ * deterministic counts. The synthesis pass only sees the items that loaded, so
+ * it can't know a source is missing — the incomplete note is appended to it.
+ * The deterministic summary already names failed sources when it has no
+ * items, so it only gets the note when it reports some.
+ */
+function composeBriefingSummary(
+  synthesized: string | null,
+  counts: BriefingCounts,
+  failedSources: readonly string[],
+): string {
+  const base = synthesized ?? briefingShortSummary(counts, failedSources);
+  const alreadyNamed = synthesized == null && Object.values(counts).every((n) => n === 0);
+  if (failedSources.length === 0 || alreadyNamed) return base;
+  return `${base} ${incompleteBriefingNote(failedSources)}`;
+}
+
 /** Provenance label for a briefing whose summary came from the counters. */
 export const DETERMINISTIC_BRIEFING_MODEL = 'deterministic';
 
@@ -522,7 +540,6 @@ export async function buildCfoBriefing(
     }
   }
 
-  const fallbackSummary = briefingShortSummary(counts, failedSources);
   const synthesize = params.synthesizeImpl ?? synthesizeBriefing;
   const synthesis = await synthesize({
     items,
@@ -530,17 +547,9 @@ export async function buildCfoBriefing(
     currency,
   });
 
-  // The synthesis pass only sees the items that loaded, so it can't know a
-  // source is missing — append the note to its summary. The deterministic
-  // fallback already names the failed sources when there are no items.
-  let summary = synthesis.summary ?? fallbackSummary;
-  if (failedSources.length > 0 && (synthesis.summary != null || items.length > 0)) {
-    summary = `${summary} ${incompleteBriefingNote(failedSources)}`;
-  }
-
   return {
     actionItems: synthesis.ordered,
-    summary,
+    summary: composeBriefingSummary(synthesis.summary, counts, failedSources),
     safeToSpendSnapshot,
     failedSources,
     model:
