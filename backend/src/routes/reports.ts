@@ -140,6 +140,7 @@ interface TxnRawRow {
   reviewFlag: boolean;
   receiptCount: string | number | null;
   txnType: string | null;
+  accountType?: string | null;
 }
 
 function rowToTxn(row: TxnRawRow): ExplainMonthTxnRow {
@@ -157,6 +158,7 @@ function rowToTxn(row: TxnRawRow): ExplainMonthTxnRow {
     reviewFlag: Boolean(row.reviewFlag),
     receiptCount: Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0,
     txnType: row.txnType ?? null,
+    accountType: row.accountType ?? null,
   };
 }
 
@@ -193,6 +195,14 @@ async function fetchTransactionsWithReceipts(
         attributes: ['id'],
         required: false,
       },
+      // accountType feeds the dashboard's isNonSpend rule in explainMonth —
+      // an outflow on an investment account is money movement, not spend.
+      {
+        model: Account,
+        as: 'account',
+        attributes: ['accountType'],
+        required: false,
+      },
     ],
   });
   type TxnWithReceipts = {
@@ -207,6 +217,7 @@ async function fetchTransactionsWithReceipts(
     reviewFlag: boolean;
     txnType: string | null;
     receipts?: Array<{ id: number }>;
+    account?: { accountType: string | null } | null;
   };
   return rows.map((r) => {
     const json = r.toJSON() as TxnWithReceipts;
@@ -222,6 +233,7 @@ async function fetchTransactionsWithReceipts(
       reviewFlag: json.reviewFlag,
       txnType: json.txnType,
       receiptCount: (json.receipts ?? []).length,
+      accountType: json.account?.accountType ?? null,
     });
   });
 }
@@ -411,7 +423,7 @@ async function fetchLifestyleTransactions(
   const [rows, accounts] = await Promise.all([
     Transaction.findAll({
       where,
-      attributes: ['accountId', 'date', 'currency', 'amount', 'finalCategory', 'finalCategoryId', 'txnType'], // B2: finalCategoryId selected for future rollup
+      attributes: ['accountId', 'date', 'currency', 'amount', 'finalCategory', 'finalCategoryId', 'txnType', 'merchantRaw', 'merchantClean'], // B2: finalCategoryId selected for future rollup
       raw: true,
     }),
     Account.findAll({
@@ -435,6 +447,8 @@ async function fetchLifestyleTransactions(
     amount: unknown;
     finalCategory: string | null;
     txnType: string | null;
+    merchantRaw: string | null;
+    merchantClean: string | null;
   };
   return (rows as unknown as RawRow[]).map((r) => ({
     date: r.date,
@@ -443,6 +457,8 @@ async function fetchLifestyleTransactions(
     finalCategory: r.finalCategory,
     txnType: r.txnType,
     accountType: accountTypeById.get(r.accountId) ?? null,
+    merchantRaw: r.merchantRaw,
+    merchantClean: r.merchantClean,
   }));
 }
 

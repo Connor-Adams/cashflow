@@ -48,9 +48,9 @@ test('produces a per-currency monthly series covering the whole window', () => {
     currency: null,
     transactions: [
       row({ date: '2026-01-10', amount: -100, finalCategory: 'Groceries' }),
-      row({ date: '2026-01-31', amount: 2000, finalCategory: null }), // income
+      row({ date: '2026-01-31', amount: 2000, finalCategory: null, txnType: 'income' }), // income
       row({ date: '2026-04-05', amount: -300, finalCategory: 'Groceries' }),
-      row({ date: '2026-04-30', amount: 2200, finalCategory: null }), // income
+      row({ date: '2026-04-30', amount: 2200, finalCategory: null, txnType: 'income' }), // income
     ],
   });
   assert.equal(res.windowMonths.length, 4);
@@ -75,7 +75,7 @@ test('produces a per-currency monthly series covering the whole window', () => {
   assert.equal(cad.series[3].spend, 300);
 });
 
-test('income is positive amounts, spend is abs of negative amounts', () => {
+test('income is txnType=income amounts, spend is abs of negative amounts', () => {
   const months = buildMonthWindow('2026-02', 2);
   const res = lifestyleInflation({
     months,
@@ -83,7 +83,7 @@ test('income is positive amounts, spend is abs of negative amounts', () => {
     transactions: [
       row({ date: '2026-02-01', amount: -50, finalCategory: 'Dining' }),
       row({ date: '2026-02-02', amount: -25, finalCategory: 'Dining' }),
-      row({ date: '2026-02-03', amount: 500, finalCategory: null }),
+      row({ date: '2026-02-03', amount: 500, finalCategory: null, txnType: 'income' }),
     ],
   });
   const feb = res.byCurrency[0].series.find((m) => m.month === '2026-02')!;
@@ -147,6 +147,44 @@ test('credit-card bill payments are excluded from both income and spend', () => 
 
 // ---------------- growth + outpacing insight ----------------
 
+test('refunds/rewards and untyped deposits are not income (dashboard parity)', () => {
+  // The dashboard counts only txnType='income' as income. A refund or reward
+  // is a credit that nets against spend; an unsignaled deposit is skipped.
+  const months = buildMonthWindow('2026-02', 2);
+  const res = lifestyleInflation({
+    months,
+    currency: 'CAD',
+    transactions: [
+      row({ date: '2026-02-01', amount: -200, finalCategory: 'Dining', txnType: 'purchase' }),
+      row({ date: '2026-02-05', amount: 50, finalCategory: 'Dining', txnType: 'refund' }),
+      row({ date: '2026-02-06', amount: 10, finalCategory: 'Rewards', txnType: 'reward' }),
+      row({ date: '2026-02-07', amount: 4000, finalCategory: null, txnType: 'unknown', accountType: 'checking' }),
+      row({ date: '2026-02-08', amount: 900, finalCategory: null, txnType: null, accountType: 'checking' }),
+      row({ date: '2026-02-28', amount: 3000, finalCategory: null, txnType: 'income', accountType: 'checking' }),
+    ],
+  });
+  const feb = res.byCurrency[0].series.find((m) => m.month === '2026-02')!;
+  assert.equal(feb.income, 3000);
+  // Net spend: 200 - 50 refund - 10 reward.
+  assert.equal(feb.spend, 140);
+  assert.equal(feb.savings, 2860);
+});
+
+test('a refund nets its category spend in the drivers', () => {
+  const months = buildMonthWindow('2026-02', 2);
+  const res = lifestyleInflation({
+    months,
+    currency: 'CAD',
+    transactions: [
+      row({ date: '2026-02-01', amount: -300, finalCategory: 'Shopping', txnType: 'purchase' }),
+      row({ date: '2026-02-09', amount: 100, finalCategory: 'Shopping', txnType: 'refund' }),
+    ],
+  });
+  const shopping = res.byCurrency[0].categoryDrivers.find((d) => d.category === 'Shopping')!;
+  // Window is [Jan, Feb]: first-half avg 0, second-half avg = net 200.
+  assert.equal(shopping.secondHalfAvg, 200);
+});
+
 test('flags spending outpacing income with a warning insight', () => {
   const months = buildMonthWindow('2026-06', 6); // Jan..Jun
   // Income flat at 3000/mo. Spend ramps hard in the second half.
@@ -161,7 +199,7 @@ test('flags spending outpacing income with a warning insight', () => {
   };
   for (const m of months) {
     txns.push(row({ date: `${m}-15`, amount: -spendByMonth[m], finalCategory: 'Dining' }));
-    txns.push(row({ date: `${m}-28`, amount: 3000, finalCategory: null }));
+    txns.push(row({ date: `${m}-28`, amount: 3000, finalCategory: null, txnType: 'income' }));
   }
   const res = lifestyleInflation({ months, currency: 'CAD', transactions: txns });
   const cad = res.byCurrency[0];
@@ -186,7 +224,7 @@ test('no insight when spend growth does not exceed income growth by threshold', 
   for (const m of months) {
     // Spend and income both flat — no inflation.
     txns.push(row({ date: `${m}-15`, amount: -1000, finalCategory: 'Dining' }));
-    txns.push(row({ date: `${m}-28`, amount: 3000, finalCategory: null }));
+    txns.push(row({ date: `${m}-28`, amount: 3000, finalCategory: null, txnType: 'income' }));
   }
   const res = lifestyleInflation({ months, currency: 'CAD', transactions: txns });
   const cad = res.byCurrency[0];
@@ -203,7 +241,7 @@ test('honors a custom outpace threshold', () => {
   };
   for (const m of months) {
     txns.push(row({ date: `${m}-15`, amount: -spend[m], finalCategory: 'Dining' }));
-    txns.push(row({ date: `${m}-28`, amount: 3000, finalCategory: null }));
+    txns.push(row({ date: `${m}-28`, amount: 3000, finalCategory: null, txnType: 'income' }));
   }
   // Spend grew 10%, income flat. Default threshold 10pp -> not strictly greater,
   // so no insight. A 5pp threshold -> insight.

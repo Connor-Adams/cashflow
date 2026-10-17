@@ -22,17 +22,19 @@
  * noisy month. Months with no data are treated as zero, never dropped, so
  * the halves always span equal calendar time.
  *
- * Income classification mirrors explainMonth.tallyByCurrency: positive
- * amounts are income, negative amounts are spend (recorded as absolute
- * value). Pure money-movement rows are excluded so the trend reflects
- * consumption, not portfolio churn or statement payments: negative rows go
- * through the shared `isNonSpend` filter (transfers, brokerage buys, the
- * checking-side leg of a card payment), and positive rows drop
- * `isNonCategorical` flows plus the card-side payment leg.
+ * Classification is the dashboard headline's (summary/classifyTransactionFlow.ts),
+ * shared with explainMonth.tallyByCurrency: negative rows are spend unless
+ * `isNonSpend` (transfers, brokerage buys, the checking-side leg of a card
+ * payment, any investment-account row). Positive rows go through
+ * `classifyPositiveAmount`: only a 'credit' with `txnType='income'` is income;
+ * any other 'credit' (refund, reward, refund-text fallback) nets against spend
+ * and its category, as the dashboard's netSpend does; 'payment' and 'skip'
+ * (untyped deposits, transfers) contribute nothing. `spend` is therefore net
+ * spend, and `savings = income - spend` is unchanged by where a refund lands.
  */
 
 import { num } from '../util/numbers';
-import { isNonCategorical, isNonSpend } from './classifyTransactionFlow';
+import { classifyPositiveAmount, isNonSpend } from './classifyTransactionFlow';
 
 /** Transaction row consumed by the aggregator. Mirrors the columns the
  *  route requests from Sequelize. */
@@ -43,6 +45,10 @@ export interface LifestyleInflationTxnRow {
   finalCategory: string | null;
   txnType: string | null;
   accountType: string | null;
+  /** Merchant text for classifyPositiveAmount's refund/payment keyword
+   *  fallback on positives with no explicit txnType. Optional. */
+  merchantRaw?: string | null;
+  merchantClean?: string | null;
 }
 
 /** One month of aggregated totals for a single currency. */
@@ -366,7 +372,8 @@ export function lifestyleInflation(
     const month = ymOf(txn.date);
     if (!monthSet.has(month)) continue;
     const amount = num(txn.amount);
-    if (amount == null) continue;
+    if (amount == null || amount === 0) continue;
+    let flow: 'spend' | 'income' | 'credit';
     if (amount < 0) {
       // Spend side: same rule as the dashboard's isNonSpend — transfers,
       // brokerage flows, AND the checking-side leg of a statement payment
@@ -374,10 +381,20 @@ export function lifestyleInflation(
       // payment skip a paid-off card month double counts (purchases + payment
       // leg).
       if (isNonSpend(txn.txnType, txn.accountType)) continue;
-    } else if (isNonCategorical(txn.txnType, txn.accountType) || txn.txnType === 'payment') {
-      // Income side: the card-side payment leg and money-movement inflows
-      // are not income.
-      continue;
+      flow = 'spend';
+    } else {
+      // Positive side: the dashboard's router. The card-side payment leg,
+      // money-movement inflows and unsignaled deposits are not income; only
+      // txnType='income' is. Refunds/rewards are credits against spend.
+      const positive = classifyPositiveAmount({
+        txnType: txn.txnType,
+        accountType: txn.accountType,
+        merchantRaw: txn.merchantRaw,
+        merchantClean: txn.merchantClean,
+        category: txn.finalCategory,
+      });
+      if (positive !== 'credit') continue;
+      flow = txn.txnType === 'income' ? 'income' : 'credit';
     }
 
     let months_ = byCurrency.get(txn.currency);
@@ -390,13 +407,13 @@ export function lifestyleInflation(
       bucket = { income: 0, spend: 0, byCategory: new Map<string, number>() };
       months_.set(month, bucket);
     }
-    if (amount < 0) {
-      const abs = Math.abs(amount);
-      bucket.spend += abs;
-      const cat = txn.finalCategory ?? '(uncategorized)';
-      bucket.byCategory.set(cat, (bucket.byCategory.get(cat) ?? 0) + abs);
-    } else {
+    if (flow === 'income') {
       bucket.income += amount;
+    } else {
+      // spend (amount < 0) adds |amount|; a credit (amount > 0) nets it out.
+      bucket.spend -= amount;
+      const cat = txn.finalCategory ?? '(uncategorized)';
+      bucket.byCategory.set(cat, (bucket.byCategory.get(cat) ?? 0) - amount);
     }
   }
 
