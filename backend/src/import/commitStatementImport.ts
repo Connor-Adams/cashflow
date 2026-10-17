@@ -442,7 +442,16 @@ export async function commitStatementImport(
       ...(account.householdId != null ? { householdId: account.householdId } : {}),
     },
   });
-  if (prior && (prior.rowCount ?? 0) > 0) {
+  // A parser fix can make the SAME file yield rows the first import never saw
+  // (the WS 2026-09 chequing statement first imported 12 of its 16 rows). When
+  // this parse finds more rows than the prior import accounted for — inserted
+  // plus skipped as duplicates — skip the short-circuit and let the row-level
+  // dedup below insert just the missing ones. Otherwise a parser fix could
+  // never reach a statement that was already imported.
+  const priorRowsSeen = (prior?.rowCount ?? 0) + (prior?.skippedDuplicateCount ?? 0);
+  const parsedRows =
+    preview.transactions.length + preview.investmentActivities.length + preview.holdings.length;
+  if (prior && (prior.rowCount ?? 0) > 0 && parsedRows <= priorRowsSeen) {
     // Transactions are what this short-circuit exists to suppress, and it
     // still suppresses every one of them. Rate windows are not transactions:
     // they are idempotent reference data keyed by UNIQUE(account_id,
