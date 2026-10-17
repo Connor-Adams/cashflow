@@ -88,6 +88,23 @@ function wsBundleLine(r: WsBundleFileResult): string {
   return `${where}: ${parts.join(' · ')}`
 }
 
+/**
+ * Result banner for a WS bundle import. Bundle-level warnings (e.g. the
+ * post-import entity re-tag failed) are attached to every file result, so
+ * each distinct one is shown once, and any warning downgrades the banner.
+ */
+function wsBundleFeedback(results: WsBundleFileResult[]) {
+  const ok = results.filter((r) => !r.error).length
+  const inserted = results.reduce((s, r) => s + r.inserted, 0)
+  const warnings = [...new Set(results.flatMap((r) => r.warnings ?? []))]
+  const clean = ok === results.length && warnings.length === 0
+  return {
+    variant: clean ? ('success' as const) : ('warning' as const),
+    title: `WS bundle: ${ok}/${results.length} imported · ${inserted} row(s)`,
+    lines: [...results.slice(0, 8).map(wsBundleLine), ...warnings.slice(0, 5)],
+  }
+}
+
 type MultiUploadResponse = { results: UploadResult[] }
 
 const PDF_BUNDLE_URL = '/api/import/upload-pdf-bundle'
@@ -272,16 +289,7 @@ export function ImportModal({
         const fd = new FormData()
         files.forEach((f) => fd.append('files', f))
         const { results } = await postFormData<{ results: WsBundleFileResult[] }>(WS_BUNDLE_URL, fd)
-        const ok = results.filter((r) => !r.error).length
-        const inserted = results.reduce((s, r) => s + r.inserted, 0)
-        // Bundle-level warnings (e.g. the post-import entity re-tag failed) are
-        // attached to every file result — show each distinct one once.
-        const warnings = [...new Set(results.flatMap((r) => r.warnings ?? []))]
-        setFeedback({
-          variant: ok === results.length && warnings.length === 0 ? 'success' : 'warning',
-          title: `WS bundle: ${ok}/${results.length} imported · ${inserted} row(s)`,
-          lines: [...results.slice(0, 8).map(wsBundleLine), ...warnings.slice(0, 5)],
-        })
+        setFeedback(wsBundleFeedback(results))
         if (onAccountsChanged) onAccountsChanged()
         else onCommitted()
         reset({ keepFeedback: true })
