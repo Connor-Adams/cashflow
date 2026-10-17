@@ -5,6 +5,7 @@ import type { Transaction } from 'sequelize';
 // import cycle that the fallow audit flags. Category.ts only pulls normalizeName.
 import { Category } from '../models/Category';
 import { normalizeCategoryName } from './normalizeName';
+import { categoryLeafSegment } from './path';
 
 /**
  * Resolve a category NAME (a flat, pathless name from rules / import /
@@ -18,6 +19,11 @@ import { normalizeCategoryName } from './normalizeName';
  *   3. else (none, or ambiguous: multiple same-named nested nodes and no root)
  *      find-or-create a flat root, the deterministic legacy behaviour.
  *
+ * A display path ("Transportation / Miami Uber" — enrichment copies these from
+ * history) resolves by its LEAF: category names may not contain "/", so the
+ * verbatim string can never name a node, and creating one throws. The leaf goes
+ * through the same household-wide lookup, so the existing nested node is reused.
+ *
  * Null / empty / whitespace name → null.
  */
 export async function resolveCategoryIdByName(
@@ -26,7 +32,7 @@ export async function resolveCategoryIdByName(
   opts: { transaction?: Transaction } = {},
 ): Promise<number | null> {
   if (name == null) return null;
-  const trimmed = name.trim();
+  const trimmed = name.includes('/') ? categoryLeafSegment(name) : name.trim();
   if (!trimmed) return null;
   const nameKey = normalizeCategoryName(trimmed);
 

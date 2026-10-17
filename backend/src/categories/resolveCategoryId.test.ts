@@ -70,3 +70,22 @@ test('creates a root when the name is ambiguous (multiple nested, no root)', asy
   assert.equal(node?.parentId, null, 'ambiguous → deterministic new root');
   assert.equal(await Category.count({ where: { householdId, name: 'Coffee' } }), 3);
 });
+
+// Enrichment copies a category from history, and 259 prod rows carry it as a
+// display path ("Transportation / Miami Uber"). Resolving that verbatim tried
+// to create a category named with a "/", which the model rejects — the throw
+// 500'd every Amex CSV upload containing an Uber charge.
+test('a "Parent / Child" path resolves to the existing child instead of throwing', async () => {
+  const transportation = await Category.create({ householdId, name: 'Transportation', parentId: null });
+  const uber = await Category.create({ householdId, name: 'Miami Uber', parentId: transportation.id });
+
+  const resolved = await resolveCategoryIdByName(householdId, 'Transportation / Miami Uber');
+  assert.equal(resolved, uber.id);
+  assert.equal(await Category.count({ where: { householdId } }), 2, 'nothing new is created');
+});
+
+test('a path whose leaf does not exist yet creates the leaf, never a slash-named node', async () => {
+  const id = await resolveCategoryIdByName(householdId, 'Household / Vape');
+  const node = await Category.findByPk(id!);
+  assert.equal(node?.name, 'Vape');
+});
