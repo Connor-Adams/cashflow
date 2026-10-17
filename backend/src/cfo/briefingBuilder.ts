@@ -30,6 +30,7 @@ import { filterInsightsVisibleTo } from '../insights/visibility';
 import { findRuleProposals } from '../ai/ruleProposals';
 import { synthesizeBriefing } from './synthesizeBriefing';
 import { getOpenAiConfig } from '../config/openai';
+import { logger } from '../observability/logger';
 import {
   computeSafeToSpend,
   type SafeToSpendResult,
@@ -110,7 +111,10 @@ export interface BriefingCounts {
  * Pure formatter for the briefing's `summary` headline. Exported so
  * unit tests can assert label/plural without spinning up the DB.
  */
-export function briefingShortSummary(counts: BriefingCounts): string {
+export function briefingShortSummary(
+  counts: BriefingCounts,
+  failedSources: readonly string[] = [],
+): string {
   const total =
     counts.forecastWarnings +
     counts.safeToSpendLow +
@@ -119,7 +123,14 @@ export function briefingShortSummary(counts: BriefingCounts): string {
     counts.reviewBacklog +
     counts.importIssues +
     counts.anomalies;
-  if (total === 0) return 'All clear — no action items for this briefing window.';
+  if (total === 0) {
+    // "All clear" is a claim that every source was checked. If one failed, an
+    // empty item list means "unknown", not "nothing to do".
+    if (failedSources.length > 0) {
+      return `No action items found, but this briefing is incomplete — couldn't load ${failedSources.join(', ')}.`;
+    }
+    return 'All clear — no action items for this briefing window.';
+  }
   const labels: string[] = [];
   push(labels, counts.forecastWarnings, 'forecast warning', 'forecast warnings');
   push(labels, counts.safeToSpendLow, 'safe-to-spend alert', 'safe-to-spend alerts');
@@ -177,6 +188,17 @@ export interface BuildBriefingResult {
    * itself so the two can never drift.
    */
   model: string;
+  /**
+   * Sub-sources that threw and were left out of this briefing (e.g.
+   * 'safe-to-spend'). Non-empty means the briefing is partial; the summary
+   * then says so instead of implying everything was checked.
+   */
+  failedSources: string[];
+}
+
+/** Appended to any summary (LLM or deterministic) when a sub-source failed. */
+export function incompleteBriefingNote(failedSources: readonly string[]): string {
+  return `Note: this briefing is incomplete — couldn't load ${failedSources.join(', ')}.`;
 }
 
 /** Provenance label for a briefing whose summary came from the counters. */
@@ -286,6 +308,8 @@ export async function buildCfoBriefing(
   params: BuildBriefingParams,
 ): Promise<BuildBriefingResult> {
   const { req, householdId, userId, periodStart, periodEnd, currency } = params;
+  const failedSources: string[] = [];
+  const fetchCtx = { householdId, failedSources };
 
   const [
     safeToSpend,
@@ -296,7 +320,7 @@ export async function buildCfoBriefing(
     reviewBacklogCount,
     importIssues,
   ] = await Promise.all([
-    safeBriefingFetch(() =>
+    safeBriefingFetch(fetchCtx, 'safe-to-spend', () =>
       computeSafeToSpend({
         userId,
         householdId,
@@ -304,8 +328,8 @@ export async function buildCfoBriefing(
         asOfDate: periodEnd,
       }),
     ),
-    safeBriefingFetch(() => loadOpenInsightItems(req, householdId)),
-    safeBriefingFetch(() => findRuleProposals(householdId)),
+    safeBriefingFetch(fetchCtx, 'open insights', () => loadOpenInsightItems(req, householdId)),
+    safeBriefingFetch(fetchCtx, 'rule suggestions', () => findRuleProposals(householdId)),
     loadOverduePlannedEvents(householdId, periodEnd),
     PlannedEvent.findAll({
       where: {
@@ -498,7 +522,7 @@ export async function buildCfoBriefing(
     }
   }
 
-  const fallbackSummary = briefingShortSummary(counts);
+  const fallbackSummary = briefingShortSummary(counts, failedSources);
   const synthesize = params.synthesizeImpl ?? synthesizeBriefing;
   const synthesis = await synthesize({
     items,
@@ -506,10 +530,19 @@ export async function buildCfoBriefing(
     currency,
   });
 
+  // The synthesis pass only sees the items that loaded, so it can't know a
+  // source is missing — append the note to its summary. The deterministic
+  // fallback already names the failed sources when there are no items.
+  let summary = synthesis.summary ?? fallbackSummary;
+  if (failedSources.length > 0 && (synthesis.summary != null || items.length > 0)) {
+    summary = `${summary} ${incompleteBriefingNote(failedSources)}`;
+  }
+
   return {
     actionItems: synthesis.ordered,
-    summary: synthesis.summary ?? fallbackSummary,
+    summary,
     safeToSpendSnapshot,
+    failedSources,
     model:
       synthesis.summary == null
         ? DETERMINISTIC_BRIEFING_MODEL
@@ -520,12 +553,20 @@ export async function buildCfoBriefing(
 /**
  * Run a sub-source builder, returning null if it throws. Each sub-source
  * is independent — we don't want a bad merchant memory row to kill the
- * whole briefing. The route layer logs failures via the run's status.
+ * whole briefing — but a failure is never silent: it is logged with context
+ * and its name is recorded in `ctx.failedSources`, which marks the briefing
+ * partial and keeps the summary from claiming "All clear".
  */
-async function safeBriefingFetch<T>(fn: () => Promise<T>): Promise<T | null> {
+async function safeBriefingFetch<T>(
+  ctx: { householdId: number; failedSources: string[] },
+  source: string,
+  fn: () => Promise<T>,
+): Promise<T | null> {
   try {
     return await fn();
-  } catch {
+  } catch (err) {
+    logger.warn({ err, householdId: ctx.householdId, source }, 'cfo_briefing_source_failed');
+    ctx.failedSources.push(source);
     return null;
   }
 }

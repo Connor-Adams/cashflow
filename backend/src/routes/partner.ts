@@ -240,13 +240,17 @@ async function resolveExcludeNonPartnerInflows(req: Request): Promise<boolean> {
   const override = req.query.excludeNonPartnerInflows;
   if (override === 'true') return true;
   if (override === 'false') return false;
+  let userId: number;
   try {
-    const { user } = currentAuth(req);
-    const row = await CashflowSettings.findOne({ where: { userId: user.id } });
-    if (row) return row.excludeNonPartnerInflows;
+    userId = currentAuth(req).user.id;
   } catch {
-    // No auth context (e.g. tests bypassing middleware) — fall through to default.
+    // No auth context (e.g. tests bypassing middleware) — use the default.
+    return CASHFLOW_SETTINGS_DEFAULTS.excludeNonPartnerInflows;
   }
+  // Deliberately NOT inside the try: a DB failure here must propagate. Falling
+  // back to the default would compute fairness under the wrong preference.
+  const row = await CashflowSettings.findOne({ where: { userId } });
+  if (row) return row.excludeNonPartnerInflows;
   return CASHFLOW_SETTINGS_DEFAULTS.excludeNonPartnerInflows;
 }
 

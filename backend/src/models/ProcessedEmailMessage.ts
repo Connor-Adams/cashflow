@@ -76,6 +76,19 @@ export function initProcessedEmailMessage(
       tableName: 'processed_email_messages',
       underscored: true,
       timestamps: true,
+      // Mirrors the migration's unique index. Declaring it is load-bearing:
+      // Sequelize's `upsert` picks its ON CONFLICT target from the model's
+      // declared unique keys, and without this it targets `id` — so
+      // re-recording a message (a retry, a forced reprocess) inserted a second
+      // row on SQLite and violated this index on Postgres (swallowed by the
+      // scanners' recordProcessed catch), leaving the old status in place.
+      indexes: [
+        {
+          name: 'processed_email_messages_household_provider_msg',
+          unique: true,
+          fields: ['household_id', 'provider', 'message_id'],
+        },
+      ],
     },
   );
   return ProcessedEmailMessage;

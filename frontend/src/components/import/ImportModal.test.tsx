@@ -217,6 +217,30 @@ describe('ImportModal — Wealthsimple bundle', () => {
     expect(await screen.findByText(/Wealthsimple Corporate Chequing/)).toBeInTheDocument()
   })
 
+  it('surfaces bundle warnings (e.g. a failed entity re-tag) in the banner, once', async () => {
+    // The backend attaches a bundle-level warning (post-import entity heal
+    // failed) to every file result. It must reach the user — and once, not
+    // once per file.
+    const warning = 'Imported, but re-tagging transactions with their account entity failed'
+    const row = (file: string, accountName: string) => ({
+      file,
+      accountName,
+      accountCreated: false,
+      inserted: 3,
+      skippedDuplicates: 0,
+      rowErrors: 0,
+      parseErrors: [],
+      warnings: [warning],
+    })
+    await submitWsBundle([
+      row('Chequing-monthly-statement-transactions-WK3DD9X35CAD-2026-08-01.csv', 'WS Chequing'),
+      row('Corporate chequing-monthly-statement-transactions-WK79NVW07CAD-2026-08-01.csv', 'WS Corp'),
+    ])
+
+    expect(await screen.findByText(/2\/2 imported/)).toBeInTheDocument()
+    expect(screen.getAllByText(warning)).toHaveLength(1)
+  })
+
   it('reports duplicates skipped on a re-import instead of a bare 0 rows', async () => {
     // Re-importing the same statement inserts nothing and skips every row as a
     // duplicate. `skippedDuplicates` is the field the backend actually sends;

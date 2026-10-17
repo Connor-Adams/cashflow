@@ -1,4 +1,4 @@
-import { test, beforeEach } from 'node:test';
+import { test, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { Account } from '../models';
@@ -108,4 +108,41 @@ test('findOrCreateAccount allows same bank account number in different household
 test('findOrCreateAccount uses last 4 digits for account name', async () => {
   const result = await findOrCreateAccount('9876543210-1234', 'rbc', testHouseholdId);
   assert(result.account.name.includes('1234'));
+});
+
+// A real DB failure during auto-match must surface, not masquerade as
+// "CSV has no Account Number" (which sends the user chasing a non-problem).
+const RBC_CSV_WITH_ACCOUNT_NUMBER =
+  'Account Type,Account Number,Transaction Date,Cheque Number,Description 1,Description 2,CAD$,USD$\n' +
+  'Chequing,02022-5016985,1/15/2026,,COFFEE SHOP,,-4.50,\n';
+
+test('importCsvFile: a DB error during Account Number auto-match propagates (not reported as "no Account Number")', async () => {
+  const findOne = mock.method(Account, 'findOne', async () => {
+    throw new Error('connection terminated unexpectedly');
+  });
+  try {
+    await assert.rejects(
+      importCsvFile({
+        buffer: Buffer.from(RBC_CSV_WITH_ACCOUNT_NUMBER),
+        fileName: 'export.csv',
+        profileId: 'rbc',
+        householdId: testHouseholdId,
+      }),
+      /connection terminated unexpectedly/,
+    );
+  } finally {
+    findOne.mock.restore();
+  }
+});
+
+test('importCsvFile: a CSV with an Account Number auto-matches/creates the account', async () => {
+  const result = (await importCsvFile({
+    buffer: Buffer.from(RBC_CSV_WITH_ACCOUNT_NUMBER),
+    fileName: 'export.csv',
+    profileId: 'rbc',
+    householdId: testHouseholdId,
+  })) as Record<string, unknown>;
+  assert.notEqual(result.reason, 'unknown_account', JSON.stringify(result));
+  const created = await Account.findOne({ where: { householdId: testHouseholdId } });
+  assert.ok(created, 'auto-match should have created an account');
 });

@@ -1,4 +1,4 @@
-import { before, beforeEach, after, test } from 'node:test';
+import { before, beforeEach, after, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import type { Request } from 'express';
@@ -507,4 +507,68 @@ test('briefing records the model as provenance when synthesis writes the summary
     'deterministic',
     'a synthesized briefing must not be stored as deterministic',
   );
+});
+
+const ZERO_COUNTS = {
+  forecastWarnings: 0,
+  safeToSpendLow: 0,
+  newSubscriptions: 0,
+  ruleSuggestions: 0,
+  reviewBacklog: 0,
+  importIssues: 0,
+  anomalies: 0,
+};
+
+test('briefingShortSummary never says "All clear" when a source failed to load', () => {
+  const out = briefingShortSummary(ZERO_COUNTS, ['open insights']);
+  assert.doesNotMatch(out, /all clear/i);
+  assert.match(out, /open insights/);
+});
+
+test('a failing sub-source is recorded on the briefing, not dropped into an "All clear"', async () => {
+  const householdId = 558;
+  const findAll = mock.method(Insight, 'findAll', async () => {
+    throw new Error('relation "insights" does not exist');
+  });
+  try {
+    const result = await buildCfoBriefing({
+      req: fakeReq(1, householdId),
+      householdId,
+      userId: 1,
+      periodStart: '2026-09-01',
+      periodEnd: '2026-09-07',
+      currency: 'CAD',
+      synthesizeImpl: async ({ items }) => ({ summary: null, ordered: items }),
+    });
+    assert.ok(
+      result.failedSources.includes('open insights'),
+      `failedSources should name the failed source: ${JSON.stringify(result.failedSources)}`,
+    );
+    assert.doesNotMatch(result.summary, /all clear/i);
+    assert.match(result.summary, /open insights/);
+  } finally {
+    findAll.mock.restore();
+  }
+});
+
+test('a synthesized summary still carries the incomplete-briefing note when a source failed', async () => {
+  const householdId = 559;
+  const findAll = mock.method(Insight, 'findAll', async () => {
+    throw new Error('boom');
+  });
+  try {
+    const result = await buildCfoBriefing({
+      req: fakeReq(1, householdId),
+      householdId,
+      userId: 1,
+      periodStart: '2026-09-01',
+      periodEnd: '2026-09-07',
+      currency: 'CAD',
+      synthesizeImpl: async ({ items }) => ({ summary: 'All clear this week.', ordered: items }),
+    });
+    assert.match(result.summary, /incomplete/i);
+    assert.match(result.summary, /open insights/);
+  } finally {
+    findAll.mock.restore();
+  }
 });

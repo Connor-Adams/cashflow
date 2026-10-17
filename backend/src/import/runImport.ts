@@ -123,20 +123,23 @@ async function tryAutoMatchAccount(
   profileId: string,
   householdId: number | null
 ): Promise<{ account: AccountModel; matchedBy: string } | null> {
+  const { profiles } = await import('./csvProfiles');
+  const profile = profiles[profileId] || profiles.generic_simple;
+  const csvAccountNumber = extractAccountNumber(records, headers, profile);
+
+  if (!csvAccountNumber) {
+    return null; // No account number in CSV
+  }
+
+  // A failure here is a real error (DB down, constraint violation), NOT "the
+  // CSV has no Account Number" — the null return above is the only "no match"
+  // signal. Swallowing it reported a DB outage as a CSV-format problem.
   try {
-    const { profiles } = await import('./csvProfiles');
-    const profile = profiles[profileId] || profiles.generic_simple;
-    const csvAccountNumber = extractAccountNumber(records, headers, profile);
-
-    if (!csvAccountNumber) {
-      return null; // No account number in CSV
-    }
-
     const result = await findOrCreateAccount(csvAccountNumber, profileId, householdId);
     return { account: result.account, matchedBy: result.matchedBy };
   } catch (err) {
-    logger.debug(`Auto-match account failed: ${err}`);
-    return null;
+    logger.error({ err, profileId, householdId }, 'import_auto_match_account_failed');
+    throw err;
   }
 }
 

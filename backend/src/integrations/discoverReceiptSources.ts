@@ -33,6 +33,7 @@ import {
   receiptCurrencyOrDefault,
   ensureFreshAccessToken,
   parseReceiptText,
+  loadSeenEmailMessageIds,
 } from './scanReceipts';
 import { collectPdfParts, extractPdfReceiptText as realExtractPdfReceiptText } from './pdfAttachments';
 import {
@@ -141,14 +142,11 @@ export async function discoverReceiptSources(
   });
   callbacks.onPhase?.({ phase: 'processing-start', total: summaries.length });
 
-  const seen = new Set<string>();
-  if (summaries.length > 0) {
-    const seenRows = await ProcessedEmailMessage.findAll({
-      where: { householdId: opts.householdId, provider: 'google', messageId: summaries.map((s) => s.id) },
-      attributes: ['messageId'],
-    });
-    for (const r of seenRows) seen.add(r.messageId);
-  }
+  // Transient failures (extraction_failed / ai_capped) still inside their
+  // retry window are not "seen", so this run retries them. Discovery's query
+  // is a fixed 30-day window (not lastScanAt), which outlasts the retry
+  // window, so a failed message is re-listed without an explicit re-fetch.
+  const seen = await loadSeenEmailMessageIds(opts.householdId, summaries.map((s) => s.id));
 
   const results: DiscoveryResultMessage[] = [];
   let autoIngested = 0;

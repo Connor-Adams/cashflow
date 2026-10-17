@@ -59,9 +59,12 @@ function useDiscoveredAccounts(): DiscoveredState {
     setLoading(true)
     setLoadError(false)
     try {
+      // Both loads must succeed: an empty household list would render the
+      // "link to existing" picker with nothing in it and push the user toward
+      // creating a duplicate account, so a failed /api/accounts is a load error.
       const [discovered, hh] = await Promise.all([
         getSimplefinAccounts(),
-        getJson<Account[]>('/api/accounts').catch(() => [] as Account[]),
+        getJson<Account[]>('/api/accounts'),
       ])
       if (!mountedRef.current) return
       setAccounts(Array.isArray(discovered.accounts) ? discovered.accounts : [])
