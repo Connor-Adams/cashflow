@@ -6,7 +6,7 @@ import { NativeSelect } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
 import { useItemsQuery, type ItemsFilters } from '@/hooks/useItems'
 import { hasActiveItemsFilters } from '@/hooks/useItems'
-import { patchJson } from '@/lib/api'
+import { postJson } from '@/lib/api'
 import { Link } from 'react-router-dom'
 import { formatMoney } from '../../lib/formatMoney'
 import type { CardOwnershipView, ItemRow } from '@cashflow/shared'
@@ -90,7 +90,7 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched, onClearFilter
     setBulkSaving(true)
     setBulkError(null)
     try {
-      await patchJson('/api/external-order-items/bulk-patch', {
+      await postJson('/api/external-order-items/bulk-patch', {
         itemIds: [...selected],
         categoryOverride: pendingCategory === '' ? null : pendingCategory,
       })

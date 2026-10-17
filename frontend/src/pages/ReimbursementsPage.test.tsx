@@ -1,9 +1,10 @@
 import React from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ToastProvider } from '@/components/ui/toast'
 import { ReimbursementsPage } from './ReimbursementsPage'
+import * as api from '../lib/api'
 import type {
   ReimbursementView,
   ReimbursementListResponse,
@@ -102,7 +103,7 @@ vi.mock('../lib/api', () => ({
     return Promise.resolve({})
   }),
   postJson: vi.fn(() => Promise.resolve({})),
-  patchJson: vi.fn(() => Promise.resolve({})),
+  putJson: vi.fn(() => Promise.resolve({})),
   deleteReq: vi.fn(() => Promise.resolve(undefined)),
 }))
 
@@ -167,5 +168,14 @@ describe('ReimbursementsPage', () => {
     expect(
       await screen.findByText(/nothing outstanding/i),
     ).toBeInTheDocument()
+  })
+
+  it('marking a claim received PUTs the status (the backend has no PATCH route)', async () => {
+    renderPage()
+    const row = (await screen.findByText('Acme Insurer')).closest('tr')!
+    fireEvent.click(within(row).getByTitle('Mark as received'))
+    await waitFor(() =>
+      expect(api.putJson).toHaveBeenCalledWith('/api/reimbursements/1', { status: 'received' }),
+    )
   })
 })

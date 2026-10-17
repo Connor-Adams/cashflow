@@ -9,7 +9,7 @@ void React
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
-  return { ...actual, getJson: vi.fn(), patchJson: vi.fn() }
+  return { ...actual, getJson: vi.fn(), postJson: vi.fn() }
 })
 
 const sample: ItemRow[] = [
@@ -60,7 +60,7 @@ const sample: ItemRow[] = [
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(api.getJson).mockResolvedValue({ items: sample, nextCursor: null })
-  vi.mocked(api.patchJson).mockResolvedValue({} as never)
+  vi.mocked(api.postJson).mockResolvedValue({} as never)
 })
 
 async function selectFirstTwo() {
@@ -107,10 +107,10 @@ describe('ItemsBrowse', () => {
       expect.arrayContaining(['— Clear category (uncategorized)', 'Grocery', 'Office'])
     )
     expect(dialog).toBeInTheDocument()
-    expect(api.patchJson).not.toHaveBeenCalled()
+    expect(api.postJson).not.toHaveBeenCalled()
   })
 
-  it('applying a chosen category PATCHes bulk-patch, clears selection, fires callback', async () => {
+  it('applying a chosen category POSTs bulk-patch, clears selection, fires callback', async () => {
     const onItemsPatched = vi.fn()
     render(<ItemsBrowse filters={{}} onOpenItem={() => {}} onItemsPatched={onItemsPatched} />)
     await selectFirstTwo()
@@ -119,7 +119,7 @@ describe('ItemsBrowse', () => {
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Grocery' } })
     fireEvent.click(screen.getByRole('button', { name: /^apply$/i }))
     await waitFor(() =>
-      expect(api.patchJson).toHaveBeenCalledWith('/api/external-order-items/bulk-patch', {
+      expect(api.postJson).toHaveBeenCalledWith('/api/external-order-items/bulk-patch', {
         itemIds: [1, 2],
         categoryOverride: 'Grocery',
       })
@@ -138,7 +138,7 @@ describe('ItemsBrowse', () => {
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: '' } })
     fireEvent.click(screen.getByRole('button', { name: /^apply$/i }))
     await waitFor(() =>
-      expect(api.patchJson).toHaveBeenCalledWith('/api/external-order-items/bulk-patch', {
+      expect(api.postJson).toHaveBeenCalledWith('/api/external-order-items/bulk-patch', {
         itemIds: [1, 2],
         categoryOverride: null,
       })
@@ -152,7 +152,7 @@ describe('ItemsBrowse', () => {
     await screen.findByRole('dialog')
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(api.patchJson).not.toHaveBeenCalled()
+    expect(api.postJson).not.toHaveBeenCalled()
     expect(screen.getByText(/2 selected/i)).toBeInTheDocument()
   })
 
