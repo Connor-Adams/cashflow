@@ -66,6 +66,7 @@ interface TxnOptions {
   currency?: string;
   hstGstAmount?: number | null;
   deductiblePercent?: number;
+  txnType?: string;
 }
 
 async function createTransaction(
@@ -88,6 +89,7 @@ async function createTransaction(
     merchantClean: 'Test',
     amount: amount.toFixed(4),
     currency: options.currency ?? 'CAD',
+    txnType: options.txnType ?? 'purchase',
     notes: null,
     sourceReference: null,
     sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
@@ -271,9 +273,12 @@ test('DELETE /api/tax/reserve/settings/:currency: idempotent when no row exists'
 test('GET /api/tax/reserve/summary: per-quarter rollup with applied percent', async () => {
   // Seed Q1 business income + expense in CAD with HST.
   // Use the OTHER household for isolation from the earlier tests.
+  // Only income-classified rows count as business income (same rule as the
+  // dashboard headline), so the revenue row is typed explicitly.
   await createTransaction(otherHouseholdId, otherAccountId, '2026-01-15', 4000, {
     business: true,
     hstGstAmount: 520,
+    txnType: 'income',
   });
   await createTransaction(otherHouseholdId, otherAccountId, '2026-02-20', -1000, {
     business: true,
