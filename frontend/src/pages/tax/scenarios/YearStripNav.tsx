@@ -25,7 +25,15 @@ import { Button } from '@connor-adams/designsystem'
 
 interface ChainEntryShape {
   scenario: { id: number; year: number; kind: string; name: string };
-  computed?: unknown;
+  /** null when that year's return could not be computed — see `error`. */
+  computed?: unknown | null;
+  /**
+   * Why this year has no computed return. The backend isolates per-year
+   * compute failures so one bad year (typically a projection past the last
+   * encoded rate table) doesn't take down the whole chain; the year is still
+   * listed and selectable, just flagged.
+   */
+  error?: string | null;
 }
 
 interface Props {
@@ -66,6 +74,7 @@ export function YearStripNav({
             const isActive =
               scenario.year === activeYear &&
               (activeScenarioId === null || activeScenarioId === scenario.id);
+            const label = `${scenario.name}${scenario.kind === 'projection_root' ? ' (projection)' : ''}`;
             return (
               <li key={scenario.id}>
                 <Button
@@ -74,7 +83,7 @@ export function YearStripNav({
                   size="sm"
                   onClick={() => onSelectYear(scenario.year, scenario.id)}
                   aria-current={isActive ? 'page' : undefined}
-                  title={`${scenario.name}${scenario.kind === 'projection_root' ? ' (projection)' : ''}`}
+                  title={entry.error ? `${label} — ${entry.error}` : label}
                 >
                   <span>{scenario.year}</span>
                   {scenario.kind === 'projection_root' && (
@@ -83,6 +92,14 @@ export function YearStripNav({
                       className="ml-1 text-xs text-muted-foreground"
                     >
                       proj
+                    </span>
+                  )}
+                  {entry.error && (
+                    <span
+                      aria-label="year failed to compute"
+                      className="ml-1 text-xs text-destructive"
+                    >
+                      !
                     </span>
                   )}
                 </Button>

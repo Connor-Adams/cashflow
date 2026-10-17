@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { Op } from 'sequelize';
+import { Op, type Transaction } from 'sequelize';
 import {
   sequelize,
   ExternalOrder,
@@ -8,6 +8,8 @@ import {
   ExternalOrderTender,
   TransactionOrderLink,
 } from '../models';
+import { findOrCreateExternalOrderForDedupe } from '../models/externalOrderDedupe';
+import { planItemRefresh, planTenderRefresh } from '../import/planOrderRefresh';
 import { currentAuth } from '../auth/middleware';
 import { defaultCurrency } from '../config/env';
 import { logger } from '../observability/logger';
@@ -17,11 +19,14 @@ import {
   type ExtractedReceiptOrder,
 } from '../ai/extractReceiptItems';
 import { parsePurchaseHistoryCsv } from '../import/parsePurchaseHistoryCsv';
+import { buildExternalOrderItemRows } from '../import/externalOrderItemRows';
 import { extractPdfLines } from '../import/pdf/extractLines';
 import {
   findReceiptPdfParser,
   registerBuiltInReceiptPdfParsers,
 } from '../import/pdf/receipts/registry';
+import type { ReceiptPdfParser } from '../import/pdf/receipts/types';
+import { importReceiptPdfsBulk } from '../import/pdf/receipts/importReceiptPdfs';
 import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
 import { categorizeAndApplyReceiptItems } from '../import/categorizeReceiptItems';
 import {
@@ -115,6 +120,19 @@ function singleFile(uploader: ReturnType<typeof multer>, fieldName: string) {
   };
 }
 
+/** Wrap a multer array-field handler the same way singleFile does. */
+function arrayFiles(uploader: ReturnType<typeof multer>, fieldName: string, maxCount: number) {
+  return (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
+    uploader.array(fieldName, maxCount)(req as never, res as never, (err: unknown) => {
+      if (err) return next(err);
+      next();
+    });
+  };
+}
+
+/** Upper bound on one bulk request. Files are parsed sequentially in-process. */
+const BULK_RECEIPT_MAX_FILES = 25;
+
 type UploadedFile = { mimetype: string; buffer: Buffer; originalname: string };
 
 /** Extract the multer-parsed `file` from the request, sending 400 if missing. Returns null when missing. */
@@ -130,7 +148,7 @@ function requireUploadedFile(req: import('express').Request, res: import('expres
 export async function persistExtractedOrder(
   extracted: ExtractedReceiptOrder,
   opts: { userId: number | null; householdId: number | null; source: string },
-): Promise<{ order: ExternalOrder; created: boolean }> {
+): Promise<{ order: ExternalOrder; created: boolean; refreshed: boolean }> {
   if (extracted.total == null && extracted.items.length === 0) {
     const err = new Error('Receipt extraction returned no usable data') as Error & {
       status?: number;
@@ -151,7 +169,11 @@ export async function persistExtractedOrder(
   ].join(':');
 
   return sequelize.transaction(async (t) => {
-    const [order, created] = await ExternalOrder.findOrCreate({
+    // findOrCreateExternalOrderForDedupe (not ExternalOrder.findOrCreate)
+    // restores a row already soft-deleted by mergeDuplicateAmazonOrders
+    // instead of colliding with the unique (household_id, dedupe_key) index
+    // on create().
+    const [order, created] = await findOrCreateExternalOrderForDedupe({
       where:
         opts.householdId != null
           ? { householdId: opts.householdId, dedupeKey }
@@ -176,18 +198,18 @@ export async function persistExtractedOrder(
       transaction: t,
     });
     if (created && extracted.items.length > 0) {
+      // buildExternalOrderItemRows resolves the category FK before the write —
+      // a static bulkCreate skips the model's beforeSave hook, so the id has to
+      // be supplied explicitly and the string has to be the leaf's FLAT name.
+      // The transaction goes with it so a rollback also unwinds any category
+      // the resolve created.
       await ExternalOrderItem.bulkCreate(
-        extracted.items.map((it) => ({
+        (await buildExternalOrderItemRows({
           externalOrderId: order.id,
-          title: it.title,
-          quantity: it.quantity,
-          unitPrice: it.unitPrice != null ? String(it.unitPrice) : null,
-          totalPrice: it.totalPrice != null ? String(it.totalPrice) : null,
-          inferredCategory: it.inferredCategory,
-          businessUsePercent: null,
-          confidence: null,
-          itemNumber: it.vendorItemId ?? null,
-          rawPayload: it as unknown,
+          householdId: opts.householdId,
+          items: extracted.items,
+          transaction: t,
+          carryBusinessUsePercent: false,
         })) as never[],
         { transaction: t },
       );
@@ -204,8 +226,85 @@ export async function persistExtractedOrder(
         { transaction: t },
       );
     }
-    return { order, created };
+    // Already on file: refresh the parser-owned fields so an order ingested by
+    // an older parser picks up fixes, without disturbing AI/user-owned columns.
+    const refreshed = created
+      ? false
+      : await refreshExistingOrder(order, extracted, t);
+
+    return { order, created, refreshed };
   });
+}
+
+/**
+ * Update parser-owned columns on an order that already existed. Returns whether
+ * anything actually changed. See planOrderRefresh for the safety rules.
+ */
+async function refreshExistingOrder(
+  order: ExternalOrder,
+  extracted: ExtractedReceiptOrder,
+  t: Transaction,
+): Promise<boolean> {
+  const [storedItems, storedTenders] = await Promise.all([
+    ExternalOrderItem.findAll({
+      where: { externalOrderId: order.id },
+      order: [['id', 'ASC']],
+      transaction: t,
+    }),
+    ExternalOrderTender.findAll({
+      where: { externalOrderId: order.id },
+      order: [['sequence', 'ASC'], ['id', 'ASC']],
+      transaction: t,
+    }),
+  ]);
+
+  const itemPlan = planItemRefresh(
+    extracted.items,
+    storedItems.map((i) => ({
+      id: i.id,
+      title: i.title,
+      quantity: i.quantity,
+      unitPrice: i.unitPrice,
+      totalPrice: i.totalPrice,
+      itemNumber: i.itemNumber,
+    })),
+  );
+  const tenderPlan = planTenderRefresh(
+    extracted.tenders,
+    storedTenders.map((x) => ({
+      id: x.id,
+      paymentLast4: x.paymentLast4,
+      network: x.network,
+      amount: x.amount,
+    })),
+  );
+
+  if (itemPlan.skipped || tenderPlan.skipped) {
+    logger.info({
+      orderId: order.id,
+      itemsSkipped: itemPlan.skipped,
+      tendersSkipped: tenderPlan.skipped,
+      parsedItems: extracted.items.length,
+      storedItems: storedItems.length,
+    }, 'external_order_refresh_skipped');
+  }
+
+  for (const u of itemPlan.updates) {
+    await ExternalOrderItem.update(u.fields as never, { where: { id: u.id }, transaction: t });
+  }
+  for (const u of tenderPlan.updates) {
+    await ExternalOrderTender.update(u.fields as never, { where: { id: u.id }, transaction: t });
+  }
+
+  const changed = itemPlan.updates.length + tenderPlan.updates.length;
+  if (changed > 0) {
+    logger.info({
+      orderId: order.id,
+      itemsUpdated: itemPlan.updates.length,
+      tendersUpdated: tenderPlan.updates.length,
+    }, 'external_order_refreshed');
+  }
+  return changed > 0;
 }
 
 /**
@@ -522,6 +621,54 @@ router.post(
   },
 );
 
+type ReceiptImportOutcome = {
+  order: ExternalOrder;
+  created: boolean;
+  refreshed: boolean;
+  extracted: Awaited<ReturnType<ReceiptPdfParser['parse']>>['extracted'];
+  warnings: string[];
+  parser: ReceiptPdfParser;
+  matchSummary: Awaited<ReturnType<typeof matchReceiptOrderToTransactions>>;
+};
+
+/**
+ * Parse one receipt PDF, persist the order (deduped), and match it to
+ * transactions. Returns null when no registered parser recognises the PDF.
+ * Shared by the single-file and bulk routes so both behave identically.
+ */
+async function importOneReceiptPdf(
+  file: UploadedFile,
+  ctx: { userId: number | null; householdId: number | null },
+): Promise<ReceiptImportOutcome | null> {
+  const lines = await extractPdfLines(file.buffer);
+  registerBuiltInReceiptPdfParsers();
+  const parser = findReceiptPdfParser(lines);
+  if (!parser) return null;
+
+  const { extracted, warnings } = parser.parse(lines, { defaultCurrency: 'CAD' });
+
+  const { order, created, refreshed } = await persistExtractedOrder(extracted, {
+    userId: ctx.userId,
+    householdId: ctx.householdId,
+    source: `${parser.id}-pdf`,
+  });
+
+  const matchSummary = ctx.householdId != null
+    ? await matchReceiptOrderToTransactions({
+        externalOrderId: order.id,
+        householdId: ctx.householdId,
+      })
+    : { created: 0, updated: 0, tendersProcessed: 0, candidatesScanned: 0 };
+
+  if (created) {
+    await categorizeAndApplyReceiptItems({ householdId: ctx.householdId, orderId: order.id });
+    await maybeExpandIngestedOrderItemNames(order);
+    kickCostcoProductResolution(order);
+  }
+
+  return { order, created, refreshed, extracted, warnings, parser, matchSummary };
+}
+
 /**
  * POST /api/external-orders/import-pdf
  * multipart with field `file` (application/pdf)
@@ -546,39 +693,21 @@ router.post(
         return;
       }
 
-      const lines = await extractPdfLines(file.buffer);
-      registerBuiltInReceiptPdfParsers();
-      const parser = findReceiptPdfParser(lines);
-      if (!parser) {
+      const outcome = await importOneReceiptPdf(file, {
+        userId: auth.user.id,
+        householdId: auth.household.id,
+      });
+      if (!outcome) {
         res.status(422).json({ error: 'no receipt parser matched this PDF' });
         return;
       }
-
-      const { extracted, warnings } = parser.parse(lines, { defaultCurrency: 'CAD' });
-
-      const { order, created } = await persistExtractedOrder(extracted, {
-        userId: auth.user.id,
-        householdId: auth.household.id,
-        source: `${parser.id}-pdf`,
-      });
-
-      const matchSummary = auth.household.id != null
-        ? await matchReceiptOrderToTransactions({
-            externalOrderId: order.id,
-            householdId: auth.household.id,
-          })
-        : { created: 0, updated: 0, tendersProcessed: 0, candidatesScanned: 0 };
-
-      if (created) {
-        await categorizeAndApplyReceiptItems({ householdId: auth.household.id, orderId: order.id })
-        await maybeExpandIngestedOrderItemNames(order);
-        kickCostcoProductResolution(order);
-      }
+      const { order, created, refreshed, extracted, warnings, parser, matchSummary } = outcome;
 
       logger.info({
         source: `${parser.id}-pdf`,
         orderId: order.id,
         created,
+        refreshed,
         vendor: extracted.vendor,
         items: extracted.items.length,
         tenders: extracted.tenders.length,
@@ -591,11 +720,68 @@ router.post(
       res.json({
         order: order.toJSON(),
         created,
+        refreshed,
         extracted,
         warnings,
         parserId: parser.id,
         match: matchSummary,
       });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+/**
+ * POST /api/external-orders/import-pdf-bulk
+ * multipart with repeated field `files` (application/pdf), up to
+ * BULK_RECEIPT_MAX_FILES per request.
+ *
+ * Files are parsed sequentially and one bad file never fails the batch: every
+ * file gets its own entry in `results` with status imported | duplicate |
+ * failed. Re-uploading a receipt already on file dedupes to the existing order
+ * and reports `duplicate`, so re-running a folder is safe.
+ */
+router.post(
+  '/import-pdf-bulk',
+  importUploadLimiter,
+  arrayFiles(pdfUpload, 'files', BULK_RECEIPT_MAX_FILES),
+  async (req, res, next) => {
+    try {
+      const auth = currentAuth(req);
+      const files = ((req as unknown as { files?: UploadedFile[] }).files ?? []);
+      if (files.length === 0) {
+        res.status(400).json({ error: 'at least one file is required (field `files`)' });
+        return;
+      }
+
+      const summary = await importReceiptPdfsBulk(files, async (file) => {
+        const outcome = await importOneReceiptPdf(file, {
+          userId: auth.user.id,
+          householdId: auth.household.id,
+        });
+        if (!outcome) throw new Error('no receipt parser matched this PDF');
+        return {
+          created: outcome.created,
+          refreshed: outcome.refreshed,
+          parserId: outcome.parser.id,
+          orderId: outcome.order.id,
+          warnings: outcome.warnings,
+          linksCreated: outcome.matchSummary.created,
+          linksUpdated: outcome.matchSummary.updated,
+        };
+      });
+
+      logger.info({
+        householdId: auth.household.id,
+        total: summary.total,
+        imported: summary.imported,
+        refreshed: summary.refreshed,
+        duplicates: summary.duplicates,
+        failed: summary.failed,
+      }, 'external_orders_bulk_imported');
+
+      res.json(summary);
     } catch (e) {
       next(e);
     }

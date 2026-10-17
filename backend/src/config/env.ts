@@ -35,6 +35,10 @@ export type EnvConfig = {
   dividendMatchCron: string;
   subscriptionPriceDetectEnabled: boolean;
   subscriptionPriceDetectCron: string;
+  insightDetectorsEnabled: boolean;
+  insightDetectorsCron: string;
+  interestAllocationEnabled: boolean;
+  interestAllocationCron: string;
 };
 
 export function parsePort(raw: string | undefined): number {
@@ -184,6 +188,25 @@ export function loadEnvConfig(
     nodeEnv,
   );
   const subscriptionPriceDetectCron = e.SUBSCRIPTION_PRICE_DETECT_CRON?.trim() || '0 2 * * *';
+  const insightDetectorsEnabled = parseInsightDetectorsEnabled(
+    e.INSIGHT_DETECTORS_ENABLED,
+    nodeEnv,
+  );
+  // 05:00 UTC — after detect_subscription_price_changes at 02:00, so
+  // subscription price hikes are already recorded when detectRecurringIncrease
+  // builds its skip-set.
+  const insightDetectorsCron = e.INSIGHT_DETECTORS_CRON?.trim() || '0 5 * * *';
+  const interestAllocationEnabled = parseInterestAllocationEnabled(
+    e.INTEREST_ALLOCATION_ENABLED,
+    nodeEnv,
+  );
+  // Every 5 minutes, and it is a SAFETY NET, not the mechanism: the triggers
+  // (statement import, loan retag) drain within seconds via
+  // contacts/interestAllocationCoordinator. This tick exists to collect work
+  // that a drain left queued — a household mid-run, or a pass that lost the
+  // advisory lock to another instance. An empty queue costs one no-op handler
+  // call and zero queries, which is why it can afford to be this frequent.
+  const interestAllocationCron = e.INTEREST_ALLOCATION_CRON?.trim() || '*/5 * * * *';
 
   return {
     csvUploadDir,
@@ -215,7 +238,27 @@ export function loadEnvConfig(
     dividendMatchCron,
     subscriptionPriceDetectEnabled,
     subscriptionPriceDetectCron,
+    insightDetectorsEnabled,
+    insightDetectorsCron,
+    interestAllocationEnabled,
+    interestAllocationCron,
   };
+}
+
+/**
+ * Line-of-credit interest reallocation. Default OFF in test so the queue never
+ * drains behind a test's back; ON in dev/prod, where the whole point is that
+ * nobody has to press the button.
+ */
+export function parseInterestAllocationEnabled(
+  raw: string | undefined,
+  nodeEnv: string,
+): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
+  if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
+  if (nodeEnv === 'test') return false;
+  return true;
 }
 
 export function parseWeeklyDigestEnabled(
@@ -344,6 +387,21 @@ export function parseSubscriptionPriceDetectEnabled(
   return true;
 }
 
+/**
+ * Default-off in test so the insight-detectors cron doesn't auto-schedule
+ * during the integration-test suite. Production / dev defaults on.
+ */
+export function parseInsightDetectorsEnabled(
+  raw: string | undefined,
+  nodeEnv: string,
+): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
+  if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
+  if (nodeEnv === 'test') return false;
+  return true;
+}
+
 export function parseDividendDedupDays(raw: string | undefined): number {
   if (raw == null || raw.trim() === '') return 5;
   const n = Number(raw);
@@ -386,6 +444,20 @@ export const dividendMatchEnabled = resolved.dividendMatchEnabled;
 export const dividendMatchCron = resolved.dividendMatchCron;
 export const subscriptionPriceDetectEnabled = resolved.subscriptionPriceDetectEnabled;
 export const subscriptionPriceDetectCron = resolved.subscriptionPriceDetectCron;
+export const insightDetectorsEnabled = resolved.insightDetectorsEnabled;
+export const insightDetectorsCron = resolved.insightDetectorsCron;
+export const interestAllocationEnabled = resolved.interestAllocationEnabled;
+export const interestAllocationCron = resolved.interestAllocationCron;
+/**
+ * Trailing window a reallocation trigger waits before draining, so a burst of
+ * loan retags costs one recomputation rather than one each. Five seconds: long
+ * enough to swallow a burst of clicks, short enough that the People page is
+ * correct by the time anyone navigates to it.
+ */
+export const interestAllocationDebounceMs = parseIntEnv(
+  'INTEREST_ALLOCATION_DEBOUNCE_MS',
+  5_000,
+);
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -438,6 +510,24 @@ function parseBoolEnv(name: string, fallback: boolean): boolean {
 /** Stage 8 ai-batch: enabled when set true AND OPENAI_API_KEY present. */
 export const enrichmentAiEnabled = parseBoolEnv(
   'ENRICHMENT_AI_ENABLED',
+  true,
+);
+/**
+ * Whether the NIGHTLY enrichment backfill is allowed to run the stage-8
+ * ai-batch over the rows the deterministic stages left cold.
+ *
+ * On by default. The cron used to omit the AI flag entirely to avoid recurring
+ * OpenAI cost, which meant the one job that sweeps every review-flagged row
+ * every night was structurally unable to categorise anything the 59 literal
+ * rules and exact-name memory had already missed — production held zero rows
+ * with `auto_source = 'ai'`. Calls now go through a self-hosted litellm proxy,
+ * and the per-run spend is bounded by ENRICHMENT_AI_MAX_MERCHANTS_PER_IMPORT
+ * plus merchant-dedupe, so the cost argument no longer holds.
+ *
+ * It stays env-gated so it can be switched off in an incident without a deploy.
+ */
+export const enrichmentBackfillAiEnabled = parseBoolEnv(
+  'ENRICHMENT_BACKFILL_AI_ENABLED',
   true,
 );
 export const enrichmentAiMaxMerchants = parseIntEnv(

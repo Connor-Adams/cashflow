@@ -12,6 +12,7 @@ import { hashContent, rowFingerprint, stableFingerprint } from './fingerprint';
 import { saveStatementPreview } from './statementPreviewStore';
 import { extractPdfLines } from './pdf/extractLines';
 import { findPdfParser, registerBuiltInPdfParsers } from './pdf/registry';
+import type { PdfParseContext } from './pdf/types';
 import { parseWsInvestRow, type WsRow } from './wealthsimpleInvestParse';
 import {
   parseActivitiesExportRow,
@@ -25,6 +26,7 @@ import type {
   NormalizedHoldingSnapshot,
   NormalizedInvestmentActivity,
   NormalizedSecurity,
+  StatementParseError,
   StatementPreview,
 } from './statementTypes';
 
@@ -102,12 +104,12 @@ function parseInvestmentCsv(
   investmentActivities: NormalizedInvestmentActivity[];
   holdings: NormalizedHoldingSnapshot[];
   warnings: string[];
-  parseErrors: { rowIndex: number; message: string }[];
+  parseErrors: StatementParseError[];
 } {
   const investmentActivities: NormalizedInvestmentActivity[] = [];
   const holdings: NormalizedHoldingSnapshot[] = [];
   const warnings: string[] = [];
-  const parseErrors: { rowIndex: number; message: string }[] = [];
+  const parseErrors: StatementParseError[] = [];
 
   records.forEach((row, index) => {
     const rowIndex = index + 1;
@@ -510,7 +512,7 @@ export async function parseStatementFile(opts: {
     holdings: [] as NormalizedHoldingSnapshot[],
     warnings: [] as string[],
     rowErrors: 0,
-    parseErrors: [] as { rowIndex: number; message: string }[],
+    parseErrors: [] as StatementParseError[],
     overrideBusiness: opts.overrideBusiness === true ? true : undefined,
     duplicateCounts: {
       transactions: 0,
@@ -726,6 +728,12 @@ export async function parseStatementFile(opts: {
       profileInferred: resolved.inferred,
       headers,
       rows: previewRows,
+      // The WS monthly CSV is the same statement the brokerage PDF and the
+      // activities export describe, under different codes and dates (CONT
+      // `transfer` vs DEP `cash_movement`; posting day vs execution day). Its
+      // activities must run through the same cross-source matcher those two
+      // already use, or importing it after either one doubles every event.
+      ...(wsMonthly ? { crossSourceDedup: 'fuzzy-window-5d' as const } : {}),
     };
     await markDuplicates(preview);
     return saveStatementPreview(preview);
@@ -775,7 +783,13 @@ export async function parseStatementFile(opts: {
         error: 'No PDF parser registered for this statement layout',
       };
     }
-    const out = parser.parse(lines, { defaultCurrency });
+    const out = parser.parse(lines, {
+      defaultCurrency,
+      // Lets a parser that serves several account shapes under one layout
+      // (Wealthsimple: brokerage + Cash/Chequing/Save) route rows to the cash
+      // ledger vs investment activity by account rather than by row code.
+      accountType: account.accountType as PdfParseContext['accountType'],
+    });
     const transactions = out.transactions.map((v) => ({
       date: v.date,
       merchantRaw: v.merchantRaw,
@@ -787,6 +801,9 @@ export async function parseStatementFile(opts: {
       // over enrichment's narrative guess in the commit pipeline. undefined for
       // parsers/rows that carry no such signal.
       overrideTxnType: v.overrideTxnType,
+      // The weaker sibling: a type the source guessed from an ambiguous code.
+      // The narrative detector may overrule it. See NormalizedCashTransaction.
+      txnTypeHint: v.txnTypeHint,
       sourceRowFingerprint: rowFingerprint({
         accountId: account.id,
         date: v.date,
@@ -836,6 +853,27 @@ export async function parseStatementFile(opts: {
       usedParser: 'pdf' as const,
       usedProfileId: parser.id,
       ...(parser.crossSourceDedup ? { crossSourceDedup: parser.crossSourceDedup } : {}),
+      // Rate-history rows (RBC Royal Credit Line). Carried verbatim — the
+      // parser already emits fixed-4 decimal strings and ISO dates, and the
+      // commit pipeline is what decides whether they can be persisted.
+      // Omitted entirely when the parser emitted none, so previews for every
+      // other source keep their existing shape.
+      ...(out.ratePeriods && out.ratePeriods.length > 0
+        ? { ratePeriods: out.ratePeriods }
+        : {}),
+      // Statement period + printed balances → account_statements on commit.
+      // Carried whenever the parser read a period, balance or not: a period
+      // with no balance is what the commit warns about.
+      ...(out.header
+        ? {
+            statementSummary: {
+              periodStart: out.header.periodStart,
+              periodEnd: out.header.periodEnd,
+              openingBalance: out.statementBalances?.opening ?? null,
+              closingBalance: out.statementBalances?.closing ?? null,
+            },
+          }
+        : {}),
       transactions,
       investmentActivities,
       holdings,

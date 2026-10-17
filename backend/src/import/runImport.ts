@@ -9,15 +9,15 @@ import {
   HoldingSnapshot,
   Transaction,
   ImportHistory,
-  TransactionSignal,
 } from '../models';
+import { upsertAccountCardIdentifier } from '../models/AccountCardIdentifier';
 import {
   hashContent,
   rowFingerprint,
   stableFingerprint,
   stableIdentityFingerprint,
 } from './fingerprint';
-import { findExistingForDedup } from './dedupExisting';
+import { findExistingForDedup, nearDuplicateWarnings } from './dedupExisting';
 import { loadAllRules } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { resolveProfileIdForImport } from './inferProfile';
@@ -26,10 +26,11 @@ import { inferCsvDateOrdering, mapCsvRow } from './mapRow';
 import { parseStatementFilename } from './parseStatementFilename';
 import {
   parseWealthsimpleFilename,
-  parseWsCreditCardPdfWsid,
+  parseWsPdfWsid,
   type WsProductHint,
 } from './parseWealthsimpleFilename';
 import { parseStatementFile } from './parseStatementFile';
+import type { StatementParseError } from './statementTypes';
 import {
   commitStatementImport,
   findOrCreateSecurity,
@@ -38,9 +39,12 @@ import { parseWsHoldingsCsv } from './wealthsimpleHoldingsParse';
 import { wsRecordsHaveSecurityActivity } from './wealthsimpleInvestParse';
 import { assertUnderRoot } from './pathUtils';
 import { findMerchantMemory } from '../ai/merchantMemory';
-import { upsertSuggestedOrderLink } from '../amazon/matcher';
 import * as env from '../config/env';
 import { enrichTransaction } from './enrich';
+import {
+  persistTransactionSignals,
+  persistSuggestedOrderLink,
+} from './enrichment/persistSignals';
 import { applyRuleSideEffects, findRuleActionsSignal } from '../rules/applyRuleSideEffects';
 import {
   computeImportConfidence,
@@ -68,6 +72,7 @@ import {
   type ColdRow,
 } from './enrichment/aiBatchOverColdRows';
 import { maybeRunEmbeddingMatchOverColdRows } from './enrichment/embeddingMatchOverColdRows';
+import { coldRowFallbackWarnings } from './enrichment/coldRowFallbackWarnings';
 export { aiSuggestionToSignal, dedupeColdRowsByMerchantKey } from './enrichment/aiBatchOverColdRows';
 import { logger } from '../observability/logger';
 import { findOrCreateAccount } from './accountLookup';
@@ -78,7 +83,7 @@ import { applyCreditCardStatementSummary } from '../cards/applyStatementSummary'
 export const PARSE_ERRORS_MAX = 50;
 
 export function appendParseError(
-  bucket: { rowIndex: number; message: string }[],
+  bucket: StatementParseError[],
   rowIndex: number,
   message: string
 ): void {
@@ -385,7 +390,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   let inserted = 0;
   let skippedDup = 0;
   let rowErrors = 0;
-  const parseErrors: { rowIndex: number; message: string }[] = [];
+  const parseErrors: StatementParseError[] = [];
   // Stage 8 deferral: rows that completed phase 1 still flagged for review accumulate
   // here, then a single AI batch (or per-row fallback) enhances them after commit.
   const coldRows: ColdRow[] = [];
@@ -393,6 +398,20 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   // One day/month ordering for the whole file: unambiguous rows ('15/03')
   // decide how ambiguous ones ('03/04') parse instead of per-row fallback.
   const dateOrdering = inferCsvDateOrdering(records, headers, profileId);
+
+  /**
+   * Existing transaction ids the narrative-rename dedup tier may no longer
+   * claim: rows an earlier incoming row already matched, plus rows this commit
+   * inserted. That tier keys on (account, date, amount, currency) with the
+   * merchant text excluded, and the key is not unique, so without this set two
+   * incoming rows sharing it would both absorb the SAME existing row (or the
+   * second would absorb the first, freshly inserted, row) and a real cash event
+   * would be silently dropped. Same role as `excludeIds` in the investment
+   * fuzzy matcher.
+   */
+  const consumedExistingIds = new Set<number>();
+  /** Date-shifted near-misses dedup declined, one entry per incoming row. */
+  const nearDuplicates: number[][] = [];
 
   await sequelize.transaction(async (t) => {
     for (let i = 0; i < records.length; i++) {
@@ -435,11 +454,14 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         incomingAmount: v.amount,
         incomingCurrency: v.currency,
         incomingMerchantRaw: v.merchantRaw,
+        consumedExistingIds,
       });
       if (dedup.kind !== 'no-match') {
+        consumedExistingIds.add(dedup.existingId);
         skippedDup += 1;
         continue;
       }
+      if (dedup.nearMissCandidateIds) nearDuplicates.push(dedup.nearMissCandidateIds);
 
       // All three reads thread `t`: on Postgres an un-threaded raw query runs
       // on a separate pooled connection and cannot see rows inserted earlier
@@ -561,31 +583,10 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         // so the unique-violation rolls back only this row.
         await sequelize.transaction({ transaction: t }, async (sp) => {
           await txn.save({ transaction: sp });
-          if (enriched.signals.length > 0) {
-            await TransactionSignal.bulkCreate(
-              enriched.signals.map((s) => ({
-                transactionId: txn.id,
-                source: s.source,
-                confidence: s.confidence,
-                fields: s.fields,
-                rationale: s.rationale ?? null,
-              })),
-              { transaction: sp },
-            );
-          }
+          await persistTransactionSignals(txn.id, enriched.signals, sp);
 
-          // Persist the item-link match through the canonical TransactionOrderLink
-          // join table (status 'suggested') so imports auto-surface suggested links.
-          const orderLink = enriched.signals.find((s) => s.orderLink)?.orderLink;
-          if (orderLink) {
-            await upsertSuggestedOrderLink({
-              transactionId: txn.id,
-              externalOrderId: orderLink.externalOrderId,
-              confidence: orderLink.confidence,
-              matchReason: orderLink.matchReason,
-              transaction: sp,
-            });
-          }
+          // Surfaces the item-link match as a suggested TransactionOrderLink.
+          await persistSuggestedOrderLink(txn.id, enriched.signals, sp);
 
           // Rule actions side-effects (issue #795): set_label / set_alert.
           const ruleActions = findRuleActionsSignal(enriched.signals);
@@ -599,6 +600,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
           }
         });
         inserted += 1;
+        consumedExistingIds.add(txn.id);
         if (enriched.fields.reviewFlag) {
           const key = (f.merchantCanonical ?? '').trim() || f.merchantClean.trim();
           if (key.length > 0) {
@@ -615,6 +617,8 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
               memory,
               accountVisibility,
               txnType: f.txnType,
+              // Brand-new row: it cannot carry a user override yet.
+              categoryOverride: null,
             });
           }
         }
@@ -706,6 +710,12 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
       matched: embeddingMatch.summary.matched,
     };
   }
+  // A fallback that could not run is reported, not silently absent — same text
+  // as the statement path, from the same shared builder.
+  const fallbackWarnings = coldRowFallbackWarnings(embeddingMatch.summary, aiEnhanced);
+  if (fallbackWarnings.length > 0) out.enrichmentWarnings = fallbackWarnings;
+  const nearDuplicateNotes = nearDuplicateWarnings(nearDuplicates);
+  if (nearDuplicateNotes.length > 0) out.nearDuplicateWarnings = nearDuplicateNotes;
   if (aiEnhanced.attempted) {
     out.aiBatch = {
       coldRows: aiEnhanced.coldRowCount,
@@ -772,7 +782,7 @@ export type BundleFileResult = {
   insertedInvestmentActivities: number;
   skippedDuplicates: number;
   rowErrors: number;
-  parseErrors: { rowIndex: number; message: string }[];
+  parseErrors: StatementParseError[];
   warnings: string[];
   error?: string;
 };
@@ -966,7 +976,7 @@ export type PdfBundleFileResult = {
   insertedHoldings: number;
   skippedDuplicates: number;
   rowErrors: number;
-  parseErrors: { rowIndex: number; message: string }[];
+  parseErrors: StatementParseError[];
   warnings: string[];
   error?: string;
 };
@@ -1012,6 +1022,7 @@ const PDF_ACCOUNT_TEMPLATES: Record<string, PdfAccountTemplate> = {
   'Wealthsimple Credit Card': { name: 'Wealthsimple Credit Card', accountType: 'credit_card' },
   'American Express Aeroplan Reserve Card': { name: 'Amex Reserve', accountType: 'credit_card' },
   'American Express Cobalt Card': { name: 'Amex Cobalt', accountType: 'credit_card' },
+  'CIBC Costco Mastercard': { name: 'Costco MC', accountType: 'credit_card' },
 };
 
 // Corp entity suffix patterns (Inc., Corp., Ltd., LLC, GmbH, Pty, S.A.). When a
@@ -1114,13 +1125,16 @@ export async function resolvePdfAccountFromHeader(
   const entity = await resolveEntityForHolder(header.accountHolder, householdId);
   const overrideBusiness = entity?.kind === 'corp';
 
-  // Stable match key. WS credit-card statement bodies print only the card last-4
-  // (header.accountSuffix), which is neither unique across cards nor the key the
-  // WS CSV path uses — so it forked a new account every time the existing one was
-  // renamed or carried a different short_code. The WS account id (WSID) lives in
-  // the PDF filename (`<WSID>_YYYY-MM_CREDIT_CARD.pdf`); prefer it when present.
-  const wsCardWsid = fileName ? parseWsCreditCardPdfWsid(fileName) : null;
-  const matchKey = wsCardWsid ?? header.accountSuffix;
+  // Stable match key. Wealthsimple statement BODIES print only a weak key — the
+  // card last-4 on a credit card, an internal account number on chequing —
+  // neither of which is unique across products nor the key the WS CSV path used,
+  // so resolving on them forked a new account whenever the existing one was
+  // renamed or carried a different short_code. Worse, a CORPORATE statement and
+  // the same-named personal account share a product label, so the name fallback
+  // could merge them. The stable WS account id (WSID) lives in the PDF filename
+  // for every WS product; prefer it whenever it is there.
+  const wsWsid = fileName ? parseWsPdfWsid(fileName) : null;
+  const matchKey = wsWsid ?? header.accountSuffix;
 
   // First try to find account by shortCode (exact match on the stable key).
   let account = await Account.findOne({
@@ -1175,6 +1189,28 @@ export async function resolvePdfAccountFromHeader(
     await applyCreditCardStatementSummary({ account, header, userId, householdId });
   } catch (err) {
     logger.error({ err, accountId: account.id }, 'cc-statement: auto-fill failed (non-fatal)');
+  }
+
+  // Harvest a card identifier off the statement header
+  // (docs/superpowers/specs/2026-09-11-account-card-identifiers-design.md,
+  // Part 2). Fires regardless of HOW `account` above was resolved --
+  // short_code, the Wealthsimple WSID path, or the name fallback -- so an
+  // account keyed by an opaque token still gains its real card number.
+  // Never lets a harvesting failure fail the import.
+  if (header.accountSuffix != null && /^\d{4}$/.test(header.accountSuffix)) {
+    try {
+      await upsertAccountCardIdentifier({
+        householdId,
+        accountId: account.id,
+        last4: header.accountSuffix,
+        source: 'pdf_statement_header',
+      });
+    } catch (err) {
+      logger.error(
+        { err, accountId: account.id },
+        'account-card-identifier: pdf statement header harvest failed (non-fatal)',
+      );
+    }
   }
 
   return { account, accountCreated, overrideBusiness };

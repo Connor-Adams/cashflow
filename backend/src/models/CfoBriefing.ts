@@ -74,7 +74,12 @@ export interface CfoBriefingActionItem {
   title: string;
   summary: string;
   status: CfoBriefingActionItemStatus;
-  /** Optional supporting transaction ids (mirrors AiFinancialInsight). */
+  /**
+   * Optional supporting transaction ids. Populated from `Insight.metadata`
+   * (e.g. `metadata.transactionIds`) via `insightToActionItem` in
+   * `backend/src/insights/toActionItems.ts`, which owns the mapping from
+   * detector `Insight` rows onto this shape.
+   */
   supportingTransactionIds?: number[];
   /** Optional rationale string for transparency / "no invented facts" AC. */
   rationale?: string;

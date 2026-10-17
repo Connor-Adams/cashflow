@@ -26,7 +26,11 @@ import {
 } from '../models';
 import type { PlannedEvent } from '../models/PlannedEvent';
 import { normalizeMerchantName } from '../subscriptions/detect';
-import { creditCardReservation } from './creditCardReservation';
+import {
+  creditCardReservation,
+  isCardPaymentInflow,
+  isStatementStale,
+} from './creditCardReservation';
 import { CASHFLOW_SETTINGS_DEFAULTS } from '../models/CashflowSettings';
 import { balanceAtDate } from '../networth/balanceAtDate';
 import { loadLiabilities, toDebtInputs } from '../debt/loadLiabilities';
@@ -47,10 +51,18 @@ import {
   projectRecurringIncome,
   type IncomeTxn,
 } from './recurringIncome';
+import { projectOwnerDrawIncome, type OwnerDraw } from './ownerDraws';
 import { toUnits, fromUnits } from '../util/numbers';
 
 /** History window scanned for recurring-income detection. */
 const INCOME_LOOKBACK_DAYS = 180;
+
+/**
+ * History window averaged for owner-draw income (#990). Shorter than the
+ * paycheck lookback on purpose: a draw average should track how much the
+ * owner is currently paying themselves, not smooth over half a year.
+ */
+const OWNER_DRAW_LOOKBACK_DAYS = 90;
 
 /**
  * History window scanned to infer which merchants are funded by a credit card.
@@ -104,12 +116,25 @@ function isCorpAccount(
 
 export type SafeToSpendBreakdown = {
   currentCash: number;
-  /** Recurring income projected to land inside the window — added back. */
+  /**
+   * Total income expected inside the window — added back. The sum of
+   * `recurringIncome` and `ownerDrawIncome`, which explain where it came from.
+   */
   expectedIncome: number;
+  /** Recurring-paycheck share of `expectedIncome` (#970). */
+  recurringIncome: number;
+  /** Owner-draw (corp -> personal distribution) share of `expectedIncome` (#990). */
+  ownerDrawIncome: number;
   upcomingRequiredExpenses: number;
   requiredSavingsContributions: number;
   expectedCreditCardPayments: number;
   minimumBuffer: number;
+  /**
+   * Names of cards whose reserved statement is more than one billing cycle old
+   * — a newer statement has not been imported, so that reservation may be out
+   * of date. Empty when every reserved statement is current.
+   */
+  staleCreditCardStatements: string[];
 };
 
 export type SafeToSpendResult = {
@@ -149,11 +174,16 @@ export function composeSafeToSpend(input: {
   windowDays: number;
   windowEndDate: string;
   currentCash: number;
-  expectedIncome?: number;
+  /** Recurring-paycheck leg (#970). Non-finite or negative values clamp to 0. */
+  recurringIncome?: number;
+  /** Owner-draw leg (#990). Non-finite or negative values clamp to 0. */
+  ownerDrawIncome?: number;
   upcomingRequiredExpenses: number;
   requiredSavingsContributions: number;
   expectedCreditCardPayments: number;
   minimumBuffer: number;
+  /** Cards whose reserved statement is stale (see the breakdown field). */
+  staleCreditCardStatements?: string[];
   settings: SafeToSpendSettingsLike;
 }): SafeToSpendResult {
   const goalContrib = input.settings.includeGoalContributions
@@ -162,10 +192,11 @@ export function composeSafeToSpend(input: {
   const ccPayments = input.settings.includeCreditCardBalance
     ? input.expectedCreditCardPayments
     : 0;
-  const expectedIncome =
-    Number.isFinite(input.expectedIncome) && input.expectedIncome! > 0
-      ? input.expectedIncome!
-      : 0;
+  // Income can only ever add. A non-finite or negative leg is a detector bug,
+  // not a reason to silently deduct from what the user can spend.
+  const recurringIncome = clampIncome(input.recurringIncome);
+  const ownerDrawIncome = clampIncome(input.ownerDrawIncome);
+  const expectedIncome = recurringIncome + ownerDrawIncome;
 
   const value = round2(
     input.currentCash +
@@ -186,10 +217,13 @@ export function composeSafeToSpend(input: {
     breakdown: {
       currentCash: round2(input.currentCash),
       expectedIncome: round2(expectedIncome),
+      recurringIncome: round2(recurringIncome),
+      ownerDrawIncome: round2(ownerDrawIncome),
       upcomingRequiredExpenses: round2(input.upcomingRequiredExpenses),
       requiredSavingsContributions: round2(goalContrib),
       expectedCreditCardPayments: round2(ccPayments),
       minimumBuffer: round2(input.minimumBuffer),
+      staleCreditCardStatements: [...(input.staleCreditCardStatements ?? [])],
     },
     settings: { ...input.settings },
   };
@@ -198,6 +232,11 @@ export function composeSafeToSpend(input: {
 function round2(n: number): number {
   if (!Number.isFinite(n)) return 0;
   return Math.round(n * 100) / 100;
+}
+
+/** An income leg, floored at 0 — income adds or does nothing, never subtracts. */
+function clampIncome(n: number | undefined): number {
+  return Number.isFinite(n) && n! > 0 ? n! : 0;
 }
 
 /** Nominal days per month used to prorate monthly amounts to the window. */
@@ -218,6 +257,15 @@ export function proRateMonthlyToWindow(
   if (!Number.isFinite(monthlyAmount) || !Number.isFinite(windowDays)) return 0;
   if (windowDays <= 0) return 0;
   return (monthlyAmount * windowDays) / DAYS_PER_MONTH;
+}
+
+/** Whole days from `start` to `end`; negative when `end` precedes `start`. */
+function daysBetweenIso(start: string, end: string): number {
+  const toMs = (iso: string): number => {
+    const [y, m, d] = iso.split('-').map((p) => parseInt(p, 10));
+    return Date.UTC(y, m - 1, d);
+  };
+  return (toMs(end) - toMs(start)) / MS_PER_DAY;
 }
 
 function addDaysIso(iso: string, days: number): string {
@@ -274,15 +322,147 @@ export async function getCurrentCash(
   return fromUnits(totalU);
 }
 
+/** The two independent sources safe-to-spend's income leg is built from. */
+export type IncomeLegs = {
+  /** Recurring paychecks projected into the window (#970). */
+  recurringIncome: number;
+  /** Trailing-average corp -> personal owner draws prorated to the window (#990). */
+  ownerDrawIncome: number;
+};
+
 /**
- * Project recurring income (paychecks) expected to land inside
- * [asOfDate, windowEndDate], in the requested currency. Scans the last
- * `INCOME_LOOKBACK_DAYS` of personal cash-account inflows, detects
- * high-confidence recurring streams (see `recurringIncome.ts`), and sums the
- * occurrences that fall in the window. Corporate-entity accounts, non-income
- * positive types (transfers, refunds, card payments…), and other currencies
- * are excluded. Detection is conservative on purpose — over-counting income
- * would tell the user they can spend money they don't have.
+ * Both income legs, from one pass over the household's personal cash inflows.
+ *
+ * Two detectors, two shapes of income:
+ *
+ * - **Recurring paycheck** — stable amount, recognised cadence. Scans the last
+ *   `INCOME_LOOKBACK_DAYS` and sums the stream occurrences landing inside
+ *   [asOfDate, windowEndDate]. Conservative on purpose: over-counting income
+ *   tells the user they can spend money they don't have.
+ * - **Owner draw** (#990) — a personal inflow whose `linkedTransactionId`
+ *   resolves to a transaction in a *corp*-entity account. That crossing of the
+ *   entity boundary is a distribution, i.e. personal income; averaged over
+ *   `OWNER_DRAW_LOOKBACK_DAYS` because draws are lumpy in both amount and
+ *   timing and will never fit a cadence.
+ *
+ * The legs are **disjoint by construction**: a corp-linked inflow is removed
+ * from the paycheck detector's input before detection runs, so an inflow can
+ * only ever be counted once. They compose — a salaried user scores 0 draws, an
+ * owner-operator scores 0 paychecks, and someone with both gets both.
+ *
+ * Corporate-entity accounts, non-income positive types (transfers, refunds,
+ * card payments…) and other currencies are excluded from the paycheck leg;
+ * corp accounts and other currencies from the draw leg. An inflow linked to
+ * another *personal* account is an internal shuffle and counts as neither; an
+ * *unlinked* transfer inflow is a coverage gap (the corp side was not
+ * imported) and is deliberately not counted.
+ */
+export async function getIncomeLegs(
+  householdId: number,
+  currency: string,
+  asOfDate: string,
+  windowEndDate: string,
+  corpEntityIds: ReadonlySet<number> = new Set(),
+): Promise<IncomeLegs> {
+  const accounts = await Account.findAll({ where: { householdId } });
+  const eligible = accounts.filter(
+    (acc) =>
+      !CASH_EXCLUDED_TYPES.has(acc.accountType) &&
+      !isCorpAccount(acc, corpEntityIds) &&
+      !(acc.closedAt && acc.closedAt <= asOfDate),
+  );
+  if (eligible.length === 0) {
+    return { recurringIncome: 0, ownerDrawIncome: 0 };
+  }
+
+  const lookback = Math.max(INCOME_LOOKBACK_DAYS, OWNER_DRAW_LOOKBACK_DAYS);
+  const fromDate = addDaysIso(asOfDate, -lookback);
+  const { Transaction } = await import('../models');
+  const rows = await Transaction.findAll({
+    where: {
+      accountId: { [Op.in]: eligible.map((a) => a.id) },
+      currency,
+      date: { [Op.gt]: fromDate, [Op.lte]: asOfDate },
+    },
+    attributes: [
+      'date',
+      'amount',
+      'txnType',
+      'merchantClean',
+      'merchantRaw',
+      'linkedTransactionId',
+    ],
+  });
+
+  const inflows = rows.filter((r) => Number(r.amount) > 0);
+  const corpLinkedIds = await resolveCorpLinkedTxnIds(
+    inflows.map((r) => r.linkedTransactionId),
+    accounts,
+    corpEntityIds,
+  );
+
+  const txns: IncomeTxn[] = [];
+  const draws: OwnerDraw[] = [];
+  for (const r of inflows) {
+    const amount = Number(r.amount);
+    if (
+      r.linkedTransactionId != null &&
+      corpLinkedIds.has(r.linkedTransactionId)
+    ) {
+      // A draw. Kept out of the paycheck detector so it cannot be counted twice.
+      draws.push({ date: r.date, amount });
+      continue;
+    }
+    if (r.txnType && INCOME_EXCLUDED_TXN_TYPES.has(r.txnType)) continue;
+    const merchant = (r.merchantClean || r.merchantRaw || '').trim();
+    if (!merchant) continue;
+    txns.push({ date: r.date, amount, merchant });
+  }
+
+  const streams = detectRecurringIncome(txns, asOfDate);
+  return {
+    recurringIncome: projectRecurringIncome(streams, asOfDate, windowEndDate),
+    ownerDrawIncome: projectOwnerDrawIncome(
+      draws,
+      asOfDate,
+      OWNER_DRAW_LOOKBACK_DAYS,
+      daysBetweenIso(asOfDate, windowEndDate),
+    ),
+  };
+}
+
+/**
+ * Of the given `linkedTransactionId`s, the subset whose transaction sits in a
+ * corp-entity account of this household — i.e. the links that mark their
+ * personal counterpart as an owner draw. Ids pointing at a personal account,
+ * or at an account outside `accounts`, are omitted.
+ */
+async function resolveCorpLinkedTxnIds(
+  linkedIds: readonly (number | null)[],
+  accounts: readonly Account[],
+  corpEntityIds: ReadonlySet<number>,
+): Promise<Set<number>> {
+  const ids = [...new Set(linkedIds.filter((id): id is number => id != null))];
+  if (ids.length === 0 || corpEntityIds.size === 0) return new Set();
+
+  const corpAccountIds = new Set(
+    accounts.filter((a) => isCorpAccount(a, corpEntityIds)).map((a) => a.id),
+  );
+  if (corpAccountIds.size === 0) return new Set();
+
+  const { Transaction } = await import('../models');
+  const linked = await Transaction.findAll({
+    where: { id: { [Op.in]: ids } },
+    attributes: ['id', 'accountId'],
+  });
+  return new Set(
+    linked.filter((t) => corpAccountIds.has(t.accountId)).map((t) => t.id),
+  );
+}
+
+/**
+ * Recurring-paycheck income only. Thin wrapper over `getIncomeLegs`, kept
+ * because callers and tests address the paycheck leg by name.
  */
 export async function getExpectedIncome(
   householdId: number,
@@ -291,38 +471,14 @@ export async function getExpectedIncome(
   windowEndDate: string,
   corpEntityIds: ReadonlySet<number> = new Set(),
 ): Promise<number> {
-  const accounts = await Account.findAll({ where: { householdId } });
-  const eligible = accounts.filter(
-    (acc) =>
-      !CASH_EXCLUDED_TYPES.has(acc.accountType) &&
-      !isCorpAccount(acc, corpEntityIds) &&
-      !(acc.closedAt && acc.closedAt <= asOfDate),
+  const legs = await getIncomeLegs(
+    householdId,
+    currency,
+    asOfDate,
+    windowEndDate,
+    corpEntityIds,
   );
-  if (eligible.length === 0) return 0;
-
-  const fromDate = addDaysIso(asOfDate, -INCOME_LOOKBACK_DAYS);
-  const { Transaction } = await import('../models');
-  const rows = await Transaction.findAll({
-    where: {
-      accountId: { [Op.in]: eligible.map((a) => a.id) },
-      currency,
-      date: { [Op.gt]: fromDate, [Op.lte]: asOfDate },
-    },
-    attributes: ['date', 'amount', 'txnType', 'merchantClean', 'merchantRaw'],
-  });
-
-  const txns: IncomeTxn[] = [];
-  for (const r of rows) {
-    const amount = Number(r.amount);
-    if (!(amount > 0)) continue;
-    if (r.txnType && INCOME_EXCLUDED_TXN_TYPES.has(r.txnType)) continue;
-    const merchant = (r.merchantClean || r.merchantRaw || '').trim();
-    if (!merchant) continue;
-    txns.push({ date: r.date, amount, merchant });
-  }
-
-  const streams = detectRecurringIncome(txns, asOfDate);
-  return projectRecurringIncome(streams, asOfDate, windowEndDate);
+  return legs.recurringIncome;
 }
 
 /**
@@ -478,14 +634,22 @@ export async function getRequiredSavingsContributions(
   return proRateMonthlyToWindow(fromUnits(totalU), windowDays);
 }
 
+/** The credit-card leg of safe-to-spend, plus which reserved statements are stale. */
+export type CreditCardPaymentsLeg = {
+  total: number;
+  staleCreditCardStatements: string[];
+};
+
 /**
  * Sum the cash safe-to-spend should reserve for credit-card payments in the
  * requested currency. Per card we reserve the *statement balance* (what is
- * billed and due), gated by the card's due day so a balance due next cycle is
- * not reserved this window — see `creditCardReservation`. When no statement
- * data is captured we fall back to the full current running balance
- * (sign-flipped from the negative charge balance) so we never under-reserve.
- * Positive (credit) balances contribute 0.
+ * billed and due) less any payments into the card dated after the statement
+ * date, gated by the card's due day so a balance due next cycle is not
+ * reserved this window — see `creditCardReservation`. When no statement data
+ * is captured we fall back to the full current running balance (sign-flipped
+ * from the negative charge balance) so we never under-reserve. Positive
+ * (credit) balances contribute 0. Cards whose reserved statement is more than
+ * one billing cycle old are named in `staleCreditCardStatements`.
  */
 export async function getExpectedCreditCardPayments(
   householdId: number,
@@ -493,7 +657,7 @@ export async function getExpectedCreditCardPayments(
   asOfDate: string,
   windowEndDate: string,
   corpEntityIds: ReadonlySet<number> = new Set(),
-): Promise<number> {
+): Promise<CreditCardPaymentsLeg> {
   const accounts = await Account.findAll({ where: { householdId } });
   const cards = accounts.filter(
     (acc) =>
@@ -501,41 +665,109 @@ export async function getExpectedCreditCardPayments(
       !isCorpAccount(acc, corpEntityIds) &&
       !(acc.closedAt && acc.closedAt <= asOfDate),
   );
-  if (cards.length === 0) return 0;
+  if (cards.length === 0) return { total: 0, staleCreditCardStatements: [] };
 
   const profiles = await LiabilityAccount.findAll({
     where: { accountId: { [Op.in]: cards.map((c) => c.id) } },
   });
   const profileByAccount = new Map(profiles.map((p) => [p.accountId, p]));
+  const paymentsByAccount = await getCardPaymentsSinceStatement(
+    profiles,
+    currency,
+    asOfDate,
+  );
 
   let totalU = 0;
+  const staleCreditCardStatements: string[] = [];
   for (const acc of cards) {
-    const bal = await balanceAtDate(acc, asOfDate);
-    let currentOwedU = 0;
-    for (const { currency: ccy, amount } of bal) {
-      if (ccy === currency && amount < 0) currentOwedU += toUnits(-amount);
-    }
-    // Statement balance lives in the account's default currency; only gate by
-    // it when that matches the requested currency, otherwise fall back.
     const profile = profileByAccount.get(acc.id);
-    const statementBalance =
-      profile != null &&
-      profile.statementBalance != null &&
-      acc.defaultCurrency === currency
-        ? Number(profile.statementBalance)
-        : null;
+    const statementBalance = statementBalanceIn(profile, acc, currency);
     const reservation = creditCardReservation(
       {
-        currentBalanceOwed: fromUnits(currentOwedU),
+        currentBalanceOwed: await cardOwedAt(acc, currency, asOfDate),
         statementBalance,
-        dueDay: profile != null ? profile.dueDay : null,
+        dueDay: profile?.dueDay ?? null,
+        paymentsSinceStatement: paymentsByAccount.get(acc.id) ?? 0,
       },
       asOfDate,
       windowEndDate,
     );
     totalU += toUnits(reservation);
+    if (statementBalance != null && isStatementStale(profile?.statementDate ?? null, asOfDate)) {
+      staleCreditCardStatements.push(acc.name);
+    }
   }
-  return fromUnits(totalU);
+  return { total: fromUnits(totalU), staleCreditCardStatements };
+}
+
+/** Magnitude owed on a card in `currency` at `asOfDate` (0 for a credit balance). */
+async function cardOwedAt(acc: Account, currency: string, asOfDate: string): Promise<number> {
+  let owedU = 0;
+  for (const { currency: ccy, amount } of await balanceAtDate(acc, asOfDate)) {
+    if (ccy === currency && amount < 0) owedU += toUnits(-amount);
+  }
+  return fromUnits(owedU);
+}
+
+/**
+ * The card's stored statement balance, or null when none is captured. It lives
+ * in the account's default currency, so a request in any other currency gets
+ * null and falls back to the live balance.
+ */
+function statementBalanceIn(
+  profile: LiabilityAccount | undefined,
+  acc: Account,
+  currency: string,
+): number | null {
+  if (profile?.statementBalance == null || acc.defaultCurrency !== currency) return null;
+  return Number(profile.statementBalance);
+}
+
+/**
+ * Per card, the sum of payments into it (see `isCardPaymentInflow`) dated
+ * strictly after its stored statement date and on or before `asOfDate`, in the
+ * requested currency. Cards without a statement date contribute nothing — with
+ * no cut date there is no way to tell which payments the bill already reflects.
+ */
+async function getCardPaymentsSinceStatement(
+  profiles: readonly LiabilityAccount[],
+  currency: string,
+  asOfDate: string,
+): Promise<Map<number, number>> {
+  const statementDateByAccount = new Map<number, string>();
+  for (const p of profiles) {
+    if (p.statementDate != null) statementDateByAccount.set(p.accountId, p.statementDate);
+  }
+  const out = new Map<number, number>();
+  if (statementDateByAccount.size === 0) return out;
+
+  const earliest = [...statementDateByAccount.values()].sort()[0];
+  const rows = await Transaction.findAll({
+    where: {
+      accountId: { [Op.in]: [...statementDateByAccount.keys()] },
+      currency,
+      amount: { [Op.gt]: 0 },
+      date: { [Op.gt]: earliest, [Op.lte]: asOfDate },
+    },
+    attributes: ['accountId', 'date', 'amount', 'txnType', 'merchantRaw', 'merchantClean', 'finalCategory'],
+  });
+  const totalsU = new Map<number, number>();
+  for (const r of rows) {
+    const cut = statementDateByAccount.get(r.accountId);
+    if (cut == null || r.date <= cut) continue;
+    const amount = Number(r.amount);
+    const isPayment = isCardPaymentInflow({
+      amount,
+      txnType: r.txnType,
+      merchantRaw: r.merchantRaw,
+      merchantClean: r.merchantClean,
+      category: r.finalCategory,
+    });
+    if (!isPayment) continue;
+    totalsU.set(r.accountId, (totalsU.get(r.accountId) ?? 0) + toUnits(amount));
+  }
+  for (const [accountId, u] of totalsU) out.set(accountId, fromUnits(u));
+  return out;
 }
 
 /** Lazy-load (or default) the user's settings row. */
@@ -578,13 +810,13 @@ export async function computeSafeToSpend(params: {
 
   const [
     currentCash,
-    expectedIncome,
+    incomeLegs,
     upcomingRequiredExpenses,
     requiredSavingsContributions,
-    expectedCreditCardPayments,
+    creditCardLeg,
   ] = await Promise.all([
     getCurrentCash(params.householdId, currency, params.asOfDate, corpEntityIds),
-    getExpectedIncome(
+    getIncomeLegs(
       params.householdId,
       currency,
       params.asOfDate,
@@ -618,10 +850,12 @@ export async function computeSafeToSpend(params: {
     windowDays,
     windowEndDate,
     currentCash,
-    expectedIncome,
+    recurringIncome: incomeLegs.recurringIncome,
+    ownerDrawIncome: incomeLegs.ownerDrawIncome,
     upcomingRequiredExpenses,
     requiredSavingsContributions,
-    expectedCreditCardPayments,
+    expectedCreditCardPayments: creditCardLeg.total,
+    staleCreditCardStatements: creditCardLeg.staleCreditCardStatements,
     minimumBuffer: Number(settings.minimumCashBuffer),
     settings,
   });

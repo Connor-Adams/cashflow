@@ -31,6 +31,7 @@ import { rejectDemoAiRequest } from '../demo/aiAccess';
 import {
   buildCfoBriefing,
   CFO_BRIEFING_PROMPT_VERSION,
+  DETERMINISTIC_BRIEFING_MODEL,
   MAX_BRIEFING_WINDOW_DAYS,
   resolveDefaultBriefingPeriod,
 } from '../cfo/briefingBuilder';
@@ -163,6 +164,10 @@ router.post('/briefings', aiSuggestLimiter, async (req, res, next) => {
     let safeToSpendSnapshot: CfoBriefingSafeToSpendSnapshot | null = null;
     let status: 'completed' | 'failed' = 'completed';
     let errorMessage: string | null = null;
+    // Provenance: overwritten with the real model id when the LLM synthesis
+    // pass wrote the summary. A failed build never leaves this behind as a
+    // lie — it stays 'deterministic' because nothing was synthesized.
+    let model: string = DETERMINISTIC_BRIEFING_MODEL;
     try {
       const built = await buildCfoBriefing({
         req,
@@ -175,6 +180,7 @@ router.post('/briefings', aiSuggestLimiter, async (req, res, next) => {
       actionItems = built.actionItems;
       summary = built.summary;
       safeToSpendSnapshot = built.safeToSpendSnapshot;
+      model = built.model;
     } catch (e) {
       status = 'failed';
       errorMessage = e instanceof Error ? e.message : 'Unknown error';
@@ -190,7 +196,7 @@ router.post('/briefings', aiSuggestLimiter, async (req, res, next) => {
       summary,
       actionItems,
       safeToSpendSnapshot,
-      model: 'deterministic',
+      model,
       promptVersion: CFO_BRIEFING_PROMPT_VERSION,
       errorMessage,
     });

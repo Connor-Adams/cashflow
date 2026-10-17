@@ -1,3 +1,4 @@
+import type { CompletenessReportDto } from '@cashflow/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { deleteReq, getJson, patchJson, postJson } from '@/lib/api';
 
@@ -26,6 +27,14 @@ export interface ComputedReturn {
   totals: Record<string, string | number>;
   warnings: string[];
   cached: boolean;
+  /**
+   * What the return does not know. Present on personal scenarios; absent on corp,
+   * where the same hole exists and is deliberately out of scope for now.
+   *
+   * Computed on every request rather than cached with the return: import coverage
+   * changes without any fact changing.
+   */
+  completeness?: CompletenessReportDto;
 }
 
 export interface ScenarioWithComputed {
@@ -67,6 +76,11 @@ export function useScenarios(entityId: number, year: number): UseScenariosResult
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  // Which (entity, year) the held list belongs to. Until the new key's fetch
+  // settles, the previous year's list is still in state and the effect has not
+  // yet flipped `loading`, so callers would read it as the new year's.
+  const key = `${entityId}:${year}`;
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,10 +89,13 @@ export function useScenarios(entityId: number, year: number): UseScenariosResult
     getJson<{ scenarios: Scenario[] }>(
       `/api/tax/scenarios/personal?entityId=${entityId}&year=${year}`,
     )
-      .then((d) => { if (!cancelled) { setScenarios(d.scenarios); setLoading(false); } })
+      .then((d) => {
+        if (!cancelled) { setScenarios(d.scenarios); setLoadedKey(`${entityId}:${year}`); setLoading(false); }
+      })
       .catch((e: unknown) => {
         if (!cancelled) {
           setError(String((e as Error)?.message ?? e));
+          setLoadedKey(`${entityId}:${year}`);
           setLoading(false);
         }
       });
@@ -149,7 +166,7 @@ export function useScenarios(entityId: number, year: number): UseScenariosResult
 
   return {
     scenarios,
-    loading,
+    loading: loading || loadedKey !== key,
     error,
     reload,
     create,

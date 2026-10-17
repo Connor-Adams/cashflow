@@ -40,7 +40,45 @@ const SCRATCH: Scenario = {
   updatedAt: NOW,
 }
 
+const PROJECTION: Scenario = {
+  id: 3,
+  parentId: null,
+  name: 'Projection 2026',
+  year: 2026,
+  entityId: 1,
+  kind: 'projection_root',
+  overrides: {},
+  assumptions: {},
+  nextYearId: null,
+  notes: null,
+  createdAt: NOW,
+  updatedAt: NOW,
+}
+
 describe('ScenarioTree', () => {
+  it('renders all three kinds distinguishably', () => {
+    render(
+      <ScenarioTree
+        scenarios={[BASELINE, SCRATCH, PROJECTION]}
+        activeId={null}
+        onSelect={vi.fn()}
+        onForkActive={vi.fn()}
+        onDeleteActive={vi.fn()}
+      />,
+    )
+    // A baseline is the year's actuals.
+    expect(screen.getByRole('button', { name: /Baseline.*actuals/ })).toBeInTheDocument()
+    // A projection root is NOT actuals and must say so — this is the defect that
+    // let a 2025-scaled forecast render as if it were the 2026 return.
+    expect(
+      screen.getByRole('button', { name: /Projection 2026.*projection/i }),
+    ).toBeInTheDocument()
+    // A fork carries overrides on top of actuals; it is neither of the above.
+    const fork = screen.getByRole('button', { name: /Scratch/ })
+    expect(fork.textContent).not.toMatch(/actuals\)/)
+    expect(fork.textContent).not.toMatch(/projection/i)
+  })
+
   it('shows empty state when no scenarios', () => {
     render(
       <ScenarioTree

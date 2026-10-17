@@ -149,3 +149,24 @@ test('header summary fields are null when the summary block is absent', () => {
   assert.equal(h.paymentDueDate, null);
   assert.equal(h.minimumPayment, null);
 });
+
+test('parse emits the New balance as the closing statement balance (opening not printed)', () => {
+  const r = wealthsimpleCreditCardParser.parse(
+    [
+      mk('Credit card statement'),
+      mk(' Wealthsimple    Apr 15 — May 14, 2026'),
+      mk('4126 50** **** 3338'),
+      mk(' New balance   $1,234.56'),
+    ],
+    { defaultCurrency: 'CAD' },
+  );
+  assert.deepEqual(r.statementBalances, { opening: null, closing: 1234.56 });
+});
+
+test('parse emits no statement balances when the New balance line is absent', () => {
+  const r = wealthsimpleCreditCardParser.parse(
+    [mk('Credit card statement'), mk(' Wealthsimple    Apr 15 — May 14, 2026'), mk('4126 50** **** 3338')],
+    { defaultCurrency: 'CAD' },
+  );
+  assert.equal(r.statementBalances, undefined);
+});

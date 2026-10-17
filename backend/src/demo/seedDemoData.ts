@@ -10,6 +10,7 @@ import {
   User,
   sequelize,
 } from '../models';
+import { findOrCreateExternalOrderForDedupe } from '../models/externalOrderDedupe';
 import { hashPassword } from '../auth/password';
 import { recomputeTransactionAmounts } from '../import/calculateShares';
 import { rowFingerprint, stableIdentityFingerprint } from '../import/fingerprint';
@@ -277,7 +278,7 @@ export async function seedDemoData(): Promise<void> {
 
     const seededOrders: ExternalOrder[] = [];
     for (const order of demoAmazonOrders) {
-      const [externalOrder, created] = await ExternalOrder.findOrCreate({
+      const [externalOrder, created] = await findOrCreateExternalOrderForDedupe({
         where: { householdId: household.id, dedupeKey: `amazon:order:${order.vendorOrderId}` },
         defaults: {
           householdId: household.id,

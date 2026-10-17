@@ -25,7 +25,7 @@ function sampleRow(id: number, title = 'x') {
     categoryOverride: null,
     businessUseEffective: false,
     businessUseOverride: null,
-    order: { id, vendor: 'v' },
+    order: { id, vendor: 'v', cardOwnership: 'known' },
     receipt: { id, date: '2026-05-01', sourceTxnId: id },
   }
 }

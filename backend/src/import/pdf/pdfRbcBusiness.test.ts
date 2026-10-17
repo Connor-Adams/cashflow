@@ -346,6 +346,12 @@ test('reconciliation gate fires when statement does not reconcile (magnitude mis
     reconErrors.length > 0,
     `Expected a reconciliation parseError, got: ${JSON.stringify(result.parseErrors)}`,
   );
+  // The gate's verdict must carry `blocking: true` — that flag, not the message
+  // text, is what makes commitStatementImport refuse the import.
+  assert.ok(
+    reconErrors.every(e => e.blocking === true),
+    `Reconciliation errors must be blocking, got: ${JSON.stringify(reconErrors)}`,
+  );
 });
 
 // ─── Fix 2: Ambiguity guard for net-zero offsetting pair ─────────────────────
@@ -466,4 +472,9 @@ test('multi-page slicer keeps page-2 transactions (does not stop at the first pe
   // And the statement reconciles only when both pages parse.
   const reconErrors = result.parseErrors.filter((e) => e.message.includes('does not reconcile'));
   assert.deepEqual(reconErrors, [], JSON.stringify(result.parseErrors));
+});
+
+test('rbcBusinessBankingParser.parse emits opening + closing statement balances', () => {
+  const result = rbcBusinessBankingParser.parse(SINGLE_TXN_LINES, { defaultCurrency: 'CAD' });
+  assert.deepEqual(result.statementBalances, { opening: 266.8, closing: 260.8 });
 });

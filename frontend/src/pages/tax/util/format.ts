@@ -37,6 +37,19 @@ export function fmtCurrency(value: Numeric): string {
   return `$${n.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// Splits the signed T1 refundOrOwing (L48500) into a label and an unsigned
+// amount. The engine computes it as totalPayable − credits, so positive is a
+// balance owing and zero-or-negative is a refund (mirrors the engine's own L48500
+// label). null when the value is missing, e.g. a snapshot cached before the
+// field existed.
+export function refundOrOwing(
+  value: Numeric,
+): { label: 'Refund' | 'Owing'; amount: string } | null {
+  const n = parseFinite(value);
+  if (!Number.isFinite(n)) return null;
+  return { label: n > 0 ? 'Owing' : 'Refund', amount: fmtCurrency(Math.abs(n)) };
+}
+
 // X.XX%, "—" on non-finite. Accepts an already-fractional number (0.15 ->
 // "15.00%"). The caller does the division.
 export function fmtPct(n: number): string {

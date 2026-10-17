@@ -9,6 +9,32 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/PULL_REQUEST_TEMPLATE/**'
 
+  # Manual build of one service under a non-production tag, for staging an
+  # environment whose build-time configuration differs from production.
+  #
+  # This exists because VITE_API_BASE is baked into the frontend bundle at build
+  # time — the runtime image is nginx serving static files, so the API base
+  # cannot be changed by an env var afterwards. Verifying the app on any
+  # hostname other than the production one therefore needs its own image.
+  #
+  # Kept separate from the push flow on purpose: `detect`/`build` below are
+  # untouched, and this path can never publish `:main` (guarded in the job).
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Which image to build
+        required: true
+        type: choice
+        options: [frontend, backend]
+      tag:
+        description: Tag to publish
+        required: true
+        type: string
+      vite_api_base:
+        description: Overrides secrets.VITE_API_BASE for a frontend build
+        required: false
+        type: string
+
 concurrency:
   group: build-images-${{ github.ref }}
   cancel-in-progress: false
@@ -28,7 +54,7 @@ jobs:
       matrix: ${{ steps.detect.outputs.matrix }}
       any: ${{ steps.detect.outputs.any }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Detect which images need building
         id: detect
@@ -89,15 +115,15 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -113,7 +139,7 @@ jobs:
           echo "app_version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push ${{ matrix.name }}
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: ${{ matrix.context }}
           # Keep v5's single-manifest output. build-push v6+ enables provenance
@@ -138,3 +164,63 @@ jobs:
             node_auth_token=${{ secrets.GITHUB_TOKEN }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # Manual builds. Never runs on push.
+  #
+  # This can publish any tag, `main` included. An earlier version refused the
+  # production tags, which bought nothing — dispatching already requires repo
+  # write access — while making it impossible to correct `:main` after a
+  # build-arg change, since the content-hash skip means a changed secret does
+  # not trigger a rebuild on its own.
+  dispatch:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/${REPO_LC}-${{ inputs.service }}" >> "$GITHUB_OUTPUT"
+          echo "app_version=$(git describe --tags --always --dirty)" >> "$GITHUB_OUTPUT"
+          # Fall back to the production value when no override is supplied, so a
+          # backend build (which ignores it) still gets a sane arg.
+          if [ -n "${{ inputs.vite_api_base }}" ]; then
+            echo "vite_api_base=${{ inputs.vite_api_base }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "vite_api_base=${{ secrets.VITE_API_BASE }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push ${{ inputs.service }}:${{ inputs.tag }}
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: ${{ inputs.service }}/Dockerfile
+          push: true
+          provenance: false
+          tags: ${{ steps.meta.outputs.image }}:${{ inputs.tag }}
+          build-args: |
+            VITE_API_BASE=${{ steps.meta.outputs.vite_api_base }}
+            APP_VERSION=${{ steps.meta.outputs.app_version }}
+          # Authenticates `yarn install` against GitHub Packages (@connor-adams/*)
+          # inside the build. Secret mount → never written to an image layer.
+          secrets: |
+            node_auth_token=${{ secrets.GITHUB_TOKEN }}
+          cache-from: type=gha,scope=${{ inputs.service }}

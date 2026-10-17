@@ -9,9 +9,24 @@ import { hasActiveItemsFilters } from '@/hooks/useItems'
 import { patchJson } from '@/lib/api'
 import { Link } from 'react-router-dom'
 import { formatMoney } from '../../lib/formatMoney'
-import type { ItemRow } from '@cashflow/shared'
+import type { CardOwnershipView, ItemRow } from '@cashflow/shared'
 
 type GroupBy = 'purchase' | 'category' | 'none'
+
+/**
+ * Badge shown beside an item's title when its order's card ownership isn't
+ * `known`. `known` renders no badge. Tailwind v4 JIT needs literal class
+ * strings, so this is a lookup table keyed by state rather than interpolated
+ * classes; the DS Badge's own `variant` prop supplies the visual treatment
+ * (never overridden via className) per the design-system-as-is rule.
+ */
+const CARD_OWNERSHIP_BADGE: Record<
+  Exclude<CardOwnershipView, 'known'>,
+  { label: string; variant: 'outline' | 'secondary' }
+> = {
+  unknown: { label: 'unverified card', variant: 'outline' },
+  foreign: { label: 'not your card', variant: 'secondary' },
+}
 
 type Props = {
   filters: ItemsFilters
@@ -200,6 +215,11 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched, onClearFilter
                 >
                   {r.title}
                 </Button>
+                {r.order.cardOwnership !== 'known' && (
+                  <Badge variant={CARD_OWNERSHIP_BADGE[r.order.cardOwnership].variant}>
+                    {CARD_OWNERSHIP_BADGE[r.order.cardOwnership].label}
+                  </Badge>
+                )}
                 {r.receipt.sourceTxnId == null && (
                   <Badge variant="outline" className="text-muted-foreground">
                     Unmatched

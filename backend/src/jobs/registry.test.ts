@@ -1,5 +1,6 @@
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { listDefinitions } from './registry';
 
 let models: typeof import('../models');
 let registry: typeof import('./registry');
@@ -92,4 +93,10 @@ test('reconcile picks up DB cron override on next iteration', async () => {
   views = await registry.listJobs();
   assert.equal(views[0].cron, '*/15 * * * *');
   assert.equal(views[0].source.cron, 'db');
+});
+
+test('run_insight_detectors is registered', async () => {
+  await import('./definitions/runInsightDetectors');
+  const names = listDefinitions().map((d) => d.name);
+  assert.ok(names.includes('run_insight_detectors'));
 });

@@ -12,6 +12,25 @@ interface Props {
 
 interface TreeNode { scenario: Scenario; children: TreeNode[] }
 
+/**
+ * A scenario's kind decides which question its number answers, so the tree has to
+ * say which one you are looking at. A `projection_root` resolves through
+ * `projectPersonalFactsFromPrevYear` — the prior year scaled forward, carrying no
+ * transactions from the year on screen — and rendering it identically to a fork is
+ * what let a 2025-scaled forecast read as the 2026 return.
+ */
+const KIND_MARKER: Record<Scenario['kind'], string> = {
+  baseline: '• ',
+  fork: '├ ',
+  projection_root: '◆ ',
+};
+
+const KIND_LABEL: Record<Scenario['kind'], string | null> = {
+  baseline: 'actuals',
+  fork: null,
+  projection_root: 'projection',
+};
+
 function buildTree(scenarios: Scenario[]): TreeNode[] {
   const byParent = new Map<number | null, Scenario[]>();
   for (const s of scenarios) {
@@ -62,9 +81,11 @@ function TreeList({ nodes, activeId, onSelect }: {
               n.scenario.id === activeId ? 'bg-muted' : 'bg-transparent',
             ].join(' ')}
           >
-            {n.scenario.kind === 'baseline' ? '• ' : '├ '}
+            {KIND_MARKER[n.scenario.kind] ?? '├ '}
             {n.scenario.name}
-            {n.scenario.kind === 'baseline' && <span className="muted"> (actuals)</span>}
+            {KIND_LABEL[n.scenario.kind] && (
+              <span className="muted"> ({KIND_LABEL[n.scenario.kind]})</span>
+            )}
           </Button>
           {n.children.length > 0 && <TreeList nodes={n.children} activeId={activeId} onSelect={onSelect} />}
         </li>

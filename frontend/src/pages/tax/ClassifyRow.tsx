@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Checkbox } from '@connor-adams/designsystem';
 import { patchJson } from '@/lib/api';
 import { TaxTreatmentSelect } from '../../components/TaxTreatmentSelect';
 import { CORP_OPTIONS, PAYROLL_OPTIONS, type TaxTreatment } from '../../lib/taxTreatment';
@@ -11,9 +12,19 @@ interface ClassifyRowProps {
   primary: QueueLeg;
   counter?: QueueLeg;
   onClassified: (targetId: number, treatment: TaxTreatment) => void;
+  selected: boolean;
+  onSelectedChange: (next: boolean) => void;
 }
 
-export function ClassifyRow({ targetId, kind, primary, counter, onClassified }: ClassifyRowProps) {
+export function ClassifyRow({
+  targetId,
+  kind,
+  primary,
+  counter,
+  onClassified,
+  selected,
+  onSelectedChange,
+}: ClassifyRowProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const options = kind === 'corp' ? CORP_OPTIONS : PAYROLL_OPTIONS;
@@ -39,6 +50,11 @@ export function ClassifyRow({ targetId, kind, primary, counter, onClassified }: 
 
   return (
     <li className="flex items-center gap-3 py-2">
+      <Checkbox
+        checked={selected}
+        onCheckedChange={onSelectedChange}
+        aria-label={`select txn ${targetId}`}
+      />
       <span className="w-20 text-sm">{primary.date}</span>
       <span className="w-24 text-right tabular-nums text-sm font-semibold">{fmtCurrency(primary.amount)}</span>
       <span className="flex-1 text-sm">

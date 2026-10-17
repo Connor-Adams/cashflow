@@ -2,14 +2,16 @@
 import { resolveCorpScenario } from './resolveCorpScenario';
 import { ratesFor } from '../engine/brackets';
 import { buildT2 } from '../engine/t2';
+import type { CorpTaxYearFacts } from '../engine/types';
 import {
   computeScenarioReturn,
   type ComputeScenarioReturnOptions,
-  type ScenarioReturnResult,
+  type ScenarioComputation,
 } from './computeScenarioReturn';
 
 export type ComputeCorpScenarioOptions = ComputeScenarioReturnOptions;
-export type ComputeCorpScenarioResult = ScenarioReturnResult;
+/** Result plus the facts it ran on, mirroring the personal path. */
+export type ComputeCorpScenarioResult = ScenarioComputation<CorpTaxYearFacts>;
 
 /**
  * Compute a corp scenario's T2 return: resolve facts → hash → check cache → run

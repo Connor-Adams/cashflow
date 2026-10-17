@@ -224,3 +224,127 @@ test('POST /import-pdf: split-tender receipt auto-links to both card transaction
   assert.equal(links[1].transactionId, t2.id);
   assert.equal(Number(links[1].linkedAmount), 1100.0);
 });
+
+test('POST /import-pdf-bulk: rejects an upload with no files', async () => {
+  const res = await authed.post('/api/external-orders/import-pdf-bulk');
+  assert.equal(res.status, 400);
+});
+
+test('POST /import-pdf-bulk: a non-PDF fails only its own entry', async () => {
+  const res = await authed
+    .post('/api/external-orders/import-pdf-bulk')
+    .attach('files', Buffer.from('not a pdf', 'utf8'), {
+      filename: 'fake.txt',
+      contentType: 'text/plain',
+    });
+
+  // The batch itself succeeds; the file is reported as failed.
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.total, 1);
+  assert.equal(res.body.failed, 1);
+  assert.equal(res.body.imported, 0);
+  assert.equal(res.body.results[0].filename, 'fake.txt');
+  assert.equal(res.body.results[0].status, 'failed');
+});
+
+test('POST /import-pdf-bulk: imports two receipts in one request with per-file results', {
+  skip: skipNoFixtures,
+}, async () => {
+  const res = await authed
+    .post('/api/external-orders/import-pdf-bulk')
+    .attach('files', fs.readFileSync(r1Path), { filename: 'r1.pdf', contentType: 'application/pdf' })
+    .attach('files', fs.readFileSync(r2Path), { filename: 'r2.pdf', contentType: 'application/pdf' });
+
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.total, 2);
+  assert.equal(res.body.failed, 0);
+  // R1 and R2 were already imported by the single-file tests above, so both
+  // dedupe to the existing orders rather than creating new ones.
+  assert.equal(res.body.duplicates, 2);
+  assert.equal(res.body.imported, 0);
+  assert.deepEqual(res.body.results.map((r: { filename: string }) => r.filename), ['r1.pdf', 'r2.pdf']);
+  for (const r of res.body.results) {
+    assert.equal(r.status, 'duplicate');
+    assert.equal(r.parserId, 'costco_till_receipt');
+    assert.ok(typeof r.orderId === 'number');
+  }
+
+  // Dedupe held: still exactly one order per receipt.
+  const orders = await models.ExternalOrder.findAll({ where: { source: 'costco_till_receipt-pdf' } });
+  const ids = new Set(orders.map((o) => o.vendorOrderId));
+  assert.equal(orders.length, ids.size, 'duplicate orders were created');
+});
+
+test('POST /import-pdf-bulk: one unparseable file does not stop the others', {
+  skip: skipNoFixtures,
+}, async () => {
+  const res = await authed
+    .post('/api/external-orders/import-pdf-bulk')
+    .attach('files', Buffer.from('%PDF-1.4 garbage', 'utf8'), { filename: 'junk.pdf', contentType: 'application/pdf' })
+    .attach('files', fs.readFileSync(r2Path), { filename: 'good.pdf', contentType: 'application/pdf' });
+
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.total, 2);
+  assert.equal(res.body.failed, 1);
+  assert.equal(res.body.results[0].status, 'failed');
+  assert.ok(res.body.results[0].error, 'failed entry carries an error message');
+  assert.notEqual(res.body.results[1].status, 'failed');
+});
+
+test('POST /import-pdf: re-uploading repairs parser-owned fields but preserves AI/user columns', {
+  skip: skipNoFixtures,
+}, async () => {
+  // R2 was imported by an earlier test in this file. Simulate an order that an
+  // older parser ingested: blank item numbers, quantity collapsed to 1, and an
+  // AI category that must survive the refresh.
+  const order = await models.ExternalOrder.findOne({
+    where: { vendorOrderId: '1168-7-285-17-20251226-1546' },
+  });
+  assert.ok(order, 'R2 order not found — earlier test did not run');
+
+  const items = await models.ExternalOrderItem.findAll({
+    where: { externalOrderId: order.id },
+    order: [['id', 'ASC']],
+  });
+  assert.ok(items.length > 0);
+  const victim = items[0];
+  await victim.update({
+    itemNumber: null,
+    quantity: 1,
+    title: 'STALE TITLE',
+    inferredCategory: 'Groceries',
+    businessUsePercent: '42.00',
+  });
+
+  const res = await authed
+    .post('/api/external-orders/import-pdf')
+    .attach('file', fs.readFileSync(r2Path), { filename: 'r2.pdf', contentType: 'application/pdf' });
+
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.created, false, 'must dedupe, not create a second order');
+  assert.equal(res.body.refreshed, true, 'the mangled row should have been repaired');
+
+  await victim.reload();
+  // parser-owned: restored
+  assert.notEqual(victim.title, 'STALE TITLE');
+  assert.ok(victim.itemNumber, 'item number should be repopulated');
+  // AI/user-owned: untouched
+  assert.equal(victim.inferredCategory, 'Groceries');
+  assert.equal(Number(victim.businessUsePercent), 42);
+
+  // No duplicate rows were introduced by the refresh.
+  const after = await models.ExternalOrderItem.count({ where: { externalOrderId: order.id } });
+  assert.equal(after, items.length);
+});
+
+test('POST /import-pdf: an unchanged re-upload reports refreshed=false', {
+  skip: skipNoFixtures,
+}, async () => {
+  const res = await authed
+    .post('/api/external-orders/import-pdf')
+    .attach('file', fs.readFileSync(r2Path), { filename: 'r2.pdf', contentType: 'application/pdf' });
+
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.created, false);
+  assert.equal(res.body.refreshed, false, 'nothing changed, so nothing should be reported as repaired');
+});

@@ -1,6 +1,5 @@
 import { Op } from 'sequelize';
 import {
-  Account,
   Carryforward,
   Entity,
   InvestmentActivity,
@@ -11,6 +10,9 @@ import {
 import { D } from '../util/decimal';
 import { computeAcb } from '../../portfolio/acb';
 import { toCad } from '../../fx/toCad';
+import { partitionCorpPerimeter } from './corpPerimeter';
+import { loadCorpPerimeterInputs } from './loadCorpPerimeterInputs';
+import { isOwnerPaidCorpExpense } from './ownerPaidCorpExpense';
 import type {
   CapGainEvent,
   CorpCarryforwards,
@@ -24,34 +26,27 @@ export async function buildCorpFacts(
   entityId: number,
   fiscalYear: CorpFiscalYear,
 ): Promise<CorpTaxYearFacts> {
-  const entity = await Entity.findByPk(entityId);
-  if (!entity) throw new Error(`Entity ${entityId} not found`);
-  if (entity.kind !== 'corp') throw new Error(`Entity ${entityId} is not corp`);
-
   const { startDate, endDate } = fiscalYear;
 
-  const accounts = await Account.findAll({ where: { entityId } });
-  const accountIds = accounts.map((a) => a.id);
+  // Shared with the completeness gate, which partitions the same perimeter to
+  // read `unimportedOutboundTransfers`. Everything below reads from this — do
+  // not re-query here, or the two views of the perimeter will drift.
+  const { entity, accountIds, txns, perimeterInput, perimeterOptions, mirrorWarnings } =
+    await loadCorpPerimeterInputs(entityId, fiscalYear);
 
-  const txns = await Transaction.findAll({
-    where: { entityId, date: { [Op.between]: [startDate, endDate] } },
-  });
+  const perimeter = partitionCorpPerimeter(perimeterInput, perimeterOptions);
 
-  // Active business income — transactions with finalBusiness=true
+  // Revenue and expenses both land in activeBusinessIncome; expenses keep their
+  // negative sign so the engine's signed sum nets them off.
   const activeBusinessIncome: IncomeItem[] = [];
-  for (const t of txns) {
-    if (t.finalBusiness) {
-      const { cad } = await toCad(
-        D(t.amount as unknown as string),
-        t.currency ?? 'CAD',
-        t.date as unknown as string,
-      );
-      activeBusinessIncome.push({
-        source: `Txn #${t.id} ${t.finalCategory ?? ''}`,
-        amount: D(t.amount as unknown as string),
-        cadAmount: cad,
-      });
-    }
+  for (const t of [...perimeter.revenue, ...perimeter.expenses]) {
+    const raw = D(t.amount);
+    const { cad } = await toCad(raw, t.currency, t.date);
+    activeBusinessIncome.push({
+      source: `Txn #${t.id} ${t.merchant ?? ''}`.trim(),
+      amount: raw,
+      cadAmount: cad,
+    });
   }
 
   const activity = accountIds.length
@@ -91,6 +86,23 @@ export async function buildCorpFacts(
         eligibleDividends.push(item);
       }
     }
+  }
+
+  // Passive income earned on accounts the InvestmentActivity ledger does not
+  // cover — a corp chequing account paying monthly interest is the common case.
+  // The perimeter split has already dropped the investment-account rows that
+  // would double the ledger above. Transaction rows carry no security, so a
+  // dividend here takes the same 'eligible' default the activity path uses when
+  // eligibility is unknown.
+  for (const t of perimeter.interestIncome) {
+    const raw = D(t.amount);
+    const { cad } = await toCad(raw, t.currency, t.date);
+    interest.push({ source: `Txn #${t.id} ${t.merchant ?? ''}`.trim(), amount: raw, cadAmount: cad });
+  }
+  for (const t of perimeter.dividendIncome) {
+    const raw = D(t.amount);
+    const { cad } = await toCad(raw, t.currency, t.date);
+    eligibleDividends.push({ source: `Txn #${t.id} ${t.merchant ?? ''}`.trim(), amount: raw, cadAmount: cad });
   }
 
   // Capital gains via ACB (same pattern as personal). ACB is a weighted-average
@@ -241,6 +253,68 @@ export async function buildCorpFacts(
     }
   }
 
+  // Business costs the owner fronted on a PERSONAL account. The expense is the
+  // corporation's, but the transaction sits on a personal card, so the
+  // corp-entity query above never sees it and the cost goes undeducted.
+  //
+  // The reimbursement transfer that repays the owner is NOT the deduction — the
+  // purchase is. `expense_reimbursement` exists to keep that transfer out of
+  // both returns (see corpPerimeter's NON_OPERATING_TREATMENTS), so the dollar
+  // is counted exactly once, here.
+  //
+  // Only attempted when the household has ONE corporation: nothing in the data
+  // says which corp a personal business expense belongs to, and guessing would
+  // let the same dollar be deducted on two returns.
+  const ownerPaidWarnings: string[] = [];
+  const corpsInHousehold = await Entity.findAll({
+    where: { householdId: entity.householdId, kind: 'corp' },
+  });
+  if (corpsInHousehold.length > 1) {
+    ownerPaidWarnings.push(
+      `Household has more than one corporation (${corpsInHousehold.length}), so business `
+      + 'expenses paid on personal accounts were NOT attributed to this return. Move them '
+      + 'onto the corporation that incurred them, or record them on a corporate account.',
+    );
+  } else {
+    const personalEntities = await Entity.findAll({
+      where: { householdId: entity.householdId, kind: 'personal' },
+    });
+    const personalEntityIds = personalEntities.map((e) => e.id);
+    const ownerPaid = personalEntityIds.length
+      ? await Transaction.findAll({
+        where: {
+          entityId: personalEntityIds,
+          date: { [Op.between]: [startDate, endDate] },
+          finalBusiness: true,
+        },
+      })
+      : [];
+    let ownerPaidTotal = D(0);
+    let ownerPaidCount = 0;
+    for (const t of ownerPaid) {
+      // Shared with buildPersonalFacts, which skips exactly these rows so the
+      // same cost is not also a self-employment expense on the T1.
+      if (!isOwnerPaidCorpExpense(t)) continue;
+      const raw = D(t.amount as unknown as string);
+      const { cad } = await toCad(raw, t.currency ?? 'CAD', t.date as unknown as string);
+      activeBusinessIncome.push({
+        source: `Txn #${t.id} ${t.merchantClean ?? t.merchantRaw ?? ''} (owner-paid)`.trim(),
+        amount: raw,
+        cadAmount: cad,
+      });
+      ownerPaidTotal = ownerPaidTotal.plus(cad.abs());
+      ownerPaidCount += 1;
+    }
+    if (ownerPaidCount > 0) {
+      ownerPaidWarnings.push(
+        `Deducted ${ownerPaidTotal.toFixed(2)} CAD across ${ownerPaidCount} business-flagged `
+        + 'transaction(s) paid on personal accounts. These rest on the finalBusiness flag being '
+        + 'correct — review them before filing, and make sure the reimbursement transfers that '
+        + "repay them are tagged 'expense_reimbursement' so the same cost is not counted twice.",
+      );
+    }
+  }
+
   return {
     fiscalYear,
     jurisdiction: 'CA-ON',
@@ -255,5 +329,6 @@ export async function buildCorpFacts(
     dividendsPaid,
     salaryPaid,
     carryforwards,
+    factWarnings: [...perimeter.warnings, ...ownerPaidWarnings, ...mirrorWarnings],
   };
 }

@@ -1,6 +1,6 @@
 import type { AlertVariant } from '@connor-adams/designsystem'
 
-type DetectedMode = 'standard' | 'ws-bundle' | 'holdings' | 'pdf-bundle'
+type DetectedMode = 'standard' | 'ws-bundle' | 'holdings' | 'activity-statement' | 'pdf-bundle'
 
 type UploadResult = {
   file?: string
@@ -27,13 +27,29 @@ const WS_CREDIT_CARD_RE =
   /^Wealthsimple-credit-card-\d{4}-\d{2}-\d{2}-credit-card-statement-transactions-ca-credit-card-[A-Za-z0-9]+\.csv$/
 const WS_MONTHLY_RE =
   /^.+?-\d{4}-\d{2}-\d{2}-monthly-statement-transactions-[A-Za-z0-9]+CAD?\.csv$/
+// WS moved the period-end date to the end of the name in 2026-08. The WSID
+// segment — not the field order — is what identifies the file as theirs.
+const WS_MONTHLY_DATE_SUFFIX_RE =
+  /^.+?-monthly-statement-transactions-[A-Za-z0-9]+CAD?-\d{4}-\d{2}-\d{2}\.csv$/
 
 function isWealthsimpleExport(name: string): boolean {
-  return WS_CREDIT_CARD_RE.test(name) || WS_MONTHLY_RE.test(name)
+  return (
+    WS_CREDIT_CARD_RE.test(name) ||
+    WS_MONTHLY_RE.test(name) ||
+    WS_MONTHLY_DATE_SUFFIX_RE.test(name)
+  )
 }
+
+// Wealthsimple's Custom Activity Statement is ONE pdf covering EVERY account.
+// It must not reach the pdf-bundle importer, which resolves one account per
+// file and would file every section against whichever account matched first.
+const WS_ACTIVITY_STATEMENT_RE = /^ACTIVITY_STATEMENT[_-]/i
 
 export function detectMode(files: File[]): DetectedMode {
   if (files.length === 0) return 'standard'
+  if (files.length === 1 && WS_ACTIVITY_STATEMENT_RE.test(files[0].name)) {
+    return 'activity-statement'
+  }
   const allPdf = files.every((f) => f.name.toLowerCase().endsWith('.pdf'))
   if (allPdf) return 'pdf-bundle'
   const allCsv = files.every((f) => f.name.toLowerCase().endsWith('.csv'))

@@ -42,6 +42,13 @@ export class Transaction extends Model<
   declare autoConfidence: string | null;
   declare linkedTransactionId: number | null;
   declare transferPurpose: string | null;
+  /**
+   * People-ledger role: what this transfer means between the user and another
+   * person. See COUNTERPARTY_ROLES. Null = untagged; the contact's loanDefault
+   * decides. Distinct from `transferPurpose`, which describes movement between
+   * the user's own accounts.
+   */
+  declare counterpartyRole: string | null;
   declare transferLinkedAt: Date | null;
   declare isRecurring: CreationOptional<boolean>;
 
@@ -92,6 +99,13 @@ export class Transaction extends Model<
    * Stored as TEXT for SQLite-compat in migration round-trip tests.
    */
   declare importConfidenceFlags: string | null;
+  /**
+   * Trust level of this row's source. 'provisional' is a feed row (SimpleFIN)
+   * carrying an authorised amount that a statement may later correct or remove;
+   * 'authoritative' is a statement/CSV/PDF row, and the default so a writer that
+   * forgets to set it produces a row statements will leave alone.
+   */
+  declare sourceTier: CreationOptional<string>;
 
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
@@ -341,6 +355,11 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
         field: 'transfer_purpose',
         allowNull: true,
       },
+      counterpartyRole: {
+        type: DataTypes.STRING(16),
+        field: 'counterparty_role',
+        allowNull: true,
+      },
       transferLinkedAt: {
         type: DataTypes.DATE,
         field: 'transfer_linked_at',
@@ -363,6 +382,13 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
         type: DataTypes.DATE,
         field: 'reviewed_at',
         allowNull: true,
+      },
+
+      sourceTier: {
+        type: DataTypes.STRING(16),
+        field: 'source_tier',
+        allowNull: false,
+        defaultValue: 'authoritative',
       },
 
       importConfidence: {

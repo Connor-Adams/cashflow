@@ -38,6 +38,12 @@ export type PersonalCarryforwards = {
   instalmentsPaid: Decimal;
   /** Cumulative FHSA contributions across all years (tracks $40k lifetime cap). */
   fhsaLifetimeContributions: Decimal;
+  /**
+   * FHSA participation room carried in, which the roll accumulates. CRA lets up to
+   * one year's unused room carry forward, so this can legitimately exceed the
+   * annual limit — a contributor who skipped a year has two years available.
+   */
+  fhsaRoom: Decimal;
 };
 
 export type CorpFiscalYear = {
@@ -75,6 +81,13 @@ export type CorpTaxYearFacts = {
   dividendsPaid: CorpDividendPaid[];
   salaryPaid: Decimal;                  // T4 box 14 from corp to owner
   carryforwards: CorpCarryforwards;
+  /**
+   * Caveats raised while ASSEMBLING these facts (as opposed to while computing
+   * the return). buildT2 seeds its own `warnings` from this so a shaky input —
+   * e.g. a receipt counted as revenue that names no external payer — is visible
+   * on the return itself rather than only in the builder.
+   */
+  factWarnings?: string[];
   /**
    * P11b: Associated-group AAII total. When present, used in place of per-corp
    * AAII for the SBD grind so all corps in an associated group share the
@@ -141,6 +154,25 @@ export type TaxYearFacts = {
   capitalGainEvents: CapGainEvent[];
   rrspContribs: RrspContrib[];
   slips: SlipFact[];
+  /**
+   * Warnings `computeAcb` raised while pricing this year's dispositions — clamped
+   * sells, zero-cost `transfer_in`, mixed currency.
+   *
+   * Carried on the facts because `buildPersonalFacts` is the only place the ACB walk
+   * runs, over FULL history, and it previously discarded them. The completeness gate
+   * reads them from here rather than re-running that walk, which would mean
+   * duplicating ~60 lines of input assembly for a diagnostic.
+   *
+   * Optional: the corp builder does not produce them, and every existing test
+   * constructs facts without them.
+   */
+  acbWarnings?: string[];
+  /**
+   * Caveats raised while assembling the facts — a missing FX rate, an
+   * unparseable slip box. buildT1 seeds its warnings from these, as buildT2 does
+   * from the corp facts' own `factWarnings`.
+   */
+  factWarnings?: string[];
   carryforwards: PersonalCarryforwards;
   donations: IncomeItem[];
   fhsaContribs: RrspContrib[]; // reuse shape
@@ -179,6 +211,12 @@ export type TaxReturn = {
     cppContrib: Decimal;
     eiPremium: Decimal;
     totalPayable: Decimal;
+    /**
+     * Payable less tax withheld at source, and NOT less instalments — the quantity
+     * the CRA instalment-threshold test is defined on. Signed: a negative is a
+     * refund, and on a rising-income year the sign is what the two-year test reads.
+     */
+    netTaxOwing: Decimal;
     refundOrOwing: Decimal;
   };
   warnings: string[];
@@ -189,7 +227,20 @@ export type Bracket = {
   rate: Decimal;
 };
 
+/**
+ * Where a rate table's numbers came from.
+ *
+ * `published` means every indexed value was taken from CRA / Service Canada /
+ * Ontario after they announced it. `projected` means the table was derived by
+ * indexing a prior year — fine for scenario planning, wrong for a return. A field
+ * rather than a comment because the 2026 table once carried a "VERIFIED" header
+ * over a projection and was served anyway; a header cannot be enforced.
+ */
+export type RateProvenance = 'published' | 'projected';
+
 export type RateTable = {
+  /** Whether these numbers were published or projected. See RateProvenance. */
+  provenance: RateProvenance;
   year: number;
   federalBrackets: Bracket[];
   provincialBrackets: Bracket[];

@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useId, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { useUnmountSafeTimeout } from '@/hooks/useUnmountSafeTimeout'
 
 const HINT_KEY = 'tax.yearJumpHintSeen'
 
@@ -16,6 +17,9 @@ export const YearJump = forwardRef<HTMLInputElement, YearJumpProps>(
     const [open, setOpen] = useState(false)
     const [highlightIdx, setHighlightIdx] = useState(0)
     const [showHint, setShowHint] = useState(false)
+    // Only the blur-close timer: the hint timer below owns its own cleanup and
+    // must not share this hook's single slot, or the two would cancel each other.
+    const scheduleBlurClose = useUnmountSafeTimeout()
 
     useEffect(() => {
       try {
@@ -98,7 +102,7 @@ export const YearJump = forwardRef<HTMLInputElement, YearJumpProps>(
             }}
             onFocus={() => setOpen(true)}
             onBlur={() => {
-              setTimeout(() => setOpen(false), 150)
+              scheduleBlurClose(() => setOpen(false), 150)
             }}
             onKeyDown={handleKeyDown}
           />

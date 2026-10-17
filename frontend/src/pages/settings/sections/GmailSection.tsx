@@ -1,3 +1,4 @@
+import { apiBase } from '../../../lib/runtimeConfig'
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@connor-adams/designsystem'
 import { Icon } from '@connor-adams/designsystem'
@@ -246,7 +247,7 @@ export function GmailSection() {
   }
 
   function connectGmail() {
-    const base = import.meta.env.VITE_API_BASE ?? ''
+    const base = apiBase()
     // Browser-level redirect — server responds with 302 to Google's consent screen.
     window.location.href = `${base}/api/email/auth/google`
   }
@@ -272,7 +273,7 @@ export function GmailSection() {
     const body: Record<string, unknown> = { maxMessages }
     if (sinceDays != null) body.sinceDays = sinceDays
     try {
-      const base = import.meta.env.VITE_API_BASE ?? ''
+      const base = apiBase()
       const res = await fetch(`${base}${path}`, {
         method: 'POST',
         credentials: 'include',

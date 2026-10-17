@@ -60,7 +60,7 @@ export type ExtractedReceiptOrder = {
   trip?: TripDetail | null;
 };
 
-const SYSTEM_PROMPT = `You extract structured order data from receipt emails and images.
+export const SYSTEM_PROMPT = `You extract structured order data from receipt emails and images.
 
 Reply with JSON only. Schema:
 {
@@ -69,6 +69,8 @@ Reply with JSON only. Schema:
   "orderDate": "YYYY-MM-DD" | null,
   "orderId": string | null,
   "total": number | null,
+  "subtotal": number | null,
+  "tax": number | null,
   "currency": "USD" | "CAD" | "EUR" | "GBP" | "AUD" | null,
   "paymentLast4": string | null,
   "items": [
@@ -87,6 +89,7 @@ Reply with JSON only. Schema:
 Rules:
 - Use "amazon" / "apple" / "google" / "uber" / "uber_eats" for those exact merchants; otherwise "other".
 - Only populate "trip" for rideshare/taxi receipts (e.g. Uber/Lyft trips). For all other receipts set "trip": null.
+- "subtotal" is the pre-tax order total and "tax" the tax charged. Null if the receipt doesn't state them separately — never compute one from the other.
 - inferredCategory: short labels matching common personal-finance categories ("Subscriptions", "Apps", "Music", "Streaming", "Office", "Groceries", "Dining", "Hardware", "Books"). Null if uncertain.
 - Quantities default to 1 if not stated.
 - All numbers as plain numbers (no currency symbols, no commas).

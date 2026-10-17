@@ -331,6 +331,23 @@ export const cibcCostcoMastercardParser: PdfParser = {
       }
     });
 
-    return { transactions, warnings, parseErrors };
+    // Both bundle entry points require `header` to resolve the account and throw
+    // "produced no header for account match" without it. Map this parser's own
+    // vendor header onto the shared PdfStatementHeader shape; `productLabel`
+    // must match the PDF_ACCOUNT_TEMPLATES key in runImport.ts or the importer
+    // forks a new account instead of reusing the existing card.
+    return {
+      transactions,
+      header: {
+        accountSuffix: header.accountLast4,
+        productLabel: 'CIBC Costco Mastercard',
+        accountType: 'credit_card',
+        periodStart: header.periodStart,
+        periodEnd: header.periodEnd,
+        currency: ctx.defaultCurrency,
+      },
+      warnings,
+      parseErrors,
+    };
   },
 };

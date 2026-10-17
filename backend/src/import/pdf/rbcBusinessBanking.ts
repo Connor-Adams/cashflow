@@ -1,5 +1,6 @@
-import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader } from './types';
-import { normalizeMerchant } from '../normalizeMerchant';
+import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader, StatementParseError } from './types';
+import { rbcBankingResult } from './rbcBankingResult';
+import { signByRunningBalance, type UnsignedRow } from './rbcRunningBalanceSigns';
 import { dayMonthToIso, parseMoney, parsePeriod, type Period } from './dateHelpers';
 
 /**
@@ -137,12 +138,7 @@ export function parseRbcBusinessBankingHeader(lines: PdfLine[]): PdfStatementHea
   };
 }
 
-type PendingRow = {
-  date: string;          // ISO yyyy-mm-dd
-  description: string;
-  rawAmount: number;     // absolute value from the PDF
-  balance: number | null;  // null if no balance column on this row
-};
+type PendingRow = UnsignedRow;
 
 /**
  * Parse transactions from the "Account Activity Details" section.
@@ -160,8 +156,9 @@ export function parseRbcBusinessBankingActivity(
   lines: PdfLine[],
   period: Period,
   openingBalance: number,
-): { rows: Array<{ date: string; description: string; amount: number }>; parseErrors: { rowIndex: number; message: string }[] } {
-  const parseErrors: { rowIndex: number; message: string }[] = [];
+  closingBalance: number | null = extractClosingBalance(lines),
+): { rows: Array<{ date: string; description: string; amount: number }>; parseErrors: StatementParseError[] } {
+  const parseErrors: StatementParseError[] = [];
 
   // Slice the activity section.
   //
@@ -292,137 +289,8 @@ export function parseRbcBusinessBankingActivity(
     }
   }
 
-  // Sign transactions using running balance delta.
-  const rows: Array<{ date: string; description: string; amount: number }> = [];
-  let runningBalance = openingBalance;
-
-  for (let i = 0; i < pending.length; i++) {
-    const row = pending[i];
-
-    if (row.balance !== null) {
-      // Balance column present: sign from delta.
-      const delta = row.balance - runningBalance;
-      // delta should be ≈ +rawAmount (credit) or ≈ -rawAmount (debit).
-      const signed = Math.abs(delta - row.rawAmount) < 0.015 ? row.rawAmount : -row.rawAmount;
-      rows.push({ date: row.date, description: row.description, amount: signed });
-      runningBalance = row.balance;
-    } else {
-      // No balance: infer sign using the next known balance.
-      // Look ahead to find the next pending row that has a balance.
-      let nextBalance: number | null = null;
-      let knownAmountsBetween = 0;
-      for (let j = i + 1; j < pending.length; j++) {
-        if (pending[j].balance !== null) {
-          nextBalance = pending[j].balance;
-          break;
-        }
-        // Count other no-balance rows between this one and the next known balance.
-        knownAmountsBetween++;
-      }
-
-      if (nextBalance !== null && knownAmountsBetween === 0) {
-        // One no-balance row before the next known balance.
-        // The next known balance was computed from a row that ALSO contributes.
-        // But we need to sign THIS row first.
-        // delta = nextBalance - runningBalance would include BOTH this row and the next row.
-        // We can't sign this row without the next row's sign too.
-        // Since next row has a balance, we use: this_signed = nextBalance - runningBalance - next_delta
-        // where next_delta = nextKnownBalance - balance_after_this.
-        // This is circular. Instead: use (nextBalance - runningBalance) as an approximation
-        // and determine sign from rawAmount comparison.
-        // Actually: if the next balance row has its balance, we know the delta that
-        // covers BOTH this row and the next row's contribution.
-        // We can defer signing until we process the next row, then back-fill.
-        // For simplicity: mark this as needing back-fill.
-        // Back-fill: after signing next row, set this row's signed = nextBalance - runningBalance - next_signed.
-        const nextRow = pending.find((p, j) => j > i && p.balance !== null)!;
-        const nextNextBalance = nextRow?.balance ?? runningBalance;
-        // We don't know the sign yet — defer. Use a sentinel.
-        rows.push({ date: row.date, description: row.description, amount: NaN }); // placeholder
-        // We'll fix it up below once we process the next row.
-        // Store the index for fixup.
-        const placeholderIdx = rows.length - 1;
-        // Process next row immediately to get its sign.
-        // But we need runningBalance to have moved — we can't do that yet.
-        // Use a different approach: the no-balance row and the next known-balance row together.
-        // total_delta = nextKnownBalance - runningBalance
-        // this_signed + next_signed = total_delta
-        // |this_signed| = rawAmount, |next_signed| = nextRow.rawAmount
-        // Case 1: both credits: this_signed = +rawAmount, next_signed = +nextRow.rawAmount
-        // Case 2: this credit, next debit: +rawAmount - nextRow.rawAmount = total_delta
-        // Case 3: this debit, next credit: -rawAmount + nextRow.rawAmount = total_delta
-        // Case 4: both debits: -rawAmount - nextRow.rawAmount = total_delta
-        const totalDelta = nextNextBalance - runningBalance;
-        const r1 = row.rawAmount;
-        const r2 = nextRow.rawAmount;
-
-        // Find the combination that matches totalDelta within tolerance.
-        const candidates: [number, number][] = [
-          [r1, r2],   // both credits
-          [r1, -r2],  // credit, then debit
-          [-r1, r2],  // debit, then credit
-          [-r1, -r2], // both debits
-        ];
-
-        const matchingCandidates = candidates.filter(
-          ([s1, s2]) => Math.abs(s1 + s2 - totalDelta) < 0.015,
-        );
-
-        if (matchingCandidates.length > 1) {
-          // Ambiguous: multiple sign combinations satisfy the balance delta.
-          // Emit the first match as a best-guess so the rows are visible,
-          // but flag the statement as partial.
-          const [s1, s2] = matchingCandidates[0];
-          rows[placeholderIdx] = { date: row.date, description: row.description, amount: s1 };
-          runningBalance += s1;
-          rows.push({ date: nextRow.date, description: nextRow.description, amount: s2 });
-          runningBalance = nextNextBalance;
-          i++;
-          parseErrors.push({
-            rowIndex: i,
-            message: `ambiguous sign for no-balance row pair: ${matchingCandidates.length} combinations match delta ${totalDelta.toFixed(2)} (${row.description} / ${nextRow.description}); best-guess used`,
-          });
-        } else if (matchingCandidates.length === 1) {
-          const [s1, s2] = matchingCandidates[0];
-          rows[placeholderIdx] = { date: row.date, description: row.description, amount: s1 };
-          runningBalance += s1;
-          // Sign next row directly.
-          rows.push({ date: nextRow.date, description: nextRow.description, amount: s2 });
-          runningBalance = nextNextBalance;
-          i++; // skip next row (already processed)
-        } else {
-          // No match at all — fallback.
-          rows[placeholderIdx] = { date: row.date, description: row.description, amount: row.rawAmount };
-          parseErrors.push({ rowIndex: i + 1, message: `Could not determine sign for no-balance row: ${row.description}` });
-          runningBalance += row.rawAmount;
-        }
-      } else if (nextBalance === null) {
-        // Last transaction, no more balances — assume credit if balance delta is positive.
-        // Without another balance, default to credit (common for last Misc Payment credit).
-        // Use the closing balance if known, otherwise assume credit.
-        rows.push({ date: row.date, description: row.description, amount: row.rawAmount });
-        parseErrors.push({ rowIndex: i + 1, message: `Last transaction has no balance column; defaulting to credit: ${row.description}` });
-        runningBalance += row.rawAmount;
-      } else {
-        // Multiple no-balance rows before the next known balance — more complex.
-        // Rare case: use rawAmount as credit (best guess).
-        rows.push({ date: row.date, description: row.description, amount: row.rawAmount });
-        parseErrors.push({ rowIndex: i + 1, message: `No-balance row with multiple unknowns ahead; defaulting to credit: ${row.description}` });
-        runningBalance += row.rawAmount;
-      }
-    }
-  }
-
-  // Fix up any remaining NaN rows (shouldn't happen with the algorithm above).
-  const output = rows.filter((r) => {
-    if (isNaN(r.amount)) {
-      parseErrors.push({ rowIndex: -1, message: `Dropping unresolved no-balance placeholder: ${r.description}` });
-      return false;
-    }
-    return true;
-  });
-
-  return { rows: output, parseErrors };
+  const signed = signByRunningBalance(pending, openingBalance, closingBalance);
+  return { rows: signed.rows, parseErrors: [...parseErrors, ...signed.parseErrors] };
 }
 
 /** Extract the opening balance from the "Opening balance X" line in the activity section. */
@@ -496,46 +364,15 @@ export const rbcBusinessBankingParser: PdfParser = {
     const period: Period = { start: header.periodStart, end: header.periodEnd };
     const openingBalance = extractOpeningBalance(lines);
     const closingBalance = extractClosingBalance(lines);
-    const { rows, parseErrors } = parseRbcBusinessBankingActivity(lines, period, openingBalance);
+    const { rows, parseErrors } = parseRbcBusinessBankingActivity(lines, period, openingBalance, closingBalance);
 
-    const transactions: PdfParseResult['transactions'] = rows.map((row) => {
-      const merchantClean = normalizeMerchant(row.description);
-      return {
-        date: row.date,
-        merchantRaw: row.description,
-        merchantClean,
-        amount: row.amount,
-        currency: ctx.defaultCurrency,
-        sourceReference: null,
-      };
-    });
-
-    // ── Reconciliation gate ─────────────────────────────────────────────────
-    // Verify: opening + Σsigned ≈ closing. Silent wrong signs/amounts are
-    // unacceptable for corporate financial data.
-    if (closingBalance === null) {
-      parseErrors.push({
-        rowIndex: -1,
-        message: 'reconciliation: could not extract closing balance from statement; gate skipped',
-      });
-    } else {
-      const sumSigned = transactions.reduce((acc, t) => acc + t.amount, 0);
-      const recomputed = openingBalance + sumSigned;
-      if (Math.abs(recomputed - closingBalance) > 0.015) {
-        parseErrors.push({
-          rowIndex: -1,
-          message:
-            `statement does not reconcile: opening ${openingBalance} + sum ${sumSigned.toFixed(2)} = ${recomputed.toFixed(2)}, expected closing ${closingBalance}`,
-        });
-      }
-    }
-    // ───────────────────────────────────────────────────────────────────────
-
-    return {
-      transactions,
+    return rbcBankingResult({
       header,
-      warnings: [],
+      rows,
       parseErrors,
-    };
+      openingBalance,
+      closingBalance,
+      currency: ctx.defaultCurrency,
+    });
   },
 };

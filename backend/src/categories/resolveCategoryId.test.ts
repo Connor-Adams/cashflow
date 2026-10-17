@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { Category, Household } from '../models';
 import { resolveCategoryIdByName } from './resolveCategoryId';
+import { allowDuplicateCategoryNames } from './duplicateNameFixture.testHelper';
 
 let householdId: number;
 beforeEach(async () => {
@@ -41,7 +42,14 @@ test('reuses an existing nested node by name instead of forking a duplicate root
   assert.equal(await Category.count({ where: { householdId } }), 2);
 });
 
+/**
+ * Step 1 of the resolution order. It only DISCRIMINATES when a root and a nested
+ * node share a name, which categories_household_name_key_unique now forbids — so
+ * the branch is defence for a database predating migration 20260930000001, and
+ * the index has to come off to exercise it.
+ */
 test('prefers an existing root over a same-named nested node', async () => {
+  await allowDuplicateCategoryNames();
   const rootCoffee = await Category.create({ householdId, name: 'Coffee', parentId: null });
   const dining = await Category.create({ householdId, name: 'Dining', parentId: null });
   await Category.create({ householdId, name: 'Coffee', parentId: dining.id });
@@ -49,7 +57,9 @@ test('prefers an existing root over a same-named nested node', async () => {
   assert.equal(await resolveCategoryIdByName(householdId, 'Coffee'), rootCoffee.id);
 });
 
+/** Step 3's ambiguity branch — likewise only reachable on a pre-index database. */
 test('creates a root when the name is ambiguous (multiple nested, no root)', async () => {
+  await allowDuplicateCategoryNames();
   const a = await Category.create({ householdId, name: 'Parent A', parentId: null });
   const b = await Category.create({ householdId, name: 'Parent B', parentId: null });
   await Category.create({ householdId, name: 'Coffee', parentId: a.id });

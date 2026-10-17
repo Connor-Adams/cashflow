@@ -515,3 +515,50 @@ test('transfer-link: Mon->Wed (2 business days, same-week) still links', () => {
   assert.ok(link, 'Mon->Wed (2 business days) should still link');
   assert.equal(link!.fields.linkedTransactionId, 777);
 });
+
+// A transfer leg has exactly one partner. Prod had txns 5456 and 2895 both
+// pointing at 992 because the matcher never asked whether 992 was taken.
+function transferInput(candidates: RelationshipCandidate[], selfId: number | null = null) {
+  return runDetectRelationshipsStage({
+    txnType: 'transfer',
+    merchantClean: 'TRANSFER TO CHEQUING',
+    amount: -500,
+    date: '2026-05-10',
+    accountId: 1,
+    householdAccountIds: [1, 2],
+    refundWindowDays: 60,
+    transferWindowDays: 2,
+    sourceReference: null,
+    selfId,
+    candidates,
+  }).find((s) => s.source === 'transfer-link');
+}
+
+test('transfer-link: never links a candidate that already has a transfer partner', () => {
+  const link = transferInput([
+    candidate({ id: 992, amount: 500, date: '2026-05-10', merchantClean: 'IN', accountId: 2, linkedTransactionId: 5456 }),
+  ]);
+  assert.equal(link, undefined);
+});
+
+test('transfer-link: never links a candidate another row already points at', () => {
+  const link = transferInput([
+    candidate({ id: 992, amount: 500, date: '2026-05-10', merchantClean: 'IN', accountId: 2, linkedFromId: 5456 }),
+  ]);
+  assert.equal(link, undefined);
+});
+
+test('transfer-link: a taken candidate gives way to a free one further away', () => {
+  const link = transferInput([
+    candidate({ id: 992, amount: 500, date: '2026-05-10', merchantClean: 'IN', accountId: 2, linkedTransactionId: 5456 }),
+    candidate({ id: 993, amount: 500, date: '2026-05-11', merchantClean: 'IN', accountId: 2 }),
+  ]);
+  assert.equal(link?.fields.linkedTransactionId, 993);
+});
+
+test('transfer-link: re-enriching a row keeps its own partner (linked back to self)', () => {
+  const link = transferInput([
+    candidate({ id: 992, amount: 500, date: '2026-05-10', merchantClean: 'IN', accountId: 2, linkedTransactionId: 2895 }),
+  ], 2895);
+  assert.equal(link?.fields.linkedTransactionId, 992);
+});

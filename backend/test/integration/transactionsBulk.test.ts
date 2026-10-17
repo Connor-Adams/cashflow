@@ -151,6 +151,49 @@ test('GET /api/transactions/category-hints returns known categories with usage c
 });
 
 test('AI transaction suggestion is tracked, review-first, and apply updates outcome', async () => {
+  const acc = await authed.post('/api/accounts').send({
+    name: 'AI Account',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+
+  // The import below deliberately runs with NO OpenAI key and NO stubbed
+  // `fetch`: both are installed further down, AFTER the row exists.
+  //
+  // Import is itself an AI consumer now. Both import paths run the stage-8
+  // cold-row batch (`import/enrichment/aiBatchOverColdRows.ts`) over every row
+  // the deterministic stages left review-flagged, and `aiBatchSkipReason`
+  // returns 'no_openai_config' only while `OPENAI_API_KEY` is absent. Hoist the
+  // stub or the key above this upload and the import consumes the canned
+  // 'Dining' response and categorises "AI Cafe" itself — which is correct
+  // behaviour for that stage and is the point of that feature, but it is a
+  // DIFFERENT AI mechanism with a different consent model: it writes
+  // `autoCategory` directly and leaves `review_flag` true, no suggestion row,
+  // no apply step.
+  //
+  // What the assertions below pin down is the SUGGEST flow's consent model —
+  // `/api/ai/transactions/suggest` records a tracked suggestion and must leave
+  // the row itself untouched until an explicit `/apply`. That property can only
+  // be observed on a row import has not already categorised. It is not a claim
+  // that import leaves rows uncategorised (the merchant-memory test immediately
+  // below asserts the opposite), so do not "tidy" the stub back to the top of
+  // this test.
+  const imp = await authed
+    .post('/api/import/upload')
+    .field('accountId', String(acc.body.id))
+    .field('profileId', 'generic_simple')
+    .attach('file', Buffer.from('Date,Description,Amount\n2025-08-01,AI Cafe,-8.00\n', 'utf8'), {
+      filename: 'ai.csv',
+      contentType: 'text/csv',
+    });
+  assert.equal(imp.status, 200);
+  const list = await authed.get('/api/transactions?pageSize=25');
+  const txn = (list.body.data as Array<{ id: number; merchantClean: string; finalCategory: string | null }>).find(
+    (row) => row.merchantClean === 'AI Cafe',
+  );
+  assert.ok(txn);
+
   const originalFetch = globalThis.fetch;
   process.env.OPENAI_API_KEY = 'test-key';
   globalThis.fetch = (async () =>
@@ -178,27 +221,6 @@ test('AI transaction suggestion is tracked, review-first, and apply updates outc
       { status: 200 },
     )) as typeof fetch;
   try {
-    const acc = await authed.post('/api/accounts').send({
-      name: 'AI Account',
-      owner: 'me',
-      defaultCurrency: 'CAD',
-    });
-    assert.equal(acc.status, 201);
-    const imp = await authed
-      .post('/api/import/upload')
-      .field('accountId', String(acc.body.id))
-      .field('profileId', 'generic_simple')
-      .attach('file', Buffer.from('Date,Description,Amount\n2025-08-01,AI Cafe,-8.00\n', 'utf8'), {
-        filename: 'ai.csv',
-        contentType: 'text/csv',
-      });
-    assert.equal(imp.status, 200);
-    const list = await authed.get('/api/transactions?pageSize=25');
-    const txn = (list.body.data as Array<{ id: number; merchantClean: string; finalCategory: string | null }>).find(
-      (row) => row.merchantClean === 'AI Cafe',
-    );
-    assert.ok(txn);
-
     const suggested = await authed.post('/api/ai/transactions/suggest').send({ ids: [txn.id] });
     assert.equal(suggested.status, 200);
     assert.equal(suggested.body.results[0].suggestion.category, 'Dining');

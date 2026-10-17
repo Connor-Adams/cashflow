@@ -10,6 +10,7 @@ import {
 import { currentAuth } from '../auth/middleware';
 import { visibleTransactionWhere } from '../auth/scope';
 import { num } from '../util/numbers';
+import { resolveDeductiblePercent } from '../tax/util/deductiblePercent';
 
 const router = Router();
 
@@ -107,10 +108,7 @@ export function aggregateTaxSummary(
     const amount = num(row.amount);
     if (amount == null || amount >= 0) continue;
     const gross = -amount;
-    const declaredDeductible = num(row.deductiblePercent);
-    const defaultDeductible = row.finalBusiness ? 1 : 0;
-    const deductiblePct =
-      declaredDeductible != null ? declaredDeductible : defaultDeductible;
+    const deductiblePct = resolveDeductiblePercent(row.deductiblePercent, row.finalBusiness);
     const deductibleEstimate = gross * deductiblePct;
     const hstGst = num(row.hstGstAmount) ?? 0;
     const key = row.currency;

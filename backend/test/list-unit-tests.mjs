@@ -39,7 +39,10 @@ const srcRoot = path.join(backendRoot, 'src');
 // this walk entirely. Kept data-driven in case a src subtree ever needs skipping.
 const EXCLUDED_DIRS = new Set();
 
-/** @param {string} dir absolute dir to walk @param {string} rel path relative to test/ */
+/**
+ * @param {string} dir absolute dir to walk
+ * @param {string} rel path relative to srcRoot
+ */
 function walk(dir, rel) {
   /** @type {string[]} */
   const found = [];

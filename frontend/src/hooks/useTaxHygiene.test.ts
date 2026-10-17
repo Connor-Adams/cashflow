@@ -1,7 +1,7 @@
 import React from 'react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
-import { useTaxSummary, useMissingReceipts, patchTransactionTax, type TaxHygieneFilters } from './useTaxHygiene'
+import { useTaxSummary, useMissingReceipts, patchTransactionTax, taxExportUrl, type TaxHygieneFilters } from './useTaxHygiene'
 import * as api from '@/lib/api'
 
 void React
@@ -91,5 +91,20 @@ describe('patchTransactionTax', () => {
     expect(api.patchJson).toHaveBeenCalledWith('/api/transactions/7/tax', { reviewedForTax: true })
     expect(meta.reviewedForTax).toBe(true)
     expect(meta.taxTag?.name).toBe('Office')
+  })
+})
+
+describe('taxExportUrl', () => {
+  afterEach(() => {
+    delete (globalThis as { __CASHFLOW_CONFIG__?: unknown }).__CASHFLOW_CONFIG__
+  })
+
+  it('prefixes the API base so prod hits the API host, not the static nginx', () => {
+    ;(globalThis as { __CASHFLOW_CONFIG__?: unknown }).__CASHFLOW_CONFIG__ = {
+      API_BASE: 'https://api.example.test/',
+    }
+    expect(taxExportUrl(filters)).toBe(
+      'https://api.example.test/api/exports/tax?scope=business&from=2026-01-01&to=2026-12-31',
+    )
   })
 })

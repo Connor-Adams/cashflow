@@ -1,6 +1,36 @@
 import type { TxnType } from './enrichment/types';
+import type { PdfRatePeriod } from './pdf/types';
 
 export type StatementParserId = 'csv' | 'ofx' | 'pdf';
+
+/**
+ * One problem a parser hit while reading a statement.
+ *
+ * `blocking` separates two genuinely different classes of problem:
+ *
+ *  - **Ordinary (`blocking` omitted/false).** One row could not be read — a bad
+ *    date, an undecidable sign, an empty description. The rest of the statement
+ *    is still trustworthy, so the import proceeds and the run is labelled
+ *    `partial`.
+ *  - **Blocking (`blocking: true`).** The statement's OWN arithmetic does not
+ *    add up: the parser recomputed the closing balance from the opening balance
+ *    plus the rows it produced and got a different number than the one printed
+ *    on the page. That is the parser reporting it misread the document — every
+ *    row it emitted is suspect, not just one. The commit path refuses these
+ *    outright (see `assertStatementReconciles` in reconciliationGate.ts).
+ *
+ * This is an explicit field on purpose. The reconciliation gate used to be
+ * discoverable only by matching the phrase "does not reconcile" in `message`;
+ * message strings are prose, not a contract, and a reworded message would
+ * silently disarm the gate.
+ */
+export type StatementParseError = {
+  /** 1-based source row, or -1 for a statement-level (not row-level) problem. */
+  rowIndex: number;
+  message: string;
+  /** True when the error invalidates the whole statement, not just one row. */
+  blocking?: boolean;
+};
 
 export type NormalizedCashTransaction = {
   date: string;
@@ -23,6 +53,19 @@ export type NormalizedCashTransaction = {
    * enrichment-pipeline output.
    */
   overrideTxnType?: TxnType;
+  /**
+   * A txnType the source guessed rather than knew. Used where a source code
+   * covers several kinds of movement: Wealthsimple's WD / AFT_OUT mean "money
+   * left the account" and cover a plain withdrawal and a credit-card bill
+   * payment alike.
+   *
+   * Unlike `overrideTxnType` this LOSES to a high-confidence narrative match,
+   * so "Pre-authorized Debit to AMEX BILL PYMT" is typed `payment` by
+   * detectTypeStage. It still beats the detector's sign-based fallback, which
+   * would otherwise call every one of these outflows a purchase and inflate
+   * spend. Set at most one of the two.
+   */
+  txnTypeHint?: TxnType;
 };
 
 export type NormalizedSecurity = {
@@ -82,6 +125,19 @@ export type NormalizedHoldingSnapshot = {
   duplicate?: boolean;
 };
 
+/**
+ * A statement's period and its own balances. Balances follow the
+ * `account_statements` convention: signed as printed for asset accounts, the
+ * amount OWED (positive) for liability accounts. `closingBalance` null means
+ * the parser read the period but not the balance.
+ */
+export type StatementSummary = {
+  periodStart: string;
+  periodEnd: string;
+  openingBalance: number | null;
+  closingBalance: number | null;
+};
+
 export type StatementPreview = {
   previewToken: string;
   fileName: string;
@@ -92,13 +148,22 @@ export type StatementPreview = {
   usedParser: StatementParserId;
   usedProfileId?: string;
   profileInferred?: boolean;
+  /**
+   * Trust level for every transaction this preview commits. Absent means
+   * 'authoritative': a statement, CSV or PDF is the source's own closed record.
+   *
+   * The SimpleFIN sync commits through this same pipeline, so the tier has to
+   * travel with the preview rather than be decided inside commitStatementImport
+   * — the commit path cannot tell a nightly feed from a statement otherwise.
+   */
+  sourceTier?: 'provisional' | 'authoritative';
   headers?: string[];
   transactions: NormalizedCashTransaction[];
   investmentActivities: NormalizedInvestmentActivity[];
   holdings: NormalizedHoldingSnapshot[];
   warnings: string[];
   rowErrors: number;
-  parseErrors: { rowIndex: number; message: string }[];
+  parseErrors: StatementParseError[];
   /**
    * Cross-source dedup strategy. When set, the commit pipeline runs the
    * named matcher BEFORE attempting an insert on each investment activity
@@ -107,6 +172,25 @@ export type StatementPreview = {
    * statement does not produce two InvestmentActivity rows.
    */
   crossSourceDedup?: 'fuzzy-window-5d';
+  /**
+   * Interest-rate windows printed on the statement's rate-history table, as
+   * emitted by the RBC Royal Credit Line parser (`PdfParseResult.ratePeriods`).
+   * The commit pipeline upserts these into `account_rate_periods` keyed on
+   * (accountId, fromDate). Absent for every source that prints no rate table.
+   *
+   * Type-only import of `PdfRatePeriod` — pdf/types.ts imports the Normalized*
+   * types from here, so a value import would close a runtime cycle.
+   */
+  ratePeriods?: PdfRatePeriod[];
+  /**
+   * The statement period and the balances printed for it, for sources that
+   * carry a statement header (PDF statements). The commit pipeline upserts an
+   * `account_statements` row from it — keyed on (accountId, periodStart,
+   * periodEnd) — and records a warning on the import when a liability
+   * statement's period parsed but its closing balance did not. Absent for
+   * sources with no statement period (CSV, OFX, SimpleFIN).
+   */
+  statementSummary?: StatementSummary;
   /**
    * When true, every Transaction inserted during commit forces
    * autoBusiness=true, regardless of what the enrichment pipeline produced.

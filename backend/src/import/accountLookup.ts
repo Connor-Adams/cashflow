@@ -1,4 +1,5 @@
 import { Account } from '../models';
+import { hashBankAccountNumber } from '../models/Account';
 
 export type BankCode = 'RBC' | 'TD' | 'Scotiabank' | 'BMO' | 'CIBC' | 'Tangerine' | 'EQ Bank' | 'National Bank' | 'Amex' | 'Wealthsimple' | 'Unknown';
 
@@ -39,10 +40,12 @@ export async function findOrCreateAccount(
 
   const trimmedNumber = csvAccountNumber.trim();
 
-  // Try to find existing account with same bank account number in this household
+  // Try to find existing account with same bank account number in this
+  // household. The number is encrypted at rest (#871), so we can't query by the
+  // plaintext value — match on the deterministic sha256 hash column instead.
   const existing = await Account.findOne({
     where: {
-      bankAccountNumber: trimmedNumber,
+      bankAccountNumberHash: hashBankAccountNumber(trimmedNumber),
       householdId,
     },
   });

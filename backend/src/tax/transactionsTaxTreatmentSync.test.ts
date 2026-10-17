@@ -206,3 +206,40 @@ test('PATCH /api/transactions/:id on an UNLINKED row only touches that row', asy
   assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
   assert.equal(await treatmentOf(solo.id), 'salary', 'unlinked row gets the treatment');
 });
+
+test('PATCH /api/transactions/:id does not mirror onto a non-reciprocal sibling', async () => {
+  const models = await import('../models/index.js');
+  const { aId, bId } = await createLinkedPair('pair-of-other');
+  const { aId: strayId, bId: strayMateId } = await createLinkedPair('stray');
+  // stray now points at b, but b still points at a: one-way.
+  await models.Transaction.update({ linkedTransactionId: bId }, { where: { id: strayId } });
+
+  const res = await authed
+    .patch(`/api/transactions/${strayId}`)
+    .send({ taxTreatmentOverride: 'non_eligible_dividend' });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(await treatmentOf(strayId), 'non_eligible_dividend');
+  assert.equal(await treatmentOf(bId), null, 'a non-reciprocal sibling is not ours to write');
+  assert.equal(await treatmentOf(aId), null);
+  assert.equal(await treatmentOf(strayMateId), null);
+});
+
+test('PATCH /api/transactions/:id refuses a dividend on money leaving the person', async () => {
+  const { aId, bId } = await createLinkedPair('inject');
+  const res = await authed
+    .patch(`/api/transactions/${bId}`)
+    .send({ taxTreatmentOverride: 'eligible_dividend' });
+  assert.equal(res.status, 400, JSON.stringify(res.body));
+  assert.equal(await treatmentOf(bId), null);
+  assert.equal(await treatmentOf(aId), null);
+});
+
+test('POST /api/transactions/bulk-patch refuses salary on money leaving the person and rolls back', async () => {
+  const { aId, bId } = await createLinkedPair('bulk-inject');
+  const res = await authed
+    .post('/api/transactions/bulk-patch')
+    .send({ ids: [aId, bId], patch: { taxTreatmentOverride: 'salary' } });
+  assert.equal(res.status, 400, JSON.stringify(res.body));
+  assert.equal(await treatmentOf(aId), null, 'the whole batch rolls back');
+  assert.equal(await treatmentOf(bId), null);
+});

@@ -4,6 +4,7 @@ import type { SlipFormProps } from './types';
 const FIELDS: { key: string; label: string }[] = [
   { key: 'box14', label: 'Box 14 — Employment income' },
   { key: 'box16', label: 'Box 16 — CPP contributions' },
+  { key: 'box16A', label: 'Box 16A — CPP2 contributions' },
   { key: 'box18', label: 'Box 18 — EI premiums' },
   { key: 'box22', label: 'Box 22 — Income tax deducted' },
   { key: 'box24', label: 'Box 24 — EI insurable earnings' },

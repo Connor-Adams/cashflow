@@ -502,7 +502,7 @@ test('applyAmazonItemCategorySuggestions: updates inferredCategory + stringifies
       rationale: 'Computer accessory.',
       usedExistingCategory: false,
     },
-  ]);
+  ], amazonHouseholdId);
 
   assert.equal(updated, 1);
   const fresh = await models.ExternalOrderItem.findByPk(item.id);

@@ -27,6 +27,7 @@ import { DEFAULT_TAX_RESERVE_PERCENT } from '../models/TaxReserveSetting';
 import { currentAuth } from '../auth/middleware';
 import { visibleTransactionWhere } from '../auth/scope';
 import { num } from '../util/numbers';
+import { resolveDeductiblePercent } from '../tax/util/deductiblePercent';
 import { parseTaxScope, scopeWhere, dateRangeWhere } from './businessTax';
 
 const router = Router();
@@ -151,8 +152,7 @@ export function aggregateReserveRollups(
         bucket.components.businessIncome += amount;
         bucket.components.hstGstCollected += hstGst;
       } else if (amount < 0) {
-        const declaredDeductible = num(row.deductiblePercent);
-        const deductiblePct = declaredDeductible != null ? declaredDeductible : 1;
+        const deductiblePct = resolveDeductiblePercent(row.deductiblePercent, true);
         bucket.components.deductibleExpenses += -amount * deductiblePct;
         bucket.components.hstGstPaid += hstGst;
       }

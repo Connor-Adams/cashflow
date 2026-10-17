@@ -1,8 +1,11 @@
 /**
- * Integration tests for the Sankey routes (issue #224).
+ * Integration tests for the Sankey routes (issue #224, full-chain rebuild).
  *
  * Exercises:
  *   - GET /api/summary/sankey
+ *       - the chain renders end to end: Income → {Corporate expenses,
+ *         Owner draws} → categories → subcategories, Surplus terminal
+ *       - the chart balances (inflow = outflow + surplus)
  *       - currency filter shapes the response (one currency per call)
  *       - dateFrom/dateTo restrict the rollup
  *       - flow totals reconcile with the underlying transactions
@@ -13,7 +16,8 @@
  *         render the picker before its first aggregation
  *       - household scoping: another household's txns never leak in
  *   - GET /api/summary/sankey/source-transactions
- *       - returns the row IDs that flowed through a clicked edge (AC)
+ *       - returns the row IDs that flowed through a clicked edge (AC),
+ *         including a subcategory edge at depth
  *       - validates source/target are non-negative integers
  *       - unknown edge returns zero rows (not a 404 — the chart's link
  *         indices may stale across re-fetches)
@@ -113,6 +117,8 @@ async function seed(emailPrefix: string): Promise<Seeded> {
 interface TxnOptions {
   currency?: string;
   finalCategory?: string | null;
+  /** Resolved Category id — places the row in the household's tree. */
+  finalCategoryId?: number | null;
   finalBusiness?: boolean;
   txnType?: string;
   merchant?: string;
@@ -153,6 +159,16 @@ async function createTxn(
     autoCategory: null,
     categoryOverride: null,
     finalCategory: options.finalCategory ?? null,
+    // Set ONLY when the caller supplied one. Transaction's beforeSave hook
+    // (reconcileCategoryField) is id-authoritative: if `finalCategoryId` is
+    // marked changed — which an explicit `null` on create does — the id wins
+    // and the string mirror is derived from it, so passing `null` here would
+    // silently wipe a `finalCategory` set by name and land the row in
+    // "Uncategorized". Omitting the key leaves it unchanged, letting the
+    // legacy resolve-by-name branch run.
+    ...(options.finalCategoryId != null
+      ? { finalCategoryId: options.finalCategoryId }
+      : {}),
     autoBusiness: null,
     businessOverride: options.finalBusiness ?? null,
     finalBusiness: options.finalBusiness ?? false,
@@ -208,6 +224,80 @@ after(async () => {
   await teardownPgTestDb(testDb);
 });
 
+type SankeyBody = {
+  nodes: Array<{ name: string; kind: string; categoryId?: number | null }>;
+  links: Array<{ source: number; target: number; value: number }>;
+  totalIncome: number;
+  totalSpend: number;
+  surplus: number;
+  balanced: boolean;
+};
+
+/** Find the link between two nodes by NAME — indices shift as depth grows. */
+function findLink(
+  body: SankeyBody,
+  from: string,
+  to: string,
+): { source: number; target: number; value: number } {
+  const link = body.links.find(
+    (l) => body.nodes[l.source]?.name === from && body.nodes[l.target]?.name === to,
+  );
+  assert.ok(
+    link,
+    `expected a ${from} → ${to} link; links were: ${body.links
+      .map((l) => `${body.nodes[l.source]?.name}→${body.nodes[l.target]?.name}`)
+      .join(', ')}`,
+  );
+  return link;
+}
+
+/** No hairlines: every drawn flow carries real money. */
+function assertLinkValuesPositive(body: SankeyBody): void {
+  for (const l of body.links) assert.ok(l.value > 0);
+}
+
+/** Inbound and outbound link value totals, per node index. */
+function flowSums(body: SankeyBody): {
+  inSum: Map<number, number>;
+  outSum: Map<number, number>;
+} {
+  const inSum = new Map<number, number>();
+  const outSum = new Map<number, number>();
+  for (const l of body.links) {
+    inSum.set(l.target, (inSum.get(l.target) ?? 0) + l.value);
+    outSum.set(l.source, (outSum.get(l.source) ?? 0) + l.value);
+  }
+  return { inSum, outSum };
+}
+
+/**
+ * One node: reached from somewhere, and — unless it is terminal — passing on
+ * exactly what it received. Compared in cents to tolerate float division.
+ */
+function assertNodeConserves(
+  body: SankeyBody,
+  i: number,
+  inflow: number,
+  outflow: number,
+): void {
+  assert.ok(inflow > 0, `node ${i} (${body.nodes[i].name}) is not orphaned`);
+  if (outflow <= 0) return; // terminal node — this is where the money stops
+  assert.equal(
+    Math.round(inflow * 100),
+    Math.round(outflow * 100),
+    `node ${i} (${body.nodes[i].name}) conserves value`,
+  );
+}
+
+/** Every intermediate node must pass on exactly what it received. */
+function assertConserves(body: SankeyBody): void {
+  assertLinkValuesPositive(body);
+  const { inSum, outSum } = flowSums(body);
+  for (let i = 1; i < body.nodes.length; i += 1) {
+    assertNodeConserves(body, i, inSum.get(i) ?? 0, outSum.get(i) ?? 0);
+  }
+}
+
 // ---- GET /api/summary/sankey -------------------------------------------
 
 test('GET /api/summary/sankey: missing currency returns available list + zero totals', async () => {
@@ -256,11 +346,20 @@ test('GET /api/summary/sankey: rolls up by category for a single currency (AC: v
   assert.equal(res.body.currency, 'CAD');
   assert.equal(res.body.totalIncome, 5000);
   assert.equal(res.body.totalSpend, 225 + 200);
-  // Income source + at least Groceries + Business spending sinks.
-  const names: string[] = res.body.nodes.map((n: { name: string }) => n.name);
+  // The full chain: Income → {Corporate expenses, Owner draws} → categories,
+  // with Surplus terminal so the chart balances.
+  const body = res.body as SankeyBody;
+  const names: string[] = body.nodes.map((n) => n.name);
   assert.ok(names.includes('Income'));
-  assert.ok(names.includes('Groceries'));
-  assert.ok(names.includes('Business spending'));
+  assert.ok(names.includes('Owner draws'));
+  assert.ok(names.includes('Corporate expenses'));
+  assert.ok(names.includes('Surplus'));
+  assert.equal(findLink(body, 'Income', 'Corporate expenses').value, 200);
+  assert.equal(findLink(body, 'Owner draws', 'Groceries').value, 225);
+  assert.equal(findLink(body, 'Owner draws', 'Surplus').value, 5000 - 425);
+  assert.equal(body.balanced, true);
+  assert.equal(body.surplus, 5000 - 425);
+  assertConserves(body);
   // CAD should now appear in availableCurrencies.
   assert.ok(res.body.availableCurrencies.includes('CAD'));
 });
@@ -300,7 +399,7 @@ test('GET /api/summary/sankey: dateFrom/dateTo restrict the window (AC: date fil
   // Only Groceries — no Business, no Income (date excludes both).
   const names: string[] = res.body.nodes.map((n: { name: string }) => n.name);
   assert.ok(names.includes('Groceries'));
-  assert.ok(!names.includes('Business spending'));
+  assert.ok(!names.includes('Corporate expenses'));
 });
 
 test('GET /api/summary/sankey: rejects invalid currency code', async () => {
@@ -364,10 +463,14 @@ test('GET /api/summary/sankey: refund nets the category it offset', async () => 
   const res = await primaryAgent.get('/api/summary/sankey').query({ currency: 'GBP' });
   assert.equal(res.status, 200);
   assert.equal(res.body.totalSpend, 70);
-  // Single sink: Returns.
-  const sinkLinks: Array<{ source: number; target: number; value: number }> = res.body.links;
-  assert.equal(sinkLinks.length, 1);
-  assert.equal(sinkLinks[0].value, 70);
+  // Single category sink: Returns, reached through Owner draws. No income in
+  // GBP, so there is no surplus node and the chart cannot balance — that gap
+  // is reported, not papered over.
+  const body = res.body as SankeyBody;
+  assert.equal(findLink(body, 'Owner draws', 'Returns').value, 70);
+  assert.equal(body.links.length, 2);
+  assert.equal(body.balanced, false);
+  assert.equal(body.surplus, -70);
 });
 
 test('GET /api/summary/sankey: scoped to household (other household gets empty result)', async () => {
@@ -388,19 +491,16 @@ test('GET /api/summary/sankey/source-transactions: drills into a clicked edge (A
     .get('/api/summary/sankey')
     .query({ currency: 'CAD' });
   assert.equal(sankey.status, 200);
-  const groceriesIdx = sankey.body.nodes.findIndex(
-    (n: { name: string }) => n.name === 'Groceries',
-  );
-  assert.ok(groceriesIdx >= 1, 'Groceries node should be present');
+  const link = findLink(sankey.body as SankeyBody, 'Owner draws', 'Groceries');
 
   const drill = await primaryAgent.get('/api/summary/sankey/source-transactions').query({
     currency: 'CAD',
-    source: 0,
-    target: groceriesIdx,
+    source: link.source,
+    target: link.target,
   });
   assert.equal(drill.status, 200);
-  assert.equal(drill.body.edge.source, 0);
-  assert.equal(drill.body.edge.target, groceriesIdx);
+  assert.equal(drill.body.edge.source, link.source);
+  assert.equal(drill.body.edge.target, link.target);
   assert.equal(drill.body.transactionCount, 2);
   assert.equal(drill.body.transactions.length, 2);
   for (const t of drill.body.transactions as Array<{
@@ -449,4 +549,122 @@ test('GET /api/summary/sankey/source-transactions: scoped to household', async (
     .query({ currency: 'CAD', source: 0, target: 1 });
   assert.equal(res.status, 200);
   assert.equal(res.body.transactionCount, 0);
+});
+
+// ---- Adaptive depth over the real category tree ------------------------
+
+test('GET /api/summary/sankey: renders a three-deep chain and drills into it', async () => {
+  // Hobbies → Golf → Clublink, the production chain that motivated the
+  // rebuild. Seeded in its own currency so the assertions stand alone.
+  const models = await import('../../src/models');
+  const hobbies = await models.Category.create({
+    householdId: primaryHouseholdId,
+    parentId: null,
+    name: 'Hobbies',
+  } as never);
+  const golf = await models.Category.create({
+    householdId: primaryHouseholdId,
+    parentId: hobbies.id,
+    name: 'Golf',
+  } as never);
+  const clublink = await models.Category.create({
+    householdId: primaryHouseholdId,
+    parentId: golf.id,
+    name: 'Clublink',
+  } as never);
+  const healthcare = await models.Category.create({
+    householdId: primaryHouseholdId,
+    parentId: null,
+    name: 'Healthcare',
+  } as never);
+  const diabetes = await models.Category.create({
+    householdId: primaryHouseholdId,
+    parentId: healthcare.id,
+    name: 'Diabetes',
+  } as never);
+
+  const clublinkTxn = await createTxn(
+    primaryHouseholdId,
+    primaryAccountId,
+    primaryUserId,
+    '2026-07-01',
+    -34308,
+    { currency: 'CHF', finalCategory: 'Clublink', finalCategoryId: clublink.id },
+  );
+  const proShopTxn = await createTxn(
+    primaryHouseholdId,
+    primaryAccountId,
+    primaryUserId,
+    '2026-07-02',
+    -4938,
+    { currency: 'CHF', finalCategory: 'Golf', finalCategoryId: golf.id },
+  );
+  const diabetesTxn = await createTxn(
+    primaryHouseholdId,
+    primaryAccountId,
+    primaryUserId,
+    '2026-07-03',
+    -1200,
+    { currency: 'CHF', finalCategory: 'Diabetes', finalCategoryId: diabetes.id },
+  );
+  await createTxn(primaryHouseholdId, primaryAccountId, primaryUserId, '2026-07-04', 60000, {
+    currency: 'CHF',
+    txnType: 'income',
+    merchant: 'CDG LABS',
+  });
+
+  const res = await primaryAgent.get('/api/summary/sankey').query({ currency: 'CHF' });
+  assert.equal(res.status, 200);
+  const body = res.body as SankeyBody;
+  assertConserves(body);
+
+  // Depth: Owner draws → Hobbies → Golf → Clublink.
+  assert.equal(findLink(body, 'Owner draws', 'Hobbies').value, 34308 + 4938);
+  assert.equal(findLink(body, 'Hobbies', 'Golf').value, 34308 + 4938);
+  assert.equal(findLink(body, 'Golf', 'Clublink').value, 34308);
+  // Golf's own charge terminates in its remainder node — never double counted.
+  assert.equal(findLink(body, 'Golf', 'Golf (other)').value, 4938);
+  // Healthcare is ~3% of spend: drawn whole, its child hidden but not dropped.
+  assert.equal(findLink(body, 'Owner draws', 'Healthcare').value, 1200);
+  assert.equal(
+    body.nodes.findIndex((n) => n.name === 'Diabetes'),
+    -1,
+  );
+  assert.equal(body.totalSpend, 34308 + 4938 + 1200);
+  assert.equal(body.balanced, true);
+
+  // Drill-down at depth 3.
+  const deep = findLink(body, 'Golf', 'Clublink');
+  const deepDrill = await primaryAgent
+    .get('/api/summary/sankey/source-transactions')
+    .query({ currency: 'CHF', source: deep.source, target: deep.target });
+  assert.equal(deepDrill.status, 200);
+  assert.deepEqual(
+    (deepDrill.body.transactions as Array<{ id: number }>).map((t) => t.id),
+    [clublinkTxn],
+  );
+
+  // A mid-chain edge carries its whole subtree.
+  const mid = findLink(body, 'Hobbies', 'Golf');
+  const midDrill = await primaryAgent
+    .get('/api/summary/sankey/source-transactions')
+    .query({ currency: 'CHF', source: mid.source, target: mid.target });
+  assert.equal(midDrill.status, 200);
+  assert.deepEqual(
+    (midDrill.body.transactions as Array<{ id: number }>)
+      .map((t) => t.id)
+      .sort((a, b) => a - b),
+    [clublinkTxn, proShopTxn].sort((a, b) => a - b),
+  );
+
+  // A collapsed parent's edge resolves to the child it hid.
+  const collapsed = findLink(body, 'Owner draws', 'Healthcare');
+  const collapsedDrill = await primaryAgent
+    .get('/api/summary/sankey/source-transactions')
+    .query({ currency: 'CHF', source: collapsed.source, target: collapsed.target });
+  assert.equal(collapsedDrill.status, 200);
+  assert.deepEqual(
+    (collapsedDrill.body.transactions as Array<{ id: number }>).map((t) => t.id),
+    [diabetesTxn],
+  );
 });

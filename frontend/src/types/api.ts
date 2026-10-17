@@ -86,6 +86,7 @@ export type {
   RealizedTotalsRow,
   Rule,
   RuleAction,
+  TxnTypeValue,
   Paginated,
   RollupRow,
   Security,
@@ -656,6 +657,10 @@ export type SankeyNodeKind =
   | 'business'
   | 'savings'
   | 'uncategorized'
+  /** The owner-draws waypoint between corporate revenue and personal spend. */
+  | 'draws'
+  /** Terminal node carrying income that was not spent. */
+  | 'surplus'
 
 export type SankeyNode = {
   name: string
@@ -673,6 +678,14 @@ export type SankeyResponse = {
   currency: string | null
   totalIncome: number
   totalSpend: number
+  /** totalIncome - totalSpend. Negative when spend exceeds observed income. */
+  surplus: number
+  /**
+   * True when the chart closes: inflow = outflow + surplus. False means
+   * observed spend exceeds observed income — a classification gap worth
+   * surfacing rather than hiding.
+   */
+  balanced: boolean
   transactionCount: number
   nodes: SankeyNode[]
   links: SankeyLink[]
@@ -812,9 +825,34 @@ export type BudgetProgress = {
   budgetId: number
   category: string | null
   currency: string
+  /**
+   * What the budget allows this period. For a rollover budget this is
+   * `baseTarget + carriedIn`, so it is the number to show the user as "of X" —
+   * it is what they can actually spend. Equals `baseTarget` when there is no
+   * carry.
+   */
   target: number
+  /**
+   * The configured `amount`, before any rollover carry. Optional only to
+   * tolerate a frontend deployed ahead of the backend that adds it.
+   */
+  baseTarget?: number
+  /**
+   * Signed remainder carried in from this budget's completed prior periods when
+   * `rolloverEnabled` is set: positive is unspent surplus, negative is an
+   * overspend carried forward as a reduction. Unclamped, so `target` can be
+   * zero or negative. Always 0 when rollover is off.
+   */
+  carriedIn?: number
   spent: number
   remaining: number
+  /**
+   * Spend as a percentage of `target` (the carry-adjusted one). When `target` is
+   * zero or negative — only reachable on a rollover budget carrying a period or
+   * more of debt — the backend reports `100 + (spent / baseTarget) * 100`
+   * instead, so the value stays monotone in spend. It can exceed 100 and, on a
+   * heavily funded envelope, is simply small.
+   */
   percentUsed: number
   periodStart: string
   periodEnd: string
@@ -1522,11 +1560,23 @@ export type CashflowSettings = {
 
 export type SafeToSpendBreakdown = {
   currentCash: number;
-  /** Recurring income projected to land inside the window — added back. */
+  /**
+   * Total income expected inside the window — added back. The sum of
+   * `recurringIncome` and `ownerDrawIncome`, which explain where it came from.
+   */
   expectedIncome: number;
+  /** Recurring-paycheck share of `expectedIncome` (#970). */
+  recurringIncome: number;
+  /** Owner-draw (corp → personal distribution) share of `expectedIncome` (#990). */
+  ownerDrawIncome: number;
   upcomingRequiredExpenses: number;
   requiredSavingsContributions: number;
   expectedCreditCardPayments: number;
+  /**
+   * Names of cards whose reserved statement is more than one billing cycle old
+   * (a newer statement hasn't been imported). Empty when all are current.
+   */
+  staleCreditCardStatements: string[];
   minimumBuffer: number;
 };
 

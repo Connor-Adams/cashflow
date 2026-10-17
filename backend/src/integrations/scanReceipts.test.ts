@@ -9,9 +9,14 @@ import type { UserEmailIntegration } from '../models/UserEmailIntegration';
 import type { GmailMessageFull } from './gmail';
 import {
   sequelize, ExternalOrder, ProcessedEmailMessage, UserEmailIntegration as UEI,
-  ReceiptSenderAllowlist, Household, User,
+  ReceiptSenderAllowlist, Category, Household, User,
 } from '../models';
 import { encryptSecret } from '../util/symmetricEncryption';
+import {
+  assertInferredCategoriesResolved,
+  assertNoHouseholdFallback,
+  inferredCategoryFixtureItems,
+} from '../../test/helpers/inferredCategoryFixture';
 
 // ---------------------------------------------------------------------------
 // DB-backed tests: ExternalOrder persistence mapping for Amazon email parser
@@ -153,4 +158,93 @@ test('receiptCurrencyOrDefault falls back to the app default currency, never a h
   // every CAD transaction, killing otherwise-perfect receipt matches.
   assert.equal(receiptCurrencyOrDefault(null), defaultCurrency);
   assert.equal(receiptCurrencyOrDefault(undefined), defaultCurrency);
+});
+
+// ---------------------------------------------------------------------------
+// Category FK on the Gmail-scan ingest path
+// ---------------------------------------------------------------------------
+//
+// scanInbox's `ExternalOrderItem.bulkCreate` is a STATIC write with no
+// `individualHooks`, so the model's `beforeSave` hook — which reconciles
+// `inferred_category` into `inferred_category_id` — never runs for it.
+//
+// Most values arriving here are flat parser labels (Apple "Subscriptions",
+// Google "Apps", Uber "Transport"), but two AI seams feed the same column an
+// unconstrained string: the `extractFromText` fallback used below, and
+// `categorizeUberTrip`, whose `category` is whatever the model returned. A path
+// form is therefore reachable and must never land in the string column.
+
+/** A plain-text receipt email no deterministic parser claims, so the injected
+ *  `extractFromText` (the AI seam) supplies the extract. */
+function plainReceiptEmail(id: string, total: number): GmailMessageFull {
+  return {
+    id,
+    threadId: 't',
+    internalDate: '1718000000000',
+    payload: {
+      headers: [
+        { name: 'From', value: 'FooShop <orders@fooshop.test>' },
+        { name: 'Subject', value: 'Your order confirmation' },
+      ],
+      mimeType: 'text/plain',
+      body: {
+        data: Buffer.from(`Thanks for your order at FooShop. Total $${total}.00`).toString('base64url'),
+      },
+    },
+  } as unknown as GmailMessageFull;
+}
+
+/** The non-item half of an AI extract; callers supply `items`. */
+function plainExtract(orderId: string, total: number) {
+  return {
+    vendor: 'other', orderId, orderDate: '2026-06-10',
+    subtotal: null, tax: null, total, currency: 'CAD', paymentLast4: null,
+    tenders: [], notes: null, trip: null,
+  };
+}
+
+test('scanInbox resolves every ingested item category to its leaf id and a FLAT name', async () => {
+  const house = await Category.create({ householdId: 99, name: 'Household', parentId: null } as never);
+  const rent = await Category.create({ householdId: 99, name: 'Rent', parentId: house.id } as never);
+
+  await scanInbox(
+    { userId: 99, householdId: 99, maxMessages: 10 },
+    {},
+    {
+      listMessageIds: async () => [{ id: 'cat-fk-msg-1', threadId: 't' }],
+      fetchMessage: async () => plainReceiptEmail('cat-fk-msg-1', 42),
+      extractFromText: async () =>
+        ({ ...plainExtract('CATFK-1', 42), items: inferredCategoryFixtureItems() }) as never,
+    },
+  );
+
+  const order = await ExternalOrder.findOne({ where: { vendorOrderId: 'CATFK-1' } });
+  assert.ok(order, 'the scan must have ingested an order');
+  await assertInferredCategoriesResolved({
+    externalOrderId: order!.id, householdId: 99, rentId: rent.id,
+  });
+
+  await Category.destroy({ where: { householdId: 99 } });
+});
+
+test('scanInbox with no household stores the leaf segment and a null id', async () => {
+  // (c) householdId null: nothing to resolve against, but the raw path form
+  // must still not be written — the fallback is the LAST PATH SEGMENT.
+  await scanInbox(
+    { userId: 99, householdId: null, maxMessages: 10 },
+    {},
+    {
+      listMessageIds: async () => [{ id: 'cat-fk-msg-2', threadId: 't' }],
+      fetchMessage: async () => plainReceiptEmail('cat-fk-msg-2', 9),
+      extractFromText: async () =>
+        ({
+          ...plainExtract('CATFK-2', 9),
+          items: [{ title: 'Rent', quantity: 1, unitPrice: 9, totalPrice: 9, inferredCategory: 'Household / Rent' }],
+        }) as never,
+    },
+  );
+
+  const order = await ExternalOrder.findOne({ where: { vendorOrderId: 'CATFK-2' } });
+  assert.ok(order);
+  await assertNoHouseholdFallback(order!.id);
 });

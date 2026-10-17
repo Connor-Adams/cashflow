@@ -4,9 +4,13 @@
  * Builds a list of action items for a date window by combining
  * deterministic signals from existing engines:
  *
- * - Anomalies / category deltas / uncategorized backlog → `buildFinancialInsights`
+ * - Anomalies / category deltas / uncategorized backlog → `loadOpenInsightItems`
+ *   (open `Insight` rows from the real detectors, same source the CFO
+ *   briefing reads — see `../cfo/briefingBuilder`). Missing receipts arrive
+ *   this way too: `detectMissingReceipt` persists them as Insight rows, so
+ *   there is deliberately no inline missing-receipt scan here — one existed
+ *   and double-surfaced every receipt-less charge alongside its Insight.
  * - Rule suggestions                                    → `findRuleProposals`
- * - Missing receipts on big-ticket spend                → direct query
  * - Subscription candidates                             → direct query
  * - Forecast warnings (overdue planned events)          → direct query
  *
@@ -21,24 +25,24 @@
 
 import { Op } from 'sequelize';
 import type { Request } from 'express';
-import { Transaction, Receipt, PlannedEvent } from '../models';
+import { Transaction } from '../models';
 import { visibleTransactionWhere } from '../auth/scope';
-import { buildFinancialInsights, type AiFinancialInsight } from './insights';
+import { loadOpenInsightItems } from '../cfo/briefingBuilder';
+import {
+  loadOverduePlannedEvents,
+  buildOverdueEventItemContent,
+  buildRuleSuggestionItemContent,
+} from '../cfo/reviewActionItemShared';
 import { findRuleProposals } from './ruleProposals';
 import { num } from '../util/numbers';
 import type {
   AiReviewActionItem,
-  AiReviewActionItemSeverity,
+  AiReviewActionItemRefType,
   AiReviewActionItemType,
 } from '../models/AiReviewRun';
+import type { CfoBriefingActionItem } from '../models/CfoBriefing';
 
 export const AI_REVIEW_PROMPT_VERSION = 'ai-review-v1';
-
-/** Default $ threshold (period currency) above which a missing receipt is
- *  surfaced. Chosen low enough to be useful on a typical month and high
- *  enough not to spam coffee runs.
- */
-const MISSING_RECEIPT_AMOUNT_THRESHOLD = 50;
 
 /** Minimum count of similar charges to consider a merchant a subscription. */
 const SUBSCRIPTION_MIN_HITS = 3;
@@ -63,34 +67,72 @@ function idFor(type: AiReviewActionItemType, suffix: string | number): string {
   return `${type}-${suffix}`;
 }
 
-function severityFromInsight(s: AiFinancialInsight['severity']): AiReviewActionItemSeverity {
-  return s === 'action' ? 'action' : s === 'watch' ? 'watch' : 'info';
+const CFO_STATUS_TO_REVIEW_STATUS: Record<
+  CfoBriefingActionItem['status'],
+  AiReviewActionItem['status']
+> = {
+  open: 'suggested',
+  resolved: 'accepted',
+  dismissed: 'dismissed',
+};
+
+const REVIEW_REF_TYPES = new Set<string>(['transaction', 'event', 'rule']);
+
+function reviewRefTypeFrom(refType: CfoBriefingActionItem['refType']): AiReviewActionItemRefType {
+  return refType != null && REVIEW_REF_TYPES.has(refType) ? (refType as AiReviewActionItemRefType) : null;
 }
 
-function classifyInsightType(insight: AiFinancialInsight): AiReviewActionItemType {
-  if (insight.metric === 'category_month_over_month_delta') return 'anomaly';
-  if (insight.metric === 'uncategorized_spend') return 'anomaly';
-  if (insight.metric === 'no_category_count') return 'anomaly';
-  if (insight.metric === 'merchant_spend') return 'anomaly';
-  if (insight.metric === 'category_spend') return 'other';
-  if (insight.metric === 'split_business_spend') return 'other';
-  return 'other';
+const REVIEW_ITEM_TYPES = new Set<string>([
+  'anomaly',
+  'rule_suggestion',
+  'missing_receipt',
+  'subscription',
+  'forecast_warning',
+  'other',
+]);
+
+function reviewTypeFrom(type: CfoBriefingActionItem['type']): AiReviewActionItemType {
+  return REVIEW_ITEM_TYPES.has(type) ? (type as AiReviewActionItemType) : 'other';
 }
 
-function safeNumber(value: unknown): number {
-  const n = num(value);
-  return n == null ? 0 : Math.abs(n);
+/**
+ * `loadOpenInsightItems` (Task 5) returns `CfoBriefingActionItem`s — the CFO
+ * briefing's shape, produced by `insightToActionItem`. That shape overlaps
+ * with `AiReviewActionItem` field-for-field but is NOT interchangeable:
+ * status vocabularies differ ('open'|'resolved'|'dismissed' vs
+ * 'suggested'|'accepted'|'dismissed'), and `type`/`refType` are each closed
+ * unions that don't fully align (e.g. `CfoBriefingActionItemRefType` allows
+ * 'subscription'/'import', which `AiReviewActionItemRefType` doesn't; CFO
+ * `type` allows values like 'safe_to_spend_low' that the review vocabulary
+ * doesn't have). Remap explicitly field-by-field rather than casting.
+ */
+export function insightItemToReviewItem(item: CfoBriefingActionItem): AiReviewActionItem {
+  const refType = reviewRefTypeFrom(item.refType);
+  return {
+    id: item.id,
+    type: reviewTypeFrom(item.type),
+    refType,
+    refId: refType == null ? null : item.refId,
+    severity: item.severity,
+    title: item.title,
+    summary: item.summary,
+    status: CFO_STATUS_TO_REVIEW_STATUS[item.status],
+    supportingTransactionIds: item.supportingTransactionIds,
+    rationale: item.rationale,
+  };
 }
 
+/** Slots: [anomalies, rule suggestions, subscriptions, forecast warnings].
+ *  There is no missing-receipt slot: those now arrive as Insight rows and are
+ *  counted under `anomaly`. */
 function shortSummary(parts: number[]): string {
   const total = parts.reduce((a, b) => a + b, 0);
   if (total === 0) return 'No action items — nothing flagged for this period.';
   const labels: string[] = [];
   if (parts[0] > 0) labels.push(`${parts[0]} anomaly${parts[0] === 1 ? '' : 'ies'}`);
   if (parts[1] > 0) labels.push(`${parts[1]} rule suggestion${parts[1] === 1 ? '' : 's'}`);
-  if (parts[2] > 0) labels.push(`${parts[2]} missing receipt${parts[2] === 1 ? '' : 's'}`);
-  if (parts[3] > 0) labels.push(`${parts[3]} subscription${parts[3] === 1 ? '' : 's'}`);
-  if (parts[4] > 0) labels.push(`${parts[4]} forecast warning${parts[4] === 1 ? '' : 's'}`);
+  if (parts[2] > 0) labels.push(`${parts[2]} subscription${parts[2] === 1 ? '' : 's'}`);
+  if (parts[3] > 0) labels.push(`${parts[3]} forecast warning${parts[3] === 1 ? '' : 's'}`);
   return `${total} action item${total === 1 ? '' : 's'}: ${labels.join(', ')}.`;
 }
 
@@ -98,16 +140,11 @@ export async function buildReviewActionItems(
   params: BuildReviewActionItemsParams,
 ): Promise<BuildReviewActionItemsResult> {
   const { req, householdId, periodStart, periodEnd, currency } = params;
-  const periodLabel = periodStart.slice(0, 7);
 
   // Run independent sub-queries in parallel.
-  const [insightsOut, ruleProposals, txnsInWindow, plannedEventsOverdue] =
+  const [insightItems, ruleProposals, txnsInWindow, plannedEventsOverdue] =
     await Promise.all([
-      buildFinancialInsights(req, periodLabel, currency, {
-        from: periodStart,
-        to: periodEnd,
-        label: `${periodStart} to ${periodEnd}`,
-      }),
+      loadOpenInsightItems(req, householdId),
       findRuleProposals(householdId),
       Transaction.findAll({
         where: {
@@ -116,96 +153,39 @@ export async function buildReviewActionItems(
           date: { [Op.between]: [periodStart, periodEnd] },
         },
         attributes: ['id', 'date', 'merchantClean', 'amount'],
-        include: [
-          {
-            model: Receipt,
-            as: 'receipts',
-            attributes: ['id'],
-            required: false,
-          },
-        ],
       }),
-      PlannedEvent.findAll({
-        where: {
-          householdId,
-          kind: 'planned',
-          status: 'planned',
-          expectedDate: {
-            [Op.lt]: periodEnd,
-          },
-        },
-        attributes: ['id', 'name', 'expectedDate', 'amount', 'type'],
-        raw: true,
-      }),
+      loadOverduePlannedEvents(householdId, periodEnd),
     ]);
 
   const items: AiReviewActionItem[] = [];
 
-  // Anomalies / categorical insights → action items.
-  for (const insight of insightsOut.insights) {
-    items.push({
-      id: idFor(classifyInsightType(insight), `${insight.metric}-${insight.amount}`),
-      type: classifyInsightType(insight),
-      refType: null,
-      refId: null,
-      severity: severityFromInsight(insight.severity),
-      title: insight.title,
-      summary: insight.summary,
-      status: 'suggested',
-      supportingTransactionIds: insight.supportingTransactionIds,
-      rationale: insight.rationale,
-    });
+  // Anomalies / categorical insights → action items, sourced from the real
+  // Insight detectors (same source the CFO briefing reads) rather than the
+  // old prompt-free, now-deleted six-template insight engine.
+  for (const insightItem of insightItems) {
+    items.push(insightItemToReviewItem(insightItem));
   }
 
   // Rule suggestions.
   for (const proposal of ruleProposals) {
-    items.push({
-      id: idFor('rule_suggestion', proposal.merchantPattern),
-      type: 'rule_suggestion',
-      refType: 'rule',
-      refId: null,
-      severity: 'info',
-      title: `Create rule for "${proposal.merchantPattern}"`,
-      summary: `${proposal.supportCount} reviewed transactions match "${proposal.merchantPattern}" → ${proposal.category ?? '(no category)'}.`,
-      status: 'suggested',
-      supportingTransactionIds: proposal.exampleTransactionIds,
-      rationale: 'Detected by repeated manual categorizations sharing a merchant pattern.',
-    });
-  }
-
-  // Missing receipts: txns above threshold with no Receipt rows.
-  type TxnWithReceipts = {
-    id: number;
-    date: string;
-    merchantClean: string | null;
-    amount: unknown;
-    receipts?: Array<{ id: number }>;
-  };
-  for (const raw of txnsInWindow) {
-    const txn = raw.toJSON() as TxnWithReceipts;
-    const amount = safeNumber(txn.amount);
-    if (amount < MISSING_RECEIPT_AMOUNT_THRESHOLD) continue;
-    if ((txn.receipts ?? []).length > 0) continue;
-    const merchant = txn.merchantClean || 'Unknown merchant';
-    items.push({
-      id: idFor('missing_receipt', txn.id),
-      type: 'missing_receipt',
-      refType: 'transaction',
-      refId: txn.id,
-      severity: 'watch',
-      title: `Missing receipt for ${merchant}`,
-      summary: `${merchant} on ${txn.date} for ${amount.toFixed(2)} ${currency} has no attached receipt.`,
-      status: 'suggested',
-      supportingTransactionIds: [txn.id],
-      rationale: `Charge of ${amount.toFixed(2)} ${currency} exceeds the ${MISSING_RECEIPT_AMOUNT_THRESHOLD} ${currency} threshold and has no receipt.`,
-    });
+    const content = buildRuleSuggestionItemContent(
+      proposal,
+      `Create rule for "${proposal.merchantPattern}"`,
+    );
+    items.push({ ...content, type: 'rule_suggestion', status: 'suggested' });
   }
 
   // Subscription detection: merchants with N+ near-identical negative
   // amounts in the window. Cheap heuristic; OpenAI not needed.
+  type TxnRow = {
+    id: number;
+    date: string;
+    merchantClean: string | null;
+    amount: unknown;
+  };
   const merchantBuckets = new Map<string, Array<{ id: number; amount: number }>>();
   for (const raw of txnsInWindow) {
-    const txn = raw.toJSON() as TxnWithReceipts;
+    const txn = raw.toJSON() as TxnRow;
     const amount = num(txn.amount);
     if (amount == null || amount >= 0) continue;
     const merchant = txn.merchantClean?.trim();
@@ -239,35 +219,17 @@ export async function buildReviewActionItems(
   }
 
   // Forecast warnings: planned events that should have posted but haven't.
-  type OverdueEvent = {
-    id: number;
-    name: string;
-    expectedDate: string;
-    amount: unknown;
-    type: string;
-  };
-  for (const raw of plannedEventsOverdue as unknown as OverdueEvent[]) {
-    items.push({
-      id: idFor('forecast_warning', raw.id),
-      type: 'forecast_warning',
-      refType: 'event',
-      refId: raw.id,
-      severity: 'watch',
-      title: `Planned ${raw.type} overdue: ${raw.name}`,
-      summary: `${raw.name} (${safeNumber(raw.amount).toFixed(2)} ${currency}) expected on ${raw.expectedDate} but not posted.`,
-      status: 'suggested',
-      supportingTransactionIds: [],
-      rationale: 'Planned event still in "planned" status past its expected date.',
-    });
+  for (const raw of plannedEventsOverdue) {
+    const content = buildOverdueEventItemContent(raw, currency);
+    items.push({ ...content, type: 'forecast_warning', status: 'suggested' });
   }
 
-  const counts = [0, 0, 0, 0, 0];
+  const counts = [0, 0, 0, 0];
   for (const item of items) {
     if (item.type === 'anomaly') counts[0] += 1;
     else if (item.type === 'rule_suggestion') counts[1] += 1;
-    else if (item.type === 'missing_receipt') counts[2] += 1;
-    else if (item.type === 'subscription') counts[3] += 1;
-    else if (item.type === 'forecast_warning') counts[4] += 1;
+    else if (item.type === 'subscription') counts[2] += 1;
+    else if (item.type === 'forecast_warning') counts[3] += 1;
   }
 
   return {

@@ -5,12 +5,21 @@ import type {
   NetWorthCurrent,
   NetWorthSeries,
 } from '@/types/api'
+import type { BalanceIntegrity } from '@cashflow/shared'
 
 export function useNetWorthCurrent(asOf?: string) {
   const path = asOf
     ? `/api/net-worth/current?asOf=${asOf}`
     : '/api/net-worth/current'
   return useFetch<NetWorthCurrent>(path)
+}
+
+/**
+ * Statement-vs-computed balance mismatches and accounts with an undated
+ * opening balance, from the data-quality surface.
+ */
+export function useBalanceIntegrity() {
+  return useFetch<BalanceIntegrity>('/api/data-quality/balances')
 }
 
 export function useCreditUtilization() {

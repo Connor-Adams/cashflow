@@ -40,6 +40,12 @@ export class Contact extends Model<
    * Spine note: a discriminator field on the Contact primitive, NOT a new primitive.
    */
   declare isSelf: CreationOptional<boolean>;
+  /**
+   * Treat this contact's untagged transfers as loans. False (default) means an
+   * untagged transfer contributes nothing to the balance; true means outflows
+   * count as loans and inflows as repayments unless a row says otherwise.
+   */
+  declare loanDefault: CreationOptional<boolean>;
   /** Lowercase + whitespace-collapsed key for dedup; auto-set by a hook. */
   declare normalizedName: CreationOptional<string | null>;
   declare readonly createdAt: CreationOptional<Date>;
@@ -75,6 +81,12 @@ export function initContact(sequelize: Sequelize): typeof Contact {
         allowNull: false,
         defaultValue: false,
       },
+      loanDefault: {
+        type: DataTypes.BOOLEAN,
+        field: 'loan_default',
+        allowNull: false,
+        defaultValue: false,
+      },
       normalizedName: {
         type: DataTypes.STRING(160),
         field: 'normalized_name',
@@ -89,8 +101,21 @@ export function initContact(sequelize: Sequelize): typeof Contact {
       timestamps: true,
     }
   );
-  Contact.beforeValidate((contact) => {
+  // Keep normalized_name derived from name on every write path.
+  //
+  // The `options.fields` push is load-bearing, not defensive: Sequelize's
+  // `instance.save()` snapshots `options.fields` from `this.changed()` BEFORE
+  // running hooks, so a field this hook sets afterwards is silently dropped
+  // from the emitted UPDATE. Renaming a contact therefore persisted `name` but
+  // left a stale `normalized_name` — and since the transfer-link matcher reads
+  // `normalizedName ?? normalizeContactName(name)`, the stale key kept winning
+  // and the unique dedup index drifted out of sync with the visible name.
+  Contact.beforeValidate((contact, options) => {
     contact.set('normalizedName', normalizeContactName(contact.get('name')));
+    const fields = (options as { fields?: string[] }).fields;
+    if (Array.isArray(fields) && !fields.includes('normalizedName')) {
+      fields.push('normalizedName');
+    }
   });
   return Contact;
 }

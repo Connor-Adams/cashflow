@@ -6,8 +6,25 @@ import {
   InferAttributes,
   InferCreationAttributes,
   CreationOptional,
+  Op,
 } from 'sequelize';
 import { logger } from '../observability/logger';
+import { encryptSecret, decryptSecret, blindIndex } from '../util/symmetricEncryption';
+
+/**
+ * Keyed blind index of a bank account number, used for the dedup unique index
+ * (the encrypted column can't be unique — each encrypt uses a random IV).
+ * Exported so callers that dedup by bank number (import accountLookup) compute
+ * the same value without holding plaintext in a query.
+ *
+ * HMAC, not a bare digest: bank account numbers are short digit strings, so an
+ * unkeyed sha256 column would be reversible by exhaustive search and would give
+ * back the plaintext that encrypting this column exists to hide. See
+ * `blindIndex` in util/symmetricEncryption.
+ */
+export function hashBankAccountNumber(value: string): string {
+  return blindIndex(value);
+}
 
 export type AccountTaxStatus =
   | 'registered_rrsp'
@@ -31,7 +48,16 @@ export class Account extends Model<
   declare visibility: CreationOptional<string>;
   declare accountType: CreationOptional<string>;
   declare shortCode: string | null;
+  /**
+   * Bank account number. Stored ENCRYPTED at rest (#871): this is a Sequelize
+   * VIRTUAL attribute backed by `bank_account_number_encrypted` (AES-256-GCM
+   * envelope via symmetricEncryption) plus `bank_account_number_hash`
+   * (sha256, for the dedup unique index). Reading decrypts transparently;
+   * assigning encrypts + rehashes. Never persisted in plaintext.
+   */
   declare bankAccountNumber: string | null;
+  declare bankAccountNumberEncrypted: CreationOptional<string | null>;
+  declare bankAccountNumberHash: CreationOptional<string | null>;
   declare defaultCurrency: string | null;
   declare entityId: number | null;
   declare taxStatus: CreationOptional<AccountTaxStatus>;
@@ -91,10 +117,41 @@ export function initAccount(sequelize: Sequelize): typeof Account {
         field: 'short_code',
         allowNull: true,
       },
-      bankAccountNumber: {
-        type: DataTypes.STRING(64),
-        field: 'bank_account_number',
+      // Persisted ciphertext (AES-256-GCM envelope, base64). Never plaintext.
+      bankAccountNumberEncrypted: {
+        type: DataTypes.TEXT,
+        field: 'bank_account_number_encrypted',
         allowNull: true,
+      },
+      // Keyed blind index (HMAC-SHA256 hex) of the plaintext, for the dedup
+      // unique index. The encrypted column can't be unique (random IV per
+      // encrypt), so dedup keys off this instead.
+      bankAccountNumberHash: {
+        type: DataTypes.STRING(64),
+        field: 'bank_account_number_hash',
+        allowNull: true,
+      },
+      // VIRTUAL: encrypt-on-write / decrypt-on-read facade over the two columns
+      // above. Keeps every existing reader/writer of `bankAccountNumber`
+      // working while the value lives encrypted at rest (#871).
+      bankAccountNumber: {
+        type: DataTypes.VIRTUAL(DataTypes.STRING, [
+          'bankAccountNumberEncrypted',
+        ]),
+        get(this: Account): string | null {
+          const enc = this.getDataValue('bankAccountNumberEncrypted');
+          if (enc == null) return null;
+          return decryptSecret(enc);
+        },
+        set(this: Account, value: string | null) {
+          if (value == null || value === '') {
+            this.setDataValue('bankAccountNumberEncrypted', null);
+            this.setDataValue('bankAccountNumberHash', null);
+            return;
+          }
+          this.setDataValue('bankAccountNumberEncrypted', encryptSecret(value));
+          this.setDataValue('bankAccountNumberHash', hashBankAccountNumber(value));
+        },
       },
       defaultCurrency: {
         type: DataTypes.STRING(3),
@@ -154,6 +211,17 @@ export function initAccount(sequelize: Sequelize): typeof Account {
       tableName: 'accounts',
       underscored: true,
       timestamps: true,
+      indexes: [
+        {
+          // Dedup: one bank account number per household. Keyed off the sha256
+          // hash because the encrypted column varies per-encrypt (random IV).
+          // Mirrors migration 20260626000001 (#871).
+          name: 'accounts_household_bank_number_hash_unique',
+          unique: true,
+          fields: ['household_id', 'bank_account_number_hash'],
+          where: { bank_account_number_hash: { [Op.ne]: null } },
+        },
+      ],
     }
   );
 

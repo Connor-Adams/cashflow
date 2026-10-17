@@ -7,6 +7,7 @@ import {
   assertCorsOrigin,
   parseTrustProxy,
   loadEnvConfig,
+  parseInsightDetectorsEnabled,
 } from './env';
 
 test('parsePort: default when unset', () => {
@@ -119,4 +120,17 @@ test('loadEnvConfig: throws on empty DATABASE_PATH', () => {
 test('loadEnvConfig: accepts DATABASE_URL for postgres', () => {
   const c = loadEnvConfig({ DATABASE_URL: 'postgres://user:pass@example.com/db' });
   assert.equal(c.databaseUrl, 'postgres://user:pass@example.com/db');
+});
+
+test('parseInsightDetectorsEnabled defaults on outside test env', () => {
+  assert.equal(parseInsightDetectorsEnabled(undefined, 'production'), true);
+});
+
+test('parseInsightDetectorsEnabled defaults off in test env', () => {
+  assert.equal(parseInsightDetectorsEnabled(undefined, 'test'), false);
+});
+
+test('parseInsightDetectorsEnabled honours explicit values', () => {
+  assert.equal(parseInsightDetectorsEnabled('false', 'production'), false);
+  assert.equal(parseInsightDetectorsEnabled('true', 'test'), true);
 });

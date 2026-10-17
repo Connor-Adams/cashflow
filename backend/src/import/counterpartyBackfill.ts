@@ -6,7 +6,8 @@
  * years of statements only got value on *new* imports. This job walks all
  * pre-existing in-scope rows (checking | savings | cash) where
  * `counterparty_contact_id IS NULL` (i.e. not yet linked to a Contact) and
- * re-runs `extractCounterparty` over the raw merchant line.
+ * re-runs `extractCounterparty` over `merchantClean ?? merchantRaw` (see
+ * `counterpartySource`).
  *
  * For person-kind extractions it calls `resolveCounterpartyContact` to
  * find-or-create a Contact deduplicated by normalized name within the
@@ -151,8 +152,24 @@ export async function getLastCounterpartyBackfillRun(
 interface TxnRow {
   id: number;
   merchantRaw: string;
+  merchantClean: string | null;
   counterpartyRaw: string | null;
   accountType: AccountType;
+}
+
+/**
+ * The string the extractor should read.
+ *
+ * `merchantClean` wins because it is the hand-correctable field: transaction
+ * 5490 has `merchantRaw = 'ATM DEPOSIT - KF470333'` (anonymous) and
+ * `merchantClean = 'Cash repayment from Caelan (ATM deposit KF470333)'` — the
+ * only place the counterparty exists. Reading `merchantRaw` alone silently
+ * skips every row Connor has already annotated. Blank-but-present clean
+ * values fall back to raw.
+ */
+function counterpartySource(r: Pick<TxnRow, 'merchantRaw' | 'merchantClean'>): string {
+  const clean = r.merchantClean?.trim();
+  return clean && clean !== '' ? clean : r.merchantRaw;
 }
 
 const COUNTERPARTY_BACKFILL_LOCK_HELD = 'COUNTERPARTY_BACKFILL_LOCK_HELD' as const;
@@ -230,6 +247,7 @@ export async function runCounterpartyBackfill(
         return {
           id: t.id,
           merchantRaw: t.merchantRaw,
+          merchantClean: t.merchantClean,
           counterpartyRaw: t.counterpartyRaw,
           accountType: acc.accountType,
         };
@@ -238,7 +256,7 @@ export async function runCounterpartyBackfill(
       for (const r of rows) {
         processed++;
         try {
-          const cp = extractCounterparty(r.merchantRaw, r.accountType);
+          const cp = extractCounterparty(counterpartySource(r), r.accountType);
           if (cp == null) {
             seenIds.add(r.id);
             callbacks.onProgress?.({ txnId: r.id, merchantRaw: r.merchantRaw, counterpartyRaw: null });

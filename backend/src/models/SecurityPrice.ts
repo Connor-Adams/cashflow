@@ -54,6 +54,15 @@ export function initSecurityPrice(sequelize: Sequelize): typeof SecurityPrice {
       tableName: 'security_prices',
       underscored: true,
       timestamps: true,
+      // Mirrors the migration's index. Declared here so upsert() conflicts on
+      // it rather than falling back to ON CONFLICT (id).
+      indexes: [
+        {
+          unique: true,
+          fields: ['security_id', 'provider', 'priced_at'],
+          name: 'security_prices_security_provider_priced_at_unique',
+        },
+      ],
     }
   );
   return SecurityPrice;

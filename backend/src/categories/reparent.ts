@@ -19,18 +19,20 @@ export async function reparentCategory(
     }
   }
 
+  // Household-wide guard, not parent-scoped: a moved node keeps its own name,
+  // so this can only fire on a pre-existing data inconsistency (the
+  // household-wide unique index forbids reaching one through the app).
   const conflict = await Category.findOne({
     where: {
       householdId,
-      parentId: newParentId,
       nameKey: node.nameKey,
       id: { [Op.ne]: id },
     },
   });
   if (conflict) {
     throw new CategoryError(
-      'sibling_conflict',
-      `a sibling named "${node.name}" already exists under the target parent`,
+      'name_conflict',
+      `a category named "${node.name}" already exists in this household`,
     );
   }
 

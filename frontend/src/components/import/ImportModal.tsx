@@ -13,7 +13,7 @@ import { detectMode, singleImportFeedback } from './importUtils'
 
 type CsvProfileOption = { id: string; label: string; hint: string }
 
-type DetectedMode = 'standard' | 'ws-bundle' | 'holdings' | 'pdf-bundle'
+type DetectedMode = 'standard' | 'ws-bundle' | 'holdings' | 'activity-statement' | 'pdf-bundle'
 
 type UploadResult = {
   file?: string
@@ -54,15 +54,38 @@ type PdfBatchStatus = {
   items: PdfBatchItem[]
 }
 
+/**
+ * Mirror of the backend's `BundleFileResult` (backend/src/import/runImport.ts).
+ * It carries no `skipped`/`reason` pair — that shape belongs to the standard
+ * upload endpoint. A bundle file either errored or committed, and rows it
+ * declined are counted in `skippedDuplicates`.
+ */
 type WsBundleFileResult = {
   file: string
-  accountShortCode: string | null
+  accountName: string | null
+  accountCreated: boolean
   inserted: number
+  skippedDuplicates: number
   rowErrors: number
   parseErrors: { rowIndex: number; message: string }[]
-  skipped?: boolean
-  reason?: string | null
+  warnings: string[]
   error?: string
+}
+
+/**
+ * One line per file in the result banner. Leads with the destination account
+ * rather than the filename — the filename is what the user just picked, the
+ * account is what they cannot otherwise verify — and reports duplicates
+ * explicitly so a re-import reads as "nothing new" instead of "0 rows".
+ */
+function wsBundleLine(r: WsBundleFileResult): string {
+  const where = r.accountName ?? r.file
+  if (r.error) return `${where}: ERR: ${r.error}`
+  const parts = [`${r.inserted} row(s)`]
+  if (r.skippedDuplicates > 0) parts.push(`${r.skippedDuplicates} duplicate(s) skipped`)
+  if (r.rowErrors > 0) parts.push(`${r.rowErrors} row error(s)`)
+  if (r.accountCreated) parts.push('account created')
+  return `${where}: ${parts.join(' · ')}`
 }
 
 type MultiUploadResponse = { results: UploadResult[] }
@@ -70,6 +93,7 @@ type MultiUploadResponse = { results: UploadResult[] }
 const PDF_BUNDLE_URL = '/api/import/upload-pdf-bundle'
 const WS_BUNDLE_URL = '/api/import/upload-bundle'
 const HOLDINGS_URL = '/api/import/upload-holdings'
+const ACTIVITY_STATEMENT_URL = '/api/import/upload-activity-statement'
 const SINGLE_URL = '/api/import/upload'
 const MULTI_URL = '/api/import/upload-many'
 
@@ -77,6 +101,7 @@ const MODE_LABELS: Record<DetectedMode, string> = {
   'pdf-bundle': 'PDF statement bundle',
   'ws-bundle': 'Wealthsimple CSV bundle',
   holdings: 'Wealthsimple holdings CSV',
+  'activity-statement': 'Wealthsimple activity statement PDF',
   standard: 'CSV / OFX / QFX statement',
 }
 
@@ -86,6 +111,8 @@ const MODE_DESCRIPTIONS: Record<DetectedMode, string> = {
   'ws-bundle':
     'Multi-file Wealthsimple activity CSV import. Accounts auto-created per file by shortCode.',
   holdings: 'Single Wealthsimple positions CSV. Updates portfolio holdings.',
+  'activity-statement':
+    'Single Wealthsimple Custom Activity Statement PDF. Covers every account at once — buys, sells, dividends and interest are split per account by their Wealthsimple id.',
   standard:
     'Single CSV / OFX / QFX statement targeted at one account. CSV profile auto-detected unless overridden.',
 }
@@ -164,11 +191,21 @@ export function ImportModal({
     if (!open) { setBatch(null); setBatchStatus(null) }
   }, [open])
 
-  function reset() {
+  /**
+   * Clear the staged upload so the drop-zone is ready for the next one.
+   *
+   * `keepFeedback` exists because every success path sets the result banner
+   * and then resets. React batches both updates into a single render, so an
+   * unconditional `setFeedback(null)` here wins and the user sees nothing at
+   * all for an import that actually succeeded. The pdf-bundle path used to
+   * dodge this by hand-rolling its own partial reset; this makes the intent
+   * explicit and available to every mode.
+   */
+  function reset(opts: { keepFeedback?: boolean } = {}) {
     setFiles([])
     setBatchLabel('')
     setOverrideMode(null)
-    setFeedback(null)
+    if (!opts.keepFeedback) setFeedback(null)
     setBatch(null)
     setBatchStatus(null)
     setShowProgressLink(false)
@@ -235,19 +272,49 @@ export function ImportModal({
         const fd = new FormData()
         files.forEach((f) => fd.append('files', f))
         const { results } = await postFormData<{ results: WsBundleFileResult[] }>(WS_BUNDLE_URL, fd)
-        const ok = results.filter((r) => !r.error && !r.skipped).length
+        const ok = results.filter((r) => !r.error).length
         const inserted = results.reduce((s, r) => s + r.inserted, 0)
-        const lines = results
-          .slice(0, 8)
-          .map((r) => `${r.file}: ${r.skipped ? `skipped (${r.reason ?? 'unknown'})` : r.error ? `ERR: ${r.error}` : `${r.inserted} row(s)`}`)
         setFeedback({
           variant: ok === results.length ? 'success' : 'warning',
           title: `WS bundle: ${ok}/${results.length} imported · ${inserted} row(s)`,
-          lines,
+          lines: results.slice(0, 8).map(wsBundleLine),
         })
         if (onAccountsChanged) onAccountsChanged()
         else onCommitted()
-        reset()
+        reset({ keepFeedback: true })
+      } else if (mode === 'activity-statement') {
+        const fd = new FormData()
+        fd.append('file', files[0])
+        const result = await postFormData<{
+          accounts?: Array<{
+            wsid: string
+            accountLabel: string
+            insertedActivities: number
+            skippedDuplicates: number
+            unmatched?: true
+          }>
+          parseErrors?: { rowIndex: number; message: string }[]
+        }>(ACTIVITY_STATEMENT_URL, fd)
+        const accounts = result.accounts ?? []
+        const inserted = accounts.reduce((sum, a) => sum + a.insertedActivities, 0)
+        const unmatched = accounts.filter((a) => a.unmatched)
+        setFeedback({
+          // One upload can partly succeed, so an unmatched account or a parse
+          // error downgrades the banner rather than being buried in the lines.
+          variant: unmatched.length > 0 || (result.parseErrors?.length ?? 0) > 0 ? 'warning' : 'success',
+          title: `Activity imported — ${inserted} row(s) across ${accounts.length - unmatched.length} account(s)`,
+          lines: [
+            ...accounts
+              .filter((a) => !a.unmatched)
+              .map((a) => `${a.accountLabel} (${a.wsid}): ${a.insertedActivities} imported, ${a.skippedDuplicates} already present`),
+            ...unmatched.map(
+              (a) => `${a.accountLabel} (${a.wsid}): no matching account — add it, or set its Wealthsimple id as the account short code`,
+            ),
+            ...(result.parseErrors ?? []).map((e) => `Line ${e.rowIndex}: ${e.message}`),
+          ],
+        })
+        onCommitted()
+        reset({ keepFeedback: true })
       } else if (mode === 'holdings') {
         const fd = new FormData()
         fd.append('file', files[0])
@@ -267,7 +334,7 @@ export function ImportModal({
           ],
         })
         onCommitted()
-        reset()
+        reset({ keepFeedback: true })
       } else {
         // standard: single or multi CSV/OFX
         const fd = new FormData()
@@ -297,7 +364,7 @@ export function ImportModal({
           })
         }
         onCommitted()
-        reset()
+        reset({ keepFeedback: true })
       }
     } catch (err) {
       setFeedback({

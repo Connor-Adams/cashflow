@@ -21,12 +21,12 @@
 // fallow-ignore-file code-duplication
 import {
   sequelize,
-  ExternalOrder,
   ExternalOrderItem,
   ProcessedEmailMessage,
   ReceiptSenderAllowlist,
   UserEmailIntegration,
 } from '../models';
+import { findOrCreateExternalOrderForDedupe } from '../models/externalOrderDedupe';
 import {
   buildDiscoveryQuery,
   getDiscoveryExclusions,
@@ -42,12 +42,14 @@ import {
   getHeader,
 } from './gmail';
 import { classifySubject } from './subjectFilter';
+import { dateFromInternalDate } from './internalDate';
 import { extractReceiptFromText } from '../ai/extractReceiptItems';
 import type { ExtractedReceiptOrder } from '../ai/extractReceiptItems';
 import { isPurchasesLabel, classifyDiscoveryConfidence } from './discoveryConfidence';
 import { isSenderAuthenticated } from './emailAuthentication';
 import { hasMatchingTransaction, matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
 import { categorizeAndApplyReceiptItems } from '../import/categorizeReceiptItems';
+import { buildExternalOrderItemRows } from '../import/externalOrderItemRows';
 import { upsertSenderSuggestion, parseEmailAddress } from './receiptSenderSuggestions';
 import { openDailyAiBudget } from './aiExtractionBudget';
 import { logger } from '../observability/logger';
@@ -196,8 +198,9 @@ export async function discoverReceiptSources(
     parser: string;
     gmailMessageId: string;
     fromPdf: boolean;
+    internalDate: string | null | undefined;
   }): Promise<number> {
-    const { extracted, parser, gmailMessageId, fromPdf } = args;
+    const { extracted, parser, gmailMessageId, fromPdf, internalDate } = args;
     const dedupeKey = [
       extracted.vendor,
       extracted.orderId || '',
@@ -208,7 +211,11 @@ export async function discoverReceiptSources(
     ].join(':');
     let orderId = 0;
     await sequelize.transaction(async (t) => {
-      const [order, createdOrder] = await ExternalOrder.findOrCreate({
+      // findOrCreateExternalOrderForDedupe (not ExternalOrder.findOrCreate)
+      // restores a row already soft-deleted by mergeDuplicateAmazonOrders
+      // instead of colliding with the unique (household_id, dedupe_key)
+      // index on create().
+      const [order, createdOrder] = await findOrCreateExternalOrderForDedupe({
         where: { householdId: opts.householdId, dedupeKey },
         defaults: {
           householdId: opts.householdId,
@@ -216,10 +223,10 @@ export async function discoverReceiptSources(
           vendor: extracted.vendor,
           vendorOrderId: extracted.orderId,
           dedupeKey,
-          orderDate: extracted.orderDate,
+          orderDate: extracted.orderDate ?? dateFromInternalDate(internalDate),
           shipmentDate: null,
-          subtotal: null,
-          tax: null,
+          subtotal: extracted.subtotal != null ? String(extracted.subtotal) : null,
+          tax: extracted.tax != null ? String(extracted.tax) : null,
           shipping: null,
           total: extracted.total != null ? String(extracted.total) : null,
           currency: receiptCurrencyOrDefault(extracted.currency),
@@ -231,18 +238,18 @@ export async function discoverReceiptSources(
       });
       orderId = order.id;
       if (createdOrder && extracted.items.length > 0) {
+        // buildExternalOrderItemRows resolves the category FK before the write —
+        // a static bulkCreate skips the model's beforeSave hook, so the id has
+        // to be supplied explicitly and the string has to be the leaf's FLAT
+        // name. The transaction goes with it so a rollback also unwinds any
+        // category the resolve created.
         await ExternalOrderItem.bulkCreate(
-          extracted.items.map((it) => ({
+          (await buildExternalOrderItemRows({
             externalOrderId: order.id,
-            title: it.title,
-            quantity: it.quantity,
-            unitPrice: it.unitPrice != null ? String(it.unitPrice) : null,
-            totalPrice: it.totalPrice != null ? String(it.totalPrice) : null,
-            inferredCategory: it.inferredCategory,
-            businessUsePercent: it.businessUsePercent != null ? String(it.businessUsePercent) : null,
-            confidence: null,
-            itemNumber: it.vendorItemId ?? null,
-            rawPayload: it as unknown,
+            householdId: opts.householdId,
+            items: extracted.items,
+            transaction: t,
+            carryBusinessUsePercent: true,
           })) as never[],
           { transaction: t },
         );
@@ -374,7 +381,9 @@ export async function discoverReceiptSources(
       r.confidence = autoIngestAllowed ? 'high' : 'low';
 
       if (autoIngestAllowed) {
-        const orderId = await persistHighConfidenceOrder({ extracted, parser, gmailMessageId: summary.id, fromPdf });
+        const orderId = await persistHighConfidenceOrder({
+          extracted, parser, gmailMessageId: summary.id, fromPdf, internalDate: full.internalDate,
+        });
         r.orderId = orderId;
         r.status = 'auto_learned';
         autoIngested++;

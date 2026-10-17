@@ -4,7 +4,10 @@ import { D, sumD, type Decimal } from '../util/decimal';
 import { computeCorpScenario, type ComputeCorpScenarioResult } from './computeCorpScenario';
 import { computeGroupAaii } from './computeGroupAaii';
 import { computeScenario, type ComputeScenarioResult } from './computeScenario';
-import { synthesizeScenarioReturn } from './computeScenarioReturn';
+import {
+  synthesizeScenarioReturn,
+  type ScenarioReturnResult,
+} from './computeScenarioReturn';
 import {
   integrationRouter,
   type OwnerCompPlan,
@@ -32,8 +35,8 @@ import type { CorpTaxYearFacts, TaxYearFacts } from '../engine/types';
 
 export interface HouseholdPlanComputeResult {
   planId: number;
-  corp: Array<{ scenario: Scenario; computed: ComputeCorpScenarioResult }>;
-  personal: Array<{ scenario: Scenario; computed: ComputeScenarioResult }>;
+  corp: CorpResult[];
+  personal: PersonalResult[];
   intercorp: IntercorpRouterOutput;
   integration: IntegrationRouterOutput;
   /**
@@ -52,8 +55,14 @@ const OWNER_COMP_RE =
   /^ownerComp\.(\d+)\.(salary|bonus|eligibleDividend|nonEligibleDividend|capitalDividend)$/;
 const INTERCORP_RE = /^intercorp\.(\d+)\.(eligible|nonEligible|capital|ownershipPercent)$/;
 
-type CorpResult = { scenario: Scenario; computed: ComputeCorpScenarioResult };
-type PersonalResult = { scenario: Scenario; computed: ComputeScenarioResult };
+/**
+ * The WIRE-shaped result, not the full computation. This whole structure is
+ * serialised by GET /api/tax/household-plans/:id/compute, and a computation also
+ * carries the resolved facts it ran on — an engine input holding every transaction
+ * amount, which exists for the completeness gate and is no part of the API contract.
+ */
+type CorpResult = { scenario: Scenario; computed: ScenarioReturnResult };
+type PersonalResult = { scenario: Scenario; computed: ScenarioReturnResult };
 
 // Walk a corp scenario's overrides, parse intercorp.<receiverId>.<field>
 // keys, return one IntercorpDistribution per receiver. Mirrors
@@ -243,7 +252,10 @@ function computeIntegratedPersonalFromFacts(
 ): ComputeScenarioResult {
   const engineReturn = buildT1(factsPlus, ratesFor(scenario.year));
   // Sentinel hash — integrated result is plan-scoped, not cached.
-  return synthesizeScenarioReturn(scenario.id, engineReturn, 'household-integrated');
+  return {
+    result: synthesizeScenarioReturn(scenario.id, engineReturn, 'household-integrated'),
+    facts: factsPlus,
+  };
 }
 
 // Inject intercorpRouter-emitted received-dividend IncomeItems and/or
@@ -311,7 +323,10 @@ function computeIntegratedCorp(
     factsPlus,
     ratesFor(Number(factsPlus.fiscalYear.startDate.slice(0, 4))),
   );
-  return synthesizeScenarioReturn(scenario.id, engineReturn, 'household-intercorp');
+  return {
+    result: synthesizeScenarioReturn(scenario.id, engineReturn, 'household-intercorp'),
+    facts: factsPlus,
+  };
 }
 
 /**
@@ -450,12 +465,15 @@ export async function computeHouseholdPlan(
         const baseFacts = corpBaseFactsByScenarioId.get(s.id)!;
         return {
           scenario: s,
-          computed: computeIntegratedCorp(s, baseFacts, received, groupAaii),
+          // `.result` only: the plan is serialised wholesale by
+          // GET /api/tax/household-plans/:id/compute, and the computation's `facts`
+          // are an engine input, not part of the API contract.
+          computed: computeIntegratedCorp(s, baseFacts, received, groupAaii).result,
         };
       }
       return {
         scenario: s,
-        computed: await computeCorpScenario(s.id),
+        computed: (await computeCorpScenario(s.id)).result,
       };
     }),
   );
@@ -497,14 +515,14 @@ export async function computeHouseholdPlan(
     const additions = integration.byShareholder[ps.entityId] ?? null;
     const shift = spouse.byEntityId[ps.entityId] ?? null;
     if (additions === null && shift === null) {
-      personal.push({ scenario: ps, computed: await computeScenario(ps.id) });
+      personal.push({ scenario: ps, computed: (await computeScenario(ps.id)).result });
       continue;
     }
     const baseFacts = resolvedPersonalFacts.get(ps.id)!;
     const factsPlus = applyAdditionsAndShifts(baseFacts, additions, shift);
     personal.push({
       scenario: ps,
-      computed: computeIntegratedPersonalFromFacts(ps, factsPlus),
+      computed: computeIntegratedPersonalFromFacts(ps, factsPlus).result,
     });
   }
 

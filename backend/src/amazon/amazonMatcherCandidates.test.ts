@@ -83,9 +83,12 @@ test('selectMatchCandidates abstains when tied candidates both have secondary=0'
   assert.deepEqual(result, [], 'should abstain when secondary is zero for all tied candidates');
 });
 
-test('secondary tiebreak does not affect strong-match (≥threshold) path', () => {
-  // Strong-match path returns all ≥70 regardless of secondary — no regression.
+test('a strong-tier tie at the top score is now resolved by secondary (Task 11 guard)', () => {
+  // Once the account-derived last4 bonus can push two exact-cent candidates to
+  // the same strong score, returning both unconditionally reintroduces the
+  // historical fan-out. The top tie (1 vs 2, both at 75) is now resolved on
+  // secondary; candidate 3 never enters the strong tier at all (50 < 70).
   const result = selectMatchCandidates([sw(1, 75, 0), sw(2, 75, 25), sw(3, 50, 25)]);
   const resultIds = result.map((r) => (r as SW).id).sort((a, b) => a - b);
-  assert.deepEqual(resultIds, [1, 2], 'strong matches returned regardless of secondary');
+  assert.deepEqual(resultIds, [2], 'tie at the top score resolved to the secondary leader');
 });

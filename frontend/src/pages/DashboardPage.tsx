@@ -18,6 +18,7 @@ import { TopGrowersTile } from '@/components/dashboard/TopGrowersTile'
 import { NetWorthTile } from '@/components/dashboard/NetWorthTile'
 import { SafeToSpendTile } from '@/components/dashboard/SafeToSpendTile'
 import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMonthTile'
+import { CashflowSankeyTile } from '@/components/dashboard/CashflowSankeyTile'
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { ReceiptCoverageTile } from '@/components/dashboard/ReceiptCoverageTile'
 import { EmailedReceiptsTile } from '@/components/dashboard/EmailedReceiptsTile'
@@ -29,6 +30,7 @@ import { ActivationCardDeck } from '@/components/dashboard/ActivationCardDeck'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
 
 import { formatCurrency } from '../lib/formatCurrency'
+import { BudgetCarryNote } from '../components/dashboard/BudgetCarryNote'
 import { DeltaBadge } from '../components/ui/DeltaBadge'
 import { rankByNetSpend } from '../lib/rankByNetSpend'
 import { businessIncomeSpend } from '../lib/businessIncomeSpend'
@@ -999,6 +1001,11 @@ export function DashboardPage() {
                       {/* formerly .budgetPill__currency */}
                       <span className="ml-1 opacity-70">{item.currency}</span>
                     </p>
+                    <BudgetCarryNote
+                      carriedIn={item.carriedIn}
+                      currency={item.currency}
+                      periodWord={periodWord}
+                    />
                     {item.pacingState && elapsedRounded !== null && (
                       <p className="mt-1">
                         <span
@@ -1171,6 +1178,15 @@ export function DashboardPage() {
             }
           />
         )}
+
+        {/* The full money chain for the range selected above — income into
+            draws, categories and surplus. Same chart as /reports/cashflow,
+            which the tile links through to for filters and drill-down. */}
+        <CashflowSankeyTile
+          currency={currency}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+        />
 
         <BentoTile
           span={6}

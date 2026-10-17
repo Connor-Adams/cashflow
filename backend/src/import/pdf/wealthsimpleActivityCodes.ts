@@ -87,3 +87,67 @@ export function wsPdfCashCodeToTxnType(code: string | null | undefined): TxnType
   if (!code) return null;
   return CASH_CODE_TXN_TYPE[String(code).trim().toUpperCase()] ?? null;
 }
+
+/**
+ * Deposit-account (WS Cash / Chequing / Save) "Transaction" code → `TxnType`.
+ *
+ * On a deposit account EVERY row is a cash-ledger event, so this covers the
+ * brokerage-taxonomy codes too — they are cash movements when they land on a
+ * chequing account, not investment activity. Wealthsimple proved the code list
+ * alone cannot separate the two: the same recurring AMEX pre-authorized debit
+ * carried AFT_OUT in the 2026-06 statement and WD in 2026-07, and an incoming
+ * Interac e-Transfer moved from E_TRFIN to CONT.
+ *
+ * A code absent from this map still routes to the cash ledger — it just falls
+ * through to the narrative detector for typing rather than being dropped.
+ */
+const DEPOSIT_CODE_TXN_TYPE: Record<string, TxnType> = {
+  ...CASH_CODE_TXN_TYPE,
+  // Deposits / withdrawals / contributions. 'transfer' matches the existing
+  // convention for money moving between one's own accounts (AFT_IN "Direct
+  // deposit" is already typed transfer), keeping them out of spend totals.
+  DEP: 'transfer',
+  WD: 'transfer',
+  WDQ: 'transfer',
+  CONT: 'transfer',
+  TRFIN: 'transfer',
+  TRFINTF: 'transfer',
+  WIREIN: 'transfer',
+  WIREINTF: 'transfer',
+  TRFOUT: 'transfer',
+  TRFOUTTF: 'transfer',
+  // Interest received on a deposit balance. 'interest' is absent from
+  // safeToSpend's INCOME_EXCLUDED_TXN_TYPES, so a positive row counts as
+  // income; the sign carries the direction.
+  INT: 'interest',
+  FPLINT: 'interest',
+  FEE: 'fee',
+  DSCFEE: 'fee',
+};
+
+export function wsPdfDepositCodeToTxnType(code: string | null | undefined): TxnType | null {
+  if (!code) return null;
+  return DEPOSIT_CODE_TXN_TYPE[String(code).trim().toUpperCase()] ?? null;
+}
+
+/**
+ * Codes whose TxnType the statement genuinely establishes, as opposed to ones
+ * that only say which way the money went.
+ *
+ * SPEND is a card purchase, OBP is a bill payment, INT is interest, DCTFEE is a
+ * fee — nothing in the narrative can outrank those. The movement codes are
+ * different: Wealthsimple uses the SAME code for a plain withdrawal and for a
+ * credit-card bill payment (WD, AFT_OUT), and for both an account funding
+ * transfer and a payroll direct deposit (DEP, AFT_IN). Their TxnType is
+ * therefore emitted as `txnTypeHint`, which the narrative detector may beat —
+ * without that, "Pre-authorized Debit to AMEX BILL PYMT" is filed as a
+ * transfer, which is what prod holds for 38 rows.
+ */
+const AUTHORITATIVE_CODES = new Set<string>([
+  'SPEND', 'OBP', 'CASHBACK', 'GIVEAWAY', 'DCTFEE', 'FEE', 'DSCFEE', 'INT', 'FPLINT',
+]);
+
+export function wsPdfCodeTypeIsAuthoritative(code: string | null | undefined): boolean {
+  if (!code) return false;
+  return AUTHORITATIVE_CODES.has(String(code).trim().toUpperCase());
+}

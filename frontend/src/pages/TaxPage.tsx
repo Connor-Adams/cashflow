@@ -16,6 +16,7 @@ import { TaxReserveTab } from './tax/TaxReserveTab'
 import { ClassifyTab } from './tax/ClassifyTab'
 import { ClassifiedTab } from './tax/ClassifiedTab'
 import { useTaxYears } from '../hooks/useTaxYears'
+import { pickDefaultYear } from './tax/util/defaultYear'
 
 const TABS = [
   { value: 'overview', label: 'Overview' },
@@ -30,12 +31,6 @@ const TABS = [
   { value: 'hygiene', label: 'Business Hygiene' },
   { value: 'reserve', label: 'Reserve' },
 ]
-
-function pickDefaultYear(years: number[]): number {
-  const prev = new Date().getUTCFullYear() - 1
-  if (years.includes(prev)) return prev
-  return years[years.length - 1]
-}
 
 function isTextInput(el: Element | null): boolean {
   if (!el) return false
@@ -109,12 +104,12 @@ export function TaxPage() {
               onPlanChange={setActivePlanId}
             />
           )}
-          {tab === 'personal' && <PersonalT1Tab year={year} />}
+          {tab === 'personal' && <PersonalT1Tab year={year} onNavigate={setTab} />}
           {tab === 'slips' && <SlipsTab year={year} />}
           {tab === 'reconciliation' && <ReconciliationTab year={year} />}
           {tab === 'classify' && <ClassifyTab year={year} />}
           {tab === 'classified' && <ClassifiedTab year={year} />}
-          {tab === 'corp' && <CorpT2Tab />}
+          {tab === 'corp' && <CorpT2Tab year={year} />}
           {tab === 'shareholder-loans' && <ShareholderLoanTab />}
           {tab === 'planner' && <OwnerCompPlannerTab activePlanId={activePlanId} />}
           {tab === 'hygiene' && <TaxHygieneTab year={year} />}

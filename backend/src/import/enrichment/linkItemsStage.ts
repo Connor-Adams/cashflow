@@ -129,7 +129,7 @@ export function runLinkItemsStage(input: LinkItemsInput): Signal[] {
       shipmentDate: order.shipmentDate,
       paymentLast4: order.paymentLast4,
     } as ExternalOrder;
-    const score = scoreAmazonOrderMatch(synthesised as Transaction, externalOrder);
+    const score = scoreAmazonOrderMatch(synthesised as Transaction, externalOrder, null);
     // Add the +15 vendor-match bump for non-Amazon vendors so they reach
     // the threshold under equivalent conditions.
     const adjusted = matched.vendor === 'amazon' ? score.confidence : Math.min(100, score.confidence + 15);

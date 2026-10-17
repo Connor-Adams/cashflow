@@ -35,7 +35,7 @@ function sampleItem(overrides: Partial<ItemRow> = {}): ItemRow {
     categoryOverride: null,
     businessUseEffective: true,
     businessUseOverride: null,
-    order: { id: 1, vendor: 'amazon' },
+    order: { id: 1, vendor: 'amazon', cardOwnership: 'known' },
     receipt: { id: 1, date: '2026-05-20', sourceTxnId: 100 },
     ...overrides,
   }

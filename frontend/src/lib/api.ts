@@ -1,6 +1,9 @@
+import { apiBase } from './runtimeConfig'
 import { clientLogger } from './clientLogger'
 import type {
   ContactLedgerResponse,
+  InterestAllocationRunResult,
+  CounterpartyRole,
   TransferLinkResult,
   SelfSuggestionsResponse,
   SimplefinConnectResponse,
@@ -13,7 +16,7 @@ import type {
   SplitTransactionResponse,
 } from '@cashflow/shared'
 
-const base = import.meta.env.VITE_API_BASE ?? ''
+const base = apiBase()
 
 export class ApiError extends Error {
   readonly status: number
@@ -159,6 +162,31 @@ export function getSelfSuggestions(): Promise<SelfSuggestionsResponse> {
 }
 export function setContactSelf(id: number, isSelf: boolean): Promise<unknown> {
   return patchJson(`/api/contacts/${id}`, { isSelf })
+}
+/**
+ * Tag what a transfer means. `null` clears the tag and hands the row back to
+ * the contact's `loanDefault`. The response does echo the saved row back, but
+ * the loan balance it feeds is recomputed server-side over every row at once,
+ * so callers must refetch the ledger — the echoed row cannot tell them what the
+ * tag did to the total.
+ */
+export function setCounterpartyRole(txnId: number, role: CounterpartyRole | null): Promise<unknown> {
+  return patchJson(`/api/transactions/${txnId}`, { counterpartyRole: role })
+}
+export function setContactLoanDefault(id: number, loanDefault: boolean): Promise<unknown> {
+  return patchJson(`/api/contacts/${id}`, { loanDefault })
+}
+/**
+ * Recompute the line-of-credit interest allocation for the household.
+ *
+ * Household-wide, not per contact: each rate window's printed interest is
+ * apportioned across every borrower at once, so one person's share cannot be
+ * recomputed on its own. Charged rows are deleted and re-inserted, so re-running
+ * recomputes rather than accumulating. The accrued estimate is never stored and
+ * is therefore untouched — it is recomputed on every ledger read.
+ */
+export function runInterestAllocation(): Promise<InterestAllocationRunResult> {
+  return postJson<InterestAllocationRunResult>('/api/contacts/interest-allocation')
 }
 
 // SimpleFIN Bridge bank connection (issue #790)

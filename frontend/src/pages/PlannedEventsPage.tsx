@@ -1,3 +1,4 @@
+import { apiBase } from '../lib/runtimeConfig'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -47,7 +48,7 @@ async function putPlannedEvent(
   id: number,
   body: PlannedEventPatch,
 ): Promise<PlannedEvent> {
-  const base = import.meta.env.VITE_API_BASE ?? ''
+  const base = apiBase()
   const res = await fetch(`${base}/api/planned-events/${id}`, {
     method: 'PUT',
     credentials: 'include',

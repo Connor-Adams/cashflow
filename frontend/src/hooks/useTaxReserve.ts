@@ -1,3 +1,4 @@
+import { apiBase } from '../lib/runtimeConfig'
 /**
  * Hooks backing the Tax Reserve tab (issue #223). Mirrors the vanilla
  * useEffect/useState pattern used by useTaxHygiene — no TanStack Query in
@@ -60,7 +61,7 @@ export async function putReserveSetting(
   currency: string,
   input: { reservePercent?: number; note?: string | null },
 ): Promise<ReserveSettingDto> {
-  const base = import.meta.env.VITE_API_BASE ?? '';
+  const base = apiBase();
   const r = await fetch(
     `${base}/api/tax/reserve/settings/${encodeURIComponent(currency)}`,
     {

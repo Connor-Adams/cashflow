@@ -38,7 +38,13 @@ FROM nginxinc/nginx-unprivileged:alpine AS runner
 # injects its own PORT at runtime, which envsubst applies to the listen directive.
 ENV PORT=8080
 
-COPY --from=builder /app/frontend/dist /usr/share/nginx/html
+# Owned by the nginx user so the runtime-config step below can rewrite
+# runtime-config.js at start-up — this image runs unprivileged.
+COPY --from=builder --chown=nginx:nginx /app/frontend/dist /usr/share/nginx/html
 COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
+
+# Regenerates runtime-config.js from the container environment before nginx
+# starts, so one image serves any environment. See frontend/src/lib/runtimeConfig.ts.
+COPY --chmod=0755 frontend/docker-runtime-config.sh /docker-entrypoint.d/40-runtime-config.sh
 
 EXPOSE 8080

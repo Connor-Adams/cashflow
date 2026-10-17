@@ -43,7 +43,7 @@ test.skip('USD interest converted to CAD via FxRate', async () => {
   // then assert interestIncome[0].cadAmount = amount * 1.35
 });
 
-test.skip('donations, rrspContribs, fhsaContribs sourced from transactions by category', async () => {
+test('donations, rrspContribs, fhsaContribs sourced from transactions by category', async () => {
   const household = await Household.create({ name: 'Donation Test' });
   const entity = await Entity.create({
     householdId: household.id, kind: 'personal', legalName: 'Donation Test', jurisdiction: 'CA-ON', fiscalYearEnd: null,
@@ -56,7 +56,8 @@ test.skip('donations, rrspContribs, fhsaContribs sourced from transactions by ca
   // Donation transaction
   await Transaction.create({
     accountId: account.id, householdId: household.id, entityId: entity.id,
-    date: '2024-06-01', amount: '500.0000', currency: 'CAD',
+    // Charges are negative in this app; the credit is on the amount given.
+    date: '2024-06-01', amount: '-500.0000', currency: 'CAD',
     finalCategory: 'donations',
     merchantRaw: 'CHARITY', merchantClean: 'CHARITY',
     importBatch: 'seed-donations', sourceRowFingerprint: 'fp-don-001',
@@ -253,7 +254,7 @@ test('transaction taxTreatmentOverride wins over the category default', async ()
   await Category.create({ householdId: household.id, name: 'Misc' } as never);
   await Transaction.create({
     accountId: account.id, householdId: household.id, entityId: entity.id,
-    date: '2025-03-01', amount: '500.0000', currency: 'CAD', finalCategory: 'Misc',
+    date: '2025-03-01', amount: '-500.0000', currency: 'CAD', finalCategory: 'Misc',
     taxTreatmentOverride: 'donations',
     merchantRaw: 'CH', merchantClean: 'CH', importBatch: 's',
     sourceRowFingerprint: 'fp-tt-ovr-1', sourceIdentityFingerprint: 'sif-tt-ovr-1',
@@ -863,3 +864,239 @@ test('a sell inside a registered account produces no capital gain events', async
 
   assert.equal(facts.capitalGainEvents.length, 0, 'registered-account disposition is not a taxable capital gain');
 });
+
+// --- passive income earned on bank accounts (not the brokerage ledger) ---
+//
+// interestIncome was sourced exclusively from InvestmentActivity rows, which
+// only exist for investment accounts. A chequing account paying monthly
+// interest has none, so the transaction was the sole record of the income and
+// nothing read it — 24 such rows ($332.93) sat unreported on Connor's return.
+// Mirrors the corp-side rule in corpPerimeter.ts.
+
+let ppFp = 0;
+async function seedPassiveEntity() {
+  const household = await Household.create({ name: 'Passive HH' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'Passive',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const mkAccount = async (name: string, accountType: string, taxStatus: string) =>
+    Account.create({
+      name, householdId: household.id, accountType,
+      entityId: entity.id, taxStatus, defaultCurrency: 'CAD',
+    } as never);
+  return { household, entity, mkAccount };
+}
+
+async function seedPassiveTxn(
+  ctx: { household: { id: number }; entity: { id: number } },
+  account: { id: number },
+  over: Record<string, unknown>,
+) {
+  ppFp += 1;
+  const merchantRaw = String(over.merchantRaw ?? 'Interest earned');
+  return Transaction.create({
+    accountId: account.id, householdId: ctx.household.id, entityId: ctx.entity.id,
+    currency: 'CAD', importBatch: 'test-passive',
+    merchantClean: merchantRaw,
+    sourceRowFingerprint: `fp-passive-${ppFp}`,
+    sourceIdentityFingerprint: `sif-passive-${ppFp}`,
+    ...over,
+    merchantRaw,
+  } as never);
+}
+
+test('chequing interest is reported as interest income', async () => {
+  const ctx = await seedPassiveEntity();
+  const chequing = await ctx.mkAccount('Chequing', 'checking', 'n_a');
+  for (const [date, amount] of [
+    ['2024-09-01', '6.2700'],
+    ['2024-10-01', '24.6800'],
+    ['2024-11-01', '50.1300'],
+  ]) {
+    await seedPassiveTxn(ctx, chequing, { date, amount, txnType: 'interest' });
+  }
+
+  const facts = await buildPersonalFacts(ctx.entity.id, 2024);
+  const total = facts.interestIncome.reduce((a, i) => a.plus(i.cadAmount), D(0));
+  assert.equal(total.toFixed(2), '81.08');
+});
+
+test('interest earned inside a registered account stays off the return', async () => {
+  // TFSA earnings are tax-free; RRSP/FHSA are taxed on withdrawal, not in-account.
+  const ctx = await seedPassiveEntity();
+  const tfsa = await ctx.mkAccount('TFSA', 'checking', 'registered_tfsa');
+  await seedPassiveTxn(ctx, tfsa, { date: '2024-09-01', amount: '100.0000', txnType: 'interest' });
+
+  const facts = await buildPersonalFacts(ctx.entity.id, 2024);
+  assert.deepEqual(facts.interestIncome, []);
+});
+
+test('passive transactions on an investment account do not double the brokerage ledger', async () => {
+  const ctx = await seedPassiveEntity();
+  const brokerage = await ctx.mkAccount('Margin', 'investment', 'non_registered');
+  await seedPassiveTxn(ctx, brokerage, {
+    date: '2024-09-01', amount: '77.6000', txnType: 'dividend',
+    merchantRaw: 'XEQT cash dividend distribution',
+  });
+  await seedPassiveTxn(ctx, brokerage, {
+    date: '2024-09-02', amount: '0.0100', txnType: 'interest',
+    merchantRaw: 'Stock lending monthly interest payment',
+  });
+
+  const facts = await buildPersonalFacts(ctx.entity.id, 2024);
+  assert.deepEqual(facts.interestIncome, []);
+  assert.deepEqual(facts.eligibleDividends, []);
+  assert.deepEqual(facts.nonEligibleDividends, []);
+});
+
+test('a dividend paid into a bank account defaults to eligible', async () => {
+  // A transaction carries no security, so eligibility is unknowable here — take
+  // the same default the InvestmentActivity path uses.
+  const ctx = await seedPassiveEntity();
+  const chequing = await ctx.mkAccount('Chequing', 'checking', 'n_a');
+  await seedPassiveTxn(ctx, chequing, {
+    date: '2024-09-01', amount: '40.0000', txnType: 'dividend',
+    merchantRaw: 'Patronage dividend',
+  });
+
+  const facts = await buildPersonalFacts(ctx.entity.id, 2024);
+  assert.equal(facts.eligibleDividends.length, 1);
+  assert.equal(facts.eligibleDividends[0].cadAmount.toFixed(2), '40.00');
+  assert.deepEqual(facts.nonEligibleDividends, []);
+});
+
+test('a bank credit tagged not_income stays off the return', async () => {
+  // Wealthsimple labels its card cash-back "Interest earned" on the chequing
+  // ledger. Card rewards are a rebate on the purchase price, not income, so the
+  // row is tagged not_income and must not reach line 12100 despite its type.
+  const ctx = await seedPassiveEntity();
+  const chequing = await ctx.mkAccount('Chequing', 'checking', 'n_a');
+  await seedPassiveTxn(ctx, chequing, {
+    date: '2024-09-01', amount: '6.2700', txnType: 'interest',
+    taxTreatmentOverride: 'not_income',
+  });
+  // A genuine interest credit alongside it still counts.
+  await seedPassiveTxn(ctx, chequing, {
+    date: '2024-09-02', amount: '10.0000', txnType: 'interest',
+    merchantRaw: 'Interest received',
+  });
+
+  const facts = await buildPersonalFacts(ctx.entity.id, 2024);
+  const total = facts.interestIncome.reduce((a, i) => a.plus(i.cadAmount), D(0));
+  assert.equal(total.toFixed(2), '10.00');
+});
+
+test('shareholder-loan and non-income treatments never become bank dividends', async () => {
+  const ctx = await seedPassiveEntity();
+  const chequing = await ctx.mkAccount('Chequing', 'checking', 'n_a');
+  for (const tt of ['not_income', 'loan_advance', 'loan_repayment']) {
+    await seedPassiveTxn(ctx, chequing, {
+      date: '2024-09-01', amount: '25.0000', txnType: 'dividend',
+      taxTreatmentOverride: tt,
+    });
+  }
+
+  const facts = await buildPersonalFacts(ctx.entity.id, 2024);
+  assert.deepEqual(facts.eligibleDividends, []);
+  assert.deepEqual(facts.nonEligibleDividends, []);
+});
+
+test('an expense reimbursement is not personal income', async () => {
+  const ctx = await seedPassiveEntity();
+  const chequing = await ctx.mkAccount('Chequing', 'checking', 'n_a');
+  // finalBusiness is deliberately true: the last branch of the treatment chain
+  // routes any business-flagged positive row to self-employment income, so
+  // without an explicit non-income branch a reimbursement lands there.
+  await seedPassiveTxn(ctx, chequing, {
+    date: '2024-06-01', amount: '1782.1200', txnType: 'transfer',
+    taxTreatmentOverride: 'expense_reimbursement', finalBusiness: true,
+    merchantRaw: 'Transfer in from CDG Labs Inc.',
+  });
+
+  const facts = await buildPersonalFacts(ctx.entity.id, 2024);
+  assert.deepEqual(facts.employmentIncome, []);
+  assert.deepEqual(facts.eligibleDividends, []);
+  assert.deepEqual(facts.nonEligibleDividends, []);
+  assert.deepEqual(facts.selfEmploymentIncome, []);
+});
+
+// The forward fix (part 1a) puts a cash mirror on brokerage accounts, including
+// registered ones. A chequing→FHSA contribution therefore now has TWO legs inside
+// the same entity, and `buildPersonalFacts` collects fhsa_contribution rows with
+// `cad.abs()` — so tagging both legs would deduct the contribution twice. The
+// account-scoped feeds do not protect this path: transactions are pulled by
+// entity, unfiltered by account.
+test('an FHSA contribution tagged on both legs is not deducted twice', async () => {
+  const household = await Household.create({ name: 'FHSA double HH' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const chequing = await Account.create({
+    name: 'Chq', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'n_a', defaultCurrency: 'CAD',
+  } as never);
+  const fhsa = await Account.create({
+    name: 'WS FHSA', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'registered_fhsa', defaultCurrency: 'CAD',
+  } as never);
+
+  const out = await Transaction.create({
+    accountId: chequing.id, householdId: household.id, entityId: entity.id,
+    date: '2026-03-01', amount: '-8000', currency: 'CAD', txnType: 'transfer',
+    taxTreatmentOverride: 'fhsa_contribution',
+    merchantRaw: 'To FHSA', merchantClean: 'To FHSA',
+    importBatch: 'b', sourceRowFingerprint: 'fp-fhsa-out', sourceIdentityFingerprint: 'sif-fhsa-out',
+  } as never);
+  // The mirror the forward fix now emits on the FHSA side.
+  await Transaction.create({
+    accountId: fhsa.id, householdId: household.id, entityId: entity.id,
+    date: '2026-03-01', amount: '8000', currency: 'CAD', txnType: 'transfer',
+    taxTreatmentOverride: 'fhsa_contribution',
+    linkedTransactionId: out.id,
+    merchantRaw: 'Contribution', merchantClean: 'Contribution',
+    importBatch: 'b', sourceRowFingerprint: 'fp-fhsa-in', sourceIdentityFingerprint: 'sif-fhsa-in',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2026);
+  const total = facts.fhsaContribs.reduce((acc, c) => acc.plus(c.amount), D('0'));
+  assert.equal(
+    total.toFixed(2),
+    '8000.00',
+    `one contribution, one deduction; got ${total.toFixed(2)} from ${facts.fhsaContribs.length} rows`,
+  );
+});
+
+// A row that is BOTH typed interest/dividend AND classified as income was counted
+// twice: once by the treatment loop, once by the txnType pass below it. That pass
+// skipped only the four NOT_INCOME treatments, so every income treatment fell
+// through — and a `dividend` txnType was pushed as ELIGIBLE, which is the wrong
+// character as well as the wrong count.
+test('a transaction both typed interest and classified as a dividend is counted once', async () => {
+  const household = await Household.create({ name: 'Double count HH' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const chq = await Account.create({
+    name: 'Chq', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'n_a', defaultCurrency: 'CAD',
+  } as never);
+  await Transaction.create({
+    accountId: chq.id, householdId: household.id, entityId: entity.id,
+    date: '2026-05-01', amount: '1000', currency: 'CAD', txnType: 'interest',
+    taxTreatmentOverride: 'non_eligible_dividend',
+    merchantRaw: 'Owner draw', merchantClean: 'Owner draw',
+    importBatch: 'b', sourceRowFingerprint: 'fp-dc', sourceIdentityFingerprint: 'sif-dc',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2026);
+  assert.equal(facts.nonEligibleDividends.length, 1, 'classified once');
+  assert.equal(
+    facts.interestIncome.length,
+    0,
+    `must not also appear as interest; got ${JSON.stringify(facts.interestIncome)}`,
+  );
+});
+

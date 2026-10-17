@@ -222,7 +222,7 @@ test('full multi-year chain: 2024 baseline → 2025 projection → 2026 projecti
   assert.deepEqual(yearsFromLeaf, [2024, 2025, 2026]);
 
   // ----- Step 7: compute 2026 succeeds + ageAtYearEnd is +2 vs baseline -----
-  const computed2026 = await computeScenario(proj2026.id);
+  const computed2026 = (await computeScenario(proj2026.id)).result;
   assert.ok(computed2026, 'computeScenario(2026) should return a result');
   assert.equal(computed2026.scenarioId, proj2026.id);
   assert.ok(computed2026.totals, '2026 computation should produce totals');
@@ -286,7 +286,7 @@ test('full multi-year chain: 2024 baseline → 2025 projection → 2026 projecti
     '150000.00',
   );
   // Compute should succeed too.
-  const fork2025Computed = await computeScenario(fork2025Id);
+  const fork2025Computed = (await computeScenario(fork2025Id)).result;
   assert.ok(fork2025Computed.totals);
   assert.ok('totalPayable' in fork2025Computed.totals);
 });

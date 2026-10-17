@@ -1,6 +1,7 @@
 import type {
   NormalizedHoldingSnapshot,
   NormalizedInvestmentActivity,
+  StatementParseError,
 } from '../statementTypes';
 import type { TxnType } from '../enrichment/types';
 
@@ -31,6 +32,18 @@ export type PdfLine = {
 export type PdfParseContext = {
   /** Account default currency, e.g. 'CAD'. */
   defaultCurrency: string;
+  /**
+   * The target Account's type, when the caller already knows it. Wealthsimple
+   * runs Cash/Chequing/Save accounts and brokerage accounts through one
+   * statement layout (and so one parser + sniff), and the row codes alone no
+   * longer separate them — WS relabels them between statement cycles. The
+   * account type is the stable signal, so the WS brokerage parser reads it to
+   * decide whether a row belongs in the cash ledger or in investment activity.
+   * Omit when the account is not known yet: the bundle importers parse once
+   * just to read the header, resolve the account from it, then re-parse
+   * through `parseStatementFile`, which does supply this.
+   */
+  accountType?: 'checking' | 'savings' | 'credit_card' | 'investment' | 'loan';
 };
 
 /**
@@ -74,6 +87,27 @@ export type PdfStatementHeader = {
   minimumPayment?: number | null;
 };
 
+/**
+ * One row of an RBC Royal Credit Line "Rate History" table: the prime rate,
+ * premium/discount, and resulting effective rate over a dated window, plus
+ * the interest RBC actually applied for that window. All numeric fields are
+ * fixed-4 decimal strings (e.g. "4.4500", "-0.5000") to avoid float drift
+ * when these are later summed/compared; dates are ISO yyyy-mm-dd.
+ */
+export type PdfRatePeriod = {
+  fromDate: string;
+  toDate: string;
+  primeRate: string;
+  premium: string;
+  effectiveRate: string;
+  applicableInterest: string;
+};
+
+export type PdfStatementBalances = {
+  opening: number | null;
+  closing: number;
+};
+
 export type PdfParseResult = {
   /** Transactions in cashflow's sign convention (positive = credit, negative = charge for credit cards). */
   transactions: Array<{
@@ -91,6 +125,13 @@ export type PdfParseResult = {
      * row by the source code instead of guessing. Omit to let enrichment decide.
      */
     overrideTxnType?: TxnType;
+    /**
+     * A TxnType the source only guessed at, because its code covers several
+     * kinds of movement (WS `WD`/`AFT_OUT` cover both a plain withdrawal and a
+     * credit-card bill payment). Loses to a high-confidence narrative match,
+     * beats the detector's sign-based fallback. Set at most one of the two.
+     */
+    txnTypeHint?: TxnType;
   }>;
   /**
    * Investment activity rows (mutual fund buys/sells, distributions,
@@ -110,8 +151,33 @@ export type PdfParseResult = {
    * existing parsers (CIBC) don't need to be retrofitted.
    */
   header?: PdfStatementHeader;
+  /**
+   * Rate-history rows read off the RBC Royal Credit Line "Rate History"
+   * table (per-period prime/premium/effective rate + applied interest).
+   * Optional — only the RBC Credit Line parser emits this; omitted (or
+   * empty) for statements without a rate table.
+   */
+  ratePeriods?: PdfRatePeriod[];
+  /**
+   * The statement's own opening and closing balance for `header`'s period,
+   * when the parser can read them. Persisted as an `account_statements` row so
+   * the app's computed balance can be reconciled against the bank's figure.
+   *
+   * Same convention as `account_statements`: the balance as printed — signed
+   * for asset accounts, the amount OWED (positive) for liability accounts
+   * (credit cards, loans, credit lines). `opening` is null when the statement
+   * prints no opening figure. Omit the whole field when there is no closing
+   * balance — there is nothing to reconcile against.
+   */
+  statementBalances?: PdfStatementBalances;
   warnings: string[];
-  parseErrors: { rowIndex: number; message: string }[];
+  /**
+   * Problems hit while reading the statement. Set `blocking: true` on an error
+   * that invalidates the whole document — in practice, a reconciliation gate
+   * whose recomputed closing balance disagrees with the printed one. The commit
+   * path refuses those unless the caller explicitly overrides.
+   */
+  parseErrors: StatementParseError[];
 };
 
 export type PdfParser = {
@@ -136,3 +202,6 @@ export type PdfParser = {
    */
   holdingFingerprint?: 'ws_holding';
 };
+
+/** Re-exported so PDF parsers can type their local parse-error buckets. */
+export type { StatementParseError } from '../statementTypes';

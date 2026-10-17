@@ -259,3 +259,113 @@ test('promotion via the exact-fingerprint tier leaves the (already-correct) date
   assert.equal(pending.date, '2026-05-07');
   assert.equal(pending.sourceIdentityFingerprint, fp);
 });
+
+/**
+ * A bank-issued transaction id is a stronger identity than any text we parse.
+ *
+ * `stableIdentityFingerprint` hashes `merchantRaw`, so when a parser's
+ * description output changes — a fixed wrap, a new normalisation rule, a
+ * vendor rewording a memo — every previously imported row gets a "new"
+ * fingerprint and the re-import inserts duplicates. That is exactly what the
+ * Wise inline-column parser fix caused: two rows re-imported with the same
+ * account, date, amount AND `source_reference`, differing only in description,
+ * and dedup let them through because the fingerprint lookup returned no
+ * candidates for the reference check to run against.
+ */
+async function seedPosted(opts: {
+  accountId: number;
+  date: string;
+  amount: number;
+  merchantRaw: string;
+  sourceReference: string | null;
+}): Promise<InstanceType<typeof models.Transaction>> {
+  return models.Transaction.create({
+    accountId: opts.accountId,
+    householdId: HOUSEHOLD_ID,
+    createdByUserId: null,
+    visibility: 'private',
+    ownershipType: 'me',
+    ownershipContactId: null,
+    importBatch: 'ref-dedup-test',
+    date: opts.date,
+    merchantRaw: opts.merchantRaw,
+    merchantClean: opts.merchantRaw,
+    amount: String(opts.amount),
+    currency: 'CAD',
+    status: 'posted',
+    notes: null,
+    sourceReference: opts.sourceReference,
+    sourceRowFingerprint: `row-fp-${Math.random()}`,
+    sourceIdentityFingerprint: stableIdentityFingerprint({
+      accountId: opts.accountId,
+      date: opts.date,
+      amount: opts.amount,
+      currency: 'CAD',
+      merchantRaw: opts.merchantRaw,
+    }),
+    txnType: 'purchase',
+    reviewFlag: false,
+    isRecurring: false,
+  } as never) as never;
+}
+
+test('same account + source_reference + amount is a duplicate even when the description changed', async () => {
+  const accountId = await makeAccount();
+  const existing = await seedPosted({
+    accountId,
+    date: '2026-05-29',
+    amount: 2499.27,
+    merchantRaw: '021000029746357',
+    sourceReference: 'TRANSFER-2160462218',
+  });
+
+  // Re-imported by the fixed parser: same money, fuller description.
+  const merchantRaw = 'Received money from AURELIUS TECHNOL with reference 021000029746357';
+  const outcome = await models.sequelize.transaction((t) =>
+    findExistingForDedup({
+      accountId,
+      sourceIdentityFingerprint: stableIdentityFingerprint({
+        accountId, date: '2026-05-29', amount: 2499.27, currency: 'CAD', merchantRaw,
+      }),
+      sourceReference: 'TRANSFER-2160462218',
+      incomingStatus: 'posted',
+      incomingDate: '2026-05-29',
+      incomingAmount: 2499.27,
+      incomingCurrency: 'CAD',
+      incomingMerchantRaw: merchantRaw,
+      t,
+    }),
+  );
+
+  assert.equal(outcome.kind, 'duplicate');
+  assert.equal((outcome as { existingId: number }).existingId, existing.id);
+});
+
+test('the same reference on a DIFFERENT amount is not a duplicate', async () => {
+  // Wise prints one reference per leg, but a provider that reuses an id across
+  // genuinely distinct charges must not collapse them.
+  const accountId = await makeAccount();
+  await seedPosted({
+    accountId, date: '2026-05-29', amount: 2499.27,
+    merchantRaw: 'Leg one', sourceReference: 'SHARED-REF',
+  });
+
+  const merchantRaw = 'Leg two';
+  const outcome = await models.sequelize.transaction((t) =>
+    findExistingForDedup({
+      accountId,
+      sourceIdentityFingerprint: stableIdentityFingerprint({
+        accountId, date: '2026-05-29', amount: 99.99, currency: 'CAD', merchantRaw,
+      }),
+      sourceReference: 'SHARED-REF',
+      incomingStatus: 'posted',
+      incomingDate: '2026-05-29',
+      incomingAmount: 99.99,
+      incomingCurrency: 'CAD',
+      incomingMerchantRaw: merchantRaw,
+      t,
+    }),
+  );
+
+  assert.equal(outcome.kind, 'no-match');
+});

@@ -198,3 +198,44 @@ test('captureOrders rejects empty vendor', async () => {
     } as never),
   );
 });
+
+// Regression (docs/superpowers/specs/2026-09-11-account-card-identifiers-design.md,
+// Part 5): ExternalOrder is paranoid, and external_orders_household_dedupe_unique
+// is a plain UNIQUE index on (household_id, dedupe_key) that a soft-deleted row
+// still occupies. Re-capturing an order whose row was soft-deleted (e.g. by
+// mergeDuplicateAmazonOrders) must restore it, not crash on the unique index.
+test('captureOrders restores a soft-deleted order instead of colliding with the unique dedupe index', async () => {
+  const { user, household } = await makeHouseholdAndUser();
+  const payload = {
+    householdId: household.id,
+    userId: user.id,
+    vendor: 'amazon',
+    source: 'bookmarklet-amazon-v1',
+    orders: [
+      {
+        vendorOrderId: 'O-SOFT-DELETED-1',
+        orderDate: '2026-05-10',
+        total: 12.34,
+        currency: 'CAD',
+        paymentLast4: null,
+        items: [{ title: 'Widget', totalPrice: 12.34 }],
+      },
+    ],
+  } as const;
+
+  const first = await vendorCapture.captureOrders({ ...payload });
+  assert.equal(first.created, 1);
+  const orderId = first.orders[0]!.externalOrderId;
+
+  const row = await models.ExternalOrder.findByPk(orderId);
+  await row!.destroy(); // simulate mergeDuplicateAmazonOrders soft-deleting it
+
+  await assert.doesNotReject(
+    vendorCapture.captureOrders({ ...payload }),
+    'must not throw a unique-constraint error on the (household_id, dedupe_key) index',
+  );
+
+  const restored = await models.ExternalOrder.findByPk(orderId);
+  assert.ok(restored, 'the row must be visible again under a normal query');
+  assert.equal(await models.ExternalOrder.count({ where: { householdId: household.id } }), 1);
+});

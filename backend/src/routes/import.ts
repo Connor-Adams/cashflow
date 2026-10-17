@@ -3,6 +3,8 @@ import path from 'node:path';
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import multer from 'multer';
 import { listImportProfiles } from '../import/csvProfiles';
+import { importWsActivityStatement } from '../import/importWsActivityStatement';
+import { hashContent } from '../import/fingerprint';
 import { PREVIEW_MAX_ROWS } from '../import/previewImport';
 import {
   runImport,
@@ -12,7 +14,16 @@ import {
   type BundleFileResult,
 } from '../import/runImport';
 import { parseStatementFile } from '../import/parseStatementFile';
-import { consumeStatementPreview } from '../import/statementPreviewStore';
+import {
+  consumeStatementPreview,
+  getStatementPreview,
+} from '../import/statementPreviewStore';
+import {
+  acknowledgementAccepted,
+  blockingParseErrors,
+  unreconciledAcknowledgementDigest,
+  unreconciledStatementError,
+} from '../import/reconciliationGate';
 import { commitStatementImport } from '../import/commitStatementImport';
 import { syncTransactionEntityIds } from '../tax/services/syncTransactionEntityIds';
 import {
@@ -104,6 +115,23 @@ const pdfBundleUpload = multer({
 // Wealthsimple holdings/positions report is always a single CSV (one report
 // covers all accounts).  Cap at 5 MB; tight `files: 1` so the route fails
 // loudly if the frontend ever tries to multi-attach by mistake.
+// The Custom Activity Statement is a single PDF covering every account, so it
+// gets its own uploader beside the holdings one rather than joining the
+// per-account PDF bundle route.
+const activityStatementUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.originalname.toLowerCase().endsWith('.pdf')) {
+      const e = new Error('Only .pdf files are allowed') as Error & { status?: number };
+      e.status = 400;
+      cb(e);
+      return;
+    }
+    cb(null, true);
+  },
+});
+
 const holdingsUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024, files: 1 },
@@ -258,6 +286,49 @@ router.post('/commit', async (req, res, next) => {
       res.status(400).json({ error: 'previewToken is required' });
       return;
     }
+    // Peek, don't consume, until the reconciliation gate has had its say.
+    // A refused commit leaves the preview alive so the user can look at the
+    // discrepancy and re-submit the SAME token with the acknowledgement digest
+    // it handed back — a consume-first refusal would force a full re-upload.
+    const peeked = getStatementPreview(previewToken);
+    if (!peeked) {
+      res.status(404).json({ error: 'Preview expired or not found. Preview the file again.' });
+      return;
+    }
+    const blocking = blockingParseErrors(peeked.parseErrors);
+
+    // The override is NOT a client-supplied flag. It is an acknowledgement of
+    // one specific refusal: the digest below is derived server-side from this
+    // preview token plus these blocking errors, is returned only with the 422,
+    // and is the only value that opens the gate. A bare `true`, a truthy
+    // string, a stale digest, or a digest minted for another upload all fail —
+    // so the boolean that actually guards the import is computed from server
+    // state, never read off the request body.
+    let acceptUnreconciled = false;
+    if (blocking.length > 0) {
+      const acknowledgement = unreconciledAcknowledgementDigest(previewToken, blocking);
+      acceptUnreconciled = acknowledgementAccepted(
+        acknowledgement,
+        (req.body as { acceptUnreconciled?: unknown })?.acceptUnreconciled,
+      );
+      if (!acceptUnreconciled) {
+        const err = unreconciledStatementError(peeked.fileName, blocking);
+        logImportEvent('commit_refused_unreconciled', {
+          file: peeked.fileName,
+          accountId: peeked.accountId,
+          blockingErrors: blocking.map((e) => e.message),
+        });
+        res.status(err.status).json({
+          error: err.message,
+          code: err.code,
+          blockingErrors: blocking,
+          previewToken,
+          acknowledgement,
+        });
+        return;
+      }
+    }
+
     const preview = consumeStatementPreview(previewToken);
     if (!preview) {
       res.status(404).json({ error: 'Preview expired or not found. Preview the file again.' });
@@ -272,7 +343,9 @@ router.post('/commit', async (req, res, next) => {
       res.status(401).json({ error: 'Missing household' });
       return;
     }
-    const result = await commitStatementImport(preview, user.id, household.id);
+    const result = await commitStatementImport(preview, user.id, household.id, {
+      acceptUnreconciled,
+    });
     await recordAudit({
       req,
       action: AUDIT_ACTIONS.ImportCommitted,
@@ -289,6 +362,7 @@ router.post('/commit', async (req, res, next) => {
         skippedDuplicates: result.skippedDuplicates,
         rowErrors: result.rowErrors,
         parseErrors: result.parseErrors,
+        acceptedUnreconciled: result.acceptedUnreconciled,
         usedParser: result.usedParser,
         usedProfileId: result.usedProfileId,
       },
@@ -728,6 +802,68 @@ router.post('/pdf-batch/:id/retry', async (req, res, next) => {
     res.json({ id: batch.id, retried: n, status: updated?.status ?? batch.status });
   } catch (e) { next(e); }
 });
+
+/**
+ * Upload Wealthsimple's Custom Activity Statement.
+ *
+ * The sibling of `/upload-holdings`: both take one file covering EVERY
+ * account, where the rest of the import surface resolves one account per file.
+ * Holdings carry positions; this carries the buys, sells, dividends and
+ * interest that ACB, capital gains and investment income are computed from.
+ *
+ * The response is per-account because one upload can partly succeed — an
+ * account the household does not have is reported `unmatched` while its
+ * siblings import.
+ */
+router.post(
+  '/upload-activity-statement',
+  importUploadLimiter,
+  (req, res, next) => {
+    activityStatementUpload.single('file')(req as never, res as never, (err: unknown) => {
+      if (err) {
+        next(err);
+        return;
+      }
+      next();
+    });
+  },
+  async (req, res, next) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: 'Missing file field "file"' });
+        return;
+      }
+      const { user, household } = currentAuth(req);
+      logImportEvent('activity_statement_started', {
+        fileName: req.file.originalname,
+        fileSizeBytes: req.file.size,
+      });
+
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const { extractPdfLines } = require('../import/pdf/extractLines');
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      const result = await importWsActivityStatement({
+        lines: await extractPdfLines(req.file.buffer),
+        fileName: req.file.originalname,
+        contentHash: hashContent(req.file.buffer),
+        householdId: household.id,
+        userId: user.id,
+      });
+
+      logImportEvent('activity_statement_completed', {
+        fileName: req.file.originalname,
+        accounts: result.accounts.length,
+        inserted: result.accounts.reduce((sum, a) => sum + a.insertedActivities, 0),
+        unmatched: result.accounts.filter((a) => a.unmatched).length,
+        parseErrors: result.parseErrors.length,
+      });
+
+      res.json(result);
+    } catch (e) {
+      next(e);
+    }
+  }
+);
 
 router.post(
   '/upload-holdings',

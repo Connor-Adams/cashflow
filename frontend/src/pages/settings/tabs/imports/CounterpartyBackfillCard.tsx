@@ -1,3 +1,4 @@
+import { apiBase } from '../../../../lib/runtimeConfig'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@connor-adams/designsystem'
 import { Icon } from '@connor-adams/designsystem'
@@ -60,7 +61,7 @@ export function CounterpartyBackfillCard() {
   async function loadStatus() {
     setStatusLoading(true)
     try {
-      const base = (import.meta as unknown as { env: { VITE_API_BASE?: string } }).env?.VITE_API_BASE ?? ''
+      const base = apiBase()
       const res = await fetch(`${base}/api/transactions/counterparty/backfill/status`, {
         credentials: 'include',
       })
@@ -108,7 +109,7 @@ export function CounterpartyBackfillCard() {
     setLive({ processed: 0, extracted: 0, skipped: 0 })
 
     try {
-      const base = (import.meta as unknown as { env: { VITE_API_BASE?: string } }).env?.VITE_API_BASE ?? ''
+      const base = apiBase()
       const res = await fetch(`${base}/api/transactions/counterparty/backfill?stream=1`, {
         method: 'POST',
         credentials: 'include',

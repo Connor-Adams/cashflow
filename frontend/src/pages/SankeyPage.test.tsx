@@ -79,6 +79,8 @@ import { SankeyPage } from './SankeyPage'
 const SANKEY_PAYLOAD = {
   currency: 'CAD',
   totalIncome: 5000,
+  surplus: 4575,
+  balanced: true,
   totalSpend: 425,
   transactionCount: 4,
   nodes: [
@@ -125,6 +127,8 @@ const DRILL_PAYLOAD = {
 const EMPTY_PAYLOAD = {
   currency: 'CAD',
   totalIncome: 0,
+  surplus: 0,
+  balanced: true,
   totalSpend: 0,
   transactionCount: 0,
   nodes: [],

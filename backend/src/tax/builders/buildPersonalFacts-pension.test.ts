@@ -24,7 +24,7 @@ test('buildT1 applies pension income credit when pensionIncome is set', () => {
     rentalIncome: [],
     rentalExpenses: [],
     medicalExpenses: [],
-    carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('0'), nonCapLoss: D('0'), instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0') },
+    carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('0'), nonCapLoss: D('0'), instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0'), fhsaRoom: D('0') },
     ageAtYearEnd: 70,
     pensionIncome: D('24000'),
   };

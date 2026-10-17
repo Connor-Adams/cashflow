@@ -32,6 +32,7 @@ import type { OverrideMap } from '../tax/scenarios/types';
 import { validateOverrideMap } from '../tax/scenarios/overrideKeys';
 import { ensureBaselineScenario } from '../tax/scenarios/resolveScenario';
 import { computeScenario } from '../tax/scenarios/computeScenario';
+import type { ScenarioComputation } from '../tax/scenarios/computeScenarioReturn';
 import { ensureCorpBaselineScenario } from '../tax/scenarios/resolveCorpScenario';
 import { computeCorpScenario } from '../tax/scenarios/computeCorpScenario';
 
@@ -60,7 +61,16 @@ export interface ScenarioKindConfig {
   entityKindGuard: ScenarioEntityKind | undefined;
   validateOverrides: (map: OverrideMap) => void;
   ensureBaseline: (entityId: number, year: number) => Promise<Scenario>;
-  compute: (scenarioId: number, opts?: ComputeOptions) => Promise<unknown>;
+  /**
+   * Returns the wire-shaped result AND the facts it ran on. The completeness gate
+   * needs the SELECTED scenario's resolved facts — re-resolving them in the route
+   * would cost a second pass and, worse, compute the estimates against a different
+   * basis than the displayed total whenever the scenario carries overrides.
+   *
+   * `unknown` for the facts: personal and corp resolve different shapes, and the one
+   * caller that reads them knows which kind it asked for.
+   */
+  compute: (scenarioId: number, opts?: ComputeOptions) => Promise<ScenarioComputation<unknown>>;
 }
 
 export const SCENARIO_KIND_CONFIG: Record<ScenarioEntityKind, ScenarioKindConfig> = {

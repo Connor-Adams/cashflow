@@ -4,7 +4,14 @@ import type { ComputedReturn, Scenario } from './useScenarios';
 
 export interface ScenarioChainEntry {
   scenario: Scenario;
-  computed: ComputedReturn;
+  /**
+   * null when that year's return could not be computed. The backend isolates
+   * per-year compute failures so one bad year (typically a projection past the
+   * last encoded rate table) still returns 200 for the rest of the chain.
+   */
+  computed: ComputedReturn | null;
+  /** The compute failure message for this year, or null when it computed. */
+  error: string | null;
 }
 
 interface UseScenarioChainResult {

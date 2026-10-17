@@ -2,7 +2,8 @@ import { useMemo, useRef, useState } from 'react'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts'
 import {
-  useNetWorthCurrent, useNetWorthSeries, updateOpeningBalance, } from '@/hooks/useNetWorth'
+  useBalanceIntegrity, useNetWorthCurrent, useNetWorthSeries, updateOpeningBalance, } from '@/hooks/useNetWorth'
+import { BalanceIntegrityAlerts } from '@/components/networth/BalanceIntegrityAlerts'
 import {
   Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
@@ -11,6 +12,8 @@ import { Skeleton } from '@connor-adams/designsystem'
 import { SkeletonRow } from '@/lib/ds-extras'
 import { Link } from 'react-router-dom'
 import { formatMoney } from '@/lib/formatMoney'
+import type { NetWorthCurrent } from '@/types/api'
+import type { BalanceIntegrity } from '@cashflow/shared'
 import {
   fromDateInputValue,
   toDateInputValue,
@@ -18,6 +21,79 @@ import {
 } from '@/lib/dateInput'
 
 type Range = '1M' | '3M' | '1Y' | 'All'
+
+type BreakdownRow = NetWorthCurrent['breakdown']['assets'][number]
+
+/** Balances left out of the headline total: negative assets and missing FX rates. */
+function ExcludedBalanceAlerts({
+  negativeAssetCount,
+  gapCurrencies,
+  asOf,
+}: {
+  negativeAssetCount: number
+  gapCurrencies: string[]
+  asOf: string
+}) {
+  return (
+    <>
+      {negativeAssetCount > 0 && (
+        <div
+          role="alert"
+          className="rounded border border-warning bg-warning-bg text-warning p-3 text-sm"
+        >
+          <strong>{negativeAssetCount}</strong> asset account
+          {negativeAssetCount === 1 ? '' : 's'} had a negative derived
+          balance — excluded from the headline total. Check the rows
+          flagged below.
+        </div>
+      )}
+
+      {gapCurrencies.length > 0 && (
+        <div
+          role="alert"
+          className="rounded border border-warning bg-warning-bg text-warning p-3 text-sm"
+        >
+          Missing FX rate{gapCurrencies.length === 1 ? '' : 's'} for{' '}
+          <strong>{gapCurrencies.join(', ')}</strong> → CAD on {asOf}.
+          Those balances are excluded from the total.
+        </div>
+      )}
+    </>
+  )
+}
+
+/** A breakdown amount, "(unset)" for an account with no opening balance, else a dash. */
+function amountCell(row: BreakdownRow, value: number | null, currency: string) {
+  if (value != null) return formatMoney(value, currency)
+  if (row.source === 'account' && !row.openingBalanceSet) {
+    return <span className="text-xs text-warning">(unset)</span>
+  }
+  return '—'
+}
+
+/** Account ids carrying a statement mismatch / an undated opening balance. */
+function integrityAccountIds(data: BalanceIntegrity | null) {
+  return {
+    mismatchAccountIds: new Set(data?.statementMismatches.map((m) => m.accountId)),
+    undatedAccountIds: new Set(data?.undatedOpeningBalances.map((u) => u.accountId)),
+  }
+}
+
+/** Data-quality badges for one breakdown row (Notes column). */
+function rowBadges(
+  row: BreakdownRow,
+  undatedAccountIds: ReadonlySet<number>,
+  mismatchAccountIds: ReadonlySet<number>,
+): string[] {
+  const isAccount = row.source === 'account'
+  const id = row.accountId ?? -1
+  return [
+    row.dataQualityWarning === 'asset_balance_negative' && 'Negative — excluded',
+    isAccount && !row.openingBalanceSet && 'Opening balance not set',
+    isAccount && undatedAccountIds.has(id) && 'Opening balance undated',
+    isAccount && mismatchAccountIds.has(id) && 'Statement mismatch',
+  ].filter((b): b is string => typeof b === 'string')
+}
 
 function rangeToParams(range: Range): {
   from: string
@@ -48,6 +124,7 @@ export function NetWorthPage() {
   const [drafts, setDrafts] = useState<Record<number, string>>({})
   const [openingErrors, setOpeningErrors] = useState<Record<number, string>>({})
   const current = useNetWorthCurrent()
+  const integrity = useBalanceIntegrity()
   const seriesParams = useMemo(() => rangeToParams(range), [range])
   const series = useNetWorthSeries(seriesParams)
   const editorRef = useRef<HTMLDivElement>(null)
@@ -179,6 +256,7 @@ export function NetWorthPage() {
   const negativeAssetCount = cur.breakdown.assets.filter(
     (r) => r.dataQualityWarning === 'asset_balance_negative',
   ).length
+  const { mismatchAccountIds, undatedAccountIds } = integrityAccountIds(integrity.data)
   const gapCurrencies = Array.from(
     new Set(
       cur.gaps
@@ -232,28 +310,13 @@ export function NetWorthPage() {
         </div>
       )}
 
-      {negativeAssetCount > 0 && (
-        <div
-          role="alert"
-          className="rounded border border-warning bg-warning-bg text-warning p-3 text-sm"
-        >
-          <strong>{negativeAssetCount}</strong> asset account
-          {negativeAssetCount === 1 ? '' : 's'} had a negative derived
-          balance — excluded from the headline total. Check the rows
-          flagged below.
-        </div>
-      )}
+      <ExcludedBalanceAlerts
+        negativeAssetCount={negativeAssetCount}
+        gapCurrencies={gapCurrencies}
+        asOf={cur.asOf}
+      />
 
-      {gapCurrencies.length > 0 && (
-        <div
-          role="alert"
-          className="rounded border border-warning bg-warning-bg text-warning p-3 text-sm"
-        >
-          Missing FX rate{gapCurrencies.length === 1 ? '' : 's'} for{' '}
-          <strong>{gapCurrencies.join(', ')}</strong> → CAD on {cur.asOf}.
-          Those balances are excluded from the total.
-        </div>
-      )}
+      <BalanceIntegrityAlerts integrity={integrity.data} />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="rounded border p-4">
@@ -311,30 +374,16 @@ export function NetWorthPage() {
           </TableHeader>
           <TableBody>
             {accountRows.map((row, i) => {
-              const badges: string[] = []
-              if (row.dataQualityWarning === 'asset_balance_negative') {
-                badges.push('Negative — excluded')
-              }
-              if (row.source === 'account' && !row.openingBalanceSet) {
-                badges.push('Opening balance not set')
-              }
+              const badges = rowBadges(row, undatedAccountIds, mismatchAccountIds)
               return (
                 <TableRow key={`${row.source}-${row.accountId}-${row.currency}-${i}`}>
                   <TableCell>{row.label}</TableCell>
                   <TableCell>{row.currency}</TableCell>
                   <TableCell className="text-right">
-                    {row.native != null
-                      ? formatMoney(row.native, row.currency)
-                      : row.source === 'account' && !row.openingBalanceSet
-                        ? <span className="text-xs text-warning">(unset)</span>
-                        : '—'}
+                    {amountCell(row, row.native, row.currency)}
                   </TableCell>
                   <TableCell className="text-right">
-                    {row.cadValue != null
-                      ? formatMoney(row.cadValue, 'CAD')
-                      : row.source === 'account' && !row.openingBalanceSet
-                        ? <span className="text-xs text-warning">(unset)</span>
-                        : '—'}
+                    {amountCell(row, row.cadValue, 'CAD')}
                   </TableCell>
                   <TableCell>
                     {badges.length === 0 ? (

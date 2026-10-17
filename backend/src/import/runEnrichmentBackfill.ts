@@ -19,7 +19,6 @@ import { findMerchantMemory } from '../ai/merchantMemory';
 import { caseInsensitiveLikeOp } from '../ai/chat/_common';
 import { enrichTransaction } from './enrich';
 import { applyRuleSideEffects, findRuleActionsSignal } from '../rules/applyRuleSideEffects';
-import { upsertSuggestedOrderLink } from '../amazon/matcher';
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
@@ -35,13 +34,49 @@ import {
   enrichmentEmbeddingEnabled,
 } from '../config/env';
 import { recomputeTransactionAmounts } from './calculateShares';
+import { isEstablishedLink } from '../transfers/linkProtection';
 import { runBackfillBatchTrace } from './backfillTrace';
 import {
   maybeRunAiBatchOverColdRows,
   type ColdRow,
 } from './enrichment/aiBatchOverColdRows';
 import { maybeRunEmbeddingMatchOverColdRows } from './enrichment/embeddingMatchOverColdRows';
+import {
+  persistTransactionSignals,
+  persistSuggestedOrderLink,
+} from './enrichment/persistSignals';
 import type { ChatMessage } from './enrichment/aiBatchStage';
+import { mergeSignals } from './enrichment/computeReviewFlag';
+import type { Confidence, Signal, SignalFields, SignalSource } from './enrichment/types';
+
+/**
+ * Signal sources the deterministic re-derivation CANNOT reproduce.
+ *
+ * `enrichTransaction` runs stages 1-7+9 only; the `embedding` (5.5) and `ai` (8)
+ * stages run AFTER the row loop, over accumulated cold rows, and persist their
+ * own TransactionSignal rows there. So a blanket
+ * `TransactionSignal.destroy({ where: { transactionId } })` before writing the
+ * fresh deterministic signals deleted real prior observations — and with them
+ * the `auto_category` those signals supplied through mergeSignals precedence.
+ * Within one run the post-loop AI batch partly healed it, but only for rows that
+ * survived `enrichmentAiMaxMerchants` and merchant-dedupe; a row enhanced on an
+ * earlier run and not re-selected lost its category outright.
+ *
+ * These rows are therefore loaded, merged alongside the fresh deterministic
+ * signals, and left in place. Deterministic signals are still replaced — that is
+ * the point of a backfill.
+ */
+const PRESERVED_SIGNAL_SOURCES: readonly SignalSource[] = ['ai', 'embedding'];
+
+/** Rehydrate a persisted signal row into the in-memory Signal the merge wants. */
+function persistedSignalToSignal(row: TransactionSignal): Signal {
+  return {
+    source: row.source as SignalSource,
+    confidence: row.confidence as Confidence,
+    fields: (row.fields ?? {}) as SignalFields,
+    ...(row.rationale ? { rationale: row.rationale } : {}),
+  };
+}
 
 export interface BackfillFlags {
   dryRun: boolean;
@@ -72,6 +107,18 @@ export interface BackfillFlags {
    * it true. Ignored on dry-run (AI never runs without persistence).
    */
   ai?: boolean;
+  /**
+   * Re-ask the `ai` / `embedding` fallbacks on rows that already carry one of
+   * their signals — dropping the prior answer so the new one wins.
+   *
+   * Off by default, and the nightly scheduler must never set it: a row the model
+   * already answered keeps `reviewFlag = true` on purpose (an AI guess still
+   * wants human review), so without this gate every previously-AI-categorised
+   * row was cold again every night — a permanent 80-merchant/run spend floor
+   * that bought nothing. A MANUAL backfill sets it when the answer itself is
+   * stale: a better model, or a corrected category vocabulary.
+   */
+  forceFallbackReask?: boolean;
 }
 
 export interface BackfillResult {
@@ -291,6 +338,20 @@ export async function runBackfill(
               (c) => c.id !== txn.id,
             );
 
+            // Prior fallback observations, loaded BEFORE re-deriving so they can
+            // be merged in and so the write below knows to keep their rows. A
+            // forced re-ask deliberately ignores (and below, deletes) them.
+            const priorFallbackSignals = flags.forceFallbackReask
+              ? []
+              : (
+                  await TransactionSignal.findAll({
+                    where: {
+                      transactionId: txn.id,
+                      source: { [Op.in]: PRESERVED_SIGNAL_SOURCES },
+                    },
+                  })
+                ).map(persistedSignalToSignal);
+
             const enriched = await enrichTransaction({
               raw: {
                 merchantRaw: txn.merchantRaw,
@@ -308,13 +369,21 @@ export async function runBackfill(
               memory,
               recurringHistory,
               relationshipCandidates,
+              selfId: txn.id,
               refundWindowDays: enrichmentRefundWindowDays,
               transferWindowDays: enrichmentTransferWindowDays,
               recurringMinSupport: enrichmentRecurringMinSupport,
               amazonLinkThreshold: enrichmentAmazonLinkThreshold,
             });
 
-            const f = enriched.fields;
+            // Re-merge with the preserved signals so precedence in
+            // computeReviewFlag.ts hands the AI/embedding-set category back to
+            // `f.autoCategory` — otherwise the write below nulls it.
+            const merged =
+              priorFallbackSignals.length > 0
+                ? mergeSignals([...enriched.signals, ...priorFallbackSignals])
+                : enriched;
+            const f = merged.fields;
 
             let willClearReview = false;
             if (
@@ -363,6 +432,16 @@ export async function runBackfill(
               continue;
             }
 
+            // An established link is the user's (or a whole pair); the matcher's
+            // fresh guess never replaces or clears it.
+            const keepLink = txn.linkedTransactionId != null && isEstablishedLink(
+              txn,
+              (await Transaction.findByPk(txn.linkedTransactionId, {
+                attributes: ['id', 'linkedTransactionId'],
+              }))?.linkedTransactionId === txn.id,
+            );
+            const nextLinkedTransactionId = keepLink ? txn.linkedTransactionId : f.linkedTransactionId;
+
             await sequelize.transaction(async (t) => {
               txn.set({
                 merchantClean: f.merchantClean,
@@ -376,7 +455,7 @@ export async function runBackfill(
                 autoPctMe: f.autoPctMe,
                 autoPctPartner: f.autoPctPartner,
                 appliedRuleId: f.appliedRuleId,
-                linkedTransactionId: f.linkedTransactionId,
+                linkedTransactionId: nextLinkedTransactionId,
                 isRecurring: f.isRecurring,
               });
               // Only fill notes if the row had none — don't overwrite user-authored notes.
@@ -390,36 +469,22 @@ export async function runBackfill(
               recomputeTransactionAmounts(txn);
               await txn.save({ transaction: t });
 
+              // Replace only what the re-derivation can reproduce. On a forced
+              // re-ask the prior fallback answer IS the thing being superseded,
+              // so it goes too and the post-loop stages write a fresh one.
               await TransactionSignal.destroy({
-                where: { transactionId: txn.id },
+                where: flags.forceFallbackReask
+                  ? { transactionId: txn.id }
+                  : {
+                      transactionId: txn.id,
+                      source: { [Op.notIn]: PRESERVED_SIGNAL_SOURCES },
+                    },
                 transaction: t,
               });
-              if (enriched.signals.length > 0) {
-                await TransactionSignal.bulkCreate(
-                  enriched.signals.map((s) => ({
-                    transactionId: txn.id,
-                    source: s.source,
-                    confidence: s.confidence,
-                    fields: s.fields,
-                    rationale: s.rationale ?? null,
-                  })),
-                  { transaction: t },
-                );
-              }
+              await persistTransactionSignals(txn.id, enriched.signals, t);
 
-              // Persist the item-link match through the canonical
-              // TransactionOrderLink join table (status 'suggested'). Idempotent,
-              // and never resurrects a link the user has already rejected.
-              const orderLink = enriched.signals.find((s) => s.orderLink)?.orderLink;
-              if (orderLink) {
-                await upsertSuggestedOrderLink({
-                  transactionId: txn.id,
-                  externalOrderId: orderLink.externalOrderId,
-                  confidence: orderLink.confidence,
-                  matchReason: orderLink.matchReason,
-                  transaction: t,
-                });
-              }
+              // Surfaces the item-link match as a suggested TransactionOrderLink.
+              await persistSuggestedOrderLink(txn.id, enriched.signals, t);
 
               // Rule actions side-effects (issue #795): re-apply labels
               // (idempotent), but do NOT re-fire alerts on a backfill — that
@@ -443,7 +508,19 @@ export async function runBackfill(
             // Accumulate cold rows for the post-loop ai-batch stage. Built the
             // same way the import path builds them (runImport.ts), so the shared
             // module sees an identical ColdRow shape.
-            if (accumulateColdRows && f.reviewFlag === true) {
+            // `reviewFlag` alone is the wrong gate: it stays true on an
+            // AI-categorised row by design (hasNonAiHighConfidence requires a
+            // NON-ai high-confidence signal — correct, an AI guess should still
+            // get human review), so gating on it alone re-sent the same rows to
+            // the model every night. A row already carrying a fallback signal has
+            // been answered; re-running embedding on it would also duplicate its
+            // signal row. `forceFallbackReask` empties priorFallbackSignals, so a
+            // manual forced run falls through here as intended.
+            if (
+              accumulateColdRows &&
+              f.reviewFlag === true &&
+              priorFallbackSignals.length === 0
+            ) {
               const key = (f.merchantCanonical ?? '').trim() || f.merchantClean.trim();
               if (key.length > 0) {
                 pushColdRow(txn.householdId, {
@@ -459,6 +536,11 @@ export async function runBackfill(
                   memory,
                   accountVisibility: txn.visibility === 'shared' ? 'shared' : 'private',
                   txnType: f.txnType,
+                  // EXISTING row — it may carry a category a human chose, and
+                  // the post-loop fallbacks must not overwrite it. The
+                  // recompute at the top of this loop cannot cover them: it
+                  // runs before those stages produce anything.
+                  categoryOverride: txn.categoryOverride,
                 });
               }
             }

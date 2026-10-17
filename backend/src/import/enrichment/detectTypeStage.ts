@@ -35,6 +35,24 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
   // Reward: crypto staking rewards earned. Sign-agnostic — WS bundle imports
   // these with negative amount on the position leg.
   { type: 'reward', re: /\bof\s+\w+\s+rewards?\s+earned\b/i },
+  // A pre-authorized debit that NAMES A CARD NETWORK is a bill payment against
+  // that card, not internal money movement. This must sit ABOVE the broad
+  // transfer rule that follows: its `pre-?authorized (?:debit|credit)`
+  // alternative would otherwise claim the row first, leaving the `amex bill
+  // pymt` payment rule further down unreachable. That is exactly what prod
+  // records — 38 rows on the one Wealthsimple narrative "Pre-authorized Debit
+  // to AMEX BILL PYMT" typed `transfer`, while the 65 RBC/CIBC card payments,
+  // whose narratives miss the transfer rule, are typed `payment`.
+  //
+  // The network token is the precision signal, same as for the bill-payment
+  // rule further down: an UNQUALIFIED pre-authorized debit is a utility or
+  // subscription (genuine spend) and deliberately does not match. The
+  // "pre-authorized" qualifier is equally load-bearing — "VISA DEBIT PURCHASE
+  // - FTX BLOCKFOLIO" names a network and says "debit", but it is card spend.
+  {
+    type: 'payment',
+    re: /\bpre-?authorized debit\b[^.]{0,40}\b(amex|american express|visa|mastercard|master ?card|discover|credit ?card)\b/i,
+  },
   {
     type: 'transfer',
     re: /\b(transfer (?:to|from|in|out)|wire transfer|interac e?-?transfer|pre-?authorized (?:debit|credit)|cash (?:sent|received)|direct deposit|from chequing account|eft (?:in|out)|aft)\b/i,
@@ -114,7 +132,13 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
     type: 'transfer',
     re: /\bConverted\s+[\d.,]+\s+[A-Z]{3}\s+to\s+[\d.,]+\s+[A-Z]{3}\b/i,
   },
-  { type: 'interest', re: /\b(interest charge|interest on|finance charge|stock lending monthly interest)\b/i },
+  // "interest earned"/"interest received" are how banks word a credit-interest
+  // payout (Wealthsimple pays chequing interest monthly this way). Without them
+  // the row imports as 'unknown' and the corp T2 counts it as active business
+  // income instead of passive investment income — a different tax rate.
+  // "interest paid" is deliberately NOT here: on a loan or mortgage that is an
+  // expense, and typing it 'interest' would net it against investment income.
+  { type: 'interest', re: /\b(interest charge|interest on|finance charge|stock lending monthly interest|interest earned|interest received)\b/i },
   { type: 'reward', re: /\b(cash ?back|reward|points redemption)\b/i, requireSign: 'positive' },
 ];
 

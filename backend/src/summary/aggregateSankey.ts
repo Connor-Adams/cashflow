@@ -1,49 +1,68 @@
 /**
- * Cashflow Sankey aggregator (issue #224).
+ * Cashflow Sankey aggregator (issue #224; full-chain rebuild per
+ * docs/superpowers/specs/2026-09-27-sankey-full-chain-design.md).
  *
  * Pure function: given a pre-filtered set of transaction rows (the route
- * applies visibility + currency + date where-clauses upstream), returns
- * the {nodes, links} shape consumed by recharts' Sankey component, plus
- * an `edgeMap` so the route can resolve a clicked flow segment back into
- * the underlying transaction IDs.
+ * applies visibility + currency + date where-clauses upstream) and the
+ * household's category tree, returns the {nodes, links} shape consumed by
+ * recharts' Sankey component, plus an `edgeMap` so the route can resolve a
+ * clicked flow segment back into the underlying transaction IDs.
  *
- * Flow model
- * ----------
- * The Sankey draws three layers left-to-right:
+ * Flow model — the full money chain
+ * ---------------------------------
  *
- *   SOURCES (income / inflows)
- *     ── "Income"          income txnType + positive credits that net
- *                          inflows (refund/reward) routed back to source.
- *                          See classifyPositiveAmount('credit') in
- *                          classifyTransactionFlow.ts.
+ *   Income ─┬→ Corporate expenses                       (finalBusiness rows)
+ *           └→ Owner draws ─┬→ category → subcategory → …
+ *                           └→ Surplus                  (terminal)
  *
- *   MIDDLE (categories — top-N + Uncategorized)
- *     ── one node per finalCategory bucket, plus an "Uncategorized" node
- *        for null/empty categories. Spend < 0 + non-spend filter applies.
+ * `finalBusiness` separates the corporate side from the personal side.
+ * Corporate expenses hang directly off Income because they are paid before
+ * anything is drawn out: omitting them would silently inflate what looks
+ * available. Surplus is a terminal node so the chart balances — everything
+ * in equals everything out.
  *
- *   SINKS (terminal pools)
- *     ── "Business spending" — finalBusiness=true spend
- *     ── "Savings & investments" — derived from positive 'income' on
- *        investment accounts… no, see below.
+ * Adaptive depth
+ * --------------
+ * Categories are a tree (`CategoryTree`), and production chains run three
+ * deep (`Hobbies → Golf → Clublink`). Rendering every level for every branch
+ * produces ~40 nodes, most of them unreadable hairlines — so **depth follows
+ * share**:
  *
- * For the v1 in this PR we use the simpler two-layer model that recharts
- * Sankey renders cleanly: SOURCES → categories. Each category node is
- * both a middle and a sink. This matches how the existing dashboard
- * thinks about money (by category) and reconciles directly with
- * aggregateDashboard.byCategory.
+ *   - A parent splits into its children only when its subtree total is at
+ *     least `splitShare` of total spend. Below that it draws as ONE node
+ *     carrying its whole subtree total — not splitting never drops value.
+ *   - Inside a split, a child below `minNodeShare` of total spend is too thin
+ *     to draw; it folds into the parent's remainder node (`"<Parent> (other)"`)
+ *     alongside the parent's own direct charges. A parent charged directly AND
+ *     through children therefore renders as parent → {children…, remainder},
+ *     which sums to the parent's subtree total exactly once.
+ *   - Both thresholds are shares of total spend, not absolutes, so they hold
+ *     as the numbers grow.
+ *
+ * At the top level the tail is additionally capped by `topCategories`; the
+ * overflow folds into a single "Other categories" node that keeps its rows.
  *
  * Internal-transfer handling
  * --------------------------
  * Transfers, investment purchases, and dividend reinvestments are
- * money-movement, not spending. `isNonCategorical` (the same gate used
- * by aggregateDashboard) drops them BEFORE bucketing — so the Sankey's
- * totalIncome and totalSpend reconcile against the dashboard headlines
- * for the same filter.
+ * money-movement, not spending. `isNonCategorical` (the same gate used by
+ * aggregateDashboard) drops them BEFORE bucketing — so the Sankey's
+ * totalIncome and totalSpend reconcile against the dashboard headlines for
+ * the same filter. `Transfer` alone is ~$493k in 2026 and would flatten
+ * everything else into invisibility.
  *
- * The aggregator also exposes an `edgeMap` keyed by `"{sourceIdx}-{targetIdx}"`
- * so the drill-down endpoint can return the transaction IDs that flowed
- * through a clicked link without re-running the aggregation.
+ * Balance
+ * -------
+ * `balanced` is true when total inflow equals total outflow plus surplus.
+ * When observed spend exceeds observed income the chart CANNOT balance; that
+ * is a classification gap (an inflow typed `unknown`, say) and it surfaces as
+ * `balanced: false` with a negative `surplus` rather than being absorbed into
+ * an invented residual node.
+ *
+ * Money math runs in integer units (see util/numbers) and converts back to
+ * dollars only at the output boundary.
  */
+import type { CategoryTree } from '../categories/rollup';
 import { num, toUnits, fromUnits } from '../util/numbers';
 import {
   classifyPositiveAmount,
@@ -56,7 +75,7 @@ export type SankeyTxnRow = {
   date: string;
   currency: string;
   finalCategory: string | null;
-  /** Resolved category primary key — carried through to the node for drill-down. */
+  /** Resolved category primary key — places the row in the category tree. */
   finalCategoryId?: number | null;
   finalBusiness: boolean;
   merchantRaw: string | null;
@@ -72,18 +91,21 @@ export type SankeyNodeKind =
   | 'category'
   | 'business'
   | 'savings'
-  | 'uncategorized';
+  | 'uncategorized'
+  /** The owner-draws waypoint between corporate revenue and personal spend. */
+  | 'draws'
+  /** Terminal node carrying income that was not spent. */
+  | 'surplus';
 
 export interface SankeyNode {
-  /** Display name (also acts as the unique key inside the response). */
+  /** Display name. Unique per node in practice, but links reference indices. */
   name: string;
   kind: SankeyNodeKind;
   /**
    * The resolved category primary key for category nodes; null/undefined for
-   * income, business, and other non-category nodes. Carried through from
-   * `SankeyTxnRow.finalCategoryId` — first non-null value seen wins (bucket
-   * is keyed by label string, so in practice all rows sharing a label share
-   * the same id post-B1).
+   * income, corporate, draws and surplus nodes. A `"<Parent> (other)"`
+   * remainder node carries its parent's id — it is the parent's own spend
+   * plus any children too thin to draw.
    */
   categoryId?: number | null;
 }
@@ -99,33 +121,66 @@ export interface SankeyLink {
 
 export interface SankeyResult {
   currency: string;
-  /** Sum of all SOURCE outflows (positive). 0 when no income observed. */
+  /** Sum of all income inflows (positive). 0 when no income observed. */
   totalIncome: number;
-  /** Sum of all SINK inflows (positive). Equals sum of spend + business spend. */
+  /** Personal spend + corporate expenses (positive). */
   totalSpend: number;
+  /** totalIncome - totalSpend. Negative when spend exceeds observed income. */
+  surplus: number;
+  /**
+   * True when inflow equals outflow plus surplus — i.e. the chart closes.
+   * False means observed spend exceeds observed income: a classification gap
+   * that the caller should surface rather than hide.
+   */
+  balanced: boolean;
   /** Aggregate count of transaction rows that contributed to any link. */
   transactionCount: number;
   nodes: SankeyNode[];
   links: SankeyLink[];
   /**
    * Map of `"sourceIdx-targetIdx"` → ordered list of transaction IDs that
-   * contributed to that link. Used by the drill-down endpoint so the
-   * client can resolve a clicked segment back to source rows without
-   * re-running aggregation.
+   * contributed to that link, at every depth. An edge into a node that was
+   * drawn undivided carries its whole hidden subtree's rows. Used by the
+   * drill-down endpoint. Also carries `"income-source"` for the income rows.
    */
   edgeMap: Map<string, number[]>;
+  /**
+   * DIRECT (not rolled-up) net spend per category id, including categories
+   * that were collapsed out of the chart. Feeds the category rollup in the
+   * route — reading it off the links would double-count, because a parent
+   * link's value already contains its children.
+   */
+  spendByCategoryId: Map<number, number>;
 }
 
 /**
- * The category-layer node count is capped so the Sankey stays readable.
- * Categories beyond the cap (ranked by total spend descending) fold into
- * a single "Other categories" node so totals still reconcile.
+ * The top-level node count is capped so the Sankey stays readable. Top-level
+ * categories beyond the cap (ranked by subtree total descending) fold into a
+ * single "Other categories" node so totals still reconcile.
  */
 export const DEFAULT_TOP_CATEGORIES = 12;
 
+/**
+ * Minimum share of total spend a node needs before it is split into its
+ * children. 5% of a $133k year is ~$6.6k — roughly where a band stops being
+ * worth subdividing.
+ */
+const DEFAULT_SPLIT_SHARE = 0.05;
+
+/**
+ * Minimum share of total spend a child needs to be drawn at all inside a
+ * split. Below this it renders as a hairline, so it folds into its parent's
+ * remainder node instead.
+ */
+const DEFAULT_MIN_NODE_SHARE = 0.01;
+
+export const INCOME_LABEL = 'Income';
+export const CORPORATE_LABEL = 'Corporate expenses';
+export const DRAWS_LABEL = 'Owner draws';
+export const SURPLUS_LABEL = 'Surplus';
+export const OTHER_CATEGORIES_LABEL = 'Other categories';
 const UNCATEGORIZED_LABEL = 'Uncategorized';
-const OTHER_CATEGORIES_LABEL = 'Other categories';
-const INCOME_LABEL = 'Income';
+const REMAINDER_SUFFIX = ' (other)';
 
 /**
  * Resolves the category label for a single row. Trimmed finalCategory wins;
@@ -139,9 +194,91 @@ export function resolveCategoryLabel(row: {
   return c.length > 0 ? c : UNCATEGORIZED_LABEL;
 }
 
+/**
+ * True when a row's resolved category id is a node in the household tree —
+ * i.e. the hierarchy can be walked from it. A row can carry an id that the
+ * tree does not know (a deleted category, or no tree supplied at all); such a
+ * row buckets by label instead.
+ */
+function isInCategoryTree(
+  categoryId: number | null,
+  tree: CategoryTree | undefined,
+): boolean {
+  if (categoryId == null) return false;
+  return tree?.parentById.has(categoryId) === true;
+}
+
+/**
+ * Display label for an in-tree category. The tree's own name wins; a node
+ * present in `parentById` but missing from `nameById` falls back to the row's
+ * label so the bucket is still named something.
+ */
+function categoryTreeLabel(
+  categoryId: number,
+  row: { finalCategory: string | null },
+  tree: CategoryTree | undefined,
+): string {
+  return tree?.nameById.get(categoryId) ?? resolveCategoryLabel(row);
+}
+
+/**
+ * Where a row's spend accumulates: keyed by `id:<categoryId>` when the row's
+ * category is in the tree (so Pass 2 can walk the hierarchy), else by
+ * `name:<label>`, which keeps flat/unknown categories as their own branch.
+ */
+function resolveBucketTarget(
+  row: { finalCategory: string | null; finalCategoryId?: number | null },
+  tree: CategoryTree | undefined,
+): { key: string; label: string } {
+  const categoryId = row.finalCategoryId ?? null;
+  if (!isInCategoryTree(categoryId, tree)) {
+    const label = resolveCategoryLabel(row);
+    return { key: `name:${label}`, label };
+  }
+  return {
+    key: `id:${categoryId}`,
+    label: categoryTreeLabel(categoryId as number, row, tree),
+  };
+}
+
 interface AggregateOptions {
-  /** Cap on category nodes; surplus collapses into "Other categories". */
+  /** Cap on top-level nodes; the tail collapses into "Other categories". */
   topCategories?: number;
+  /**
+   * Household category tree. Without it every category is a flat leaf (the
+   * pre-hierarchy behaviour) — the chain and surplus still render.
+   */
+  categoryTree?: CategoryTree;
+  /** Share of total spend a node needs before splitting. Default 5%. */
+  splitShare?: number;
+  /** Share of total spend a child needs to be drawn. Default 1%. */
+  minNodeShare?: number;
+}
+
+/** One accumulation bucket: a category (by id when known) or a flat label. */
+interface Bucket {
+  label: string;
+  /** Net spend in integer units; positive credits reduce it. */
+  netU: number;
+  txnIds: number[];
+  /** Resolved category id, when the row carried one. */
+  categoryId: number | null;
+}
+
+/** A bucket before anything has been routed into it. */
+function emptyBucket(label: string): Bucket {
+  return { label, netU: 0, txnIds: [], categoryId: null };
+}
+
+/** A top-level branch of the chart: a tree root, or a flat (id-less) bucket. */
+interface Branch {
+  label: string;
+  totalU: number;
+  /** Tree node id, or null for a flat bucket. */
+  id: number | null;
+  txnIds: number[];
+  categoryId: number | null;
+  kind: SankeyNodeKind;
 }
 
 /**
@@ -153,18 +290,14 @@ interface AggregateOptions {
  *   2. Drop rows whose `amount` doesn't parse.
  *
  * Then rows are bucketed:
- *   - Negative + !isNonSpend → spend → category sink, OR business sink if
- *     finalBusiness=true (overrides category routing).
- *   - Positive + classifyPositiveAmount==='credit' → income → goes to the
- *     category node it offsets (so a refund nets the category's spend).
- *   - Positive + classifyPositiveAmount==='payment' → SKIP. Statement
- *     payments aren't income or category signal.
- *   - Positive + isNonSpend (income/refund/reward) → INCOME source.
- *
- * For two-layer Sankey we model:
- *   INCOME → category (or business sink). Refund/reward credits net the
- *   category sink (subtract from category spend) rather than appearing as
- *   their own flow — same semantics as dashboard `netSpend`.
+ *   - Negative + !isNonSpend → spend → its category, OR the corporate sink if
+ *     finalBusiness=true (which overrides category routing).
+ *   - Positive + txnType='income' → the Income source.
+ *   - Positive + classifyPositiveAmount==='credit' → nets the category it
+ *     offsets, same semantics as the dashboard's netSpend.
+ *   - Positive + classifyPositiveAmount==='payment'/'skip' → excluded.
+ *     Statement payments and unsignalled deposits are neither income nor
+ *     category signal.
  */
 export function aggregateSankey(
   rows: SankeyTxnRow[],
@@ -172,32 +305,35 @@ export function aggregateSankey(
   opts: AggregateOptions = {},
 ): SankeyResult {
   const topN = opts.topCategories ?? DEFAULT_TOP_CATEGORIES;
+  const splitShare = opts.splitShare ?? DEFAULT_SPLIT_SHARE;
+  const minNodeShare = opts.minNodeShare ?? DEFAULT_MIN_NODE_SHARE;
+  const tree = opts.categoryTree;
 
   // --------- Pass 1: classify each row and accumulate buckets ----------
-  type CategoryBucket = {
-    label: string;
-    netSpend: number;
-    txnIds: number[];
-    /** First non-null finalCategoryId seen for this label. null when unknown. */
-    categoryId: number | null;
-  };
-  // Keyed by the resolved category label (or 'Uncategorized'); negatives
-  // contribute totalSpend, positive credits reduce it.
-  const categoryBuckets = new Map<string, CategoryBucket>();
-
-  // Business sink is a separate bucket — distinct from any user category
-  // because business spend has a different financial meaning (deductible
-  // expense, not consumption). Negative business rows route here.
-  const businessBucket: CategoryBucket = {
-    label: 'Business spending',
-    netSpend: 0,
+  // Keyed by `id:<categoryId>` when the row's category is in the tree (so the
+  // hierarchy can be walked), else by `name:<label>`.
+  const buckets = new Map<string, Bucket>();
+  const corporate: Bucket = {
+    label: CORPORATE_LABEL,
+    netU: 0,
     txnIds: [],
     categoryId: null,
   };
 
-  let totalIncome = 0;
+  let incomeU = 0;
   const incomeTxnIds: number[] = [];
   let totalTransactionCount = 0;
+
+  /** Route one signed amount (in units) into the right category bucket. */
+  const addToCategory = (row: SankeyTxnRow, deltaU: number): void => {
+    const { key, label } = resolveBucketTarget(row, tree);
+    const bucket = buckets.get(key) ?? emptyBucket(label);
+    bucket.netU += deltaU;
+    bucket.txnIds.push(row.id);
+    // Keep the first non-null categoryId seen for this bucket.
+    bucket.categoryId = bucket.categoryId ?? row.finalCategoryId ?? null;
+    buckets.set(key, bucket);
+  };
 
   for (const row of rows) {
     if (row.currency !== currency) continue;
@@ -209,29 +345,15 @@ export function aggregateSankey(
 
     totalTransactionCount += 1;
     const nonSpend = isNonSpend(row.txnType, row.accountType);
-
-    // Accumulate in integer units (×10 000) to avoid float drift.
     const amtU = toUnits(amount);
+
     if (amount < 0 && !nonSpend) {
       // -------- SPEND row ------------------------------------------------
       if (row.finalBusiness) {
-        businessBucket.netSpend += -amtU;
-        businessBucket.txnIds.push(row.id);
+        corporate.netU += -amtU;
+        corporate.txnIds.push(row.id);
       } else {
-        const label = resolveCategoryLabel(row);
-        const bucket = categoryBuckets.get(label) ?? {
-          label,
-          netSpend: 0,
-          txnIds: [],
-          categoryId: null,
-        };
-        bucket.netSpend += -amtU;
-        bucket.txnIds.push(row.id);
-        // Keep first non-null categoryId seen for this label.
-        if (bucket.categoryId === null && (row.finalCategoryId ?? null) !== null) {
-          bucket.categoryId = row.finalCategoryId as number;
-        }
-        categoryBuckets.set(label, bucket);
+        addToCategory(row, -amtU);
       }
       continue;
     }
@@ -245,146 +367,303 @@ export function aggregateSankey(
         merchantClean: row.merchantClean,
         category: row.finalCategory,
       });
+      if (bucket === 'payment' || bucket === 'skip') continue;
 
-      if (bucket === 'payment' || bucket === 'skip') {
-        // Statement payment / non-categorical positive — not income, not
-        // category signal. Excluded entirely.
-        continue;
-      }
-
-      // bucket === 'credit'
-      // Two sub-cases by txnType:
-      //   - txnType='income' → primary INCOME source (paycheque, etc.)
-      //   - refund/reward (or fallback credit) → net against the category
-      //     it offset, same semantics as dashboard's netSpend.
       if (row.txnType === 'income') {
-        totalIncome += amtU;
+        incomeU += amtU;
         incomeTxnIds.push(row.id);
         continue;
       }
 
-      // refund / reward / unspecified credit → reduces category netSpend.
-      // Routed to the business bucket if business=true, otherwise to the
-      // row's resolved category.
+      // refund / reward / unspecified credit → reduces net spend where it
+      // landed (corporate or the row's category).
       if (row.finalBusiness) {
-        businessBucket.netSpend -= amtU;
-        businessBucket.txnIds.push(row.id);
+        corporate.netU -= amtU;
+        corporate.txnIds.push(row.id);
       } else {
-        const label = resolveCategoryLabel(row);
-        const cat = categoryBuckets.get(label) ?? {
-          label,
-          netSpend: 0,
-          txnIds: [],
-          categoryId: null,
-        };
-        cat.netSpend -= amtU;
-        cat.txnIds.push(row.id);
-        // Keep first non-null categoryId seen for this label.
-        if (cat.categoryId === null && (row.finalCategoryId ?? null) !== null) {
-          cat.categoryId = row.finalCategoryId as number;
-        }
-        categoryBuckets.set(label, cat);
+        addToCategory(row, -amtU);
       }
       continue;
     }
 
-    // amount === 0 or amount < 0 + nonSpend (e.g. refund negative) — skip.
+    // amount === 0, or negative + nonSpend (e.g. a negative refund) — skip.
   }
 
-  // --------- Pass 2: cap category count, build nodes + links ----------
-  // Categories sort by netSpend desc; ties broken by name.
-  const categories = Array.from(categoryBuckets.values())
-    .filter((c) => c.netSpend > 0 || c.txnIds.length > 0)
-    .sort((a, b) => {
-      if (b.netSpend !== a.netSpend) return b.netSpend - a.netSpend;
-      return a.label.localeCompare(b.label);
+  // --------- Pass 2: clamp, roll up the tree, rank branches ------------
+  // A bucket whose credits exceeded its spend nets ≤ 0; it contributes
+  // nothing (a zero/negative-width link is noise, and the rows stay in the
+  // underlying data). Clamping here keeps every subtree total non-negative,
+  // so a parent's children always sum to exactly its own total.
+  const effectiveU = new Map<string, number>();
+  const spendByCategoryId = new Map<number, number>();
+  for (const [key, bucket] of buckets) {
+    const netU = Math.max(0, bucket.netU);
+    effectiveU.set(key, netU);
+    if (netU > 0 && bucket.categoryId != null) {
+      spendByCategoryId.set(bucket.categoryId, fromUnits(netU));
+    }
+  }
+  const corporateU = Math.max(0, corporate.netU);
+
+  /** Own (direct) spend for a tree node id. */
+  const ownU = (id: number): number => effectiveU.get(`id:${id}`) ?? 0;
+  const ownIds = (id: number): number[] =>
+    ownU(id) > 0 ? (buckets.get(`id:${id}`)?.txnIds ?? []) : [];
+
+  // Relevant tree ids = every id with spend, plus their ancestors (an
+  // ancestor with no direct spend still has to exist as a waypoint).
+  const childrenById = new Map<number, number[]>();
+  const relevant = new Set<number>();
+  if (tree) {
+    for (const [key, bucket] of buckets) {
+      if (!key.startsWith('id:')) continue;
+      if ((effectiveU.get(key) ?? 0) <= 0) continue;
+      let cursor: number | null = bucket.categoryId;
+      const seen = new Set<number>();
+      while (cursor != null && tree.parentById.has(cursor) && !seen.has(cursor)) {
+        seen.add(cursor);
+        relevant.add(cursor);
+        cursor = tree.parentById.get(cursor) ?? null;
+      }
+    }
+    for (const id of relevant) {
+      const parent = tree.parentById.get(id) ?? null;
+      if (parent != null && relevant.has(parent)) {
+        childrenById.set(parent, [...(childrenById.get(parent) ?? []), id]);
+      }
+    }
+  }
+
+  const subtreeCache = new Map<number, number>();
+  const subtreeU = (id: number): number => {
+    const cached = subtreeCache.get(id);
+    if (cached != null) return cached;
+    // Seed before recursing so a malformed (cyclic) tree terminates.
+    subtreeCache.set(id, 0);
+    let total = ownU(id);
+    for (const child of childrenById.get(id) ?? []) total += subtreeU(child);
+    subtreeCache.set(id, total);
+    return total;
+  };
+  const subtreeIds = (id: number): number[] => {
+    const out = [...ownIds(id)];
+    for (const child of childrenById.get(id) ?? []) out.push(...subtreeIds(child));
+    return out;
+  };
+
+  const displayName = (id: number): string =>
+    tree?.nameById.get(id) ?? buckets.get(`id:${id}`)?.label ?? UNCATEGORIZED_LABEL;
+
+  // Top-level branches: tree roots with spend, plus every flat bucket.
+  const branches: Branch[] = [];
+  for (const id of relevant) {
+    const parent = tree?.parentById.get(id) ?? null;
+    const isRoot = parent == null || !relevant.has(parent);
+    if (!isRoot) continue;
+    const totalU = subtreeU(id);
+    if (totalU <= 0) continue;
+    branches.push({
+      label: displayName(id),
+      totalU,
+      id,
+      txnIds: subtreeIds(id),
+      categoryId: id,
+      kind: 'category',
     });
-
-  let visibleCategories = categories;
-  let otherBucket: CategoryBucket | null = null;
-  if (categories.length > topN) {
-    visibleCategories = categories.slice(0, topN);
-    const overflow = categories.slice(topN);
-    otherBucket = {
-      label: OTHER_CATEGORIES_LABEL,
-      netSpend: overflow.reduce((sum, c) => sum + c.netSpend, 0),
-      txnIds: overflow.flatMap((c) => c.txnIds),
-      // "Other categories" aggregates multiple categories; no single id applies.
-      categoryId: null,
-    };
   }
-
-  const sinkBuckets: CategoryBucket[] = [];
-  for (const c of visibleCategories) {
-    // Drop categories whose net is ≤ 0 (refund/reward exceeded spend). They
-    // would render as zero-width links, which recharts handles poorly.
-    if (c.netSpend > 0) sinkBuckets.push(c);
+  for (const [key, bucket] of buckets) {
+    if (key.startsWith('id:') && relevant.has(bucket.categoryId as number)) continue;
+    const totalU = effectiveU.get(key) ?? 0;
+    if (totalU <= 0) continue;
+    branches.push({
+      label: bucket.label,
+      totalU,
+      id: null,
+      txnIds: bucket.txnIds,
+      categoryId: bucket.categoryId,
+      kind: bucket.label === UNCATEGORIZED_LABEL ? 'uncategorized' : 'category',
+    });
   }
-  if (otherBucket && otherBucket.netSpend > 0) sinkBuckets.push(otherBucket);
-  if (businessBucket.netSpend > 0) sinkBuckets.push(businessBucket);
+  const bySize = (a: Branch, b: Branch): number =>
+    b.totalU !== a.totalU ? b.totalU - a.totalU : a.label.localeCompare(b.label);
+  branches.sort(bySize);
 
-  // Compute totalSpend from the FINAL buckets (post-overflow, post-business
-  // routing) so it reconciles with the rendered link widths.
-  // Both totalIncome and bucket.netSpend are still in integer units here.
-  const totalSpendU = sinkBuckets.reduce((sum, b) => sum + b.netSpend, 0);
+  const personalU = branches.reduce((sum, b) => sum + b.totalU, 0);
+  const totalSpendU = personalU + corporateU;
+  const surplusU = incomeU - totalSpendU;
 
   // -------- Empty state ----------------------------------------------
-  if (totalIncome === 0 && totalSpendU === 0) {
+  if (incomeU === 0 && totalSpendU === 0) {
     return {
       currency,
       totalIncome: 0,
       totalSpend: 0,
+      surplus: 0,
+      balanced: true,
       transactionCount: totalTransactionCount,
       nodes: [],
       links: [],
       edgeMap: new Map(),
+      spendByCategoryId,
     };
   }
 
-  // -------- Build the Sankey shape ----------------------------------
-  // Node order:
-  //   [0] Income source (always present if totalIncome>0 OR totalSpend>0)
-  //   [1..N] category sinks
-  // Recharts Sankey wants a single linear node array; links reference by index.
-  const nodes: SankeyNode[] = [{ name: INCOME_LABEL, kind: 'income' }];
+  const minSplitU = splitShare * totalSpendU;
+  const minNodeU = minNodeShare * totalSpendU;
 
-  // Track txnIds at the income side too: the link from Income to each
-  // category carries the income+spend txns that contributed.
+  // Tail: the top-N overflow plus any branch too thin to draw. A tail of
+  // exactly one keeps its own name — relabelling a single category "Other
+  // categories" would hide which one it was.
+  const ranked = branches.slice(0, topN);
+  const tail = [
+    ...branches.slice(topN),
+    ...ranked.filter((b) => b.totalU < minNodeU),
+  ].sort(bySize);
+  let visible = ranked.filter((b) => b.totalU >= minNodeU);
+  if (tail.length === 1) {
+    visible = [...visible, tail[0]].sort(bySize);
+    tail.length = 0;
+  }
+
+  // -------- Build the Sankey shape ----------------------------------
+  // Node order: Income, [Corporate expenses], [Owner draws], [Surplus], then
+  // the category branches depth-first in rank order.
+  const nodes: SankeyNode[] = [{ name: INCOME_LABEL, kind: 'income' }];
   const links: SankeyLink[] = [];
   const edgeMap = new Map<string, number[]>();
 
-  for (const sink of sinkBuckets) {
-    const targetIdx = nodes.length;
-    let kind: SankeyNodeKind = 'category';
-    if (sink.label === businessBucket.label) kind = 'business';
-    else if (sink.label === UNCATEGORIZED_LABEL) kind = 'uncategorized';
-    const node: SankeyNode = { name: sink.label, kind };
-    // Attach categoryId for category/uncategorized nodes so callers can
-    // correlate the node back to the Category primitive without a second
-    // label-based lookup.
-    if (kind === 'category' || kind === 'uncategorized') {
-      node.categoryId = sink.categoryId;
+  const addLink = (source: number, target: number, valueU: number, txnIds: number[]): void => {
+    if (valueU <= 0) return;
+    links.push({ source, target, value: fromUnits(valueU) });
+    if (txnIds.length > 0) edgeMap.set(`${source}-${target}`, txnIds);
+  };
+
+  if (corporateU > 0) {
+    const corpIdx = nodes.length;
+    nodes.push({ name: CORPORATE_LABEL, kind: 'business' });
+    addLink(0, corpIdx, corporateU, corporate.txnIds);
+  }
+
+  const drawsOutU = personalU + Math.max(0, surplusU);
+  let drawsIdx = -1;
+  if (drawsOutU > 0) {
+    drawsIdx = nodes.length;
+    nodes.push({ name: DRAWS_LABEL, kind: 'draws' });
+    addLink(0, drawsIdx, drawsOutU, incomeTxnIds);
+    if (surplusU > 0) {
+      const surplusIdx = nodes.length;
+      nodes.push({ name: SURPLUS_LABEL, kind: 'surplus' });
+      // Surplus is money that was NOT spent — no transactions flow through it.
+      addLink(drawsIdx, surplusIdx, surplusU, []);
     }
-    nodes.push(node);
-
-    links.push({ source: 0, target: targetIdx, value: fromUnits(sink.netSpend) });
-    edgeMap.set(`0-${targetIdx}`, sink.txnIds);
   }
 
-  // Surface the income source IDs at edge "0-_income" so the drill-down
-  // can return income rows when the income node itself is clicked.
-  if (incomeTxnIds.length > 0) {
-    edgeMap.set('income-source', incomeTxnIds);
+  /** Biggest subtree first; ties broken by name so output is deterministic. */
+  const bySubtreeThenName = (a: number, b: number): number =>
+    subtreeU(b) - subtreeU(a) || displayName(a).localeCompare(displayName(b));
+
+  /** A node's drawable children — those with spend — in draw order. */
+  const rankedChildren = (id: number): number[] =>
+    (childrenById.get(id) ?? []).filter((c) => subtreeU(c) > 0).sort(bySubtreeThenName);
+
+  /**
+   * Split a node's children into the ones drawn in their own right and the
+   * hairlines that fold into the parent's remainder. A lone thin child with no
+   * sibling remainder to hide behind keeps its own name instead — relabelling
+   * it "(other)" would lose which category it was.
+   */
+  const splitChildren = (
+    children: number[],
+    directU: number,
+  ): { kept: number[]; folded: number[] } => {
+    const kept = children.filter((c) => subtreeU(c) >= minNodeU);
+    const folded = children.filter((c) => subtreeU(c) < minNodeU);
+    if (folded.length === 1 && directU === 0) {
+      return { kept: [...kept, ...folded], folded: [] };
+    }
+    return { kept, folded };
+  };
+
+  /**
+   * Draw the parent's own direct charges plus every folded child under a single
+   * `"<Parent> (other)"` node, so a split sums to exactly the parent's subtree
+   * total — nothing is dropped by not drawing a child on its own.
+   */
+  const emitRemainder = (id: number, idx: number, folded: number[]): void => {
+    const remainderU = ownU(id) + folded.reduce((sum, c) => sum + subtreeU(c), 0);
+    if (remainderU <= 0) return;
+    const remainderIdx = nodes.length;
+    nodes.push({
+      name: `${displayName(id)}${REMAINDER_SUFFIX}`,
+      kind: 'category',
+      categoryId: id,
+    });
+    addLink(idx, remainderIdx, remainderU, [
+      ...ownIds(id),
+      ...folded.flatMap((c) => subtreeIds(c)),
+    ]);
+  };
+
+  /**
+   * Emit one tree node under `parentIdx`, then recurse if its share of total
+   * spend earns the split. The inbound link always carries the node's whole
+   * subtree total, and any split sums back to exactly that.
+   *
+   * A leaf, and a node whose every child is a hairline, both fall out through
+   * the empty-`kept` return — drawn as one undivided node.
+   */
+  const emitTreeNode = (id: number, parentIdx: number): void => {
+    const idx = nodes.length;
+    nodes.push({ name: displayName(id), kind: 'category', categoryId: id });
+    addLink(parentIdx, idx, subtreeU(id), subtreeIds(id));
+
+    if (subtreeU(id) < minSplitU) return; // too small to be worth the width
+    const { kept, folded } = splitChildren(rankedChildren(id), ownU(id));
+    if (kept.length === 0) return;
+
+    for (const child of kept) emitTreeNode(child, idx);
+    emitRemainder(id, idx, folded);
+  };
+
+  for (const branch of visible) {
+    if (branch.id != null) {
+      emitTreeNode(branch.id, drawsIdx);
+      continue;
+    }
+    const idx = nodes.length;
+    nodes.push({
+      name: branch.label,
+      kind: branch.kind,
+      categoryId: branch.categoryId,
+    });
+    addLink(drawsIdx, idx, branch.totalU, branch.txnIds);
   }
+  if (tail.length > 0) {
+    const idx = nodes.length;
+    nodes.push({ name: OTHER_CATEGORIES_LABEL, kind: 'category', categoryId: null });
+    addLink(
+      drawsIdx,
+      idx,
+      tail.reduce((sum, b) => sum + b.totalU, 0),
+      tail.flatMap((b) => b.txnIds),
+    );
+  }
+
+  // Surface the income rows under a stable key so the drill-down can return
+  // them when the income node itself is clicked.
+  if (incomeTxnIds.length > 0) edgeMap.set('income-source', incomeTxnIds);
 
   return {
     currency,
-    totalIncome: fromUnits(totalIncome),
+    totalIncome: fromUnits(incomeU),
     totalSpend: fromUnits(totalSpendU),
+    surplus: fromUnits(surplusU),
+    balanced: surplusU >= 0,
     transactionCount: totalTransactionCount,
     nodes,
     links,
     edgeMap,
+    spendByCategoryId,
   };
 }
 

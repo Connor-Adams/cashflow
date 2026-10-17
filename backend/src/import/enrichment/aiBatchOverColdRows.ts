@@ -20,20 +20,28 @@ import {
 import { openaiJson } from '../../ai/openaiJson';
 import { getOpenAiConfig } from '../../config/openai';
 import { loadCategoryHints } from '../../ai/suggestTransaction';
-import {
-  computeImportConfidence,
-  serializeFlags,
-} from '../computeImportConfidence';
-import { mergeSignals } from './computeReviewFlag';
+import { persistColdRowEnrichment } from './persistColdRowEnrichment';
 import type { Signal } from './types';
 import type { MerchantMemoryMatch } from '../../ai/merchantMemory';
-import { Transaction, TransactionSignal } from '../../models';
-import { logger } from '../../observability/logger';
 import {
   enrichmentAiEnabled,
   enrichmentAiMaxMerchants,
   enrichmentAiPerRowConcurrency,
 } from '../../config/env';
+
+/**
+ * Why the stage emitted nothing. Same rationale as
+ * `EmbeddingMatchSkipReason`: `attempted: false` alone could not tell an
+ * unavailable fallback apart from an import with nothing left to categorise,
+ * which is how a stage that had never once run in production stayed invisible.
+ */
+export type AiBatchSkipReason =
+  /** ENRICHMENT_AI_ENABLED=false. */
+  | 'disabled'
+  /** Rules, memory and embedding-match resolved everything. */
+  | 'no_cold_rows'
+  /** No OPENAI_API_KEY, so `getOpenAiConfig()` returned null. */
+  | 'no_openai_config';
 
 export type AiBatchSummary = {
   attempted: boolean;
@@ -43,6 +51,8 @@ export type AiBatchSummary = {
   capped: boolean;
   usedBatch: boolean;
   fellBackToPerRow: boolean;
+  /** Set only when the stage did NOT run. Undefined on a real run. */
+  skipReason?: AiBatchSkipReason;
 };
 
 export type ColdRow = {
@@ -60,6 +70,14 @@ export type ColdRow = {
    *  need to round-trip through the DB. */
   accountVisibility: 'private' | 'shared';
   txnType: string;
+  /**
+   * The row's user-set category override, captured alongside
+   * `accountVisibility` so this stage can apply the project's
+   * `final_category` precedence without a round-trip. Always null on the
+   * import paths (a brand-new row cannot have one); on the backfill path it
+   * may hold a category a human chose, which MUST survive this stage.
+   */
+  categoryOverride: string | null;
 };
 
 export function dedupeColdRowsByMerchantKey(coldRows: ColdRow[]): ColdRow[] {
@@ -108,62 +126,28 @@ export function aiSuggestionToSignal(sug: {
   };
 }
 
-async function persistAiEnhancement(c: ColdRow, aiSignal: Signal, householdId: number | null): Promise<boolean> {
-  const merged = mergeSignals([...c.signals, aiSignal]);
-  // Re-classify import confidence with the merged enrichment fields. An AI
-  // suggestion that fills a category and turns reviewFlag off should move
-  // the row from 'needs_review' back to 'clean' on the dashboard.
-  const confidence = computeImportConfidence({
-    reviewFlag: merged.fields.reviewFlag,
-    finalCategory: merged.fields.autoCategory,
-    autoCategory: merged.fields.autoCategory,
-    autoSplitType: merged.fields.autoSplitType,
-    finalSplitType:
-      merged.fields.autoSplitType === 'partner' ||
-      merged.fields.autoSplitType === 'shared'
-        ? merged.fields.autoSplitType
-        : 'me',
-    txnType: c.txnType,
-    accountVisibility: c.accountVisibility,
-    linkedTransactionId: merged.fields.linkedTransactionId,
-    amount: c.amount,
+/**
+ * Exported for tests — see dedupeColdRowsByMerchantKey, aiSuggestionToSignal.
+ *
+ * The write itself is shared with the embedding stage (see
+ * persistColdRowEnrichment.ts); only the signal source and the failure event
+ * name are this stage's own.
+ */
+export async function persistAiEnhancement(
+  c: ColdRow,
+  aiSignal: Signal,
+  householdId: number | null,
+): Promise<boolean> {
+  return persistColdRowEnrichment({
+    row: c,
+    signal: aiSignal,
+    householdId,
+    signalSource: 'ai',
+    failureEvent: 'enrichment_ai_batch_post_update_failed',
   });
-  try {
-    // NOTE: static update/bulkCreate bypasses the beforeSave category-id hook, so *_category_id stays null momentarily. Migration 20260623000001 backfills any null FKs where the category string is set.
-    await Transaction.update(
-      {
-        autoCategory: merged.fields.autoCategory,
-        autoBusiness: merged.fields.autoBusiness,
-        autoSplitType: merged.fields.autoSplitType,
-        autoPctMe: merged.fields.autoPctMe,
-        autoPctPartner: merged.fields.autoPctPartner,
-        autoSource: merged.fields.autoSource,
-        autoConfidence: merged.fields.autoConfidence,
-        reviewFlag: merged.fields.reviewFlag,
-        importConfidence: confidence.state,
-        importConfidenceFlags: serializeFlags(confidence.flags),
-      },
-      { where: { id: c.txnId } },
-    );
-    await TransactionSignal.create({
-      transactionId: c.txnId,
-      source: 'ai',
-      confidence: aiSignal.confidence,
-      fields: aiSignal.fields,
-      rationale: aiSignal.rationale ?? null,
-    });
-    if (householdId != null) {
-      const { ensureCategory } = await import('../../util/ensureCategory');
-      await ensureCategory(householdId, merged.fields.autoCategory);
-    }
-    return true;
-  } catch (err) {
-    logger.warn({ err, txnId: c.txnId, module: 'enrichment' }, 'enrichment_ai_batch_post_update_failed');
-    return false;
-  }
 }
 
-function emptyAiSummary(coldRowCount: number): AiBatchSummary {
+function emptyAiSummary(coldRowCount: number, skipReason: AiBatchSkipReason): AiBatchSummary {
   return {
     attempted: false,
     coldRowCount,
@@ -172,13 +156,16 @@ function emptyAiSummary(coldRowCount: number): AiBatchSummary {
     capped: false,
     usedBatch: false,
     fellBackToPerRow: false,
+    skipReason,
   };
 }
 
-function aiBatchPossible(coldRows: ColdRow[]): boolean {
-  if (!enrichmentAiEnabled) return false;
-  if (coldRows.length === 0) return false;
-  return getOpenAiConfig() != null;
+/** Null when the stage can run; otherwise the specific reason it cannot. */
+function aiBatchSkipReason(coldRows: ColdRow[]): AiBatchSkipReason | null {
+  if (!enrichmentAiEnabled) return 'disabled';
+  if (coldRows.length === 0) return 'no_cold_rows';
+  if (getOpenAiConfig() == null) return 'no_openai_config';
+  return null;
 }
 
 async function tryEnhanceColdRow(c: ColdRow, sug: AiBatchSuggestion | undefined, householdId: number | null): Promise<boolean> {
@@ -203,7 +190,8 @@ export async function maybeRunAiBatchOverColdRows(
   householdId: number | null,
   opts?: { openaiCaller?: (msgs: ChatMessage[]) => Promise<Record<string, unknown>> },
 ): Promise<AiBatchSummary> {
-  if (!aiBatchPossible(coldRows)) return emptyAiSummary(coldRows.length);
+  const skipReason = aiBatchSkipReason(coldRows);
+  if (skipReason != null) return emptyAiSummary(coldRows.length, skipReason);
 
   const openaiCaller = opts?.openaiCaller ?? ((msgs: ChatMessage[]) => openaiJson(msgs));
 

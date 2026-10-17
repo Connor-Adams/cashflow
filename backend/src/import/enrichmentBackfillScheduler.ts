@@ -26,17 +26,34 @@ export interface EnrichmentBackfillTickResult {
 
 export interface EnrichmentBackfillTickConfig {
   enabled: boolean;
+  /**
+   * Whether this tick may run the stage-8 ai-batch over the rows the
+   * deterministic stages leave cold. Defaults to
+   * `ENRICHMENT_BACKFILL_AI_ENABLED` (on).
+   */
+  ai: boolean;
 }
 
+/** The backfill runner, injectable so tests can observe the flags the tick
+ *  builds without standing up OpenAI or a full household sweep. */
+export type EnrichmentBackfillTickDeps = {
+  runBackfill?: typeof runBackfill;
+};
+
 function configFromEnv(): EnrichmentBackfillTickConfig {
-  return { enabled: env.enrichmentBackfillEnabled };
+  return {
+    enabled: env.enrichmentBackfillEnabled,
+    ai: env.enrichmentBackfillAiEnabled,
+  };
 }
 
 export async function runEnrichmentBackfillTick(
   configOverride?: Partial<EnrichmentBackfillTickConfig>,
+  deps: EnrichmentBackfillTickDeps = {},
 ): Promise<EnrichmentBackfillTickResult> {
   const config: EnrichmentBackfillTickConfig = { ...configFromEnv(), ...configOverride };
   if (!config.enabled) return { status: 'skipped_disabled' };
+  const backfill = deps.runBackfill ?? runBackfill;
 
   try {
     const households = await Household.findAll({ attributes: ['id'] });
@@ -59,7 +76,7 @@ export async function runEnrichmentBackfillTick(
         continue;
       }
       try {
-        const result = await runBackfill({
+        const result = await backfill({
           dryRun: false,
           noReviewFlag: false,
           reviewOnly: true,
@@ -70,8 +87,18 @@ export async function runEnrichmentBackfillTick(
           batchSize: 100,
           dateFrom: null,
           dateTo: null,
-          // ai intentionally omitted: nightly cron stays deterministic (no
-          // recurring OpenAI cost); AI runs only on manual backfill.
+          // The nightly cron DOES run stage 8. It used to omit `ai` to keep the
+          // cron deterministic and free — but that made the only job that sees
+          // every review-flagged row unable to categorise anything the literal
+          // rules and exact-name memory had already missed, and production held
+          // no `auto_source = 'ai'` row at all. The calls now go through a
+          // self-hosted litellm proxy, so the recurring-OpenAI-cost argument no
+          // longer applies, and spend per run is bounded by
+          // `enrichmentAiMaxMerchants` (80) plus merchant-dedupe — the first
+          // sweep is the expensive one and it tails off as memory fills.
+          // `ENRICHMENT_BACKFILL_AI_ENABLED=false` switches it back off without
+          // a deploy.
+          ai: config.ai,
         });
         totals.processed += result.processed;
         totals.updated += result.updated;

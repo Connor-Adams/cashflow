@@ -22,9 +22,12 @@ export default defineConfig([
     },
   },
   // Forbid console.* in src/ — use logger (pino) instead.
-  // Tests (test/**) are intentionally excluded so they may use console for debugging.
+  // Tests are intentionally excluded so they may use console for debugging: the
+  // integration suite lives in test/** (outside this config's `src` target), and
+  // unit tests are colocated as src/**/*.test.ts, which this rule must skip.
   {
     files: ['src/**/*.ts'],
+    ignores: ['src/**/*.test.ts'],
     rules: {
       'no-console': 'error',
     },

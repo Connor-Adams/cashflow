@@ -29,6 +29,7 @@ export function useTaxYearCompare(from: number, to: number) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setError(null);
     getJson<TaxYearSummary[] | { years: TaxYearSummary[] }>(
       `/api/tax/personal/years?from=${from}&to=${to}`,
     )

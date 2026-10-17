@@ -15,11 +15,20 @@ import {
   parseCostcoTenders,
 } from './costcoTillReceipt';
 
-const fixturesDir = join(__dirname, 'fixtures', 'pdf');
-const hasFixtures = existsSync(join(fixturesDir, 'costco-till-2025-12-13.pdf'));
-const skipNoFixtures = hasFixtures
-  ? undefined
-  : 'Costco till PDF fixtures not present (gitignored — see backend/test/fixtures/pdf/)';
+// Real statement/receipt PDFs are personal financial documents and are
+// gitignored (.gitignore: backend/test/fixtures/pdf/), so these tests are
+// LOCAL-ONLY. CI coverage comes from the synthetic line fixtures in-file.
+const backendRoot = join(__dirname, '..', '..', '..', '..');
+const fixturesDir = join(backendRoot, 'test', 'fixtures', 'pdf');
+/**
+ * Skip reason for ONE fixture. Gating every test on a single file meant one
+ * absent PDF silently disabled all of them.
+ */
+function skipUnless(name: string): string | undefined {
+  return existsSync(join(fixturesDir, name))
+    ? undefined
+    : `fixture ${name} not present (gitignored — drop it in backend/test/fixtures/pdf/)`;
+}
 
 async function loadLines(name: string) {
   const buf = await readFile(join(fixturesDir, name));
@@ -114,7 +123,7 @@ test('costcoTillReceiptParser.sniff matches a Costco receipt and rejects unrelat
   assert.equal(costcoTillReceiptParser.sniff(nonCostco), false);
 });
 
-test('Costco R1 — single-tender (2025-12-13, $947.04)', { skip: skipNoFixtures }, async () => {
+test('Costco R1 — single-tender (2025-12-13, $947.04)', { skip: skipUnless('costco-till-2025-12-13.pdf') }, async () => {
   const lines = await loadLines('costco-till-2025-12-13.pdf');
   const { extracted, warnings } = costcoTillReceiptParser.parse(lines, { defaultCurrency: 'CAD' });
 
@@ -165,7 +174,7 @@ test('Costco R1 — single-tender (2025-12-13, $947.04)', { skip: skipNoFixtures
 });
 
 test('Costco R2 — split-tender (2025-12-26, $2,963.72 on 2 cards, 17 items)', {
-  skip: skipNoFixtures,
+  skip: skipUnless('costco-till-2025-12-26.pdf'),
 }, async () => {
   const lines = await loadLines('costco-till-2025-12-26.pdf');
   const { extracted, warnings } = costcoTillReceiptParser.parse(lines, { defaultCurrency: 'CAD' });
@@ -208,4 +217,119 @@ test('Costco R2 — split-tender (2025-12-26, $2,963.72 on 2 cards, 17 items)', 
   assert.ok(tv, 'LG OLED77B5 not found');
   assert.equal(tv.title, 'LG OLED77B5');
   assert.equal(tv.totalPrice, 2496.99);
+});
+
+test('Costco R3 — four `qty @ unitPrice` lines across 3 pages (2026-02-13, $582.64)', {
+  skip: skipUnless('costco-till-2026-02-13.pdf'),
+}, async () => {
+  const lines = await loadLines('costco-till-2026-02-13.pdf');
+  const { extracted, warnings } = costcoTillReceiptParser.parse(lines, { defaultCurrency: 'CAD' });
+
+  assert.equal(warnings.length, 0, `unexpected warnings: ${warnings.join('; ')}`);
+  assert.equal(extracted.orderDate, '2026-02-13');
+  assert.equal(extracted.orderId, '1168-8-492-36-20260213-2013');
+  assert.equal(extracted.subtotal, 531.31);
+  assert.equal(extracted.total, 582.64);
+
+  // No phantom items from the four `2 @ ...` lines.
+  assert.equal(extracted.items.filter((it) => it.title === '@').length, 0);
+
+  const sum = extracted.items.reduce((a, it) => a + (it.totalPrice ?? 0), 0);
+  assert.ok(Math.abs(sum - 531.31) < 0.01, `items sum ${sum.toFixed(2)} != 531.31`);
+
+  // Each multi-quantity item carries its real breakdown rather than qty 1.
+  const expectations: [string, number, number, number][] = [
+    ['85', 2, 17.99, 35.98],      // DIET COKE
+    ['4788', 2, 5.79, 11.58],     // LAC FREE 2%
+    ['378868', 2, 15.99, 31.98],  // CAMPO VIEJO
+    ['2519', 2, 0.2, 0.4],        // bottle deposit, name wraps around its row
+  ];
+  for (const [id, qty, unit, total] of expectations) {
+    const it = extracted.items.find((x) => x.vendorItemId === id);
+    assert.ok(it, `item ${id} not found`);
+    assert.equal(it.quantity, qty, `${id} quantity`);
+    assert.equal(it.unitPrice, unit, `${id} unitPrice`);
+    assert.equal(it.totalPrice, total, `${id} totalPrice`);
+  }
+});
+
+// Synthetic receipt — no real purchase data, so it is committable to a public
+// repo and always runs in CI (unlike the fixture-gated R1/R2 tests above).
+// Line shapes are taken from four real Costco Guelph receipts: a `<qty> @ <unit>`
+// continuation line, a trailing-minus TPD discount, a name that wraps around its
+// numeric row, a comma-thousands amount, and a split tender across two pages.
+function syntheticLines(): { page: number; y: number; text: string }[] {
+  const p1: string[] = [
+    'GUELPH #1168',
+    '1111111 WIDGET A              29.99 Y',
+    '2 @ 17.99',
+    '85              GIZMO 2PK              35.98 Y',
+    '2222222 TPD/1111111              5.00-',
+    '3333333 BIG THING              1,234.56 Y',
+    '2 @ 0.20',
+    'DEPOSIT',
+    '4444                                          0.40',
+    'VL/3333333',
+    'SUBTOTAL              1,295.93',
+    'TAX              168.47',
+    '****              TOTAL              1,464.40',
+    'XXXXXXXXXXXXX3812              CHIP read',
+    'APPROVED -PURCHASE',
+    'AMOUNT: $1,464.40',
+    'MASTER CARD              1,000.00',
+    'COSTCO MASTERCARD              464.40',
+    'CHANGE              0',
+    'TOTAL NUMBER OF ITEMS SOLD = 5',
+    '05/04/2026 11:07              1168 7 285 17',
+  ];
+  const p2: string[] = ['whse: 1168              Trm: 7', ' Items Sold: 5'];
+  return [
+    ...p1.map((text, i) => ({ page: 1, y: 700 - i * 19.2, text })),
+    ...p2.map((text, i) => ({ page: 2, y: 700 - i * 19.2, text })),
+  ];
+}
+
+test('a `<qty> @ <unitPrice>` line is folded into the following item, not emitted as an item', () => {
+  const { extracted, warnings } = costcoTillReceiptParser.parse(syntheticLines(), {
+    defaultCurrency: 'CAD',
+  });
+
+  // No phantom `@` item.
+  assert.equal(
+    extracted.items.filter((it) => it.title === '@').length,
+    0,
+    `phantom @ items: ${JSON.stringify(extracted.items.filter((it) => it.title === '@'))}`,
+  );
+
+  // 4 catalog rows + 1 TPD discount row. The two `@` lines are not items.
+  assert.equal(extracted.items.length, 5, `items: ${extracted.items.map((i) => i.title).join(', ')}`);
+
+  // Items reconcile against SUBTOTAL, so no warning.
+  const sum = extracted.items.reduce((a, it) => a + (it.totalPrice ?? 0), 0);
+  assert.ok(Math.abs(sum - 1295.93) < 0.01, `items sum ${sum.toFixed(2)} != 1295.93`);
+  assert.equal(warnings.length, 0, `unexpected warnings: ${warnings.join('; ')}`);
+});
+
+test('a `<qty> @ <unitPrice>` line sets quantity and unitPrice on the item it precedes', () => {
+  const { extracted } = costcoTillReceiptParser.parse(syntheticLines(), { defaultCurrency: 'CAD' });
+
+  const gizmo = extracted.items.find((it) => it.vendorItemId === '85');
+  assert.ok(gizmo, 'GIZMO 2PK not found');
+  assert.equal(gizmo.title, 'GIZMO 2PK');
+  assert.equal(gizmo.quantity, 2);
+  assert.equal(gizmo.unitPrice, 17.99);
+  assert.equal(gizmo.totalPrice, 35.98);
+});
+
+test('a `<qty> @ <unitPrice>` line carries across a wrapped name fragment to its item', () => {
+  // Real shape: `2 @ 0.20` / `DEPOSIT` / `4444  0.40` / `VL/3333333`.
+  // The qty line is not adjacent to the numeric row it belongs to.
+  const { extracted } = costcoTillReceiptParser.parse(syntheticLines(), { defaultCurrency: 'CAD' });
+
+  const deposit = extracted.items.find((it) => it.vendorItemId === '4444');
+  assert.ok(deposit, 'deposit item not found');
+  assert.equal(deposit.title, 'DEPOSIT VL/3333333');
+  assert.equal(deposit.quantity, 2);
+  assert.equal(deposit.unitPrice, 0.2);
+  assert.equal(deposit.totalPrice, 0.4);
 });

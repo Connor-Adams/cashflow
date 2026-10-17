@@ -21,6 +21,10 @@ beforeEach(async () => {
   await sequelize.sync({ force: true });
 });
 
+// NOTE: this test was already skipped, and its premise is now obsolete —
+// `finalBusiness` no longer decides what counts as active business income. See
+// corpPerimeter.ts and the perimeter tests at the bottom of this file for the
+// current rule. Do not un-skip without rewriting the assertions.
 test.skip('builds corp facts from seeded business transaction', async () => {
   const household = await Household.create({ name: 'Corp Test HH' });
   const entity = await Entity.create({
@@ -453,4 +457,388 @@ test.skip('dividend investment income routes to eligible vs non_eligible by secu
 
   assert.equal(eligSum.toFixed(2), '3000.00');
   assert.equal(nonElSum.toFixed(2), '1500.00');
+});
+
+// --- active business income: perimeter rule (replaces the finalBusiness sum) ---
+//
+// Revenue arrives as a multi-hop chain across the corp's own accounts. Only the
+// hop that crosses the corporate perimeter is income; every downstream hop is
+// the same dollar moving house. See corpPerimeter.ts for the rule and why
+// `linkedTransactionId` alone is not enough to detect an internal leg.
+
+async function seedPerimeterCorp() {
+  const household = await Household.create({ name: 'Perimeter HH' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'corp', legalName: 'CDG LABS INC.',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const wiseUsd = await Account.create({
+    name: 'Wise Corporate USD', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'USD',
+  } as never);
+  const chequing = await Account.create({
+    name: 'Corp Chequing', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  return { household, entity, wiseUsd, chequing };
+}
+
+let perimeterFp = 0;
+async function seedTxn(
+  ctx: { household: { id: number }; entity: { id: number } },
+  account: { id: number },
+  over: Record<string, unknown>,
+) {
+  perimeterFp += 1;
+  const merchantRaw = String(over.merchantRaw ?? 'SEED');
+  return Transaction.create({
+    accountId: account.id,
+    householdId: ctx.household.id,
+    entityId: ctx.entity.id,
+    currency: 'CAD',
+    importBatch: 'test-perimeter',
+    merchantClean: merchantRaw,
+    sourceRowFingerprint: `fp-perimeter-${perimeterFp}`,
+    sourceIdentityFingerprint: `sif-perimeter-${perimeterFp}`,
+    ...over,
+    merchantRaw,
+  } as never);
+}
+
+test('active business income counts the external receipt, not the internal hops', async () => {
+  const ctx = await seedPerimeterCorp();
+  await FxRate.create({
+    fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: '2025-03-13',
+    rate: '1.40', source: 'manual_seed', fetchedAt: new Date(),
+  } as never);
+
+  // Hop 1 — the money enters the corp from a customer. THIS is revenue.
+  await seedTxn(ctx, ctx.wiseUsd, {
+    date: '2025-03-13', amount: '5000.0000', currency: 'USD', txnType: 'transfer',
+    merchantRaw: 'Received money from WANDERCOM', merchantClean: 'Received money from WANDERCOM',
+    finalBusiness: false,
+  });
+  // Hop 2 — leaves Wise, pointing at the arrival row. Internal.
+  const out = await seedTxn(ctx, ctx.wiseUsd, {
+    date: '2025-03-13', amount: '-5000.0000', currency: 'USD', txnType: 'transfer',
+    merchantRaw: 'Sent money to CDG Labs Inc.', finalBusiness: true,
+  });
+  // Hop 3 — the arrival. Unlinked itself, but it is hop 2's target. Internal.
+  const arrival = await seedTxn(ctx, ctx.chequing, {
+    date: '2025-03-13', amount: '7000.0000', txnType: 'unknown',
+    merchantRaw: 'Misc Payment CDG LABS INC', finalBusiness: true,
+  });
+  await out.update({ linkedTransactionId: arrival.id });
+
+  const facts = await buildCorpFacts(ctx.entity.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+
+  assert.equal(facts.activeBusinessIncome.length, 1, 'exactly one hop is revenue');
+  // USD 5,000 at 1.40 = CAD 7,000 — the same money as hop 3, counted once.
+  assert.equal(facts.activeBusinessIncome[0].cadAmount.toFixed(2), '7000.00');
+  assert.deepEqual(facts.factWarnings ?? [], [], 'a named external payer needs no warning');
+});
+
+test('an orphaned arrival leg is counted but warned about', async () => {
+  const ctx = await seedPerimeterCorp();
+  // No upstream hops exist (the source account was never imported), so this
+  // looks external. Count it, but say so.
+  await seedTxn(ctx, ctx.chequing, {
+    date: '2025-06-30', amount: '14891.9900', txnType: 'income',
+    merchantRaw: 'Direct deposit from CDG LABS INC', finalBusiness: false,
+  });
+
+  const facts = await buildCorpFacts(ctx.entity.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+
+  assert.equal(facts.activeBusinessIncome.length, 1);
+  assert.equal(facts.activeBusinessIncome[0].cadAmount.toFixed(2), '14891.99');
+  assert.equal((facts.factWarnings ?? []).length, 1);
+  assert.match((facts.factWarnings ?? [])[0], /no external counterparty/);
+});
+
+test('business expenses exclude transfers and securities purchases', async () => {
+  const ctx = await seedPerimeterCorp();
+  await seedTxn(ctx, ctx.chequing, {
+    date: '2025-04-01', amount: '10000.0000', txnType: 'income',
+    merchantRaw: 'ACME CORP invoice 12', finalBusiness: false,
+  });
+  await seedTxn(ctx, ctx.chequing, {
+    date: '2025-04-02', amount: '-6.0000', txnType: 'fee',
+    merchantRaw: 'Account fee', finalBusiness: true,
+  });
+  // Capital deployment, not a cost of doing business.
+  await seedTxn(ctx, ctx.chequing, {
+    date: '2025-04-03', amount: '-9999.4100', txnType: 'investment',
+    merchantRaw: 'Buy VFV', finalBusiness: false,
+  });
+
+  const facts = await buildCorpFacts(ctx.entity.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+
+  const net = facts.activeBusinessIncome.reduce(
+    (acc, i) => acc.plus(i.cadAmount), D(0),
+  );
+  assert.equal(net.toFixed(2), '9994.00', 'revenue 10000 less the 6.00 fee only');
+});
+
+test('corp chequing interest lands in investment income', async () => {
+  const ctx = await seedPerimeterCorp();
+  // Wealthsimple pays interest on the business chequing balance monthly.
+  // There is no InvestmentActivity row for a chequing account, so before the
+  // perimeter split routed these the income was reported nowhere.
+  for (const [date, amount] of [
+    ['2025-05-01', '2.2700'],
+    ['2025-06-01', '17.7900'],
+    ['2025-07-01', '30.9100'],
+    ['2025-08-01', '27.5300'],
+  ]) {
+    await seedTxn(ctx, ctx.chequing, {
+      date, amount, txnType: 'interest',
+      merchantRaw: 'Interest received', finalBusiness: false,
+    });
+  }
+
+  const facts = await buildCorpFacts(ctx.entity.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+
+  assert.equal(facts.activeBusinessIncome.length, 0, 'interest is passive, not ABI');
+  const interest = facts.investmentIncome.interest.reduce(
+    (acc, i) => acc.plus(i.cadAmount), D(0),
+  );
+  assert.equal(interest.toFixed(2), '78.50');
+});
+
+test('passive transactions on an investment account do not double the ledger', async () => {
+  const ctx = await seedPerimeterCorp();
+  const investing = await Account.create({
+    name: 'Corp Investing', householdId: ctx.household.id, accountType: 'investment',
+    entityId: ctx.entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  // The brokerage restates each distribution as a cash transaction. The
+  // InvestmentActivity ledger is the source of truth there (it carries the
+  // security, and therefore the eligibility), so this row must be ignored.
+  await seedTxn(ctx, investing, {
+    date: '2025-03-31', amount: '151.2300', txnType: 'dividend',
+    merchantRaw: 'XEQT cash dividend distribution', finalBusiness: false,
+  });
+
+  const facts = await buildCorpFacts(ctx.entity.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+
+  assert.deepEqual(facts.investmentIncome.eligibleDividends, []);
+  assert.deepEqual(facts.investmentIncome.nonEligibleDividends, []);
+  assert.deepEqual(facts.investmentIncome.interest, []);
+});
+
+// --- business expenses fronted on a personal card ---
+//
+// Connor pays hosting/AI/internet on a personal Amex and the corp reimburses
+// him. The cost is the corp's, but the transaction lives on a personal account,
+// so buildCorpFacts (which queries corp-entity rows) never saw it — the corp
+// deducted $30 for 2026 while the real costs sat on the personal card. The
+// reimbursement transfer itself is NOT the deduction; the purchase is.
+
+async function seedOwnerExpenseHousehold() {
+  const household = await Household.create({ name: 'Owner Expense HH' });
+  const corp = await Entity.create({
+    householdId: household.id, kind: 'corp', legalName: 'CDG LABS INC.',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const personal = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'Personal',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const corpChequing = await Account.create({
+    name: 'Corp Chequing', householdId: household.id, accountType: 'checking',
+    entityId: corp.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  const personalCard = await Account.create({
+    name: 'Amex Reserve', householdId: household.id, accountType: 'credit_card',
+    entityId: personal.id, taxStatus: 'n_a', defaultCurrency: 'CAD',
+  } as never);
+  return { household, corp, personal, corpChequing, personalCard };
+}
+
+let oeFp = 0;
+async function seedOwnerTxn(
+  household: { id: number }, entityId: number, account: { id: number },
+  over: Record<string, unknown>,
+) {
+  oeFp += 1;
+  const merchantRaw = String(over.merchantRaw ?? 'VENDOR');
+  return Transaction.create({
+    accountId: account.id, householdId: household.id, entityId,
+    currency: 'CAD', importBatch: 'test-owner-expense',
+    merchantClean: merchantRaw,
+    sourceRowFingerprint: `fp-oe-${oeFp}`,
+    sourceIdentityFingerprint: `sif-oe-${oeFp}`,
+    ...over,
+    merchantRaw,
+  } as never);
+}
+
+test('business spend on a personal card is deducted by the corp', async () => {
+  const ctx = await seedOwnerExpenseHousehold();
+  await seedOwnerTxn(ctx.household, ctx.corp.id, ctx.corpChequing, {
+    date: '2025-04-01', amount: '10000.0000', txnType: 'income',
+    merchantRaw: 'ACME CORP invoice',
+  });
+  await seedOwnerTxn(ctx.household, ctx.personal.id, ctx.personalCard, {
+    date: '2025-05-02', amount: '-1758.3100', finalBusiness: true,
+    finalCategory: 'Internet', merchantRaw: 'BELL CANADA',
+  });
+  await seedOwnerTxn(ctx.household, ctx.personal.id, ctx.personalCard, {
+    date: '2025-06-02', amount: '-740.5300', finalBusiness: true,
+    finalCategory: 'Ai', merchantRaw: 'ANTHROPIC',
+  });
+
+  const facts = await buildCorpFacts(ctx.corp.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+
+  const net = facts.activeBusinessIncome.reduce((a, i) => a.plus(i.cadAmount), D(0));
+  assert.equal(net.toFixed(2), '7501.16', '10000 revenue less 2498.84 of owner-paid costs');
+  assert.ok(
+    (facts.factWarnings ?? []).some((w) => /personal/i.test(w) && /2498\.84/.test(w)),
+    `expected a warning naming the owner-paid total, got ${JSON.stringify(facts.factWarnings)}`,
+  );
+});
+
+test('personal spend not flagged business is left alone', async () => {
+  const ctx = await seedOwnerExpenseHousehold();
+  await seedOwnerTxn(ctx.household, ctx.personal.id, ctx.personalCard, {
+    date: '2025-05-02', amount: '-250.0000', finalBusiness: false,
+    merchantRaw: 'GROCERIES',
+  });
+
+  const facts = await buildCorpFacts(ctx.corp.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+  assert.deepEqual(facts.activeBusinessIncome, []);
+});
+
+test('a business-flagged personal INFLOW is not negative corp revenue', async () => {
+  // A refund or a reimbursement landing back on the card is not a cost.
+  const ctx = await seedOwnerExpenseHousehold();
+  await seedOwnerTxn(ctx.household, ctx.personal.id, ctx.personalCard, {
+    date: '2025-05-02', amount: '500.0000', finalBusiness: true,
+    merchantRaw: 'REFUND',
+  });
+
+  const facts = await buildCorpFacts(ctx.corp.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+  assert.deepEqual(facts.activeBusinessIncome, []);
+});
+
+test('card payments and transfers flagged business are not costs', async () => {
+  const ctx = await seedOwnerExpenseHousehold();
+  for (const txnType of ['payment', 'transfer', 'investment']) {
+    await seedOwnerTxn(ctx.household, ctx.personal.id, ctx.personalCard, {
+      date: '2025-05-02', amount: '-900.0000', finalBusiness: true, txnType,
+      merchantRaw: `${txnType} row`,
+    });
+  }
+
+  const facts = await buildCorpFacts(ctx.corp.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+  assert.deepEqual(facts.activeBusinessIncome, []);
+});
+
+test('with two corps in the household the owner-paid pass is skipped, and says so', async () => {
+  // Nothing in the data says WHICH corp a personal business expense belongs to,
+  // and guessing would let the same dollar be deducted on two returns.
+  const ctx = await seedOwnerExpenseHousehold();
+  await Entity.create({
+    householdId: ctx.household.id, kind: 'corp', legalName: 'Second Co.',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  await seedOwnerTxn(ctx.household, ctx.personal.id, ctx.personalCard, {
+    date: '2025-05-02', amount: '-1758.3100', finalBusiness: true,
+    merchantRaw: 'BELL CANADA',
+  });
+
+  const facts = await buildCorpFacts(ctx.corp.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+  assert.deepEqual(facts.activeBusinessIncome, [], 'not attributed to either corp');
+  assert.ok(
+    (facts.factWarnings ?? []).some((w) => /more than one corporation/i.test(w)),
+    `expected a multi-corp warning, got ${JSON.stringify(facts.factWarnings)}`,
+  );
+});
+
+test('a transfer to the corp brokerage is not flagged as unexplained', async () => {
+  // The far side of a bank→brokerage transfer is an InvestmentActivity row, so
+  // linked_transaction_id (an FK into transactions) can never point at it. The
+  // money is tracked, just in the other ledger.
+  const ctx = await seedPerimeterCorp();
+  const investing = await Account.create({
+    name: 'Corp Investing', householdId: ctx.household.id, accountType: 'investment',
+    entityId: ctx.entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  await seedTxn(ctx, ctx.chequing, {
+    date: '2025-07-06', amount: '-10000.0000', txnType: 'transfer',
+    merchantRaw: 'Tax-free money transfer out of the account', finalBusiness: true,
+  });
+  await InvestmentActivity.create({
+    accountId: investing.id, activityType: 'transfer_in',
+    tradeDate: '2025-07-06', amount: '10000.0000', currency: 'CAD',
+    description: 'Transfer in', importBatch: 'test-perimeter',
+    sourceRowFingerprint: 'fp-cashmove-1',
+  } as never);
+
+  const facts = await buildCorpFacts(ctx.entity.id, {
+    startDate: '2025-01-01', endDate: '2025-12-31',
+  });
+
+  assert.deepEqual(facts.factWarnings ?? [], []);
+});
+
+// ---------------------------------------------------------------------------
+// The forward fix (part 1a) puts a cash mirror on brokerage accounts. On a CORP
+// brokerage account that mirror is a plain transaction the perimeter split has
+// never seen before, and a positive one cannot be claimed by claimMatchingCashMove
+// — that matcher needs an opposite sign, and the activity is positive too. So it
+// would fall through to revenue.push as phantom active business income. Activity
+// 1712 in prod is exactly this shape: transfer_in +10,000 into account 13.
+// ---------------------------------------------------------------------------
+
+test('a cash mirror on a corp brokerage account is not counted as revenue', async () => {
+  const { household, entity, account } = await seedCorpInvestmentAccount('Mirror Revenue HH');
+
+  // The activity: money arriving in the corp's own brokerage from its chequing.
+  await InvestmentActivity.create({
+    accountId: account.id, householdId: household.id,
+    activityType: 'transfer_in', tradeDate: '2026-07-06',
+    amount: '10000', currency: 'CAD',
+    description: 'Money transfer into the account',
+    sourceRowFingerprint: 'fp-mirror-act', importBatch: 'b',
+  } as never);
+
+  // The mirror the forward fix now emits alongside it.
+  await Transaction.create({
+    accountId: account.id, householdId: household.id, entityId: entity.id,
+    date: '2026-07-06', amount: '10000', currency: 'CAD', txnType: 'transfer',
+    merchantRaw: 'Money transfer into the account',
+    merchantClean: 'Money transfer into the account',
+    importBatch: 'b', sourceRowFingerprint: 'fp-mirror-txn',
+    sourceIdentityFingerprint: 'sif-mirror-txn',
+  } as never);
+
+  const facts = await buildCorpFacts(entity.id, { startDate: '2026-01-01', endDate: '2026-12-31' });
+  assert.equal(
+    facts.activeBusinessIncome.length,
+    0,
+    `mirror must not be revenue; got ${JSON.stringify(
+      facts.activeBusinessIncome.map((i) => i.cadAmount.toString()),
+    )}`,
+  );
 });

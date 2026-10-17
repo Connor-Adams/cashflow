@@ -4,16 +4,28 @@
  *
  * Idempotency: detectors return a stable `fingerprint` (e.g. sorted txn ids).
  * We upsert by `(household_id, type, fingerprint)`. A re-run of the same
- * detector will refresh `metadata`/`detected_at` but won't churn statuses —
- * if the user already dismissed/resolved a finding, we preserve that. That
- * means a "dismissed" duplicate stays dismissed even if the detector still
- * surfaces it. To re-surface, drop the row.
+ * detector refreshes `metadata`/`detected_at` and preserves an `open` or
+ * `dismissed` status — a "dismissed" duplicate stays dismissed even if the
+ * detector still surfaces it. To re-surface a dismissal, drop the row.
+ * `resolved` is the one exception: it means "this run's sweep retired the
+ * row because the finding stopped recurring," not a standing user decision,
+ * so a fingerprint match on a `resolved` row reopens it — the condition has
+ * demonstrably recurred. See `upsertInsight`.
+ *
+ * Retirement: upserting alone only ever grows the open set — an insight whose
+ * cause stopped being true (receipt attached, duplicate deleted, month rolled
+ * over, or a detector that stopped emitting the finding at all) stayed `open`
+ * forever until a human dismissed it by hand. So after the upserts we sweep:
+ * any `open` row of a type THIS run produces whose fingerprint the run didn't
+ * emit becomes `resolved`. See `resolveStaleInsights` for why the sweep is
+ * scoped to `DETECTOR_RUNS`' types and never touches `dismissed`.
  *
  * Scope: this is the deterministic layer. Issue #210 (future) layers an AI
  * review pass on top — it reads the same `insights` table.
  */
 import { Op } from 'sequelize';
 import { Insight, Transaction, PartnerSettlement, Contact, Receipt, PlannedEvent, Account, sequelize } from '../models';
+import type { InsightType } from '../models/Insight';
 import { isNonSpend } from '../summary/classifyTransactionFlow';
 import { assembleForecast } from '../forecast/assembleForecast';
 import { buildForecast } from '../forecast/buildForecast';
@@ -47,6 +59,10 @@ const FORECAST_EXCLUDED_TYPES = new Set(['investment']);
 export type RunDetectorsResult = {
   created: number;
   refreshed: number;
+  /** Resolved rows reopened because this run re-emitted their fingerprint. */
+  reopened: number;
+  /** Open rows retired by the stale sweep because this run no longer emits them. */
+  resolved: number;
   total: number;
   detectorCounts: Record<string, number>;
 };
@@ -172,21 +188,32 @@ async function loadRunwayPoints(
 
 /**
  * Upsert one detected insight, keyed by (householdId, type, fingerprint).
- * Refreshes content fields but NEVER writes `status`, so a user's
- * dismissed/resolved state is preserved across re-runs. Caller supplies the
- * transaction. Returns 'created' | 'refreshed'.
+ * Refreshes content fields and preserves a user's `open`/`dismissed` status
+ * across re-runs — a dismissal is a standing decision, not ours to rewrite.
+ *
+ * `resolved` is different: nothing but the stale sweep ever writes it, and
+ * the sweep only means "this fingerprint didn't recur last run." If the same
+ * fingerprint is emitted again, the condition has demonstrably come back, so
+ * a `resolved` row is reopened (status set back to `open`) rather than left
+ * silently retired forever. Without this, `resolved` + a re-emitted
+ * fingerprint would refresh the row's content but leave it invisible in every
+ * `open` view — permanent silent data loss for exactly the findings (e.g.
+ * `settlement_imbalance`, `missing_receipt`) whose condition can recur.
+ *
+ * Caller supplies the transaction. Returns 'created' | 'refreshed' | 'reopened'.
  */
 export async function upsertInsight(
   householdId: number,
   f: DetectedInsight,
   opts: { now: Date; userId: number | null },
   t: import('sequelize').Transaction,
-): Promise<'created' | 'refreshed'> {
+): Promise<'created' | 'refreshed' | 'reopened'> {
   const existing = await Insight.findOne({
     where: { householdId, type: f.type, fingerprint: f.fingerprint },
     transaction: t,
   });
   if (existing) {
+    const wasResolved = existing.status === 'resolved';
     existing.set('severity', f.severity);
     existing.set('title', f.title);
     existing.set('description', f.description);
@@ -194,8 +221,13 @@ export async function upsertInsight(
     existing.set('entityId', f.entityId);
     existing.set('metadata', f.metadata);
     existing.set('detectedAt', opts.now);
+    if (wasResolved) {
+      // Only 'resolved' is reopened here — 'dismissed' is a user decision
+      // and must never be overridden by a recurring detector run.
+      existing.set('status', 'open');
+    }
     await existing.save({ transaction: t });
-    return 'refreshed';
+    return wasResolved ? 'reopened' : 'refreshed';
   }
   await Insight.create(
     {
@@ -215,6 +247,61 @@ export async function upsertInsight(
     { transaction: t },
   );
   return 'created';
+}
+
+/** An insight's identity: rows are keyed by (household, type, fingerprint). */
+function identityKey(type: string, fingerprint: string): string {
+  return `${type} ${fingerprint}`;
+}
+
+/**
+ * Retire the open insights this run no longer produces.
+ *
+ * Two hard scoping rules, both load-bearing:
+ *
+ * 1. **Only types this run covers.** `coveredTypes` is derived from the
+ *    detector roster the run itself executes, so it can never widen to types
+ *    written by OTHER producers — `subscription_price_increase`
+ *    (`subscriptions/detectSubscriptionPriceChanges.ts`, its own scheduled
+ *    job) and `small_subscription` / `recurring_fee` / `duplicate_service` /
+ *    `delivery_fee_high` (`routes/moneyLeaks.ts`). This run knows nothing
+ *    about their findings; sweeping them would silently wipe another
+ *    feature's data.
+ * 2. **Only `status = 'open'`.** A dismissal is a user decision and a
+ *    `resolved` row is already retired — neither is ours to rewrite.
+ *
+ * Caller supplies the transaction so the sweep commits with the upserts: a
+ * partial run must never resolve rows whose replacements were never written.
+ */
+async function resolveStaleInsights(
+  householdId: number,
+  coveredTypes: Set<InsightType>,
+  findings: DetectedInsight[],
+  t: import('sequelize').Transaction,
+): Promise<number> {
+  if (coveredTypes.size === 0) return 0;
+  const emitted = new Set(findings.map((f) => identityKey(f.type, f.fingerprint)));
+  // Narrow `attributes` deliberately: it keeps the JSON `metadata` column out
+  // of the SELECT (Sequelize's `raw` JSON handling differs across sqlite and
+  // Postgres) and the sweep only needs identity.
+  const openRows = await Insight.findAll({
+    where: {
+      householdId,
+      status: 'open',
+      type: { [Op.in]: Array.from(coveredTypes) },
+    },
+    attributes: ['id', 'type', 'fingerprint'],
+    transaction: t,
+  });
+  const staleIds = openRows
+    .filter((r) => !emitted.has(identityKey(r.type, r.fingerprint)))
+    .map((r) => r.id);
+  if (staleIds.length === 0) return 0;
+  await Insight.update(
+    { status: 'resolved' },
+    { where: { id: { [Op.in]: staleIds } }, transaction: t },
+  );
+  return staleIds.length;
 }
 
 export async function runDetectorsForHousehold(
@@ -250,16 +337,29 @@ export async function runDetectorsForHousehold(
     if (display) subscriptionMerchants.add(display);
   }
 
-  const findings: DetectedInsight[] = [
-    ...detectDuplicateTransactions(transactions, { now }),
-    ...detectMerchantSpendSpike(transactions, { now }),
-    ...detectRecurringIncrease(transactions, { now, subscriptionMerchants }),
-    ...detectMissingReceipt(transactions, { now }),
-    ...detectUnusualCategorySpend(transactions, { now }),
-    ...detectCategoryTrend(transactions, { now }),
-    ...detectCashRunwayLow(runwayPoints, { now }),
-    ...detectSettlementImbalance(settlements),
+  // The detector roster. One entry per detector, pairing the insight type it
+  // emits with its invocation — this single list is BOTH what the run executes
+  // and what the stale sweep is scoped to, so adding or removing a detector
+  // moves both at once and there is no second list to drift out of sync.
+  const detectorRuns: Array<{ emits: InsightType; run: () => DetectedInsight[] }> = [
+    { emits: 'duplicate_transactions', run: () => detectDuplicateTransactions(transactions, { now }) },
+    { emits: 'merchant_spend_spike', run: () => detectMerchantSpendSpike(transactions, { now }) },
+    { emits: 'recurring_increase', run: () => detectRecurringIncrease(transactions, { now, subscriptionMerchants }) },
+    { emits: 'missing_receipt', run: () => detectMissingReceipt(transactions, { now }) },
+    { emits: 'unusual_category_spend', run: () => detectUnusualCategorySpend(transactions, { now }) },
+    { emits: 'category_trend', run: () => detectCategoryTrend(transactions, { now }) },
+    { emits: 'cash_runway_low', run: () => detectCashRunwayLow(runwayPoints, { now }) },
+    { emits: 'settlement_imbalance', run: () => detectSettlementImbalance(settlements) },
   ];
+
+  const findings: DetectedInsight[] = detectorRuns.flatMap((d) => d.run());
+
+  // Declared types cover the detectors that found nothing this run (that is
+  // precisely the case a sweep must retire). Union in the types actually
+  // emitted so a detector whose `emits` annotation drifts still sweeps only
+  // what this run itself produced — it can never reach another producer's rows.
+  const coveredTypes = new Set<InsightType>(detectorRuns.map((d) => d.emits));
+  for (const f of findings) coveredTypes.add(f.type);
 
   const detectorCounts: Record<string, number> = {};
   for (const f of findings) {
@@ -268,15 +368,22 @@ export async function runDetectorsForHousehold(
 
   let created = 0;
   let refreshed = 0;
+  let reopened = 0;
+  let resolved = 0;
 
   // Persist inside a transaction so a partial run doesn't leave inconsistent
-  // state. Upsert by (household_id, type, fingerprint).
+  // state. Upsert by (household_id, type, fingerprint), then retire the open
+  // rows this run no longer emits — same transaction, so the sweep can never
+  // resolve rows whose replacements failed to write.
   await sequelize.transaction(async (t) => {
     for (const f of findings) {
       const r = await upsertInsight(householdId, f, { now, userId }, t);
-      if (r === 'created') created++; else refreshed++;
+      if (r === 'created') created++;
+      else if (r === 'reopened') reopened++;
+      else refreshed++;
     }
+    resolved = await resolveStaleInsights(householdId, coveredTypes, findings, t);
   });
 
-  return { created, refreshed, total: findings.length, detectorCounts };
+  return { created, refreshed, reopened, resolved, total: findings.length, detectorCounts };
 }

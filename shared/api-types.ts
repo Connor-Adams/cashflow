@@ -273,6 +273,44 @@ export const IMPORT_CONFIDENCE_FLAG_TOKENS = [
 export type ImportConfidenceFlagToken =
   (typeof IMPORT_CONFIDENCE_FLAG_TOKENS)[number]
 
+/**
+ * One statement whose closing balance disagrees with the app's computed
+ * balance at the statement's period end. Balances use the account_statements
+ * convention: signed for assets, the amount OWED (positive) for liabilities.
+ * `delta` = computed − statement.
+ */
+export type StatementBalanceMismatch = {
+  accountId: number
+  accountName: string
+  accountType: string
+  statementId: number
+  /** ISO YYYY-MM-DD — the statement's period end. */
+  statementDate: string
+  currency: string
+  computedBalance: number
+  statementBalance: number
+  delta: number
+}
+
+/** An account with a non-zero opening balance but no opening-balance date. */
+export type UndatedOpeningBalance = {
+  accountId: number
+  accountName: string
+  openingBalance: number
+  currency: string
+}
+
+/**
+ * Balance reconciliation result, served on the data-quality surface
+ * (GET /api/data-quality → `balanceIntegrity`, and GET /api/data-quality/balances).
+ */
+export type BalanceIntegrity = {
+  /** Statements actually compared (investment and closed accounts are skipped). */
+  statementsChecked: number
+  statementMismatches: StatementBalanceMismatch[]
+  undatedOpeningBalances: UndatedOpeningBalance[]
+}
+
 export type ImportHealthResponse = {
   total: number
   clean: number
@@ -526,6 +564,11 @@ export const TAX_TREATMENTS = [
   'loan_advance',
   'loan_repayment',
   'not_income',
+  // The corp repaying an owner for a business cost they fronted on a personal
+  // card. Not income to the owner (it returns money they already spent) and not
+  // an expense to the corp at the moment of repayment — the underlying purchase
+  // is what gets deducted, so deducting the transfer as well would double it.
+  'expense_reimbursement',
   'rental_income',
   'rental_expense',
   'pension_income',
@@ -617,7 +660,7 @@ export type AuthUser = {
 /**
  * A rule's composable effect (issue #795). The scalar columns below mirror the
  * `set_category` / `set_business` / `set_split` actions for backward compat;
- * `set_label` / `set_alert` live only in the actions list.
+ * `set_label` / `set_alert` / `set_txn_type` live only in the actions list.
  */
 export type RuleAction =
   | { type: 'set_category'; payload: { category: string | null } }
@@ -625,6 +668,56 @@ export type RuleAction =
   | { type: 'set_split'; payload: { splitType: string; pctMe: string | null; pctPartner: string | null } }
   | { type: 'set_label'; payload: { labelId: number } }
   | { type: 'set_alert'; payload: { severity: 'info' | 'warn' | 'critical'; title?: string; body?: string } }
+  /**
+   * Overrides the transaction's `txnType`. Beware: this field drives whether a
+   * row counts as spend at all (`transfer` / `investment` / `dividend` drop out
+   * of the dashboard and the Sankey entirely) and feeds the tax engine, so the
+   * editor warns on those values.
+   */
+  | { type: 'set_txn_type'; payload: { txnType: TxnTypeValue } }
+
+/**
+ * The `txn_type` vocabulary a rule may assign. Runtime values, not just a type,
+ * because both sides need to enumerate them: the backend validates against this
+ * set and the editor renders it as a dropdown. One source, so they cannot drift.
+ */
+export const TXN_TYPE_VALUES = [
+  'purchase',
+  'income',
+  'transfer',
+  'payment',
+  'refund',
+  'reward',
+  'fee',
+  'interest',
+  'dividend',
+  'investment',
+  'unknown',
+] as const
+
+export type TxnTypeValue = (typeof TXN_TYPE_VALUES)[number]
+
+/**
+ * The types that REMOVE money from the reports when applied in bulk:
+ * `transfer` / `investment` / `dividend` drop out of the dashboard and the
+ * cashflow chart entirely, and `payment` / `refund` / `reward` change the
+ * net-spend arithmetic. `income` is absent — it adds, never removes.
+ *
+ * The backend holds the authoritative definition (NON_SPEND_TXN_TYPES minus
+ * `income`); this list is asserted equal to it by a backend test, so a change
+ * there fails CI rather than silently diverging from what the editor warns
+ * about.
+ */
+export const RISKY_TXN_TYPE_VALUES = [
+  'transfer',
+  'investment',
+  'dividend',
+  'payment',
+  'refund',
+  'reward',
+] as const
+
+export type RiskyTxnTypeValue = (typeof RISKY_TXN_TYPE_VALUES)[number]
 
 export type Rule = {
   id: number
@@ -751,7 +844,17 @@ export type StatementPreview = {
   }>
   warnings: string[]
   rowErrors: number
-  parseErrors: { rowIndex: number; message: string }[]
+  /**
+   * `blocking: true` means the statement's own arithmetic did not add up — the
+   * parser misread the document, not just one row. `POST /api/import/commit`
+   * refuses such a preview with 422 `statement_unreconciled`. The refusal body
+   * carries an `acknowledgement` digest derived server-side from the preview
+   * token and these blocking errors; the preview token stays valid, and the
+   * same token re-submitted with `acceptUnreconciled: "<acknowledgement>"`
+   * imports anyway. A bare `true`, or a digest from another preview, is
+   * refused — the override acknowledges one specific discrepancy.
+   */
+  parseErrors: { rowIndex: number; message: string; blocking?: boolean }[]
   duplicateCounts: {
     transactions: number
     investmentActivities: number
@@ -1141,6 +1244,16 @@ export type TripDetailView = {
   surgeMultiplier: number | null;
 };
 
+/**
+ * Whether an order was paid with a card Cashflow recognizes as belonging to
+ * this household. Derived per request from accounts.short_code — never
+ * persisted. `foreign` is only ever produced for vendor 'amazon' orders
+ * (see backend/src/amazon/cardOwnership.ts); every other vendor serializes
+ * as `known` or `unknown`. `foreign` orders are excluded from every spend
+ * total and from the Items page.
+ */
+export type CardOwnershipView = 'known' | 'foreign' | 'unknown';
+
 export type ExternalOrderView = {
   id: number;
   vendor: string;
@@ -1149,6 +1262,7 @@ export type ExternalOrderView = {
   shipping: string | null;
   total: string | null;
   currency: string;
+  cardOwnership: CardOwnershipView;
   trip?: TripDetailView | null;
 };
 
@@ -1289,6 +1403,7 @@ export type ItemRow = {
   order: {
     id: number
     vendor: string
+    cardOwnership: CardOwnershipView
   }
   receipt: {
     id: number
@@ -1935,14 +2050,42 @@ export type PeriodInsightResp = {
 
 // ── Per-person loan ledger (per-person loan ledger feature) ──────────────────
 
+/**
+ * What a transfer means between the user and another person. Distinct from
+ * {@link TransferPurpose}, which describes movement between the user's own
+ * accounts. `loc_interest` marks a line-of-credit interest charge as
+ * allocatable and sits on rows with no counterparty.
+ */
+export const COUNTERPARTY_ROLES = [
+  'loan',
+  'repayment',
+  'purchase',
+  'business',
+  'rent',
+  'gift',
+  'self',
+  'loc_interest',
+] as const;
+
+export type CounterpartyRole = (typeof COUNTERPARTY_ROLES)[number];
+
 export interface LedgerTransferRow {
   id: number;
   date: string;
   amount: string;
   currency: string;
+  /** Raw bank text — `merchant_clean` strips the counterparty name off RBC transfers. */
   merchant: string | null;
   direction: 'out' | 'in';
   isLoan: boolean;
+  /** Explicit tag, or null when the contact's default decides. */
+  counterpartyRole: CounterpartyRole | null;
+  /** How this row actually landed in the balance after direction resolution. */
+  ledgerEffect: 'loan' | 'repayment' | 'none';
+  /** True when the tag contradicted the direction; direction won. */
+  roleMismatch: boolean;
+  /** True when this row is one leg of a cancelled e-transfer pair. */
+  cancelled: boolean;
 }
 
 export interface TransferNet {
@@ -1952,10 +2095,115 @@ export interface TransferNet {
   net: string;
 }
 
+/** Signed per-currency loan balance. Positive: they owe you. */
+export interface LoanBalance {
+  currency: string;
+  lent: string;
+  repaid: string;
+  balance: string;
+}
+
+/**
+ * One line-of-credit rate window's contribution to charged interest.
+ *
+ * `scalingFactor` is `allocated / rawTotal`: below 1 when the window's printed
+ * Applicable Interest bound the balance-based accrual down, which is the normal
+ * case because total lending exceeds the line. A sudden change in it means the
+ * lending or the line moved, so it is shown rather than hidden.
+ */
+export interface InterestWindowSummary {
+  rateWindowId: number;
+  fromDate: string;
+  toDate: string;
+  /** Fixed(4) annual percentage, e.g. `8.9400`. */
+  effectiveRate: string;
+  /** Fixed(4). What the statement printed for this window. */
+  applicableInterest: string;
+  /** Fixed(4). Balance-based accrual across all borrowers, before the bound. */
+  rawTotal: string;
+  /** Fixed(4). What was actually allocated. */
+  allocated: string;
+  /** Fixed(6). `1.000000` when the printed figure did not bind. */
+  scalingFactor: string;
+  bound: boolean;
+}
+
+/**
+ * Whether the PERSISTED charged interest still matches what the allocator would
+ * write today.
+ *
+ * Nothing runs the allocator automatically — `POST
+ * /api/contacts/interest-allocation` has one caller, a button. So importing a
+ * statement and not pressing it leaves the persisted figure covering less than
+ * the imported windows do, while the accrued estimate starts from the NEW last
+ * window end: every day in the newly imported window falls into neither figure
+ * and silently disappears. A caption naming the newest statement over a figure
+ * that stops earlier is the "confident number over unsubstantiated data" bug
+ * this page keeps shipping, so the comparison is served rather than inferred.
+ */
+export interface InterestChargedStaleness {
+  /** True when `persistedTotal` and `recomputedTotal` disagree. Show "stale", not a date. */
+  stale: boolean;
+  /** Fixed(4). Household-wide sum of the stored `kind='interest'` rows. */
+  persistedTotal: string;
+  /** Fixed(4). Household-wide sum a fresh allocator run would write right now. */
+  recomputedTotal: string;
+  /**
+   * `YYYY-MM-DD`: the last day the PERSISTED rows cover, from their window end
+   * dates. `null` when nothing is persisted — no coverage may then be claimed.
+   */
+  chargedThrough: string | null;
+  /** `YYYY-MM-DD`: the last day any imported rate window covers. `null` when none. */
+  statementThrough: string | null;
+}
+
+/** Result of `POST /api/contacts/interest-allocation`. */
+export interface InterestAllocationRunResult {
+  /** Rate windows loaded. Zero when no statement has been imported yet. */
+  windows: number;
+  /** Charged rows written, or under `dryRun` that would be. */
+  allocations: number;
+  /** Fixed(4). Charged interest only — never the accrued estimate. */
+  totalCharged: string;
+  windowSummaries: InterestWindowSummary[];
+  dryRun: boolean;
+  elapsedMs: number;
+}
+
 export interface ContactLedgerResponse {
   contactId: number;
   name: string;
+  /** Treat untagged transfers with this contact as loans. */
+  loanDefault: boolean;
+  /** Descriptive raw flow. Carries no owed/owe claim. */
   transferNet: TransferNet[];
+  /** The number that means "owes you". Principal only — interest is never folded in. */
+  loanBalance: LoanBalance[];
+  /**
+   * Interest apportioned from each rate window's printed Applicable Interest,
+   * through the last statement. Persisted, and traces to a document.
+   * `repaid` is always zero: an interest allocation is not repaid piecemeal.
+   */
+  interestCharged: LoanBalance[];
+  /**
+   * Interest estimated for the days since the last statement, at the rate now in
+   * force. Computed on every read and NEVER stored — it changes daily. Must be
+   * labelled an estimate wherever it is shown.
+   */
+  interestAccrued: LoanBalance[];
+  /**
+   * A FRESH recomputation of every imported rate window, with each one's scaling
+   * factor — NOT a description of `interestCharged`.
+   *
+   * `interestCharged` is read from stored rows; these windows are recomputed on
+   * this request. They agree only while `interestStaleness.stale` is false.
+   * Reading these as "the windows behind interestCharged" is what let the page
+   * caption a stale persisted figure with a statement date it does not cover, so
+   * anything rendered from them must check `interestStaleness` first.
+   */
+  interestWindows: InterestWindowSummary[];
+  /** Whether `interestCharged` still matches what those windows would allocate. */
+  interestStaleness: InterestChargedStaleness;
   trackedOutstandingByCurrency: Record<string, string>;
   transfers: LedgerTransferRow[];
 }
@@ -2148,4 +2396,166 @@ export interface SplitTransactionResponse {
   /** Reimbursement view rows generated by the split (shape mirrors the
    *  reimbursements list endpoint's `data[]`). */
   claims: unknown[];
+}
+
+// ---------------------------------------------------------------------------
+// Tax completeness — what a return does not know
+// ---------------------------------------------------------------------------
+
+/** Worst-wins across every completeness item. */
+export type CompletenessStatus = 'complete' | 'gaps' | 'blocked'
+
+/**
+ * `blocker` — known-missing money whose size is known or boundable; the total is
+ * demonstrably wrong. `gap` — a correctness risk of unknown size; the total may be
+ * right.
+ */
+export type CompletenessSeverity = 'blocker' | 'gap'
+
+/** Where the reader goes to clear an item. */
+export type CompletenessFixSurface =
+  | 'classify'
+  | 'import'
+  | 'duplicates'
+  | 'slips'
+  | 'carryforwards'
+  | 'securities'
+  | 'rates'
+  | 'transactions'
+
+export interface CompletenessItemDto {
+  kind: string
+  severity: CompletenessSeverity
+  title: string
+  detail: string
+  /** Money missing or at risk, signed as the ledger holds it. `null` where no honest figure exists. */
+  amount: string | null
+  /**
+   * Tax this would add if fixed. `null` where the money's character is unknown —
+   * rendering an invented figure is worse than rendering none.
+   */
+  taxEstimate: string | null
+  fix: { surface: CompletenessFixSurface; label: string }
+  references: number[]
+}
+
+export interface CompletenessReportDto {
+  status: CompletenessStatus
+  checkedAt: string
+  /**
+   * Latest transaction date the report saw, or `null` for an empty period. Rendered
+   * even when complete: absence of warning must be affirmative, or "no problems" and
+   * "nobody checked" look identical.
+   */
+  coverageThrough: string | null
+  blockers: CompletenessItemDto[]
+  gaps: CompletenessItemDto[]
+}
+
+/** The personal T1 / corp T2 return as the scenario and return routes serve it. */
+export interface TaxReturnDto {
+  cached: boolean
+  computedAt: string
+  lines: unknown[]
+  totals: Record<string, unknown>
+  warnings: string[]
+  /**
+   * Present on the personal T1 paths. Absent for corp returns — the same hole exists
+   * on the T2 side and is deliberately out of scope for now.
+   */
+  completeness?: CompletenessReportDto
+}
+
+// ---------------------------------------------------------------------------
+// Tax outlook — what is coming, rather than what happened
+// ---------------------------------------------------------------------------
+
+/** Which of CRA's three instalment calculations an option follows. */
+export type InstalmentBasis = 'no_calculation' | 'prior_year' | 'current_year'
+
+/** One dated payment. `amount` is a fixed-2 string like every money value here. */
+export interface InstalmentDueDto {
+  /** `YYYY-MM-DD`. */
+  dueOn: string
+  amount: string
+}
+
+export interface InstalmentOptionDto {
+  basis: InstalmentBasis
+  /** The sum of this option's own four instalments — always, so the two agree. */
+  total: string
+  /**
+   * What is left to pay with the return if this option is followed: the year's
+   * projected net owing less what these instalments cover, floored at zero.
+   *
+   * Server-computed, because finding it in the client would mean subtracting fixed-2
+   * money strings — and it is the largest number in the picture.
+   */
+  balanceWithReturn: string
+  /**
+   * True only for the current-year estimate. It is the one option that can leave a
+   * shortfall CRA charges interest on, and the backend surfaces the trade-off rather
+   * than deciding it, so the UI must show it rather than silently ranking it last.
+   */
+  carriesInterestRisk: boolean
+  instalments: InstalmentDueDto[]
+}
+
+export interface InstalmentObligationDto {
+  year: number
+  required: boolean
+  /** Plain-language statement of which conjunct of CRA's test decided it. */
+  reason: string
+  /**
+   * When the year's remaining balance is due — April 30 of the following year.
+   *
+   * Present even when no instalments are required, because it is then the whole
+   * obligation. Nothing in the app named this date before.
+   */
+  balanceDueOn: string
+  recommended: InstalmentBasis
+  /** The recommended option's payments, or empty when none are required. */
+  instalments: InstalmentDueDto[]
+  options: InstalmentOptionDto[]
+}
+
+export interface ForwardDrawsDto {
+  actualToDate: string
+  monthlyRunRate: string
+  projectedRemainder: string
+  projectedTotal: string
+  coveredMonths: number
+  /** Elapsed months (1-12) with no transactions at all, i.e. probably unimported. */
+  uncoveredMonths: number[]
+  /** The assumption in words, including any uncovered months it names. */
+  basis: string
+}
+
+export interface ForwardViewDto {
+  year: number
+  /** Always true. Stated so the figure can never be mistaken for a filed number. */
+  isProjection: boolean
+  /** Total payable on the return as it stands. */
+  currentTotalPayable: string
+  /** Total payable if the projected remainder is drawn as it has been so far. */
+  projectedTotalPayable: string
+  /** The difference — what the rest of the year is expected to add. */
+  projectedAdditionalTax: string
+  draws: ForwardDrawsDto
+}
+
+/** `GET /api/tax/personal/:year/outlook`. Every money value is a fixed-2 string. */
+export interface TaxOutlookDto {
+  year: number
+  /**
+   * Net tax owing for each year of CRA's three-year threshold window, keyed by year.
+   * The current year's entry is year-to-date; `projectedCurrentYearNetOwing` is the
+   * figure the threshold test actually used.
+   */
+  netOwingByYear: Record<string, string>
+  projectedCurrentYearNetOwing: string
+  /** Years in the window whose rate table is a projection rather than published. */
+  provenanceWarnings: string[]
+  obligation: InstalmentObligationDto
+  forward: ForwardViewDto
 }

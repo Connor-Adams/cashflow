@@ -260,6 +260,26 @@ test('reconciliation gate fires when credit line statement does not reconcile', 
     reconErrors.length > 0,
     `Expected a reconciliation parseError, got: ${JSON.stringify(result.parseErrors)}`,
   );
+  // The gate's verdict must carry `blocking: true` — that flag, not the message
+  // text, is what makes commitStatementImport refuse the import. This is the
+  // gate that caught the +6,400 payment booked as a -6,400 withdrawal and was
+  // then ignored by the commit path.
+  assert.ok(
+    reconErrors.every(e => e.blocking === true),
+    `Reconciliation errors must be blocking, got: ${JSON.stringify(reconErrors)}`,
+  );
+});
+
+test('an ordinary row-level parse error is NOT blocking', () => {
+  // A clean statement's non-reconciliation errors (e.g. a "gate skipped"
+  // notice, an unreadable row) must never stop an import — only the
+  // arithmetic verdict does.
+  const result = rbcCreditLineParser.parse(CLEAN_RECONCILE_LINES, { defaultCurrency: 'CAD' });
+  assert.equal(
+    result.parseErrors.filter((e) => e.blocking === true).length,
+    0,
+    `A reconciling statement must produce no blocking errors, got: ${JSON.stringify(result.parseErrors)}`,
+  );
 });
 
 test('reconciliation gate passes cleanly for a correct credit line statement', () => {
@@ -332,4 +352,205 @@ test('rbcCreditLineParser.parse: correct header + transactions for glued-row fix
   assert.equal(result.header?.accountType, 'loan');
   assert.equal(result.header?.periodStart, '2025-07-08');
   assert.equal(result.header?.periodEnd, '2025-08-04');
+});
+
+// ─── Interest rows are not transactions on the credit line ───────────────────
+//
+// Interest on a Royal Credit Line is billed to the linked RBC chequing account,
+// not capitalised into the principal — the statement proves it by leaving the
+// balance-owing column unchanged across the interest row. The chequing
+// statement records the same event as "Loan interest", so emitting it here too
+// books the cost twice (once as a fee on chequing, once as a purchase on the
+// line) and overstates the amount owing by the cumulative interest.
+//
+// In prod all 7 credit-line interest rows matched a chequing "LOAN INTEREST"
+// row exactly on date and amount, and the line reported 516.63 more owing than
+// the statement.
+//
+// The parser already distinguishes them (`isPrincipalChange: false`) and
+// already excludes them from its reconciliation sum; it just emitted them
+// anyway.
+
+test('interest rows are excluded from the emitted transactions', () => {
+  const result = rbcCreditLineParser.parse(MULTI_TXN_LINES, { defaultCurrency: 'CAD' });
+
+  assert.equal(result.transactions.length, 3);
+  assert.deepEqual(
+    result.transactions.map((t) => t.amount),
+    [-400, -1150, -2000],
+  );
+  assert.ok(
+    !result.transactions.some((t) => /interest/i.test(t.merchantRaw)),
+    `interest row leaked into transactions: ${JSON.stringify(result.transactions.map((t) => t.merchantRaw))}`,
+  );
+});
+
+test('excluding interest keeps the principal reconciliation intact', () => {
+  // Opening 4,000 + (-400 -1,150 -2,000) = -7,550 owing, matching the
+  // statement's closing principal. Interest never entered that sum.
+  const result = rbcCreditLineParser.parse(MULTI_TXN_LINES, { defaultCurrency: 'CAD' });
+  const recon = result.parseErrors.filter((e) => e.message.includes('does not reconcile'));
+  assert.deepEqual(recon, []);
+  const sum = result.transactions.reduce((acc, t) => acc + t.amount, 0);
+  assert.equal(-4000 + sum, -7550);
+});
+
+test('the row-level parser still reports interest rows, flagged as non-principal', () => {
+  // The information is not lost — only its promotion to a transaction is. The
+  // reconciliation gate depends on still seeing these rows.
+  const { rows } = parseRbcCreditLineActivity(MULTI_TXN_LINES, { start: '2025-08-05', end: '2025-09-03' }, 4000);
+  const interest = rows.filter((r) => !r.isPrincipalChange);
+  assert.equal(interest.length, 1);
+  assert.match(interest[0].description, /Interest Payment/i);
+});
+
+// ─── No-balance rows: fall back to the description, not a blind "withdrawal" ──
+//
+// When the balance-owing column can't be read for a row and the two-row
+// lookahead can't disambiguate it either, the parser used to guess
+// "withdrawal" AND mark the row a principal change, ignoring the description.
+// Both guesses are wrong on real statements:
+//
+//   Credit Line Statement-0001 2026-03-03.pdf — a *payment* of 6,400 that
+//   cleared the line to zero was booked as a 6,400 withdrawal: a 12,800 error
+//   on the account balance, and the statement stopped reconciling.
+//
+//   Credit Line Statement-0001 2026-04-06.pdf — an `Interest Payment` row was
+//   marked a principal change, leaking into the emitted transactions (interest
+//   is billed to the linked chequing account and is already recorded there)
+//   and pushing the reconciled closing principal 17.24 past the statement's.
+//
+// The description is unambiguous on these statements, so it is the fallback.
+
+// Real case 1: period 2026-02-04..2026-03-03, opening 6,400, closing 0.
+// The payment row's balance column is unreadable and there is no later row to
+// look ahead to, so sign resolution falls through to the description.
+const NO_BALANCE_PAYMENT_LINES: PdfLine[] = [
+  mkHeader('ROYAL BANK OF CANADA', 1, 730),
+  mkHeader(' Your Royal Credit Line', 1, 719),
+  mkHeader(' Statement', 1, 691),
+  mkHeader('From February 4, 2026 to March 3, 2026', 1, 671),
+  mkHeader(' Your loan account number:   73772650-001', 1, 627),
+  mkHeader('Principal balance on February 4, 2026   $6,400.00', 1, 424),
+  mkHeader('Principal balance on March 3, 2026   $0.00', 1, 342),
+  mkHeader(' Details of your account activity', 1, 185),
+  mkLine(' Date   Description   Interest/Fees/Insurance ($)   Withdrawals ($)   Payments ($)   Balance owing ($)', 1, 167, 45.1),
+  mkLine(' 16 Feb   WWW PMT TIN0-04766 (6,400.00)', 1, 151, 47.3),
+  mkLine('Principal   6,400.00', 1, 138, 63.4),
+  mkHeader(' Your LoanProtector insurance coverage summary', 1, 100),
+];
+
+test('no-balance "WWW PMT … Principal" row is a payment (positive), not a withdrawal', () => {
+  const period = { start: '2026-02-04', end: '2026-03-03' };
+  const { rows, parseErrors } = parseRbcCreditLineActivity(NO_BALANCE_PAYMENT_LINES, period, 6400);
+
+  assert.equal(rows.length, 1, `Expected 1 row, got ${JSON.stringify(rows)}`);
+  assert.equal(rows[0].date, '2026-02-16');
+  assert.equal(rows[0].amount, 6400, 'payment must be positive cashflow');
+  assert.equal(rows[0].isPrincipalChange, true);
+  assert.deepEqual(parseErrors, [], 'description resolves the sign — no parse error');
+});
+
+test('the 6,400 payment statement reconciles to a zero closing principal', () => {
+  const result = rbcCreditLineParser.parse(NO_BALANCE_PAYMENT_LINES, { defaultCurrency: 'CAD' });
+  assert.deepEqual(result.parseErrors, [], `expected a clean parse: ${JSON.stringify(result.parseErrors)}`);
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].amount, 6400);
+});
+
+// Real case 2: period 2026-03-04..2026-04-06, opening 0, closing 7,000.
+// The interest row has no balance column; the next row does, so the two-row
+// lookahead runs and fails (no signed combination hits the delta) — because
+// interest never moves the principal at all.
+const NO_BALANCE_INTEREST_LINES: PdfLine[] = [
+  mkHeader('ROYAL BANK OF CANADA', 1, 730),
+  mkHeader(' Your Royal Credit Line', 1, 719),
+  mkHeader(' Statement', 1, 691),
+  mkHeader('From March 4, 2026 to April 6, 2026', 1, 671),
+  mkHeader(' Your loan account number:   73772650-001', 1, 627),
+  mkHeader('Principal balance on March 4, 2026   $0.00', 1, 424),
+  mkHeader('Principal balance on April 6, 2026   $7,000.00', 1, 342),
+  mkHeader(' Details of your account activity', 1, 185),
+  mkLine(' Date   Description   Interest/Fees/Insurance ($)   Withdrawals ($)   Payments ($)   Balance owing ($)', 1, 167, 45.1),
+  mkLine(' 5 Mar   Interest Payment   17.24', 1, 151, 47.3),
+  mkLine('17 Mar   WWW TFR TIN0-06604   6,000.00   -6,000.00', 1, 136, 45.1),
+  mkLine('18 Mar   WWW TFR TIN0-03079   1,000.00   -7,000.00', 1, 120, 45.1),
+  mkHeader(' Your LoanProtector insurance coverage summary', 1, 100),
+];
+
+test('no-balance "Interest Payment" row is interest, not a principal change', () => {
+  const period = { start: '2026-03-04', end: '2026-04-06' };
+  const { rows, parseErrors } = parseRbcCreditLineActivity(NO_BALANCE_INTEREST_LINES, period, 0);
+
+  assert.equal(rows.length, 3, `Expected 3 rows, got ${JSON.stringify(rows)}`);
+  assert.equal(rows[0].date, '2026-03-05');
+  assert.equal(rows[0].amount, -17.24, 'interest is a cost → negative cashflow');
+  assert.equal(rows[0].isPrincipalChange, false, 'interest must NOT move principal');
+  // The interest row must not consume balance headroom: the following
+  // withdrawals still resolve off their own balance column.
+  assert.equal(rows[1].amount, -6000);
+  assert.equal(rows[2].amount, -1000);
+  assert.deepEqual(parseErrors, [], 'description resolves the sign — no parse error');
+});
+
+test('the interest statement reconciles and does not emit the interest row', () => {
+  const result = rbcCreditLineParser.parse(NO_BALANCE_INTEREST_LINES, { defaultCurrency: 'CAD' });
+  assert.deepEqual(result.parseErrors, [], `expected a clean parse: ${JSON.stringify(result.parseErrors)}`);
+  assert.deepEqual(result.transactions.map((t) => t.amount), [-6000, -1000]);
+  assert.ok(!result.transactions.some((t) => /interest/i.test(t.merchantRaw)));
+});
+
+test('no-balance "WWW TFR" row is still a withdrawal', () => {
+  const lines: PdfLine[] = [
+    mkHeader('ROYAL BANK OF CANADA', 1, 730),
+    mkHeader(' Your Royal Credit Line', 1, 719),
+    mkHeader(' Statement', 1, 691),
+    mkHeader('From March 4, 2026 to April 6, 2026', 1, 671),
+    mkHeader(' Your loan account number:   73772650-001', 1, 627),
+    mkHeader('Principal balance on March 4, 2026   $0.00', 1, 424),
+    mkHeader('Principal balance on April 6, 2026   $2,500.00', 1, 342),
+    mkHeader(' Details of your account activity', 1, 185),
+    mkLine(' 9 Mar   WWW TFR TIN0-11111   2,500.00', 1, 151, 47.3),
+    mkHeader(' Your LoanProtector insurance coverage summary', 1, 100),
+  ];
+  const result = rbcCreditLineParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.deepEqual(result.parseErrors, []);
+  assert.deepEqual(result.transactions.map((t) => t.amount), [-2500]);
+});
+
+test('an unrecognised no-balance description still defaults to withdrawal AND records a parseError', () => {
+  const lines: PdfLine[] = [
+    mkHeader('ROYAL BANK OF CANADA', 1, 730),
+    mkHeader(' Your Royal Credit Line', 1, 719),
+    mkHeader(' Statement', 1, 691),
+    mkHeader('From March 4, 2026 to April 6, 2026', 1, 671),
+    mkHeader(' Your loan account number:   73772650-001', 1, 627),
+    mkHeader('Principal balance on March 4, 2026   $0.00', 1, 424),
+    mkHeader('Principal balance on April 6, 2026   $2,500.00', 1, 342),
+    mkHeader(' Details of your account activity', 1, 185),
+    mkLine(' 9 Mar   ZZZ MYSTERY ROW   2,500.00', 1, 151, 47.3),
+    mkHeader(' Your LoanProtector insurance coverage summary', 1, 100),
+  ];
+  const { rows, parseErrors } = parseRbcCreditLineActivity(
+    lines,
+    { start: '2026-03-04', end: '2026-04-06' },
+    0,
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].amount, -2500);
+  assert.equal(rows[0].isPrincipalChange, true);
+  assert.equal(parseErrors.length, 1, `expected a parseError: ${JSON.stringify(parseErrors)}`);
+  assert.match(parseErrors[0].message, /ZZZ MYSTERY ROW/);
+});
+
+// ─── statement balances (balance reconciliation) ──────────────────────────────
+//
+// The principal balances are what the app's computed balance is reconciled
+// against, so the parser must hand them to the import pipeline rather than
+// only using them for its own reconciliation gate. Owed amounts stay positive,
+// matching the account_statements convention for liability accounts.
+
+test('rbcCreditLineParser.parse emits opening + closing principal as statement balances', () => {
+  const result = rbcCreditLineParser.parse(MULTI_TXN_LINES, { defaultCurrency: 'CAD' });
+  assert.deepEqual(result.statementBalances, { opening: 4000, closing: 7550 });
 });

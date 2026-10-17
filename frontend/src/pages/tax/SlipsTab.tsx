@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Button } from '@connor-adams/designsystem'
+import { useToast } from '@/components/ui/toast';
 import { useTaxSlips, type SlipDto } from '../../hooks/useTaxSlips';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
 import { SLIP_FORMS, slipPreview } from './slips/registry';
@@ -16,6 +17,7 @@ export function SlipsTab({ year }: { year: number }) {
   const { entities } = useTaxEntities();
   const { slips, create, error } = useTaxSlips(year);
   const personal = entities?.find((e) => e.kind === 'personal');
+  const { showToast } = useToast();
 
   const [form, setForm] = useState<FormState>({
     slipType: 'T4',
@@ -45,13 +47,23 @@ export function SlipsTab({ year }: { year: number }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await create({
-      entityId: personal.id,
-      year,
-      slipType: form.slipType,
-      issuer: form.issuer,
-      boxValues: form.boxValues,
-    });
+    try {
+      await create({
+        entityId: personal.id,
+        year,
+        slipType: form.slipType,
+        issuer: form.issuer,
+        boxValues: form.boxValues,
+      });
+    } catch (err) {
+      // Keep the form as typed so the user can retry without re-entering boxes.
+      showToast({
+        variant: 'destructive',
+        title: 'Failed to save slip',
+        description: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
     setForm({ slipType: 'T4', issuer: '', boxValues: {} });
   };
 

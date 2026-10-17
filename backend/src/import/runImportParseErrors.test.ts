@@ -4,9 +4,10 @@ import {
   appendParseError,
   PARSE_ERRORS_MAX,
 } from './runImport';
+import type { StatementParseError } from './statementTypes';
 
 test('appendParseError respects cap', () => {
-  const bucket: { rowIndex: number; message: string }[] = [];
+  const bucket: StatementParseError[] = [];
   for (let i = 0; i < PARSE_ERRORS_MAX + 15; i++) {
     appendParseError(bucket, i + 1, `err ${i}`);
   }

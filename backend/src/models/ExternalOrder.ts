@@ -30,6 +30,14 @@ export class ExternalOrder extends Model<
   declare rawPayload: unknown | null;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
+  /**
+   * Paranoid soft-delete (docs/superpowers/specs/2026-09-11-account-card-identifiers-design.md,
+   * Part 5). Set by `mergeDuplicateAmazonOrders`'s `loser.destroy()`, the
+   * repo's only cron-triggered hard delete before this -- now reversible via
+   * `restore()`. Excluded from every query by default; pass
+   * `{ paranoid: false }` to see soft-deleted rows.
+   */
+  declare readonly deletedAt: CreationOptional<Date | null>;
 }
 
 export function initExternalOrder(sequelize: Sequelize): typeof ExternalOrder {
@@ -58,6 +66,7 @@ export function initExternalOrder(sequelize: Sequelize): typeof ExternalOrder {
       tableName: 'external_orders',
       underscored: true,
       timestamps: true,
+      paranoid: true,
     }
   );
   return ExternalOrder;

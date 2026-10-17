@@ -4,9 +4,12 @@ const FIELDS: { key: string; label: string }[] = [
   { key: 'box21', label: 'Box 21 — Capital gains' },
   { key: 'box23', label: 'Box 23 — Actual amount of dividends from Canadian corps' },
   { key: 'box26', label: 'Box 26 — Other income' },
-  { key: 'box32', label: 'Box 32 — Eligible dividends actual' },
-  { key: 'box49', label: 'Box 49 — Eligible dividends taxable' },
-  { key: 'box50', label: 'Box 50 — Eligible div tax credit' },
+  // CRA meanings. These were wrong in three places, and the engine reads box 32
+  // and box 50 as taxable amounts — so a form asking for the wrong quantity here
+  // wires a credit figure into an income line.
+  { key: 'box32', label: 'Box 32 — Taxable amount of non-eligible dividends' },
+  { key: 'box49', label: 'Box 49 — Actual amount of eligible dividends' },
+  { key: 'box50', label: 'Box 50 — Taxable amount of eligible dividends' },
 ];
 
 export function T3Form({ issuer, onChange, values }: SlipFormProps) {

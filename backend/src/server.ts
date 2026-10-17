@@ -12,6 +12,7 @@ import { isEncryptionKeyConfigured } from './util/symmetricEncryption';
 import { sequelize } from './db';
 // Register job definitions (side-effect imports).
 import './jobs/definitions/yahooQuote';
+import './jobs/definitions/yahooDailyHistory';
 import './jobs/definitions/dailySnapshot';
 import './jobs/definitions/forwardIncome';
 import './jobs/definitions/enrichmentBackfill';
@@ -20,11 +21,14 @@ import './jobs/definitions/weeklyDigest';
 import './jobs/definitions/budgetBreachCheck';
 import './jobs/definitions/dividendReconciliation';
 import './jobs/definitions/detectSubscriptionPriceChanges';
+import './jobs/definitions/runInsightDetectors';
 import './jobs/definitions/jobRunCleanup';
 import './jobs/definitions/dataExportCleanup';
 import './jobs/definitions/auditBufferTrim';
 import './jobs/definitions/pdfImportProcess';
 import './jobs/definitions/simplefinSync';
+import './jobs/definitions/gmailReceiptScan';
+import './jobs/definitions/interestAllocation';
 import { startAllJobs } from './jobs';
 
 const uploadDir = env.csvUploadDir;

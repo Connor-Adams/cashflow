@@ -35,21 +35,45 @@ describe('PeriodInsightBand', () => {
     expect(getByText('$8,000.00')).toBeTruthy() // totalPayments
   })
 
-  it('shows the loaned-out chip when owedBack > 0', () => {
-    const { getByText } = render(<PeriodInsightBand data={base} currency="CAD" />)
-    expect(getByText(/loaned out/i)).toBeTruthy()
-    expect(getByText(/comes back to you/i)).toBeTruthy()
+  // The chip is money owed TO you this period — a reimbursable expense or a
+  // partner's split share. Neither is a loan, so it must not say "loaned out".
+  it('names a reimbursable amount as reimbursable, not a loan', () => {
+    const { getByText, queryByText } = render(<PeriodInsightBand data={base} currency="CAD" />)
+    expect(getByText(/reimbursable · owed to you/i)).toBeTruthy()
     expect(getByText(/\$4,000\.00/)).toBeTruthy()
+    expect(queryByText(/loan/i)).toBeNull()
   })
 
-  it('omits the loaned-out chip when owedBack === 0', () => {
+  it("names a partner split as the partner's share, not a loan", () => {
+    const { getByText, queryByText } = render(
+      <PeriodInsightBand
+        data={{ ...base, owedBack: 1473.07, owedBackBreakdown: { reimbursable: 0, partnerShare: 1473.07 } }}
+        currency="CAD"
+      />,
+    )
+    expect(getByText(/partner's share · owed to you/i)).toBeTruthy()
+    expect(getByText(/\$1,473\.07/)).toBeTruthy()
+    expect(queryByText(/loan/i)).toBeNull()
+  })
+
+  it('names both sources when the period has both', () => {
+    const { getByText } = render(
+      <PeriodInsightBand
+        data={{ ...base, owedBack: 500, owedBackBreakdown: { reimbursable: 200, partnerShare: 300 } }}
+        currency="CAD"
+      />,
+    )
+    expect(getByText(/partner's share \+ reimbursable · owed to you/i)).toBeTruthy()
+  })
+
+  it('omits the owed-to-you chip when owedBack === 0', () => {
     const { queryByText } = render(
       <PeriodInsightBand
         data={{ ...base, owedBack: 0, owedBackBreakdown: { reimbursable: 0, partnerShare: 0 } }}
         currency="CAD"
       />,
     )
-    expect(queryByText(/loaned out/i)).toBeNull()
+    expect(queryByText(/owed to you/i)).toBeNull()
   })
 
   it('shows the friendly range label and currency in the caption', () => {

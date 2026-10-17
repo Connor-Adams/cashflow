@@ -1,3 +1,4 @@
+import { apiBase } from './runtimeConfig'
 import { useEffect, useState } from 'react'
 
 export const FRONTEND_VERSION: string = import.meta.env.VITE_APP_VERSION ?? 'dev'
@@ -11,7 +12,7 @@ export function useBackendVersion(): BackendVersionState {
   const [state, setState] = useState<BackendVersionState>({ status: 'loading' })
 
   useEffect(() => {
-    const base = import.meta.env.VITE_API_BASE ?? ''
+    const base = apiBase()
     const controller = new AbortController()
     fetch(`${base}/api/version`, { signal: controller.signal })
       .then((res) => (res.ok ? (res.json() as Promise<{ version: string }>) : Promise.reject(new Error(`status ${res.status}`))))

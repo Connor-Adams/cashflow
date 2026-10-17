@@ -19,9 +19,11 @@ import { ImportRulesModal } from '../components/rules/ImportRulesModal'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import { useUrlSort } from '../hooks/useUrlSort'
 import { useLabels } from '../lib/useLabels'
-import type { Rule, RuleAction } from '../types/api'
+import { TXN_TYPE_VALUES, RISKY_TXN_TYPE_VALUES } from '@cashflow/shared'
+import type { Rule, RuleAction, TxnTypeValue } from '../types/api'
 
 type AlertSeverity = 'info' | 'warn' | 'critical'
+
 
 const RULES_SORT_FIELDS = ['name', 'matchType', 'priority', 'updatedAt'] as const
 
@@ -97,6 +99,7 @@ export function RulesPage() {
   const [alertSeverity, setAlertSeverity] = useState<AlertSeverity>('info')
   const [alertTitle, setAlertTitle] = useState('')
   const [alertBody, setAlertBody] = useState('')
+  const [newTxnType, setNewTxnType] = useState<TxnTypeValue | ''>('')
   // A set_label row referencing a label that no longer exists must block save
   // and surface a warning (AC #9, editor side).
   const danglingLabelIds = useMemo(
@@ -107,6 +110,23 @@ export function RulesPage() {
     null | 'counting' | { matches: number } | { error: string }
   >(null)
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Guards every preview state write against a component that is already gone.
+  // Both escape hatches matter: the debounce timer can fire after unmount, and
+  // a request that was already in flight can resolve after it. Either one
+  // dispatching setState post-teardown makes React reach for a `window` that
+  // no longer exists.
+  const previewActiveRef = useRef(true)
+
+  useEffect(() => {
+    previewActiveRef.current = true
+    return () => {
+      previewActiveRef.current = false
+      if (previewTimerRef.current) {
+        clearTimeout(previewTimerRef.current)
+        previewTimerRef.current = null
+      }
+    }
+  }, [])
 
   const validateShares = useCallback((pctMe: string, pctPartner: string, splitType: string) => {
     if (splitType !== 'shared') { setShareError(null); return true; }
@@ -133,6 +153,7 @@ export function RulesPage() {
   }, [])
 
   const fetchPreview = useCallback(async (pattern: string, matchKind: string) => {
+    if (!previewActiveRef.current) return
     if (!pattern) { setPreviewState(null); return; }
     setPreviewState('counting')
     try {
@@ -140,9 +161,11 @@ export function RulesPage() {
         pattern,
         matchType: matchKind,
       })
+      if (!previewActiveRef.current) return
       setPreviewState({ matches: result.matches })
       setPatternError(null)
     } catch (e) {
+      if (!previewActiveRef.current) return
       const message = e instanceof Error ? e.message : 'Invalid pattern'
       setPreviewState({ error: message })
       if (matchKind === 'regex') setPatternError(`Invalid pattern: ${message}`)
@@ -262,6 +285,9 @@ export function RulesPage() {
       for (const labelId of newLabelIds) {
         actions.push({ type: 'set_label', payload: { labelId } })
       }
+      if (newTxnType) {
+        actions.push({ type: 'set_txn_type', payload: { txnType: newTxnType } })
+      }
       if (alertEnabled) {
         actions.push({
           type: 'set_alert',
@@ -296,6 +322,7 @@ export function RulesPage() {
       setAlertSeverity('info')
       setAlertTitle('')
       setAlertBody('')
+      setNewTxnType('')
       setShareError(null)
       setPatternError(null)
       setPreviewState(null)
@@ -665,6 +692,39 @@ export function RulesPage() {
                   />
                 </label>
               </div>
+            )}
+          </div>
+
+          {/* Override the detected transaction type. Separate from category:
+            * category says what the money was for, txn_type says whether it
+            * counts as spend at all. */}
+          <div className="col-span-full" data-testid="rule-txn-type-action">
+            <label>
+              Transaction type
+              <select
+                name="txnType"
+                value={newTxnType}
+                onChange={(e) => setNewTxnType(e.target.value as TxnTypeValue | '')}
+              >
+                <option value="">Leave as detected</option>
+                {TXN_TYPE_VALUES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {newTxnType && (RISKY_TXN_TYPE_VALUES as readonly string[]).includes(newTxnType) && (
+              <p
+                className="mt-1 text-sm text-warning"
+                data-testid="txn-type-warning"
+                role="status"
+              >
+                <strong>{newTxnType}</strong> removes matching transactions from
+                your spend totals — the dashboard, the cashflow chart and the tax
+                figures will all change. Saving also re-applies this to matching
+                transactions already imported.
+              </p>
             )}
           </div>
         </div>

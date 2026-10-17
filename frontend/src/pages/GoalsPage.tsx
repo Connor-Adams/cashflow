@@ -1,3 +1,4 @@
+import { apiBase } from '../lib/runtimeConfig'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Badge, Icon } from '@connor-adams/designsystem'
@@ -42,7 +43,7 @@ async function putGoal(
   id: number,
   body: FinancialGoalPatch,
 ): Promise<FinancialGoal> {
-  const base = import.meta.env.VITE_API_BASE ?? ''
+  const base = apiBase()
   const res = await fetch(`${base}/api/goals/${id}`, {
     method: 'PUT',
     credentials: 'include',

@@ -35,7 +35,7 @@ async function seedCorp() {
 test('computeCorpScenario returns a CorpTaxReturn-shape result', async () => {
   const { entity } = await seedCorp();
   const baseline = await ensureCorpBaselineScenario(entity.id, 2025);
-  const result = await computeCorpScenario(baseline.id);
+  const result = (await computeCorpScenario(baseline.id)).result;
   assert.ok(Array.isArray(result.lines));
   assert.ok('netTaxPayable' in result.totals);
 });
@@ -43,8 +43,8 @@ test('computeCorpScenario returns a CorpTaxReturn-shape result', async () => {
 test('computeCorpScenario writes a cache row and reuses it', async () => {
   const { entity } = await seedCorp();
   const baseline = await ensureCorpBaselineScenario(entity.id, 2025);
-  await computeCorpScenario(baseline.id);
-  await computeCorpScenario(baseline.id);
+  (await computeCorpScenario(baseline.id)).result;
+  (await computeCorpScenario(baseline.id)).result;
   const cached = await ScenarioReturn.findAll({ where: { scenarioId: baseline.id } });
   assert.equal(cached.length, 1);
 });
@@ -58,8 +58,8 @@ test('computeCorpScenario recomputes when overrides change', async () => {
     overrides: { 'corp.activeIncome': 400000 },
     assumptions: {}, nextYearId: null, notes: null,
   });
-  const r1 = await computeCorpScenario(fork.id);
+  const r1 = (await computeCorpScenario(fork.id)).result;
   await fork.update({ overrides: { 'corp.activeIncome': 600000 } });
-  const r2 = await computeCorpScenario(fork.id);
+  const r2 = (await computeCorpScenario(fork.id)).result;
   assert.notEqual(r1.factsHash, r2.factsHash);
 });

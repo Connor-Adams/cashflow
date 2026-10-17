@@ -104,16 +104,10 @@ test('GET /api/tax/years returns sorted supported years', async () => {
   assert.deepEqual(res.body.years, sorted, 'years should be sorted ascending');
 });
 
-// TODO: The cached-snapshot test requires seeding an Entity, Accounts, Transactions,
-// TaxSlips, and Carryforwards in a configuration that produces a stable factsHash.
-// The buildPersonalFacts builder also performs FX lookups for non-CAD transactions
-// which adds complexity to the seed. Deferred as an integration concern — the
-// caching logic (TaxReturn.findOne → hash compare → TaxReturn.create/update) is
-// unit-testable independently of the HTTP layer.
-test('GET /api/tax/personal/:year/return: cached snapshot (stub)', async () => {
-  // Minimal stub: without an entity the route returns 404 which is correct
-  // and consistent — the cached-snapshot path requires an entity + facts.
-  // Full coverage is deferred per the plan comment above.
-  const res = await authedNoEntity.get('/api/tax/personal/2025/return');
-  assert.ok(res.status === 404 || res.status === 200, `unexpected status ${res.status}`);
-});
+// The cached-snapshot path (TaxReturn.findOne → key compare →
+// create/update) is covered directly in
+// `backend/src/tax/services/computeEntityReturn.test.ts`, which is where both
+// return handlers now get it from. It used to sit inline in each handler,
+// reachable only through a fully seeded household, and the test here asserted
+// `status === 404 || status === 200` — true of any outcome. Removed rather than
+// left standing: a test that cannot fail reads as coverage and is not.

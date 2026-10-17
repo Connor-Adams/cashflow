@@ -235,6 +235,12 @@ test('reconciliation gate fires when statement does not reconcile', () => {
     reconErrors.length > 0,
     `Expected a reconciliation parseError, got: ${JSON.stringify(result.parseErrors)}`,
   );
+  // The gate's verdict must carry `blocking: true` — that flag, not the message
+  // text, is what makes commitStatementImport refuse the import.
+  assert.ok(
+    reconErrors.every(e => e.blocking === true),
+    `Reconciliation errors must be blocking, got: ${JSON.stringify(reconErrors)}`,
+  );
 });
 
 test('reconciliation gate passes cleanly for a correct statement', () => {
@@ -279,4 +285,143 @@ test('no activity statement emits 0 transactions and no parseErrors', () => {
   assert.equal(result.transactions.length, 0);
   const reconErrors = result.parseErrors.filter(e => e.message.includes('does not reconcile'));
   assert.equal(reconErrors.length, 0, `Unexpected recon errors: ${JSON.stringify(reconErrors)}`);
+});
+
+// ─── Overdrawn statement: negative balances written as "- 130.40" ────────────
+//
+// When the account goes overdrawn RBC renders the balance with the minus sign
+// SEPARATED from the digits by a space. MONEY_RE required the sign glued to the
+// number, so every such cell failed to register as a balance, the rows fell into
+// the no-balance sign-guessing path, and three of them were stored with the
+// wrong sign — including "Investment WS Investments" as an outflow when the
+// balance shows it was money coming IN.
+//
+// Verbatim from "Chequing Statement-6985 2026-08-03.pdf". The balance column is
+// the arbiter: 21.88 → -130.40 → -130.38 → -135.38 → 114.62 → … → 100.75.
+const OVERDRAWN_LINES: PdfLine[] = [
+  mkHeader(' Your RBC personal banking account statement', 1, 744),
+  mkHeader(' From July 2, 2026 to August 3, 2026', 1, 675),
+  mkHeader(' Your account number:   02022-5016985', 1, 637),
+  mkHeader(' RBC Day to Day Banking   02022-5016985', 1, 494),
+  mkHeader(' Your opening balance on July 2, 2026   $21.88', 1, 446),
+  mkHeader(' Your closing balance on August 3, 2026   = $100.75', 1, 404),
+  mkHeader(' Details of your account activity', 1, 360),
+  mkHeader('12013  Date   Description   Withdrawals ($)   Deposits ($)   Balance ($)', 1, 340),
+  mkLine(' Opening Balance   21.88', 1, 326.2, 90),
+  mkLine('6 Jul   Loan interest   152.28   - 130.40', 1, 312.0),
+  mkLine('Auto transfer from Find & Save   0.02   - 130.38', 1, 298.1, 90),
+  mkLine('7 Jul   Overdraft handling fee 1 @ $ 5.00   5.00   - 135.38', 1, 284.2),
+  mkLine('15 Jul   Investment WS Investments   250.00   114.62', 1, 270.0),
+  mkLine('17 Jul   Overdraft interest   0.73   113.89', 1, 256.1),
+  mkLine('20 Jul   Online Banking transfer - 7284   9.14   104.75', 1, 242.2),
+  mkLine('24 Jul   Online Banking transfer - 1989   2,000.00   2,104.75', 1, 228.0),
+  mkLine('e-Transfer sent caelan ws PMF6C7   2,000.00   104.75', 1, 214.1, 90),
+  mkLine('3 Aug   Monthly fee   4.00   100.75', 1, 200.2),
+  mkLine(' Closing Balance   $100.75', 1, 186.0, 90),
+];
+
+test('overdrawn: a negative balance written "- 130.40" is read as a balance', () => {
+  const period = { start: '2026-07-02', end: '2026-08-03' };
+  const { rows, parseErrors } = parseRbcPersonalBankingActivity(OVERDRAWN_LINES, period);
+
+  assert.equal(rows.length, 9, `parseErrors: ${JSON.stringify(parseErrors)}`);
+  assert.deepEqual(
+    rows.map((r) => r.amount),
+    [-152.28, 0.02, -5, 250, -0.73, -9.14, 2000, -2000, -4],
+  );
+});
+
+test('overdrawn: the statement reconciles, so no sign is guessed', () => {
+  // Opening 21.88 + Σ 78.87 = closing 100.75. Getting every sign right is what
+  // makes this hold, so it is the strongest single assertion available.
+  const period = { start: '2026-07-02', end: '2026-08-03' };
+  const { rows, parseErrors } = parseRbcPersonalBankingActivity(OVERDRAWN_LINES, period);
+
+  const sum = rows.reduce((acc, r) => acc + r.amount, 0);
+  assert.equal(Number((21.88 + sum).toFixed(2)), 100.75);
+  assert.deepEqual(parseErrors, []);
+});
+
+test('rbcPersonalBankingParser.parse emits opening + closing statement balances', () => {
+  const result = rbcPersonalBankingParser.parse(CLEAN_MULTI_TXN_LINES, { defaultCurrency: 'CAD' });
+  assert.ok(result.statementBalances, 'expected statementBalances');
+  assert.equal(typeof result.statementBalances.opening, 'number');
+  assert.equal(typeof result.statementBalances.closing, 'number');
+  const sum = result.transactions.reduce((a, t) => a + t.amount, 0);
+  assert.ok(
+    Math.abs(result.statementBalances.opening! + sum - result.statementBalances.closing!) < 0.015,
+  );
+});
+
+// ─── Same-day runs where RBC prints the balance only on the last row ──────────
+//
+// Mirrors "Chequing Statement-6985 2026-10-02.pdf". On 2 Oct three rows share
+// one balance: the transfer and the fee carry no balance, the rebate does.
+// Signing only one balance-less row at a time defaulted the transfer to a
+// credit, so the statement missed reconciliation by exactly 2 × 17.93 and the
+// import was refused.
+const SAME_DAY_RUN_LINES: PdfLine[] = [
+  mkHeader(' Your RBC personal banking account statement', 1, 744),
+  mkHeader(' From September 2, 2026 to October 2, 2026', 1, 675),
+  mkHeader(' Your account number:   02022-5016985', 1, 637),
+  mkHeader(' RBC Day to Day Banking   02022-5016985', 1, 494),
+  mkHeader(' Your opening balance on September 2, 2026   $257.32', 1, 446),
+  mkHeader(' Your closing balance on October 2, 2026   = $160.36', 1, 404),
+  mkHeader(' Details of your account activity', 1, 360),
+  mkLine(' Date   Description   Withdrawals ($)   Deposits ($)   Balance ($)', 1, 340),
+  mkLine(' Opening Balance   257.32', 1, 326, 90),
+  mkLine('8 Sep   Loan interest   189.03   68.29', 1, 312),
+  mkLine('14 Sep   e-Transfer - Autodeposit', 1, 298),
+  mkLine('Connor Douglas Greene Adams', 1, 288, 98),
+  mkLine('bzmsF33cqxG6SFA9zd5L4c2nam1JHAzmYJe   150.00   218.29', 1, 278, 98),
+  mkLine('15 Sep   ATM withdrawal - KF450729   40.00   178.29', 1, 264),
+  mkLine('2 Oct   Online Banking transfer - 4243   17.93', 1, 250),
+  mkLine('Monthly fee   4.00', 1, 236, 90),
+  mkLine('Monthly Fee Rebate   4.00   160.36', 1, 222, 90),
+  mkLine(' Closing Balance   $160.36', 1, 208, 90),
+];
+
+test('same-day run: two balance-less rows before the balance are all signed correctly', () => {
+  const period = { start: '2026-09-02', end: '2026-10-02' };
+  const { rows, parseErrors } = parseRbcPersonalBankingActivity(SAME_DAY_RUN_LINES, period);
+
+  assert.deepEqual(rows.map((r) => r.amount), [-189.03, 150, -40, -17.93, -4, 4]);
+  assert.deepEqual(parseErrors, []);
+});
+
+test('same-day run: the statement reconciles', () => {
+  const result = rbcPersonalBankingParser.parse(SAME_DAY_RUN_LINES, { defaultCurrency: 'CAD' });
+  const sum = result.transactions.reduce((a, t) => a + t.amount, 0);
+  assert.equal(Number((257.32 + sum).toFixed(2)), 160.36);
+});
+
+// Mirrors "Chequing Statement-6985 2026-09-02.pdf": a fee and its rebate with
+// one balance between them. Both sign orders net to zero, so the old best guess
+// stored the fee as a credit and the rebate as a debit — reconciled, but wrong.
+const FEE_REBATE_LINES: PdfLine[] = [
+  mkHeader(' Your RBC personal banking account statement', 1, 744),
+  mkHeader(' From August 3, 2026 to September 2, 2026', 1, 675),
+  mkHeader(' Your account number:   02022-5016985', 1, 637),
+  mkHeader(' RBC Day to Day Banking   02022-5016985', 1, 494),
+  mkHeader(' Your opening balance on August 3, 2026   $287.32', 1, 446),
+  mkHeader(' Your closing balance on September 2, 2026   = $257.32', 1, 404),
+  mkHeader(' Details of your account activity', 1, 360),
+  mkLine(' Date   Description   Withdrawals ($)   Deposits ($)   Balance ($)', 1, 340),
+  mkLine(' Opening Balance   287.32', 1, 326, 90),
+  mkLine('31 Aug   Online Banking transfer - 9067   30.00   257.32', 1, 312),
+  mkLine('2 Sep   Monthly fee   4.00', 2, 700),
+  mkLine('Monthly Fee Rebate   4.00   257.32', 2, 686, 90),
+  mkLine(' Closing Balance   $257.32', 2, 672, 90),
+];
+
+test('fee + rebate pair: the fee is a debit and the rebate a credit', () => {
+  const period = { start: '2026-08-03', end: '2026-09-02' };
+  const { rows, parseErrors } = parseRbcPersonalBankingActivity(FEE_REBATE_LINES, period);
+
+  assert.deepEqual(rows.map((r) => [r.description, r.amount]), [
+    ['Online Banking transfer - 9067', -30],
+    ['Monthly fee', -4],
+    ['Monthly Fee Rebate', 4],
+  ]);
+  assert.deepEqual(parseErrors, []);
 });

@@ -1,6 +1,7 @@
 // backend/src/tax/scenarios/computeScenarioReturn.ts
 import crypto from 'node:crypto';
 import { Scenario, ScenarioReturn } from '../../models';
+import { returnCacheKey } from '../engine/engineVersion';
 
 export interface ComputeScenarioReturnOptions {
   /** If true, skip the cache check and always re-run the engine. */
@@ -15,6 +16,19 @@ export interface ScenarioReturnResult {
   totals: Record<string, unknown>;
   warnings: string[];
   cached: boolean;
+}
+
+/**
+ * A computation plus the facts it ran on.
+ *
+ * The facts are deliberately NOT a field on `ScenarioReturnResult`: six routes do
+ * `res.json({ computed })` with that object, and putting the resolved fact set on it
+ * shipped every transaction amount to the client. A caller that wants the facts asks
+ * for them here, so the wire-shaped result cannot carry them by accident.
+ */
+export interface ScenarioComputation<F> {
+  result: ScenarioReturnResult;
+  facts: F;
 }
 
 /** What an engine (buildT1 / buildT2) yields after computing a return. */
@@ -36,19 +50,21 @@ export async function computeScenarioReturn<F>(
   resolveFacts: (scenarioId: number) => Promise<F>,
   runEngine: (facts: F) => EngineReturn,
   options: ComputeScenarioReturnOptions = {},
-): Promise<ScenarioReturnResult> {
+): Promise<ScenarioComputation<F>> {
   const scenario = await Scenario.findByPk(scenarioId);
   if (!scenario) throw new Error(`scenario id=${scenarioId} not found`);
 
   const facts = await resolveFacts(scenarioId);
-  const factsHash = hashFacts(facts);
+  // Versioned: the facts digest alone would serve a row computed by an older
+  // engine, which is how every rate and slip-box correction stayed invisible.
+  const factsHash = returnCacheKey(hashFacts(facts));
 
   if (!options.force) {
     const cached = await ScenarioReturn.findOne({
       where: { scenarioId, factsHash },
     });
     if (cached) {
-      return {
+      return { facts, result: {
         scenarioId,
         factsHash,
         computedAt: cached.computedAt.toISOString(),
@@ -56,7 +72,7 @@ export async function computeScenarioReturn<F>(
         totals: cached.totals as Record<string, unknown>,
         warnings: cached.warnings as string[],
         cached: true,
-      };
+      } };
     }
   }
 
@@ -85,13 +101,16 @@ export async function computeScenarioReturn<F>(
       });
 
   return {
-    scenarioId,
-    factsHash,
-    computedAt: row.computedAt.toISOString(),
-    lines,
-    totals,
-    warnings,
-    cached: false,
+    facts,
+    result: {
+      scenarioId,
+      factsHash,
+      computedAt: row.computedAt.toISOString(),
+      lines,
+      totals,
+      warnings,
+      cached: false,
+    },
   };
 }
 
@@ -122,8 +141,12 @@ export function synthesizeScenarioReturn(
  * Canonical hash of a facts struct. Identical inputs always produce the same
  * hash. JSON.stringify with a replacer keeps Decimal values (which serialise as
  * objects) stable.
+ *
+ * Exported because the stored cache key is defined as
+ * `returnCacheKey(hashFacts(facts))` — the facts component is half of a
+ * two-part contract, not an internal detail.
  */
-function hashFacts(facts: unknown): string {
+export function hashFacts(facts: unknown): string {
   const canonical = JSON.stringify(facts, replacer);
   return crypto.createHash('sha256').update(canonical).digest('hex');
 }

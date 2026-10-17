@@ -72,6 +72,10 @@ const navSections: NavSection[] = [
       { to: '/rules', label: 'Rules', icon: 'book-open-check' },
       { to: '/merchants/cleanup', label: 'Merchant cleanup', icon: 'tags' },
       { to: '/reports', label: 'Reports', icon: 'bar-chart' },
+      // A Reports tab that also earns a rail entry, same as Tax
+      // (/scenarios/tax) and People (/planned/people) — the Sankey is a
+      // destination, not a sub-view (2026-09-27 full-chain spec).
+      { to: '/reports/cashflow', label: 'Cashflow', icon: 'git-merge' },
       { to: '/vault', label: 'Vault', icon: 'lock', visibilityKey: 'vault' },
       { to: '/monthly-close', label: 'Monthly close', icon: 'check-square' },
       { to: '/enrichment', label: 'Enrichment', icon: 'sparkles' },

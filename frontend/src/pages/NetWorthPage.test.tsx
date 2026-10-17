@@ -1,11 +1,12 @@
 import React from 'react'
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { NetWorthPage } from './NetWorthPage'
 import {
   updateOpeningBalance,
+  useBalanceIntegrity,
   useNetWorthCurrent,
   useNetWorthSeries,
 } from '@/hooks/useNetWorth'
@@ -59,7 +60,30 @@ const loadedSeries = () => ({
   refresh: () => {},
 })
 
+const integrityState = (data: {
+  statementsChecked: number
+  statementMismatches: Array<Record<string, unknown>>
+  undatedOpeningBalances: Array<Record<string, unknown>>
+}) => ({ data, loading: false, error: null, refresh: () => {} })
+
+function renderWithIntegrity(data: Parameters<typeof integrityState>[0]) {
+  vi.mocked(useBalanceIntegrity).mockReturnValue(integrityState(data) as never)
+  render(
+    <MemoryRouter>
+      <NetWorthPage />
+    </MemoryRouter>,
+  )
+}
+
+const cleanIntegrity = () => ({
+  data: { statementsChecked: 0, statementMismatches: [], undatedOpeningBalances: [] },
+  loading: false,
+  error: null,
+  refresh: () => {},
+})
+
 vi.mock('@/hooks/useNetWorth', () => ({
+  useBalanceIntegrity: vi.fn(() => cleanIntegrity()),
   useNetWorthCurrent: vi.fn(() => loadedCurrent()),
   useNetWorthSeries: vi.fn(() => loadedSeries()),
   updateOpeningBalance: vi.fn(),
@@ -224,5 +248,63 @@ describe('NetWorthPage', () => {
       1,
       expect.objectContaining({ openingBalance: 0 }),
     )
+  })
+
+  it('shows no balance warning when every statement reconciles', () => {
+    render(
+      <MemoryRouter>
+        <NetWorthPage />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByText(/disagree with the bank/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/no opening-balance date/i)).not.toBeInTheDocument()
+  })
+
+  describe('balance integrity', () => {
+    afterEach(() => {
+      vi.mocked(useBalanceIntegrity).mockImplementation(() => cleanIntegrity())
+    })
+
+    it('lists statement balance mismatches with computed, statement and delta, and badges the row', () => {
+      renderWithIntegrity({
+        statementsChecked: 3,
+        statementMismatches: [
+          {
+            accountId: 7,
+            accountName: 'Visa',
+            accountType: 'credit_card',
+            statementId: 11,
+            statementDate: '2026-09-03',
+            currency: 'CAD',
+            computedBalance: 36354.86,
+            statementBalance: 22700,
+            delta: 13654.86,
+          },
+        ],
+        undatedOpeningBalances: [],
+      })
+      const alert = screen.getByRole('alert', { name: /statement balances/i })
+      expect(alert).toHaveTextContent(/1 statement balance disagrees with the bank/i)
+      // Account, statement date, computed, statement, difference.
+      for (const cell of ['Visa', '2026-09-03', /36,354\.86/, /22,700\.00/, /13,654\.86/]) {
+        expect(within(alert).getByText(cell)).toBeInTheDocument()
+      }
+      expect(screen.getByText(/Statement mismatch/)).toBeInTheDocument()
+    })
+
+    it('warns about an opening balance with no date and badges the row', () => {
+      renderWithIntegrity({
+        statementsChecked: 0,
+        statementMismatches: [],
+        undatedOpeningBalances: [
+          { accountId: 7, accountName: 'Visa', openingBalance: -13654.86, currency: 'CAD' },
+        ],
+      })
+      const alert = screen.getByRole('alert', { name: /opening balances/i })
+      expect(alert).toHaveTextContent(/1 account has an opening balance with no opening-balance date/i)
+      expect(within(alert).getByText(/Visa/)).toBeInTheDocument()
+      expect(within(alert).getByText(/13,654\.86/)).toBeInTheDocument()
+      expect(screen.getByText(/Opening balance undated/)).toBeInTheDocument()
+    })
   })
 })

@@ -18,7 +18,6 @@ import { enrichmentItemClearConfidence } from '../config/env';
 import { computeReceiptWarnings } from '../util/receiptWarnings';
 import {
   loadCategoryHints,
-  suggestTransactionFields,
   suggestTransactionFieldsTracked,
 } from '../ai/suggestTransaction';
 import { createTrackedSuggestion, markTransactionSuggestionOutcome } from '../ai/suggestionStore';
@@ -28,6 +27,8 @@ import {
 } from '../ai/counterpartyPromotions';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
+import { COUNTERPARTY_ROLES, isCounterpartyRole } from '../contacts/counterpartyRole';
+import { markInterestAllocationPending } from '../contacts/interestAllocationCoordinator';
 import {
   AUDIT_ACTIONS,
   AUDIT_ENTITY_TYPES,
@@ -70,6 +71,7 @@ import { isTransactionStatus } from '../transactions/types';
 import { streamCsvExport } from '../services/transactionsExport';
 import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
 import { isTaxTreatment } from '@cashflow/shared';
+import { assertDistributionDirection } from '../tax/util/distributionDirection';
 
 const router = Router();
 
@@ -426,6 +428,37 @@ function scheduleMemoryFanoutIfNeeded(
   });
 }
 
+/**
+ * Keys whose value decides how much of the line-of-credit interest a person is
+ * carrying, and therefore how the billed interest is apportioned.
+ *
+ * `loadLedgerRows` selects the ledger by `counterpartyContactId` and weights it
+ * by `counterpartyRole`, so moving a transaction to a different person is as
+ * much a retag as changing its role. Everything else on a transaction — notes,
+ * category, split — moves no balance the allocation reads.
+ */
+const LENDING_KEYS = ['counterpartyRole', 'counterpartyContactId'] as const;
+
+/**
+ * Queue a reallocation when a patch retagged lending.
+ *
+ * Called only AFTER the patch has committed — a rejected patch changed no
+ * balance — and always queued, never run: Connor retags loans in bursts, and a
+ * dozen PATCHes must not mean a dozen full household recomputations inside
+ * request handlers. The coordinator collapses the burst into one run. It cannot
+ * throw, so a broken allocator can never make a retag look like it failed.
+ */
+function scheduleInterestReallocationIfNeeded(
+  req: import('express').Request,
+  patch: Record<string, unknown>,
+): void {
+  if (!LENDING_KEYS.some((k) => Object.prototype.hasOwnProperty.call(patch, k))) return;
+  markInterestAllocationPending({
+    householdId: currentAuth(req).household.id,
+    source: 'counterparty-retag',
+  });
+}
+
 const PATCHABLE_KEYS = [
   'categoryOverride',
   'categoryOverrideId',
@@ -439,6 +472,7 @@ const PATCHABLE_KEYS = [
   'ownershipType',
   'ownershipContactId',
   'counterpartyContactId',
+  'counterpartyRole',
   'status',
 ] as const;
 
@@ -514,6 +548,18 @@ export async function applyPatchBody(
             throw err;
           }
           txn.set('counterpartyContactId', contact.id);
+        }
+      } else if (k === 'counterpartyRole') {
+        if (b[k] == null || b[k] === '') {
+          txn.set('counterpartyRole', null);
+        } else if (isCounterpartyRole(b[k])) {
+          txn.set('counterpartyRole', b[k]);
+        } else {
+          const err = new Error(
+            'counterpartyRole must be one of: ' + COUNTERPARTY_ROLES.join(', '),
+          ) as Error & { status?: number };
+          err.status = 400;
+          throw err;
         }
       } else if (k === 'status') {
         if (!isTransactionStatus(b[k])) {
@@ -596,8 +642,10 @@ export async function applyPatchBody(
  * Mirrors ONLY the tax treatment; review state and every other field are left
  * alone (syncing those is the dedicated transfers endpoint's job). Idempotent:
  * no-ops when the patch doesn't touch the treatment, when the row is unlinked,
- * when the sibling is not visible, or when it already matches. Must run inside
- * the same transaction as the primary save so the pair can never half-commit.
+ * when the sibling is not visible or does not link back, or when it already
+ * matches. Refuses (400) a distribution treatment on money moving into the
+ * corp. Must run inside the same transaction as the primary save so the pair
+ * can never half-commit.
  */
 async function syncLinkedLegTaxTreatment(
   req: import('express').Request,
@@ -606,13 +654,18 @@ async function syncLinkedLegTaxTreatment(
   t: import('sequelize').Transaction,
 ): Promise<void> {
   if (!Object.prototype.hasOwnProperty.call(patch, 'taxTreatmentOverride')) return;
+  // A dividend or salary on money moving INTO the corp is refused; the throw
+  // rolls back the primary save too (same rule as the classification bulk route).
+  await assertDistributionDirection(txn, txn.get('taxTreatmentOverride'), { transaction: t });
   const siblingId = txn.linkedTransactionId;
   if (siblingId == null) return;
   const sibling = await Transaction.findOne({
     where: { id: siblingId, ...visibleTransactionWhere(req) },
     transaction: t,
   });
-  if (!sibling) return;
+  // Only a RECIPROCAL sibling is this row's other leg — a one-way link (two
+  // rows both pointing at one) would otherwise overwrite a different pair.
+  if (!sibling || sibling.linkedTransactionId !== txn.id) return;
   const value = txn.get('taxTreatmentOverride');
   if (sibling.get('taxTreatmentOverride') === value) return;
   sibling.set('taxTreatmentOverride', value);
@@ -650,7 +703,7 @@ router.post('/bulk-ai-suggest', aiSuggestLimiter, async (req, res, next) => {
     const results: {
       id: number;
       suggestionId: number;
-      suggestion: Awaited<ReturnType<typeof suggestTransactionFields>>;
+      suggestion: Awaited<ReturnType<typeof suggestTransactionFieldsTracked>>['suggestion'];
     }[] = [];
     for (const id of ids) {
         const txn = await Transaction.findOne({ where: { id, ...visibleTransactionWhere(req) } });
@@ -743,6 +796,7 @@ router.post('/bulk-patch', async (req, res, next) => {
     // Fire memory-fanout AFTER the outer commit so we never schedule a
     // re-enrich for a transaction whose patch was rolled back.
     for (const { snap, txn } of fanoutTargets) scheduleMemoryFanoutIfNeeded(snap, txn);
+    scheduleInterestReallocationIfNeeded(req, patch);
 
     logTransactionEvent('bulk_patch_completed', {
       count: ids.length,
@@ -835,6 +889,7 @@ router.post('/bulk-patch-filter', async (req, res, next) => {
         }),
     );
     for (const { snap, txn } of fanoutTargets) scheduleMemoryFanoutIfNeeded(snap, txn);
+    scheduleInterestReallocationIfNeeded(req, patch);
 
     logTransactionEvent('bulk_patch_filter_completed', {
       updated: updatedIds.length,
@@ -1295,6 +1350,7 @@ router.patch('/:id', async (req, res, next) => {
         }),
     );
     scheduleMemoryFanoutIfNeeded(memSnap, txn);
+    scheduleInterestReallocationIfNeeded(req, b);
     if (hasAiSuggestion) {
       await markTransactionSuggestionOutcome(req, aiSuggestionId, txn);
     }
@@ -2172,6 +2228,12 @@ router.post('/enrichment/backfill', async (req, res, next) => {
       // deterministic pipeline leaves cold. runBackfill still gates this off on
       // dry-run, so a dry-run preview never calls OpenAI.
       ai: true,
+      // Opt-in: also re-ask rows that already carry an `ai`/`embedding` signal,
+      // for when the prior ANSWER is what went stale (better model, corrected
+      // category vocabulary). Off unless the operator asks, because a re-ask
+      // costs a model call per merchant and normally buys nothing. The nightly
+      // scheduler never sets it.
+      forceFallbackReask: Boolean(body.forceFallbackReask),
     };
 
     // Content negotiation: NDJSON streaming only when the client explicitly

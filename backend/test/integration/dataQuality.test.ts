@@ -550,3 +550,64 @@ test('GET /api/data-quality: actionLinks point at routable URLs for each compone
     assert.ok(link.description.length > 0);
   }
 });
+
+test('GET /api/data-quality/balances: statement mismatch + undated opening, household-scoped', async () => {
+  const models = await import('../../src/models');
+  const line = await models.Account.create({
+    householdId: primaryHouseholdId,
+    ownerUserId: primaryUserId,
+    owner: 'me',
+    visibility: 'shared',
+    name: 'Primary credit line',
+    accountType: 'loan',
+    defaultCurrency: 'CAD',
+    openingBalance: '-100',
+    openingBalanceDate: null,
+  } as never);
+  await createTransaction(primaryHouseholdId, line.id, '2026-04-10', null, -50, 'CAD', {
+    createdByUserId: primaryUserId,
+  });
+  // The bank says 50 owed; the undated -100 opening makes the app say 150.
+  await models.AccountStatement.create({
+    householdId: primaryHouseholdId,
+    accountId: line.id,
+    createdByUserId: primaryUserId,
+    visibility: 'shared',
+    periodStart: '2026-04-01',
+    periodEnd: '2026-04-30',
+    openingBalance: '0',
+    closingBalance: '50',
+    currency: 'CAD',
+    sourceFilename: null,
+    notes: null,
+    reconciledAt: null,
+    varianceExplanation: null,
+  } as never);
+
+  const res = await primaryAgent.get('/api/data-quality/balances');
+  assert.equal(res.status, 200);
+  const mismatch = res.body.statementMismatches.find(
+    (m: { accountId: number }) => m.accountId === line.id,
+  );
+  assert.ok(mismatch, `expected a mismatch, got ${JSON.stringify(res.body)}`);
+  assert.equal(mismatch.statementDate, '2026-04-30');
+  assert.equal(mismatch.computedBalance, 150);
+  assert.equal(mismatch.statementBalance, 50);
+  assert.equal(mismatch.delta, 100);
+  assert.ok(
+    res.body.undatedOpeningBalances.some(
+      (u: { accountId: number; openingBalance: number }) =>
+        u.accountId === line.id && u.openingBalance === -100,
+    ),
+  );
+
+  // The full report carries the same section.
+  const full = await primaryAgent.get('/api/data-quality');
+  assert.deepEqual(full.body.balanceIntegrity, res.body);
+
+  // The other household sees none of it.
+  const other = await otherAgent.get('/api/data-quality/balances');
+  assert.equal(other.status, 200);
+  assert.ok(!other.body.statementMismatches.some((m: { accountId: number }) => m.accountId === line.id));
+  assert.ok(!other.body.undatedOpeningBalances.some((u: { accountId: number }) => u.accountId === line.id));
+});

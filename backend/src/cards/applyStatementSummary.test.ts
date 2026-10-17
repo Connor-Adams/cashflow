@@ -110,6 +110,37 @@ test('a strictly-older statement is a no-op (newer-wins)', async () => {
   assert.equal(events[0].expectedDate, '2026-06-11');
 });
 
+test('a newer statement whose balance did not parse clears the old balance instead of pairing it with the new date', async () => {
+  const account = await makeCard('CC-E');
+  // June statement, fully parsed (and later paid).
+  await applyCreditCardStatementSummary({
+    account,
+    header: baseHeader({ periodEnd: '2026-06-24', statementBalance: 11922.9, paymentDueDate: '2026-07-15' }),
+    userId, householdId,
+  });
+  // September statement whose balance failed to parse.
+  await applyCreditCardStatementSummary({
+    account,
+    header: baseHeader({ periodEnd: '2026-09-24', statementBalance: null, paymentDueDate: '2026-10-15' }),
+    userId, householdId,
+  });
+  const liab = await LiabilityAccount.findOne({ where: { accountId: account.id } });
+  assert.equal(liab!.statementDate, '2026-09-24');
+  // The June balance must not be presented as September's bill.
+  assert.equal(liab!.statementBalance, null);
+});
+
+test('re-importing the same statement without a parsed balance keeps the stored balance', async () => {
+  const account = await makeCard('CC-F');
+  await applyCreditCardStatementSummary({ account, header: baseHeader(), userId, householdId });
+  await applyCreditCardStatementSummary({
+    account, header: baseHeader({ statementBalance: null }), userId, householdId,
+  });
+  const liab = await LiabilityAccount.findOne({ where: { accountId: account.id } });
+  assert.equal(liab!.statementDate, '2026-05-14');
+  assert.equal(Number(liab!.statementBalance), 1234.56);
+});
+
 test('non-credit_card account is ignored', async () => {
   const account = await Account.create({
     householdId, name: 'Chequing', accountType: 'checking',

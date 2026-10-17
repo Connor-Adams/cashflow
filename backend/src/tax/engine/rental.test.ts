@@ -24,7 +24,7 @@ test('buildT1 includes net rental income in total income', () => {
     rentalIncome: [{ source: 'Rental unit A', amount: D('24000'), cadAmount: D('24000') }],
     rentalExpenses: [{ source: 'Mortgage interest', amount: D('8000'), cadAmount: D('8000') }],
     medicalExpenses: [],
-    carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('0'), nonCapLoss: D('0'), instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0') },
+    carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('0'), nonCapLoss: D('0'), instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0'), fhsaRoom: D('0') },
     ageAtYearEnd: 40,
   };
   const ret = buildT1(facts, r);
@@ -57,7 +57,7 @@ test('buildT1 net rental income can be negative (rental loss reduces income)', (
     rentalIncome: [{ source: 'Rental', amount: D('10000'), cadAmount: D('10000') }],
     rentalExpenses: [{ source: 'Repairs', amount: D('15000'), cadAmount: D('15000') }],
     medicalExpenses: [],
-    carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('0'), nonCapLoss: D('0'), instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0') },
+    carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('0'), nonCapLoss: D('0'), instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0'), fhsaRoom: D('0') },
     ageAtYearEnd: 40,
   };
   const ret = buildT1(facts, r);

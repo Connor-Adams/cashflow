@@ -49,7 +49,7 @@ export async function projectCorpFactsFromPrevYear(
   // computeCorpScenario serialises Decimal totals to strings via JSON.stringify,
   // but rollCorpCarryforwards calls .toFixed() directly on totals.{gripEnding,
   // cdaEnding,erdtohEnding,nerdtohEnding} — re-hydrate those fields as Decimal.
-  const serialisedTotals = parentReturn.totals as Record<string, unknown>;
+  const serialisedTotals = parentReturn.result.totals as Record<string, unknown>;
   const hydratedTotals = {
     ...serialisedTotals,
     gripEnding: D(String(serialisedTotals.gripEnding ?? '0')),
@@ -66,9 +66,9 @@ export async function projectCorpFactsFromPrevYear(
     parent.year,
     {
       fiscalYear: parentFacts.fiscalYear,
-      lines: parentReturn.lines as never,
+      lines: parentReturn.result.lines as never,
       totals: hydratedTotals as never,
-      warnings: parentReturn.warnings,
+      warnings: parentReturn.result.warnings,
     } as never,
   );
 

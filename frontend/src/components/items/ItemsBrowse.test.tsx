@@ -24,7 +24,7 @@ const sample: ItemRow[] = [
     categoryOverride: null,
     businessUseEffective: true,
     businessUseOverride: null,
-    order: { id: 10, vendor: 'amazon' },
+    order: { id: 10, vendor: 'amazon', cardOwnership: 'known' },
     receipt: { id: 100, date: '2026-05-20', sourceTxnId: 1000 },
   },
   {
@@ -38,7 +38,7 @@ const sample: ItemRow[] = [
     categoryOverride: null,
     businessUseEffective: true,
     businessUseOverride: null,
-    order: { id: 10, vendor: 'amazon' },
+    order: { id: 10, vendor: 'amazon', cardOwnership: 'known' },
     receipt: { id: 100, date: '2026-05-20', sourceTxnId: 1000 },
   },
   {
@@ -52,7 +52,7 @@ const sample: ItemRow[] = [
     categoryOverride: null,
     businessUseEffective: false,
     businessUseOverride: null,
-    order: { id: 11, vendor: 'costco' },
+    order: { id: 11, vendor: 'costco', cardOwnership: 'known' },
     receipt: { id: 101, date: '2026-05-19', sourceTxnId: 1001 },
   },
 ]
@@ -179,5 +179,38 @@ describe('ItemsBrowse', () => {
     expect(
       screen.getAllByRole('heading', { name: /Unmatched purchases/ }).length,
     ).toBeGreaterThan(0)
+  })
+
+  describe('card ownership badges', () => {
+    it('badges an item whose order card is unverified (no last4 at all)', async () => {
+      const unverified: ItemRow = {
+        ...sample[0],
+        id: 200,
+        title: 'NoLast4Widget',
+        order: { ...sample[0].order, cardOwnership: 'unknown' },
+      }
+      vi.mocked(api.getJson).mockResolvedValue({ items: [unverified], nextCursor: null })
+      render(<ItemsBrowse filters={{}} onOpenItem={() => {}} />)
+      expect(await screen.findByText(/unverified card/i)).toBeInTheDocument()
+    })
+
+    it('badges an item whose order card is foreign', async () => {
+      const foreign: ItemRow = {
+        ...sample[0],
+        id: 201,
+        title: 'ForeignCardOrderWidget',
+        order: { ...sample[0].order, cardOwnership: 'foreign' },
+      }
+      vi.mocked(api.getJson).mockResolvedValue({ items: [foreign], nextCursor: null })
+      render(<ItemsBrowse filters={{}} onOpenItem={() => {}} />)
+      expect(await screen.findByText(/not your card/i)).toBeInTheDocument()
+    })
+
+    it('renders no card-ownership badge for a known card', async () => {
+      render(<ItemsBrowse filters={{}} onOpenItem={() => {}} />)
+      await waitFor(() => expect(screen.getByText(/^A$/)).toBeInTheDocument())
+      expect(screen.queryByText(/unverified card/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/not your card/i)).not.toBeInTheDocument()
+    })
   })
 })

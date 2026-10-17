@@ -18,7 +18,17 @@ type SurplusOverride = {
   } | null
 }
 
-function mockSafe(value: number, isNegative = false, surplus?: SurplusOverride) {
+type IncomeOverride = { recurringIncome?: number; ownerDrawIncome?: number }
+
+function mockSafe(
+  value: number,
+  isNegative = false,
+  surplus?: SurplusOverride,
+  income?: IncomeOverride,
+  staleCreditCardStatements: string[] = [],
+) {
+  const recurringIncome = income?.recurringIncome ?? 0
+  const ownerDrawIncome = income?.ownerDrawIncome ?? 0
   return {
     data: {
       currency: 'CAD',
@@ -29,11 +39,14 @@ function mockSafe(value: number, isNegative = false, surplus?: SurplusOverride) 
       isNegative,
       breakdown: {
         currentCash: 3000,
-        expectedIncome: 0,
+        expectedIncome: recurringIncome + ownerDrawIncome,
+        recurringIncome,
+        ownerDrawIncome,
         upcomingRequiredExpenses: 800,
         requiredSavingsContributions: 200,
         expectedCreditCardPayments: 300,
         minimumBuffer: 100,
+        staleCreditCardStatements,
       },
       settings: {
         minimumCashBuffer: '100.0000',
@@ -307,6 +320,86 @@ describe('SafeToSpendTile', () => {
       )
       expect(screen.getByText(/committed past your cash on hand/i)).toBeInTheDocument()
       expect(screen.queryByText(/surplus/i)).not.toBeInTheDocument()
+    })
+  })
+
+  it('flags a stale card statement on the credit-card payments line, and only then', async () => {
+    const openBreakdown = async (stale: string[]) => {
+      vi.resetModules()
+      vi.doMock('@/hooks/useSafeToSpend', () => ({
+        useSafeToSpend: () => mockSafe(1000, false, undefined, undefined, stale),
+      }))
+      const { SafeToSpendTile: T } = await import('./SafeToSpendTile')
+      const view = render(<MemoryRouter><T /></MemoryRouter>)
+      fireEvent.click(screen.getByText('Show breakdown'))
+      return view
+    }
+    const fresh = await openBreakdown([])
+    expect(screen.queryByText(/statement is stale/i)).not.toBeInTheDocument()
+    fresh.unmount()
+    await openBreakdown(['WS Visa'])
+    expect(screen.getByText('(statement is stale: WS Visa)')).toBeInTheDocument()
+  })
+
+  it('breaks expected income into its paycheck and owner-draw sources', () => {
+    vi.resetModules()
+    vi.doMock('@/hooks/useSafeToSpend', () => ({
+      useSafeToSpend: () =>
+        mockSafe(4533.33, false, undefined, {
+          recurringIncome: 2000,
+          ownerDrawIncome: 933.33,
+        }),
+    }))
+    return import('./SafeToSpendTile').then(({ SafeToSpendTile: T }) => {
+      render(
+        <MemoryRouter>
+          <T />
+        </MemoryRouter>,
+      )
+      fireEvent.click(screen.getByText('Show breakdown'))
+      expect(screen.getByText('Expected income')).toBeInTheDocument()
+      expect(screen.getByText('Recurring income')).toBeInTheDocument()
+      expect(screen.getByText('Owner draws')).toBeInTheDocument()
+      // Sub-lines render unsigned; the parent total carries the '+'.
+      expect(screen.getByText('$2,000.00')).toBeInTheDocument()
+      expect(screen.getByText('$933.33')).toBeInTheDocument()
+      expect(screen.getByText('+$2,933.33')).toBeInTheDocument()
+    })
+  })
+
+  it('hides an income sub-line that contributes nothing', () => {
+    vi.resetModules()
+    vi.doMock('@/hooks/useSafeToSpend', () => ({
+      useSafeToSpend: () =>
+        mockSafe(3933.33, false, undefined, { ownerDrawIncome: 933.33 }),
+    }))
+    return import('./SafeToSpendTile').then(({ SafeToSpendTile: T }) => {
+      render(
+        <MemoryRouter>
+          <T />
+        </MemoryRouter>,
+      )
+      fireEvent.click(screen.getByText('Show breakdown'))
+      expect(screen.getByText('Owner draws')).toBeInTheDocument()
+      expect(screen.queryByText('Recurring income')).not.toBeInTheDocument()
+    })
+  })
+
+  it('shows no income sub-lines when there is no expected income at all', () => {
+    vi.resetModules()
+    vi.doMock('@/hooks/useSafeToSpend', () => ({
+      useSafeToSpend: () => mockSafe(1600),
+    }))
+    return import('./SafeToSpendTile').then(({ SafeToSpendTile: T }) => {
+      render(
+        <MemoryRouter>
+          <T />
+        </MemoryRouter>,
+      )
+      fireEvent.click(screen.getByText('Show breakdown'))
+      expect(screen.getByText('Expected income')).toBeInTheDocument()
+      expect(screen.queryByText('Owner draws')).not.toBeInTheDocument()
+      expect(screen.queryByText('Recurring income')).not.toBeInTheDocument()
     })
   })
 })

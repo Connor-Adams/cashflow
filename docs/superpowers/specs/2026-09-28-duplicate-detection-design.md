@@ -1,0 +1,238 @@
+# Duplicate Detection and Supersession — retroactively, without deleting anything
+
+**Date:** 2026-09-28
+**Status:** Implemented 2026-09-29 — detector module, script wrapper, prod verification below
+**Type:** Data integrity, backend
+**Part:** 1b of 7 — **scoped to detect-and-report** (2026-09-28)
+
+## Scope decision
+
+This part was cut back from "detect, supersede and exclude" to **detect and report**.
+
+Dropped: the `superseded_by_transaction_id` / `superseded_at` columns, the migration,
+the `rollbackImportBatch.ts` change, and the enumerated exclusion sweep across the 91
+non-test files that query `Transaction` — which this spec itself called "the bulk of
+this part's work".
+
+Why: the T1 exposure to duplicates is **$20.73** (the duplicated RAILWAY row
+11748/11559 inflating the business-expense total that feeds L13500). The $28,848.18
+phantom on account 13 is corp-side — T2, out of scope for this set. The detector's
+real value is keeping part 3's dollar estimates honest and giving part 4 a list to
+work, and neither needs supersession state.
+
+What remains: a period-bounded detector module that classifies pairs as
+**certain** or **for review**, exposed so part 3 can call it as a gap type and part 4
+can run it once. Connor clears the 25 pairs by hand.
+
+Reinstate supersession if duplicates recur after part 4 — the fingerprint divergence
+below says they probably will, and at that point permanence earns its cost.
+
+The sections below describe the full design; treat the supersession half as deferred,
+not rejected.
+
+**The scope-down also removes a hazard.** With supersession, `import/dedupExisting.ts`
+would have had to be taught not to match a superseded row — otherwise a legitimate
+re-import is silently dropped as a duplicate of a row that is no longer counted. That
+file was missing from this spec's exclusion list, along with ~18 other money-summing
+call sites (`summary/aggregateDashboard.ts`, `statements/computeReconciliation.ts`,
+`forecast/assembleForecast.ts`, `fx/currencyExposure.ts`,
+`tax/services/shareholderLoanBalance.ts`, `routes/sankey.ts`, `routes/reporting.ts`,
+`services/transactionsExport.ts`, `portfolio/dividendMatcher.ts` among them) — 86
+non-test files call `Transaction.findAll/findOne/sum/count`. Detect-and-report
+touches none of them.
+
+## Problem
+
+25+ pairs share `(account_id, date, amount)` in 2026 alone. The table below names
+18 of them; it is illustrative, not exhaustive, and the detector is what produces
+the full list.
+
+| Account | Pairs | Impact |
+|---|---|---|
+| 13 corp Investing | 2764/3329 (+7,348.18), 2767/3330 (+7,000), 2746/3321 (+7,500), 2757/3322 (+7,000) | **$28,848.18 phantom corp inflow** |
+| 14 personal WS Chequing | 12 pairs, Feb–Mar | from two re-imports of the same statements |
+| 16 corp Save | 971/12178 (−2,000 ×2, same linked counterpart) | derived balance of **−1,996.79 on a savings account** |
+| 1 Amex Reserve | 11748/11559 (−20.73 RAILWAY) | inflates the business-expense total feeding L13500 |
+
+Several personal legs point at the **same** `linked_transaction_id` (2863/3315 →
+5499, 2846/3302 → 5507, 2848/3304 → 5509). Two legs sharing one counterpart is
+structurally invalid, and that is what makes a confident auto-merge rule possible.
+
+### Why the existing dedup did not catch them
+
+`dedupExisting.ts:136,161-185` already queries **all** existing rows in the account
+by `sourceIdentityFingerprint` — it is genuinely cross-batch, at import time. So
+these pairs exist because the two runs produced **different fingerprints for the
+same row**. That file documents the cause class itself:
+
+> the identity fingerprint hashes `merchantRaw`: any change to a parser's text
+> output (a fixed line wrap, a new normalisation rule, a reworded memo) gives every
+> previously imported row a "new" fingerprint, so the tiers below find no candidates
+> at all and a re-import inserts duplicates.
+
+Wealthsimple relabels descriptions between statement cycles. So the honest
+expectation is that **this is not fully preventable** for sources without a stable
+`sourceReference`, and a retroactive detector is a permanent need rather than a
+one-off cleanup. This spec therefore does not promise to eliminate the divergence —
+it promises to detect its consequences repeatedly and cheaply.
+
+## Decisions
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Classification | Pairs are reported **certain** or **for review**, using the rule below | Connor's call was auto-merge where clear, review otherwise. As scoped this part decides the classification and acts on neither. |
+| Everything else | Review queue | Nothing silently disappears from a financial ledger. |
+| Merge mechanism | *(Deferred)* Mark superseded; never `DELETE` | Reversible, auditable, and a rollback stays coherent. Not built in this part — nothing merges. |
+| Marker shape | *(Deferred)* **A column pair** — `superseded_by_transaction_id` + `superseded_at` — not a new `status` value | `Transaction.status` is `pending \| posted \| cleared` with `validate: { isIn: [TRANSACTION_STATUSES] }` (`models/Transaction.ts:180-187`, `transactions/types.ts:1`), and `dedupExisting.promotePending` branches on `status === 'pending'`. A status value also carries no pointer to the surviving row, which the "restore what it found" rollback requirement needs. |
+| Exclusion mechanism | *(Deferred)* **A shared `notSuperseded` where-fragment**, applied explicitly at the sites that must exclude | There is no `defaultScope` on any model (`grep defaultScope models/` → zero hits) and 91 non-test files query `Transaction`. A `defaultScope` is a one-line change with a very large blast radius, and it would also hide superseded rows from the transaction list, which must still show them. |
+| Surface | A **module**, plus a script wrapper | Part 3 needs it callable per request as a gap type; part 4 needs it as an operation. A script-only build blocks part 3. |
+| Detector scope | Bounded to a period | Part 3 calls it on every T1 request; an unbounded whole-ledger scan there is a latency problem. |
+
+### "Structurally certain" — the classification rule
+
+A pair is **certain** (and, once supersession is reinstated, auto-mergeable) only
+when **all** hold:
+
+1. Identical `account_id`, `date`, and `amount`.
+2. **And** both rows carry the same non-null `linked_transaction_id` — two legs
+   cannot share one counterpart, as with 2863/3315 → 5499.
+3. Neither row has been manually edited: `business_override` false,
+   `tax_treatment_override` null **and** no inherited `Category.taxTreatment` and no
+   legacy snake_case `finalCategory` classifying it (the override is only one of
+   three classification routes — `buildPersonalFacts.ts:139-147` — so testing the
+   override alone would auto-merge a categorised row), `final_split_type` equal to
+   its column default (every Transaction has one, `models/Transaction.ts:72`), and
+   no receipt joined via `Transaction.hasMany(Receipt, { foreignKey:
+   'transaction_id', as: 'receipts' })` (`models/index.ts:507-508`).
+
+**An earlier draft had a second certainty criterion keyed on the `import_batch`
+period prefix. It is withdrawn: the prefix is not a period.** Both
+`parseStatementFile.ts:500-503` and `runImport.ts:321-325` build the default label
+from `new Date()`:
+
+```ts
+const importBatch =
+  (opts.batchLabel && String(opts.batchLabel).trim()) ||
+  `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')} ${account.shortCode || account.name}`;
+```
+
+So `2026-05 WK3DD9X35CAD` means *imported in May*, not *covers May*. Two imports in
+the same calendar month produce an identical label, so that duplicate class would be
+missed entirely; and only the CSV filename path
+(`parseStatementFilename.ts:15`, `CardName_YYYY_MM.csv`) yields a real period, so two
+ingest paths emit the same `"<YYYY-MM> <token>"` shape with opposite meanings.
+
+Consequence: **the 12 account-14 pairs are classified for review**, unless they
+independently satisfy criterion 2. Note the impact table's largest class — account
+13's four pairs, and the Amex RAILWAY pair — is not stated to share a
+`linked_transaction_id`, and a merchant charge would not normally be transfer-linked
+at all, so those are likely for-review too — confirm against prod before the implementation
+plan is written. Classifying the account-14 pairs for review is the correct outcome
+regardless: they are the class the withdrawn criterion would have merged on a false
+premise.
+
+### CONFIRMED against prod, 2026-09-29 — and the guess above was wrong twice
+
+Read-only query over `transactions` for 2026, replicating the rule below:
+
+| Verdict | Groups | Surplus rows | Ledger overstates by |
+|---|---|---|---|
+| **certain** | 12 | 12 | **$17,722.35** net |
+| for review | 22 | 22 | $3,627.76 net |
+| *(of the certain, account 13 alone)* | 4 | 4 | **$28,848.18** |
+
+Two corrections:
+
+1. **All four account-13 pairs DO share one `linked_transaction_id`** — they are
+   *certain*, not for review. The largest single class, the $28,848.18 phantom corp
+   inflow, is the most confidently detectable one, not the least.
+2. **Eight of the twelve account-14 pairs also share one link**, so they are certain
+   too. The paragraph above predicted the opposite for both classes. The withdrawn
+   `import_batch` criterion was still right to go: it would have merged the *other*
+   22 groups, which include the $6–$14 recurring-fee shapes.
+
+**The certain pairs are structurally duplicates, verified rather than assumed.** Each
+group's counterpart carries the negation of **one** leg (e.g. txns 2764 and 3329 at
++7,348.18 both point at txn 2937 at −7,348.18). A legitimate two-into-one
+aggregation would show a counterpart at twice the leg amount; none does. Every one of
+the 24 rows is categorised `Transfer` whose `taxTreatment` is `none`, carries the
+default split, has no receipt and no override — so none is disqualified by criterion
+3, and the certainty verdict survives contact with the real data.
+
+The count is **34 groups in 2026**, not the "25+" this spec estimated.
+
+The Amex RAILWAY pair (11559/11748, −$20.73 — the one with actual T1 exposure) does
+**not** share a link, and is correctly for-review.
+
+Explicitly **not** certain: two identical amounts on one day from one import
+(the recurring $6.00 RBC monthly fees, equal staking rewards, two genuine $1,000
+e-transfers). `fuzzyDedupInvestmentActivity.ts:15-23` reasons about exactly this —
+"two legitimate identical activities within the window (recurring buys, equal
+staking rewards)" are distinct events.
+
+### What "superseded" excludes
+
+A superseded Transaction is excluded from: every tax computation
+(`buildPersonalFacts`, `buildCorpFacts`), derived-balance arithmetic
+(`networth/balanceAtDate.ts`, `networth/aggregate.ts`), the classification queue
+(`routes/tax.ts:54-63`), and spend and income rollups
+(`reporting/cashflowTotals.ts`, `cashflow/safeToSpend.ts`, `budgets/*`).
+
+It **remains** visible in the transaction list, flagged, and remains attached to its
+`ImportHistory`.
+
+*(Deferred with the supersession half. When it is reinstated, the implementation
+plan must enumerate the call sites it edits — that exclusion is the bulk of that
+work, not an afterthought.)*
+
+### Rollback
+
+`rollbackImportBatch.ts` must clear `superseded_by_transaction_id` on any row
+pointing at a transaction the rollback deletes — otherwise rolling back the batch
+that contained the *surviving* row leaves the superseded row pointing at a dead id
+and silently excluded forever. This needs a step in `executeRollback`, a line in
+`previewRollback`'s impact summary, and a field on `ExecuteRollbackResult`. That file
+is 20 KB with a TOCTOU re-preview inside the SQL transaction; this is not a one-liner.
+
+### Primitives check
+
+Duplicate suspicion is **derived** — no table, no column, no migration, nothing
+persisted. As scoped this part is a query and a report.
+
+*(Deferred design, if supersession is later reinstated: two nullable columns on
+**Transaction**, an existing primitive — one migration, two `addColumn` calls,
+nullable with no default, so no backfill and no table rewrite on Postgres.)*
+
+## Scope
+
+**In:** a new detector module under `backend/src/import/`, exposed so part 3 can call
+it per request, plus a script wrapper following
+`backend/scripts/migrate-ws-deposit-activities.ts`.
+
+**Out, per the scope decision at the top of this file:** `models/Transaction.ts`, the
+migration, `rollbackImportBatch.ts`, and the exclusion sweep. The sections below that
+describe them are the deferred design, not this part's work.
+
+**Out:** the fingerprint divergence itself — diagnosed above as largely
+unpreventable, and explicitly **not** on this part's critical path. Also out:
+clearing Connor's actual 25 pairs (part 4).
+
+## Testing
+
+Backend `node:test` via `tsx`, colocated.
+
+- A pair is classified **certain** on the shared-`linked_transaction_id` shape (real
+  prod pairs 2863/3315, 971/12178) and **for review** on the ambiguous shapes (two
+  $6.00 RBC fees on one day).
+- A row classified only by an inherited category, with a null override, is reported
+  **for review**, never certain.
+- The detector is period-bounded: a call for 2026 does not scan 2023.
+- The detector returns pairs classified **certain** or **for review**, and changes
+  no row.
+- It is callable from part 3's completeness path within that part's latency budget.
+
+*(Deferred, with supersession: exclusion from `buildPersonalFacts`, derived-balance
+arithmetic and the classification queue while remaining in the transaction list; and
+rollback clearing a dangling `superseded_by_transaction_id`.)*
+
+Build order: **0 → 1a → 4 (steps 1, 2, 7) → 2 → 1b → 3 → 4 (rest) → 5**. Part 1c is **cut**.

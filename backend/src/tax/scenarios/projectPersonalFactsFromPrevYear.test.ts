@@ -1,8 +1,10 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
+import { D } from '../util/decimal';
 import {
   Account, Entity, Household, Scenario, Transaction,
+  Carryforward,
 } from '../../models';
 import { projectPersonalFactsFromPrevYear } from './projectPersonalFactsFromPrevYear';
 import { ensureBaselineScenario } from './resolveScenario';
@@ -94,4 +96,31 @@ test('rejects when scenario kind is not projection_root', async () => {
   const { entity } = await seedPersonalWithEmployment();
   const yearN = await ensureBaselineScenario(entity.id, 2025);
   await assert.rejects(() => projectPersonalFactsFromPrevYear(yearN.id), /projection_root/i);
+});
+
+test('fhsaRoom comes from the roll, like every other carryforward', async () => {
+  // Found in review. Every sibling field reads `cfRows` — the rows the roll at the top
+  // of this function just wrote for the parent year — but `fhsaRoom` alone read
+  // `parentFacts.carryforwards.fhsaRoom`, which is the parent's INPUT room, a year too
+  // early. So a projection discarded the new year's annual limit plus any carried-
+  // forward unused room, and if the lifetime cap had been reached in the parent year
+  // it kept deducting FHSA anyway.
+  const { entity } = await seedPersonalWithEmployment();
+  const yearN = await ensureBaselineScenario(entity.id, 2025);
+  const yearN1 = await Scenario.create({
+    parentId: yearN.id, householdPlanId: null,
+    entityId: entity.id, year: 2026, name: 'Projection 2026', kind: 'projection_root',
+    overrides: {}, assumptions: {}, nextYearId: null, notes: null,
+  });
+  const facts = await projectPersonalFactsFromPrevYear(yearN1.id);
+
+  const rolled = await Carryforward.findOne({
+    where: { entityId: entity.id, kind: 'fhsa_room', asOfYear: 2025 },
+  });
+  assert.ok(rolled, 'the roll should have written an fhsa_room row for 2025');
+  assert.equal(
+    facts.carryforwards.fhsaRoom.toFixed(4),
+    D(rolled.amount as unknown as string).toFixed(4),
+    'the projection must use the rolled room, not the parent year\'s own input room',
+  );
 });

@@ -1,3 +1,4 @@
+import { apiBase } from '../lib/runtimeConfig'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getJson } from '@/lib/api'
 import type {
@@ -78,7 +79,7 @@ export function useNotifications(): {
     setUnreadCount((c) => Math.max(0, c - 1))
     try {
       await fetch(
-        `${import.meta.env.VITE_API_BASE ?? ''}/api/notifications/${id}/read`,
+        `${apiBase()}/api/notifications/${id}/read`,
         { method: 'POST', credentials: 'include' },
       )
     } catch {
@@ -95,7 +96,7 @@ export function useNotifications(): {
     setUnreadCount(0)
     try {
       await fetch(
-        `${import.meta.env.VITE_API_BASE ?? ''}/api/notifications/mark-all-read`,
+        `${apiBase()}/api/notifications/mark-all-read`,
         { method: 'POST', credentials: 'include' },
       )
     } catch {

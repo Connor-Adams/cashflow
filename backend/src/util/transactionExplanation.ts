@@ -50,7 +50,7 @@ export interface AcceptedAiSuggestion {
   status: 'accepted' | 'edited';
   model: string | null;
   /**
-   * Output JSON shape from suggestTransactionFields. We only use the fields
+   * Output JSON shape from suggestTransactionFieldsTracked. We only use the fields
    * we care about; everything else is ignored.
    */
   output: {

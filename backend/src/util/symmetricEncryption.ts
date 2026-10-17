@@ -7,7 +7,7 @@
  * Ciphertext envelope (base64-encoded): version(1) || iv(12) || tag(16) || cipher
  *   - version: 0x01 — lets us rotate the algorithm later without breaking old rows
  */
-import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'crypto';
 
 const VERSION_BYTE = 0x01;
 const IV_LEN = 12;
@@ -51,6 +51,24 @@ function getKey(): Buffer {
   }
   cachedKey = decodeKey(raw);
   return cachedKey;
+}
+
+/**
+ * Keyed blind index (HMAC-SHA256 hex) of a value, for columns that must stay
+ * encrypted at rest yet still support equality lookups and UNIQUE constraints.
+ *
+ * `encryptSecret` uses a fresh random IV per call, so its output cannot carry an
+ * index. A deterministic digest can — but a BARE digest of a low-entropy value
+ * (a bank account number is a handful of digits) is reversible by exhaustive
+ * search, which would hand back the plaintext the encryption exists to hide.
+ * Keying the digest with the same secret removes that: the value is still
+ * deterministic for equality, and useless to anyone holding only the database.
+ *
+ * Callers must treat the output as opaque and derive it only through this
+ * function, so a key rotation reaches every producer at once.
+ */
+export function blindIndex(plaintext: string): string {
+  return createHmac('sha256', getKey()).update(plaintext, 'utf8').digest('hex');
 }
 
 export function encryptSecret(plaintext: string): string {

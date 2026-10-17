@@ -8,11 +8,20 @@ import { buildCorpFacts } from '../tax/builders/buildCorpFacts';
 import { buildT1 } from '../tax/engine/t1';
 import { buildT2 } from '../tax/engine/t2';
 import { ratesFor, supportedYears, RateTableMissingError } from '../tax/engine/brackets';
-import { factsHash } from '../tax/util/factsHash';
+import { computeEntityReturn } from '../tax/services/computeEntityReturn';
+import { assertRatesUsable, ProjectedRatesError } from '../tax/engine/rateProvenance';
+import { buildCompletenessReport } from '../tax/completeness/buildCompletenessReport';
+import { buildOutlook } from '../tax/forward/buildOutlook';
 import type { CorpFiscalYear } from '../tax/engine/types';
 import { rollPersonalCarryforwards } from '../tax/services/rollPersonalCarryforwards';
 import { buildReconciliationReport } from '../tax/reconciliation/buildReport';
 import { computeShareholderLoanBalance } from '../tax/services/shareholderLoanBalance';
+import { resolvePersonalEntity } from '../tax/services/personalEntityOwner';
+import { parseSlipAmount } from '../tax/util/parseSlipAmount';
+import { assertDistributionDirection, entityKindsFor } from '../tax/util/distributionDirection';
+import { apiReadLimiter, apiWriteLimiter } from './apiRateLimit';
+import type { SlipType, TaxSlipBoxValues } from '../models/TaxSlip';
+import { isTaxTreatment, type TaxTreatment } from '@cashflow/shared';
 
 const router = Router();
 
@@ -59,6 +68,10 @@ router.get('/classification-queue', async (req, res, next) => {
         txnType: 'transfer',
         linkedTransactionId: { [Op.ne]: null },
         taxTreatmentOverride: overrideWhere,
+        // Money ARRIVING only. A personal→corp leg is a loan or an injection of
+        // capital; listing it let an injection be classified as a dividend.
+        // Mirrors detectUnclassifiedCorpDraws' cadAmount > 0.
+        amount: { [Op.gt]: 0 },
       },
     });
 
@@ -84,6 +97,7 @@ router.get('/classification-queue', async (req, res, next) => {
         date: { [Op.between]: [start, end] },
         txnType: 'income',
         taxTreatmentOverride: overrideWhere,
+        amount: { [Op.gt]: 0 },
       },
     });
 
@@ -113,6 +127,121 @@ router.get('/classification-queue', async (req, res, next) => {
         corp: slim(d.corp as Transaction),
       })),
       payroll: payroll.map(slim),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/tax/classification-queue/bulk
+// Body: { ids: number[], taxTreatmentOverride: TaxTreatment | null }
+// Clears a slice of the classification queue in one request.
+//
+// A dedicated endpoint rather than N calls to PATCH
+// /api/transfers/:id/tax-treatment: the queue is worked in batches of dozens
+// (the 2026 corp-draw backlog was 50+ rows), and N independent requests can
+// half-apply — leaving the T1 and T2 sides of the same draws disagreeing
+// about what the money was. One transaction means the batch either lands or
+// does not.
+//
+// Response carries the updated rows so the caller can patch its list in
+// place; a refetch would re-run the whole queue derivation and lose the
+// user's scroll position mid-batch.
+router.post('/classification-queue/bulk', apiWriteLimiter, async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const body = (req.body || {}) as { ids?: unknown; taxTreatmentOverride?: unknown };
+    if (!Array.isArray(body.ids) || body.ids.length === 0) {
+      res.status(400).json({ error: 'ids must be a non-empty array' });
+      return;
+    }
+    if (body.ids.length > 200) {
+      res.status(400).json({ error: 'At most 200 ids per request' });
+      return;
+    }
+    const ids: number[] = [];
+    for (const raw of body.ids) {
+      const id = typeof raw === 'number' ? raw : Number(raw);
+      if (!Number.isInteger(id) || id < 1) {
+        res.status(400).json({ error: 'Each id must be a positive integer' });
+        return;
+      }
+      if (!ids.includes(id)) ids.push(id);
+    }
+
+    const raw = body.taxTreatmentOverride;
+    let treatment: TaxTreatment | null;
+    if (raw === null || raw === undefined || raw === '') {
+      treatment = null;
+    } else if (isTaxTreatment(raw)) {
+      treatment = raw;
+    } else {
+      res.status(400).json({ error: 'invalid taxTreatment' });
+      return;
+    }
+
+    const entityKind = await entityKindsFor(household.id);
+    const written = await sequelize.transaction(async (t) => {
+      const rows: Transaction[] = [];
+      const reviewedAt = new Date();
+      for (const id of ids) {
+        // visibleTransactionWhere is the household + visibility gate, so a row
+        // from another household simply isn't found — and throwing here rolls
+        // back every row already written in this transaction.
+        const txn = await Transaction.findOne({
+          where: { id, ...visibleTransactionWhere(req) },
+          transaction: t,
+        });
+        if (!txn) {
+          const err = new Error(`Transaction ${id} not found`) as Error & { status?: number };
+          err.status = 404;
+          throw err;
+        }
+        // Throwing rolls back the whole batch, like an unknown id.
+        await assertDistributionDirection(txn, treatment, { kinds: entityKind });
+        txn.set('taxTreatmentOverride', treatment);
+        txn.set('reviewedAt', reviewedAt);
+        await txn.save({ transaction: t });
+        rows.push(txn);
+
+        // Both legs of a transfer pair must carry the same treatment — the T1
+        // and T2 builders read whichever leg they own, and a one-sided write
+        // makes the personal return disagree with the corp return.
+        if (txn.linkedTransactionId != null) {
+          const sibling = await Transaction.findOne({
+            where: { id: txn.linkedTransactionId, ...visibleTransactionWhere(req) },
+            transaction: t,
+          });
+          // Only a RECIPROCAL sibling is this row's other leg. A one-way link
+          // (two rows both pointing at one) would otherwise overwrite the
+          // treatment of a different pair.
+          if (sibling && sibling.linkedTransactionId === txn.id
+            && sibling.taxTreatmentOverride !== treatment) {
+            sibling.set('taxTreatmentOverride', treatment);
+            sibling.set('reviewedAt', reviewedAt);
+            await sibling.save({ transaction: t });
+            rows.push(sibling);
+          }
+        }
+      }
+      return rows;
+    });
+
+    const acctIds = Array.from(new Set(written.map((r) => r.accountId)));
+    const accts = acctIds.length ? await Account.findAll({ where: { id: acctIds } }) : [];
+    const acctName = new Map(accts.map((a) => [a.id, a.name]));
+    res.json({
+      updated: written.map((r) => ({
+        id: r.id,
+        date: r.date,
+        amount: r.amount,
+        currency: r.currency,
+        merchantClean: r.merchantClean,
+        accountId: r.accountId,
+        accountName: acctName.get(r.accountId) ?? null,
+        txnType: r.txnType,
+        taxTreatmentOverride: r.taxTreatmentOverride,
+      })),
     });
   } catch (e) {
     next(e);
@@ -358,16 +487,16 @@ router.delete('/entities/:id/spouse', async (req, res, next) => {
 });
 
 // GET /api/tax/personal/:year/return — compute (or return cached) T1 for the personal entity.
-router.get('/personal/:year/return', async (req, res, next) => {
+router.get('/personal/:year/return', apiReadLimiter, async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
+    const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
       res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
       return;
     }
 
-    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.status(404).json({
         error: 'no_personal_entity',
@@ -377,60 +506,56 @@ router.get('/personal/:year/return', async (req, res, next) => {
     }
 
     const facts = await buildPersonalFacts(entity.id, year);
-    const hash = factsHash(serializeFacts(facts));
+    const rates = ratesFor(year);
+    assertRatesUsable(rates, { periodEnd: `${year}-12-31`, now: new Date() });
+    const result = await computeEntityReturn({
+      entityId: entity.id,
+      cacheYear: year,
+      facts,
+      run: (f) => buildT1(f, rates),
+    });
 
-    const cached = await TaxReturn.findOne({ where: { entityId: entity.id, year } });
-    if (cached && cached.factsHash === hash) {
+    // Computed on EVERY request and merged into BOTH responses. The cache-hit path
+    // below returns early, so attaching this only to the miss path would ship a gate
+    // that vanishes whenever the cache is warm — a gate that disappears under exactly
+    // the common case is worse than none.
+    //
+    // Deliberately not part of `factsHash`: import coverage changes without any fact
+    // changing.
+    const completeness = await buildCompletenessReport({
+      entityId: entity.id, year, facts, rates,
+    });
+
+    if (result.cached) {
       res.json({
         cached: true,
-        computedAt: cached.computedAt,
-        lines: cached.lines,
-        totals: cached.totals,
-        warnings: cached.warnings,
+        computedAt: result.computedAt,
+        lines: result.lines,
+        totals: result.totals,
+        warnings: result.warnings,
+        completeness,
       });
       return;
-    }
-
-    const ret = buildT1(facts, ratesFor(year));
-    const lines = serializeLines(ret.lines);
-    const totals = serializeTotals(ret.totals);
-    const computedAt = new Date();
-
-    if (cached) {
-      await cached.update({
-        factsHash: hash,
-        computedAt,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        lines: lines as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        totals: totals as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        warnings: ret.warnings as any,
-      });
-    } else {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (TaxReturn.create as any)({
-        entityId: entity.id,
-        year,
-        factsHash: hash,
-        computedAt,
-        lines,
-        totals,
-        warnings: ret.warnings,
-      });
     }
 
     // Optional ?roll=true: after snapshot, auto-roll carryforwards for this year
     if (req.query.roll === 'true') {
       try {
-        await rollPersonalCarryforwards(entity.id, year, ret, facts, ratesFor(year));
+        await rollPersonalCarryforwards(entity.id, year, result.engineReturn, facts, rates);
       } catch {
         // Roll failure is non-fatal; include a warning but still return the return
-        ret.warnings.push('carryforward_roll_failed');
+        result.warnings.push('carryforward_roll_failed');
       }
     }
 
-    res.json({ cached: false, computedAt, lines, totals, warnings: ret.warnings });
+    res.json({
+      cached: false,
+      computedAt: result.computedAt,
+      lines: result.lines,
+      totals: result.totals,
+      warnings: result.warnings,
+      completeness,
+    });
   } catch (err) {
     if (err instanceof RateTableMissingError) {
       res.status(409).json({
@@ -439,22 +564,28 @@ router.get('/personal/:year/return', async (req, res, next) => {
       });
       return;
     }
+    if (err instanceof ProjectedRatesError) {
+      res.status(409).json({
+        error: 'rate_table_projected',
+        message: err.message,
+        year: err.year,
+      });
+      return;
+    }
     next(err);
   }
 });
 
 // GET /api/tax/personal/:year/reconciliation — slip / txn / categorisation issues.
-router.get('/personal/:year/reconciliation', async (req, res, next) => {
+router.get('/personal/:year/reconciliation', apiReadLimiter, async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
+    const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
       res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
       return;
     }
-    const entity = await Entity.findOne({
-      where: { householdId: household.id, kind: 'personal' },
-    });
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.status(404).json({
         error: 'no_personal_entity',
@@ -470,10 +601,10 @@ router.get('/personal/:year/reconciliation', async (req, res, next) => {
 });
 
 // GET /api/tax/carryforwards — list carryforwards for the personal entity.
-router.get('/carryforwards', async (req, res, next) => {
+router.get('/carryforwards', apiReadLimiter, async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
-    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const { household, user } = currentAuth(req);
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.json({ carryforwards: [] });
       return;
@@ -514,6 +645,42 @@ router.post('/carryforwards', async (req, res, next) => {
   }
 });
 
+const SLIP_TYPES: readonly SlipType[] = ['T4', 'T5', 'T3', 'T4A', 'T5008'];
+
+/**
+ * Validate a slip before it is stored. Box values are typed in by hand from the
+ * paper slip, and anything stored here is read by buildPersonalFacts on every
+ * return — an unchecked "twelve" used to surface as a 500 on the whole T1.
+ * Values are normalised to plain decimal strings ("1,200.50" → "1200.50").
+ */
+function parseSlipInput(body: { year: unknown; slipType: unknown; issuer: unknown; boxValues: unknown }):
+  | { value: { year: number; slipType: SlipType; issuer: string; boxValues: TaxSlipBoxValues } }
+  | { error: string } {
+  const year = Number(body.year);
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    return { error: 'year must be an integer between 2000 and 2100' };
+  }
+  if (!SLIP_TYPES.includes(body.slipType as SlipType)) {
+    return { error: `slipType must be one of ${SLIP_TYPES.join(', ')}` };
+  }
+  // The column is NOT NULL but the form allows a blank issuer, so '' is kept.
+  if (typeof body.issuer !== 'string') {
+    return { error: 'issuer must be a string' };
+  }
+  const raw = body.boxValues ?? {};
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return { error: 'boxValues must be an object of box → amount' };
+  }
+  const boxValues: TaxSlipBoxValues = {};
+  for (const [key, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^box\d{1,3}[A-Za-z]?$/.test(key)) return { error: `"${key}" is not a box key (e.g. box14, box16A)` };
+    const amount = parseSlipAmount(v);
+    if (!amount) return { error: `${key}: "${String(v)}" is not an amount` };
+    boxValues[key] = amount.toFixed(2);
+  }
+  return { value: { year, slipType: body.slipType as SlipType, issuer: body.issuer.trim(), boxValues } };
+}
+
 // POST /api/tax/slips — create a tax slip.
 router.post('/slips', async (req, res, next) => {
   try {
@@ -522,6 +689,11 @@ router.post('/slips', async (req, res, next) => {
       string,
       unknown
     >;
+    const parsed = parseSlipInput({ year, slipType, issuer, boxValues });
+    if ('error' in parsed) {
+      res.status(400).json({ error: 'invalid_slip', message: parsed.error });
+      return;
+    }
     const entity = await Entity.findOne({
       where: { id: entityId as number, householdId: household.id },
     });
@@ -529,14 +701,7 @@ router.post('/slips', async (req, res, next) => {
       res.status(404).json({ error: 'entity_not_found' });
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const slip = await (TaxSlip.create as any)({
-      entityId: entity.id,
-      year,
-      slipType,
-      issuer,
-      boxValues,
-    });
+    const slip = await TaxSlip.create({ entityId: entity.id, ...parsed.value });
     res.status(201).json({ slip });
   } catch (err) {
     next(err);
@@ -544,16 +709,16 @@ router.post('/slips', async (req, res, next) => {
 });
 
 // POST /api/tax/personal/:year/roll-forward — explicit carryforward roll for year N.
-router.post('/personal/:year/roll-forward', async (req, res, next) => {
+router.post('/personal/:year/roll-forward', apiWriteLimiter, async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
+    const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
       res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
       return;
     }
 
-    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.status(404).json({
         error: 'no_personal_entity',
@@ -589,9 +754,9 @@ router.post('/personal/:year/roll-forward', async (req, res, next) => {
 });
 
 // GET /api/tax/personal/years?from=YYYY&to=YYYY — multi-year compare.
-router.get('/personal/years', async (req, res, next) => {
+router.get('/personal/years', apiReadLimiter, async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
+    const { household, user } = currentAuth(req);
     const fromYear = req.query.from ? Number(req.query.from) : new Date().getFullYear() - 2;
     const toYear = req.query.to ? Number(req.query.to) : new Date().getFullYear();
 
@@ -600,7 +765,7 @@ router.get('/personal/years', async (req, res, next) => {
       return;
     }
 
-    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.status(404).json({ error: 'no_personal_entity', message: 'No Personal entity for this household.' });
       return;
@@ -626,17 +791,97 @@ router.get('/personal/years', async (req, res, next) => {
   }
 });
 
-// GET /api/tax/personal/:year/instalments — list instalment payments for the year.
-router.get('/personal/:year/instalments', async (req, res, next) => {
+// GET /api/tax/personal/:year/outlook — what is coming: whether instalments are
+// required, what the three CRA options come to, when the balance is due, and the
+// year at its current run rate.
+//
+// Every other tax endpoint answers what happened. This is the one that answers what
+// Connor actually asked — "so I know what I'm getting myself into" — and his next
+// cash obligation is a date nothing in the app named.
+//
+// Not cached. The run-rate projection changes as the calendar advances with no fact
+// changing, which is the same reason the completeness report is recomputed per
+// request.
+router.get('/personal/:year/outlook', apiReadLimiter, async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
+    const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
       res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
       return;
     }
 
-    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const entity = await resolvePersonalEntity(household.id, user.id);
+    if (!entity) {
+      res.status(404).json({ error: 'no_personal_entity', message: 'No Personal entity for this household.' });
+      return;
+    }
+
+    res.json(serializeOutlook(await buildOutlook({ entityId: entity.id, year })));
+  } catch (err) {
+    if (err instanceof RateTableMissingError) {
+      res.status(409).json({ error: 'rate_table_missing', message: err.message });
+      return;
+    }
+    next(err);
+  }
+});
+
+/** Decimals to fixed strings; the outlook is Decimal-valued throughout. */
+function serializeOutlook(outlook: Awaited<ReturnType<typeof buildOutlook>>): unknown {
+  const money = (d: { toFixed: (n: number) => string }) => d.toFixed(2);
+  const instalments = (list: { dueOn: string; amount: { toFixed: (n: number) => string } }[]) =>
+    list.map((i) => ({ dueOn: i.dueOn, amount: money(i.amount) }));
+  return {
+    year: outlook.year,
+    netOwingByYear: outlook.netOwingByYear,
+    projectedCurrentYearNetOwing: outlook.projectedCurrentYearNetOwing,
+    provenanceWarnings: outlook.provenanceWarnings,
+    obligation: {
+      year: outlook.obligation.year,
+      required: outlook.obligation.required,
+      reason: outlook.obligation.reason,
+      balanceDueOn: outlook.obligation.balanceDueOn,
+      recommended: outlook.obligation.recommended,
+      instalments: instalments(outlook.obligation.instalments),
+      options: outlook.obligation.options.map((o) => ({
+        basis: o.basis,
+        total: money(o.total),
+        balanceWithReturn: money(o.balanceWithReturn),
+        carriesInterestRisk: o.carriesInterestRisk,
+        instalments: instalments(o.instalments),
+      })),
+    },
+    forward: {
+      year: outlook.forward.year,
+      isProjection: outlook.forward.isProjection,
+      currentTotalPayable: outlook.forward.currentTotalPayable,
+      projectedTotalPayable: outlook.forward.projectedTotalPayable,
+      projectedAdditionalTax: outlook.forward.projectedAdditionalTax,
+      draws: {
+        actualToDate: money(outlook.forward.draws.actualToDate),
+        monthlyRunRate: money(outlook.forward.draws.monthlyRunRate),
+        projectedRemainder: money(outlook.forward.draws.projectedRemainder),
+        projectedTotal: money(outlook.forward.draws.projectedTotal),
+        coveredMonths: outlook.forward.draws.coveredMonths,
+        uncoveredMonths: outlook.forward.draws.uncoveredMonths,
+        basis: outlook.forward.draws.basis,
+      },
+    },
+  };
+}
+
+// GET /api/tax/personal/:year/instalments — list instalment payments for the year.
+router.get('/personal/:year/instalments', apiReadLimiter, async (req, res, next) => {
+  try {
+    const { household, user } = currentAuth(req);
+    const year = Number(req.params.year);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
+      return;
+    }
+
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.status(404).json({ error: 'no_personal_entity', message: 'No Personal entity for this household.' });
       return;
@@ -654,16 +899,16 @@ router.get('/personal/:year/instalments', async (req, res, next) => {
 });
 
 // POST /api/tax/personal/:year/instalments — record a new instalment payment.
-router.post('/personal/:year/instalments', async (req, res, next) => {
+router.post('/personal/:year/instalments', apiWriteLimiter, async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
+    const { household, user } = currentAuth(req);
     const year = Number(req.params.year);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
       res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
       return;
     }
 
-    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.status(404).json({ error: 'no_personal_entity', message: 'No Personal entity for this household.' });
       return;
@@ -693,10 +938,10 @@ router.post('/personal/:year/instalments', async (req, res, next) => {
 });
 
 // GET /api/tax/slips — list slips for the personal entity, optionally filtered by year.
-router.get('/slips', async (req, res, next) => {
+router.get('/slips', apiReadLimiter, async (req, res, next) => {
   try {
-    const { household } = currentAuth(req);
-    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const { household, user } = currentAuth(req);
+    const entity = await resolvePersonalEntity(household.id, user.id);
     if (!entity) {
       res.json({ slips: [] });
       return;
@@ -800,52 +1045,27 @@ router.get('/corp/:fiscalYear/return', async (req, res, next) => {
     }
 
     const facts = await buildCorpFacts(entity.id, fiscalYear);
-    const hash = factsHash(serializeFacts(facts));
-
+    // Keyed on the fiscal year's START year, which is not always the calendar
+    // year the facts cover — an off-calendar year end straddles two.
     const snapshotYear = Number(fiscalYear.startDate.slice(0, 4));
-    const cached = await TaxReturn.findOne({ where: { entityId: entity.id, year: snapshotYear } });
-    if (cached && cached.factsHash === hash) {
-      res.json({
-        cached: true,
-        computedAt: cached.computedAt,
-        lines: cached.lines,
-        totals: cached.totals,
-        warnings: cached.warnings,
-      });
-      return;
-    }
-
     const rateTable = ratesFor(snapshotYear);
-    const ret = buildT2(facts, rateTable);
-    const lines = serializeLines(ret.lines);
-    const totals = serializeTotals(ret.totals);
-    const computedAt = new Date();
+    // The fiscal year's own end date, not December 31: an off-calendar year end
+    // closes mid-calendar-year and a year-based check would call it open.
+    assertRatesUsable(rateTable, { periodEnd: fiscalYear.endDate, now: new Date() });
+    const result = await computeEntityReturn({
+      entityId: entity.id,
+      cacheYear: snapshotYear,
+      facts,
+      run: (f) => buildT2(f, rateTable),
+    });
 
-    if (cached) {
-      await cached.update({
-        factsHash: hash,
-        computedAt,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        lines: lines as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        totals: totals as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        warnings: ret.warnings as any,
-      });
-    } else {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (TaxReturn.create as any)({
-        entityId: entity.id,
-        year: snapshotYear,
-        factsHash: hash,
-        computedAt,
-        lines,
-        totals,
-        warnings: ret.warnings,
-      });
-    }
-
-    res.json({ cached: false, computedAt, lines, totals, warnings: ret.warnings });
+    res.json({
+      cached: result.cached,
+      computedAt: result.computedAt,
+      lines: result.lines,
+      totals: result.totals,
+      warnings: result.warnings,
+    });
   } catch (err) {
     if (err instanceof RateTableMissingError) {
       res.status(409).json({
@@ -854,53 +1074,17 @@ router.get('/corp/:fiscalYear/return', async (req, res, next) => {
       });
       return;
     }
+    if (err instanceof ProjectedRatesError) {
+      res.status(409).json({
+        error: 'rate_table_projected',
+        message: err.message,
+        year: err.year,
+      });
+      return;
+    }
     next(err);
   }
 });
-
-// ---------------------------------------------------------------------------
-// Serialization helpers: convert Decimal → string before DB storage / response.
-// ---------------------------------------------------------------------------
-
-/**
- * Deep-serialize facts: converts Decimal instances to fixed-precision strings
- * so that `factsHash` produces a stable, JSON-encodable representation.
- */
-function serializeFacts(facts: unknown): unknown {
-  return JSON.parse(
-    JSON.stringify(facts, (_k, v) => {
-      if (
-        v !== null &&
-        typeof v === 'object' &&
-        typeof (v as { toFixed?: unknown }).toFixed === 'function' &&
-        (v as { constructor?: { name?: string } }).constructor?.name === 'Decimal'
-      ) {
-        return (v as { toFixed: (n: number) => string }).toFixed(8);
-      }
-      return v;
-    })
-  );
-}
-
-function serializeLines(lines: Array<{
-  code: string;
-  label: string;
-  amount: { toFixed: (n: number) => string };
-  inputs: Array<{ source: string; amount: { toFixed: (n: number) => string } }>;
-  formula?: string;
-}>): unknown {
-  return lines.map((l) => ({
-    ...l,
-    amount: l.amount.toFixed(2),
-    inputs: l.inputs.map((i) => ({ ...i, amount: i.amount.toFixed(2) })),
-  }));
-}
-
-function serializeTotals(totals: Record<string, { toFixed: (n: number) => string }>): unknown {
-  return Object.fromEntries(
-    Object.entries(totals).map(([k, v]) => [k, v.toFixed(2)])
-  );
-}
 
 // POST /api/tax/corp/:fiscalYear/roll-forward
 // Triggers rollCorpCarryforwards from the most recent snapshot for the fiscal year.

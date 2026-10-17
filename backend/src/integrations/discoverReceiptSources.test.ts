@@ -7,6 +7,7 @@ import {
   sequelize,
   Transaction,
   ExternalOrder,
+  Category,
   ReceiptSenderAllowlist,
   ProcessedEmailMessage,
   UserEmailIntegration,
@@ -17,6 +18,10 @@ import {
 import { discoverReceiptSources } from './discoverReceiptSources';
 import { encryptSecret } from '../util/symmetricEncryption';
 import type { GmailMessageFull, GmailMessageSummary } from './gmail';
+import {
+  assertInferredCategoriesResolved,
+  inferredCategoryFixtureItems,
+} from '../../test/helpers/inferredCategoryFixture';
 
 // Fixed IDs used across tests (created once in before, never destroyed).
 const TEST_USER_ID = 1;
@@ -353,4 +358,50 @@ test('PDF fetch is NOT attempted when the body already yields items', async () =
     },
   );
   assert.equal(pdfCalled, false);
+});
+
+// ---------------------------------------------------------------------------
+// Category FK on the Gmail-discovery auto-ingest path
+// ---------------------------------------------------------------------------
+//
+// persistHighConfidenceOrder's `ExternalOrderItem.bulkCreate` is a STATIC write
+// with no `individualHooks`, so the model's `beforeSave` hook — which reconciles
+// `inferred_category` into `inferred_category_id` — never runs for it. Every
+// item this path auto-ingests is fed by `extractFromText` (discovery has no
+// deterministic-parser shortcut), i.e. an unconstrained AI string, so a path
+// form is reachable and must never land in the string column.
+
+test('discovery auto-ingest resolves every item category to its leaf id and a FLAT name', async () => {
+  const house = await Category.create({ householdId: TEST_HOUSEHOLD_ID, name: 'Household', parentId: null } as never);
+  const rent = await Category.create({ householdId: TEST_HOUSEHOLD_ID, name: 'Rent', parentId: house.id } as never);
+
+  await Transaction.create({
+    accountId: TEST_ACCOUNT_ID, householdId: TEST_HOUSEHOLD_ID,
+    date: '2026-06-10', amount: '42.00', currency: 'CAD',
+    merchantRaw: 'FOOSHOP', merchantClean: 'Fooshop',
+    importBatch: 'test', sourceRowFingerprint: 'fp-catfk', sourceIdentityFingerprint: 'fi-catfk',
+  } as never);
+  const msg = fakeMessage({
+    id: 'catfk1', from: 'FooShop <orders@fooshop.com>', subject: 'Your order confirmation',
+    labelIds: ['CATEGORY_PURCHASES'], authResults: dkimPassFor('fooshop.com'),
+  });
+
+  const result = await discoverReceiptSources(
+    { userId: 1, householdId: 1 },
+    {},
+    deps([msg], async () => ({
+      ...cleanExtract,
+      orderId: 'CATFK-D1',
+      items: inferredCategoryFixtureItems(),
+    })),
+  );
+  assert.equal(result.autoIngested, 1, 'the message must auto-ingest for this test to mean anything');
+
+  const order = await ExternalOrder.findOne({ where: { vendorOrderId: 'CATFK-D1' } });
+  assert.ok(order);
+  await assertInferredCategoriesResolved({
+    externalOrderId: order!.id, householdId: TEST_HOUSEHOLD_ID, rentId: rent.id,
+  });
+
+  await Category.destroy({ where: { householdId: TEST_HOUSEHOLD_ID } });
 });

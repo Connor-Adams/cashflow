@@ -74,6 +74,15 @@ export function initSecurityDividend(sequelize: Sequelize): typeof SecurityDivid
       tableName: 'security_dividends',
       underscored: true,
       timestamps: true,
+      // Mirrors the migration's index. Declared here so upsert() conflicts on
+      // it rather than falling back to ON CONFLICT (id).
+      indexes: [
+        {
+          unique: true,
+          fields: ['security_id', 'ex_dividend_date'],
+          name: 'security_dividends_security_exdate_unique',
+        },
+      ],
     },
   );
   return SecurityDividend;

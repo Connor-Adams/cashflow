@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -47,6 +47,7 @@ function mockFetch(rules: typeof SAMPLE_RULES, overrides: MockOverrides = {}) {
       duplicateRules: [],
       topMerchantsWithoutRules: [],
     }) } as Response)
+    if (url.endsWith('/api/rules/preview-pattern')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ matches: 3 }) } as Response)
     if (url.endsWith('/api/rules/suggestions')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ suggestions: [] }) } as Response)
     if (url.endsWith('/api/transactions/category-hints')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ categories: [] }) } as Response)
     if (url.endsWith('/api/labels')) return Promise.resolve({ ok: true, json: () => Promise.resolve([
@@ -151,6 +152,82 @@ describe('RulesPage', () => {
     })
   })
 
+  describe('rule actions: set_txn_type', () => {
+    function renderRules() {
+      return render(
+        <MemoryRouter initialEntries={['/rules']}>
+          <ToastProvider>
+            <RulesPage />
+          </ToastProvider>
+        </MemoryRouter>,
+      )
+    }
+
+    it('posts a set_txn_type action when a transaction type is chosen', async () => {
+      renderRules()
+      await waitFor(() => expect(screen.getByText('amazon')).toBeInTheDocument())
+
+      await userEvent.type(screen.getByLabelText(/^pattern$/i), 'cdg labs')
+      await userEvent.selectOptions(screen.getByLabelText(/transaction type/i), 'income')
+      await userEvent.click(screen.getByRole('button', { name: /add rule/i }))
+
+      await waitFor(() => {
+        const post = vi
+          .mocked(fetch)
+          .mock.calls.find(
+            (c) =>
+              String(c[0]).endsWith('/api/rules') &&
+              (c[1] as RequestInit | undefined)?.method === 'POST',
+          )
+        expect(post).toBeTruthy()
+        const body = JSON.parse(String((post![1] as RequestInit).body))
+        expect(body.actions).toEqual(
+          expect.arrayContaining([{ type: 'set_txn_type', payload: { txnType: 'income' } }]),
+        )
+      })
+    })
+
+    it('posts no set_txn_type action when left unset', async () => {
+      renderRules()
+      await waitFor(() => expect(screen.getByText('amazon')).toBeInTheDocument())
+
+      await userEvent.type(screen.getByLabelText(/^pattern$/i), 'acme')
+      await userEvent.click(screen.getByRole('button', { name: /add rule/i }))
+
+      await waitFor(() => {
+        const post = vi
+          .mocked(fetch)
+          .mock.calls.find(
+            (c) =>
+              String(c[0]).endsWith('/api/rules') &&
+              (c[1] as RequestInit | undefined)?.method === 'POST',
+          )
+        expect(post).toBeTruthy()
+        const body = JSON.parse(String((post![1] as RequestInit).body))
+        expect(
+          (body.actions as Array<{ type: string }>).some((a) => a.type === 'set_txn_type'),
+        ).toBe(false)
+      })
+    })
+
+    // txn_type decides whether a row is spend at all. Picking one of the
+    // destructive values must say so before the rule is saved and backfilled
+    // over history.
+    it('warns when a destructive transaction type is chosen, and not otherwise', async () => {
+      renderRules()
+      await waitFor(() => expect(screen.getByText('amazon')).toBeInTheDocument())
+
+      const select = screen.getByLabelText(/transaction type/i)
+      expect(screen.queryByTestId('txn-type-warning')).toBeNull()
+
+      await userEvent.selectOptions(select, 'transfer')
+      expect(await screen.findByTestId('txn-type-warning')).toBeInTheDocument()
+
+      await userEvent.selectOptions(select, 'income')
+      await waitFor(() => expect(screen.queryByTestId('txn-type-warning')).toBeNull())
+    })
+  })
+
   describe('rule actions: tags + alert (issue #795)', () => {
     function renderRules() {
       return render(
@@ -215,5 +292,45 @@ describe('RulesPage', () => {
       // there are no suggestions to surface.
       expect(screen.queryByText(/Auto-rule suggestions/i)).toBeNull()
     })
+  })
+  describe('preview debounce lifecycle', () => {
+    function renderRules() {
+      return render(
+        <MemoryRouter initialEntries={['/rules']}>
+          <ToastProvider>
+            <RulesPage />
+          </ToastProvider>
+        </MemoryRouter>,
+      )
+    }
+
+    function previewCalls() {
+      return vi
+        .mocked(fetch)
+        .mock.calls.filter((c) => String(c[0]).includes('/api/rules/preview-pattern'))
+    }
+
+    it('clears the pending preview debounce when the page unmounts', async () => {
+      // Regression: the 300ms debounce timer was never cleared on unmount, so
+      // it fired after the test environment was torn down and React touched a
+      // `window` that no longer existed — an unhandled rejection that reds the
+      // whole vitest run without failing a single test.
+      const { unmount } = renderRules()
+      await waitFor(() => expect(screen.getByText('amazon')).toBeInTheDocument())
+
+      vi.useFakeTimers()
+      try {
+        fireEvent.change(screen.getByLabelText(/^pattern$/i), {
+          target: { value: 'costco' },
+        })
+        unmount()
+        vi.advanceTimersByTime(5000)
+      } finally {
+        vi.useRealTimers()
+      }
+
+      expect(previewCalls()).toHaveLength(0)
+    })
+
   })
 })

@@ -258,20 +258,23 @@ test('excludeIds: exclusion can demote a multi-match to a single-match', () => {
   assert.equal(out.existing.id, 2);
 });
 
-test('dedupEquivalentActivityTypes folds CSV transfer ↔ PDF transfer_in/transfer_out', () => {
+test('dedupEquivalentActivityTypes folds CSV transfer ↔ PDF transfer_in/transfer_out/cash_movement', () => {
   // The WS activities-CSV stores SecurityTransfer as undirected 'transfer';
-  // the WS PDF stores it directionally. All three must query the same bucket
-  // so a re-import matches across sources instead of double-counting.
-  const want = ['transfer', 'transfer_in', 'transfer_out'];
+  // the WS PDF stores it directionally. And one deposit is CONT ('transfer')
+  // in the monthly CSV but DEP ('cash_movement') in the brokerage PDF. All four
+  // must query the same bucket so a re-import matches across sources instead
+  // of double-counting.
+  const want = ['transfer', 'transfer_in', 'transfer_out', 'cash_movement'];
   assert.deepEqual([...dedupEquivalentActivityTypes('transfer')].sort(), [...want].sort());
   assert.deepEqual([...dedupEquivalentActivityTypes('transfer_in')].sort(), [...want].sort());
   assert.deepEqual([...dedupEquivalentActivityTypes('transfer_out')].sort(), [...want].sort());
+  assert.deepEqual([...dedupEquivalentActivityTypes('cash_movement')].sort(), [...want].sort());
 });
 
 test('dedupEquivalentActivityTypes leaves non-transfer types exact (no over-folding)', () => {
   assert.deepEqual(dedupEquivalentActivityTypes('buy'), ['buy']);
   assert.deepEqual(dedupEquivalentActivityTypes('dividend'), ['dividend']);
-  assert.deepEqual(dedupEquivalentActivityTypes('cash_movement'), ['cash_movement']);
+  assert.deepEqual(dedupEquivalentActivityTypes('interest'), ['interest']);
 });
 
 test('Incoming null quantity, candidate has quantity: NO match', () => {

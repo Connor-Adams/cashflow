@@ -1,3 +1,4 @@
+import { apiBase } from '../lib/runtimeConfig'
 import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -55,7 +56,7 @@ async function putPlannedEvent(
   id: number,
   body: PlannedEventPatch,
 ): Promise<PlannedEvent> {
-  const base = import.meta.env.VITE_API_BASE ?? ''
+  const base = apiBase()
   const res = await fetch(`${base}/api/planned-events/${id}`, {
     method: 'PUT',
     credentials: 'include',
@@ -289,7 +290,7 @@ export function ForecastPage() {
                 <Area
                   type="monotone"
                   dataKey="balance"
-                  stroke="var(--chart-income-stroke)"
+                  stroke="var(--chart-income)"
                   fill="url(#forecastFill)"
                   strokeWidth={2}
                 />
