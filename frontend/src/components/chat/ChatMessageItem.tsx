@@ -1,6 +1,7 @@
 import { Icon } from '@connor-adams/designsystem'
 import { cn } from '@/lib/utils'
 import type { ChatMessage } from '@cashflow/shared'
+import { ChatMarkdown } from './ChatMarkdown'
 
 type Props = {
   message: ChatMessage
@@ -10,9 +11,8 @@ type Props = {
  * One message bubble. Visual differs by role:
  *
  * - `user`: right-aligned, primary-tinted bubble.
- * - `assistant`: left-aligned, neutral bubble. Plain text only —
- *   newlines render as `<br>` so multi-paragraph replies read cleanly.
- *   We avoid a markdown renderer to keep the bundle small.
+ * - `assistant`: left-aligned, neutral bubble. Rendered as markdown
+ *   (see `ChatMarkdown`) since the agents reply in markdown.
  * - `tool`: a compact system-style row showing the tool name plus a
  *   truncated result. Tool messages are persisted by the backend for
  *   replay, but they're noise in the conversation thread — we keep them
@@ -42,10 +42,10 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   return (
     <div data-role="assistant" className="flex justify-start">
       <div
-        className="max-w-[80%] whitespace-pre-wrap rounded-lg border border-border bg-card px-3 py-2 text-sm"
+        className="max-w-[80%] min-w-0 break-words rounded-lg border border-border bg-card px-3 py-2 text-sm"
         style={{ color: 'var(--fg)' }}
       >
-        {text}
+        <ChatMarkdown text={text} />
       </div>
     </div>
   )
