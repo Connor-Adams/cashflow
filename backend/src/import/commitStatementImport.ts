@@ -388,6 +388,28 @@ export type CommitStatementImportDeps = {
   aiCaller?: (msgs: ChatMessage[]) => Promise<Record<string, unknown>>;
 };
 
+/**
+ * True when `prior` (an earlier successful import of this exact file) already
+ * accounted for every row this parse produced, so the commit can short-circuit.
+ *
+ * A parser fix can make the SAME file yield rows the first import never saw
+ * (the WS 2026-09 chequing statement first imported 12 of its 16 rows). When
+ * this parse finds more rows than the prior import saw — inserted plus skipped
+ * as duplicates — return false so the row-level dedup inserts just the missing
+ * ones. Otherwise a parser fix could never reach an already-imported statement.
+ */
+function isAlreadyFullyImported(
+  prior: { rowCount?: number | null; skippedDuplicateCount?: number | null },
+  preview: StatementPreview,
+): boolean {
+  const inserted = prior.rowCount ?? 0;
+  if (inserted <= 0) return false;
+  const priorRowsSeen = inserted + (prior.skippedDuplicateCount ?? 0);
+  const parsedRows =
+    preview.transactions.length + preview.investmentActivities.length + preview.holdings.length;
+  return parsedRows <= priorRowsSeen;
+}
+
 export async function commitStatementImport(
   preview: StatementPreview,
   userId: number | null,
@@ -442,7 +464,7 @@ export async function commitStatementImport(
       ...(account.householdId != null ? { householdId: account.householdId } : {}),
     },
   });
-  if (prior && (prior.rowCount ?? 0) > 0) {
+  if (prior && isAlreadyFullyImported(prior, preview)) {
     // Transactions are what this short-circuit exists to suppress, and it
     // still suppresses every one of them. Rate windows are not transactions:
     // they are idempotent reference data keyed by UNIQUE(account_id,
