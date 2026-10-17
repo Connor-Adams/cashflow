@@ -11,7 +11,7 @@ This document tells an AI agent (or a human shell user) how to verify the produc
 
 ```bash
 export CASHFLOW_AUDIT_TOKEN="cfa_..."
-export CASHFLOW_BACKEND="https://backend-production-30f95.up.railway.app"
+export CASHFLOW_BACKEND="<backend-url>"
 ```
 
 ## Endpoints

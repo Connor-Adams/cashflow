@@ -2,8 +2,11 @@
 
 A portable, self-contained briefing of the Cashflow product's design system — colors,
 typography, spacing, primitives, and usage rules. Built for designing new Cashflow
-screens/components that match the existing app. Source of truth is
-`frontend/src/index.css` (tokens) + `frontend/src/components/ui/` (primitives).
+screens/components that match the existing app. Sources of truth: tokens come from
+`@connor-adams/tokens` (imported in `frontend/src/index.css`, mapped to Tailwind in
+`frontend/src/styles/theme.css`); primitives come from `@connor-adams/designsystem`,
+plus app-local gap-fillers in `frontend/src/lib/ds-extras/` and app-specific
+composites in `frontend/src/components/ui/`.
 
 **Stack:** React 19, Tailwind v4 (CSS-first `@theme`, no JS config), Radix primitives,
 lucide-react icons, recharts. Dark mode via `data-theme` attribute flipping the same
@@ -146,11 +149,13 @@ sans-serif`. Base line-height 1.45, weight 400, antialiased, `optimizeLegibility
 
 ## 5. Component Primitives
 
-Located in `frontend/src/components/ui/`. Built with **CVA** (class-variance-authority)
-for variant props + `cn()` (clsx) merging. Every primitive carries a
-`data-slot="<name>"` attribute. Class strings are verbatim so you can reproduce the look.
+Marked **(DS)** = exported by `@connor-adams/designsystem` — import it from there;
+this repo has no `button.tsx` / `card.tsx` / … of its own. **(ds-extras)** =
+`frontend/src/lib/ds-extras/`. **(app)** = `frontend/src/components/ui/`. The variants
+and class strings below describe the intended look; for the DS primitives the package
+source is authoritative if they drift.
 
-### Button — `button.tsx`
+### Button (DS)
 - **variant:** `default` · `primary` · `secondary` · `outline` · `ghost` · `destructive`
   · `danger` · `link`
 - **size:** `default` (h-10 px-4) · `sm` (px-3 text-sm) · `lg` (h-11 px-8) · `icon` (h-10 w-10)
@@ -161,52 +166,52 @@ for variant props + `cn()` (clsx) merging. Every primitive carries a
 - link: `text-text-link underline-offset-4 hover:underline`
 - Supports `asChild` (Radix Slot) for rendering as a link, etc.
 
-### Badge — `badge.tsx`
+### Badge (DS)
 variant: `default` (brand fill) · `secondary` · `destructive` · `outline` · `count`
 (uppercase pill for counters). Base: `inline-flex w-fit rounded-md border px-2 py-0.5 text-xs font-medium`.
 
-### Card — `card.tsx`
+### Card (DS)
 `rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm sm:p-5`.
 Sub-parts: `CardHeader` (grid gap-1.5 px-5 pt-5), `CardTitle` (font-semibold tracking-tight),
 `CardDescription` (text-sm text-muted-foreground), `CardContent` (px-5 py-5).
 
-### Input / Textarea / NativeSelect / Label
+### Input / Textarea / NativeSelect / Label (DS)
 - Input: `h-9 w-full rounded-md border border-input bg-background/70 px-3 text-sm shadow-sm focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive`
 - Textarea: same treatment, `min-h-16 py-2`.
 - NativeSelect: `min-h-9 rounded-md border border-input bg-background/70 px-3 text-sm` (+ `sm` size).
 - Label: `grid gap-1 text-[0.82rem] font-semibold text-muted-foreground` (label sits above field).
 
-### Alert — `alert.tsx`
+### Alert (DS)
 variant: `error` · `warning` · `info` · `success`. Base: `flex flex-col gap-2 rounded-lg
 border p-3 text-sm`. Each variant = `color-mix` of its semantic color into bg (~10–12%)
 and border (~42–45%). `error` → `role="alert" aria-live="assertive"`; others →
 `role="status" aria-live="polite"`.
 
-### Table — `table.tsx`
+### Table (DS)
 Overflow wrapper with optional `maxHeight` + `stickyHeader`. Row:
 `border-b border-border hover:bg-muted/45 data-[state=selected]:bg-muted`. Head:
 `h-10 px-3 text-left text-xs font-semibold uppercase text-muted-foreground`. Cell:
 `px-3 py-2.5 align-middle`.
 
-### Tabs — `tabs.tsx`
+### Tabs (DS)
 Pill tablist: `inline-flex flex-wrap gap-1 rounded-lg border border-border bg-muted/30 p-1`.
 Active tab: `bg-card text-foreground shadow-sm`; inactive: `text-muted-foreground
 hover:text-foreground`. Full keyboard nav (arrows/home/end), `aria-selected`.
 
-### Skeleton — `skeleton.tsx`
+### Skeleton / SkeletonText (DS) · SkeletonRow (ds-extras)
 `skeleton-shimmer rounded-md` — 1.6s hero-gradient sweep at 22% opacity over muted base;
 respects `prefers-reduced-motion`. Helpers: `SkeletonText` (N lines, last 2/3 width),
 `SkeletonRow` (N table cells).
 
-### EmptyState — `empty-state.tsx`
+### EmptyState (DS) · EmptyTableRow (ds-extras)
 `rounded-lg border border-border bg-muted/20 p-4 text-sm` with muted title + description +
 actions row. `EmptyTableRow` wraps it in a full-width `<tr>`.
 
-### Headers — `page-header.tsx` / `section-header.tsx`
+### Headers — `page-header.tsx` / `section-header.tsx` (app)
 Both: `mb-4 flex flex-wrap items-start justify-between gap-3` with title + optional
 description + right-aligned actions slot. PageHeader = `h1`, SectionHeader = `h2`.
 
-### Metrics — `stat-card.tsx`, `metric-stat.tsx`, `DeltaBadge.tsx`, `pct-delta-cell.tsx`
+### Metrics — StatCard + Sparkline (DS); `metric-stat.tsx`, `DeltaBadge.tsx`, `pct-delta-cell.tsx` (app)
 - **StatCard:** Card with uppercase label, large value (`text-[1.55rem] font-bold
   tracking-tight`), hint, and a signed delta.
 - **DeltaBadge / delta tone:** tone resolves from `sign × metricKind`. `metricKind="gain"`
@@ -214,15 +219,14 @@ description + right-aligned actions slot. PageHeader = `h1`, SectionHeader = `h2
   Arrows ▲ ▼ —. This is the core "is this number good?" logic — match it.
 - **Sparkline:** minimal recharts line; green if trending up, oxblood if down.
 
-### Containers & nav — `collapsible-card.tsx`, `grid.tsx`, `tree.tsx`, `filter-bar.tsx`, `filter-card.tsx`
+### Containers & nav — `collapsible-card.tsx`, `tree.tsx`, `filter-bar.tsx` (app); Grid (ds-extras)
 - **CollapsibleCard:** card with a clickable header that expands/collapses (aria-expanded).
 - **Grid:** responsive auto-fit/auto-fill grid; `minItemWidth` + gap `sm`/`md`/`lg`.
 - **Tree:** nested rows with hero-gradient indent guides, drag grip, hover-revealed actions,
   trailing slot for amounts.
 - **FilterBar:** currency + date-from/to + quick-range toggle buttons (`aria-pressed`).
-- **FilterCard:** filter wrapper, `comfortable` (default) or `compact` density.
 
-### Avatar — `letter-avatar.tsx`
+### Avatar — LetterAvatar (DS)
 Categorical avatar from a hashed first character → one of the 12 `--avatar-*` colors with
 precomputed contrast text. Sizes `sm` 24 · `md` 32 · `lg` 48 · `xl` 64px.
 
