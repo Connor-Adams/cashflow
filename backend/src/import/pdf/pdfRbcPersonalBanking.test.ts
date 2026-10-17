@@ -425,3 +425,74 @@ test('fee + rebate pair: the fee is a debit and the rebate a credit', () => {
   ]);
   assert.deepEqual(parseErrors, []);
 });
+
+// ─── Opening / closing balance extraction ─────────────────────────────────────
+//
+// Signing is delta-based from the opening balance, so a missing opening must be
+// a hard parse error (same convention as rbcCreditLine): defaulting to 0 flips
+// the sign of leading rows. And a summary line whose dollar figure wrapped to
+// the next line must NOT read the year ("2025") as a $2,025.00 balance — only
+// money-shaped tokens count.
+
+const BASE_HEADER_LINES: PdfLine[] = [
+  mkHeader(' Your RBC personal banking account statement', 1, 744),
+  mkHeader(' From November 3, 2025 to December 2, 2025', 1, 675),
+  mkHeader(' Your account number:   02022-5016985', 1, 637),
+  mkHeader(' RBC Day to Day Banking   02022-5016985', 1, 494),
+];
+
+const BASE_ACTIVITY_LINES: PdfLine[] = [
+  mkHeader(' Details of your account activity', 1, 360),
+  mkLine(' Date   Description   Withdrawals ($)   Deposits ($)   Balance ($)', 1, 340, 44.9),
+];
+
+test('parse throws when the only opening balance line is a wrapped summary (year is not a balance)', () => {
+  const lines: PdfLine[] = [
+    ...BASE_HEADER_LINES,
+    // Dollar figure wrapped onto its own line and the activity table has no
+    // Opening Balance row. Old code read "2025" as the opening balance.
+    mkHeader(' Your opening balance on November 3, 2025', 1, 446),
+    mkHeader(' $100.00', 1, 440),
+    mkHeader(' Your closing balance on December 2, 2025   = $120.00', 1, 404),
+    ...BASE_ACTIVITY_LINES,
+    mkLine('10 Nov   e-Transfer deposit   50.00   150.00', 1, 312, 44.9),
+    mkLine('20 Nov   Online Banking payment   30.00   120.00', 1, 298, 44.9),
+    mkLine(' Closing Balance   $120.00', 1, 200, 90),
+  ];
+  assert.throws(
+    () => rbcPersonalBankingParser.parse(lines, { defaultCurrency: 'CAD' }),
+    /opening balance/i,
+  );
+});
+
+test('parse throws when the opening balance is missing entirely (no silent 0)', () => {
+  const lines: PdfLine[] = [
+    ...BASE_HEADER_LINES,
+    mkHeader(' Your closing balance on December 2, 2025   = $120.00', 1, 404),
+    ...BASE_ACTIVITY_LINES,
+    mkLine('10 Nov   e-Transfer deposit   50.00   150.00', 1, 312, 44.9),
+    mkLine('20 Nov   Online Banking payment   30.00   120.00', 1, 298, 44.9),
+    mkLine(' Closing Balance   $120.00', 1, 200, 90),
+  ];
+  assert.throws(
+    () => rbcPersonalBankingParser.parse(lines, { defaultCurrency: 'CAD' }),
+    /opening balance/i,
+  );
+});
+
+test('wrapped summary lines fall back to the activity rows instead of reading the year', () => {
+  const lines: PdfLine[] = [
+    ...BASE_HEADER_LINES,
+    mkHeader(' Your opening balance on November 3, 2025', 1, 446),
+    // Wrapped closing summary: must not become a $2,025.00 closing balance.
+    mkHeader(' Your closing balance on December 2, 2025', 1, 404),
+    ...BASE_ACTIVITY_LINES,
+    mkLine('         Opening Balance   100.00', 1, 326, 90),
+    mkLine('10 Nov   e-Transfer deposit   50.00   150.00', 1, 312, 44.9),
+    mkLine('20 Nov   Online Banking payment   30.00   120.00', 1, 298, 44.9),
+    mkLine(' Closing Balance   $120.00', 1, 200, 90),
+  ];
+  const result = rbcPersonalBankingParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.deepEqual(result.statementBalances, { opening: 100, closing: 120 });
+  assert.deepEqual(result.parseErrors, []);
+});
