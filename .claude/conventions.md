@@ -7,7 +7,7 @@
 
 ## Workspaces (Yarn 4 Berry monorepo, run everything from repo root)
 
-`packageManager: yarn@4.17.0` is pinned in `package.json`; invoke via Corepack
+`packageManager: yarn@4.18.1` is pinned in `package.json`; invoke via Corepack
 (`corepack yarn …`). `.yarnrc.yml` sets `nodeLinker: node-modules` (a real
 `node_modules`, **not** PnP) + `nmMode: hardlinks-local`; the lockfile is Berry
 format (`__metadata: version 10`).

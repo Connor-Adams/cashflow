@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Cashflow is a local-first personal & partner expense tracker: import card CSVs and
 PDF statements, categorize and split transactions, attach receipts, track
 investments, and roll spend into per-currency summaries. Yarn 4 (Berry) workspace
-monorepo (`backend`, `frontend`, `shared`); `packageManager: yarn@4.17.0` is pinned
+monorepo (`backend`, `frontend`, `shared`); `packageManager: yarn@4.18.1` is pinned
 in `package.json` and run via Corepack.
 
 ## Primitives spine (READ BEFORE ADDING ANY MODEL, ROUTE, OR PAGE)
