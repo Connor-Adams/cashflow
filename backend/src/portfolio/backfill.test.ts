@@ -522,3 +522,36 @@ test('refreshHeldDailyPrices retries a failed symbol once the backoff has elapse
   assert.deepEqual(fetched, ['DEAD.TO', 'DEAD.V', 'DEAD.CN']);
   assert.equal(summary.attempted, 1);
 });
+
+test('a stale dividend refresh re-upserting a stored ex-date updates it instead of failing', async () => {
+  // Same "Validation error" as daily bars: without the model declaring the
+  // (security_id, ex_dividend_date) index, upsert targeted ON CONFLICT (id).
+  const sec = await models.Security.create({
+    householdId: 1, symbol: 'DIVR', name: 'Div Refresh', assetType: 'EQUITY', currency: 'USD',
+  });
+  const exDate = isoDaysAgo(40);
+  await models.SecurityDividend.create({
+    securityId: sec.id, exDividendDate: exDate, declarationDate: null, recordDate: null,
+    paymentDate: null, amount: '0.10', currency: 'USD', source: 'yahoo',
+    fetchedAt: new Date(Date.now() - 31 * 86400_000),
+  });
+  backfill.__setYahooFetchers({
+    fetchQuote: async () => null,
+    fetchDailyHistory: async () => null,
+    fetchDividends: async () => [{
+      exDividendDate: exDate, declarationDate: null, recordDate: null,
+      paymentDate: null, amount: 0.12, currency: 'USD',
+    }],
+    fetchOverview: async () => null,
+  });
+
+  const status = await backfill.ensureDividends(sec.id);
+  assert.equal(status.status, 'stale');
+  await backfill.__drainForTests();
+
+  const rows = await models.SecurityDividend.findAll({ where: { securityId: sec.id } });
+  assert.equal(rows.length, 1);
+  assert.equal(Number(rows[0].amount), 0.12);
+  const log = await models.ProviderJobLog.findOne({ where: { function: 'DIVIDENDS' } });
+  assert.equal(log?.status, 'ok');
+});
