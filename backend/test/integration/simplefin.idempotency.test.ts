@@ -189,8 +189,9 @@ test('stable re-run inserts 0 and dedups every row on the second sync', async ()
 });
 
 /**
- * AC3: the sync fetches from `lastSyncedAt`, so after the first run the second
- * run's fetch window starts later but still OVERLAPS the prior window and
+ * AC3: the sync fetches from `lastSyncedAt` minus SYNC_LOOKBACK_DAYS, so after
+ * the first run the second run's fetch window starts later but still OVERLAPS
+ * the prior window and
  * re-returns the same stable boundary transactions. Assert the overlap produces
  * zero duplicates. We capture the requested `start-date`s to prove the second
  * sync genuinely moved its window forward (a real overlapping re-fetch), not a
@@ -208,8 +209,8 @@ test('an overlapping re-fetch window inserts zero duplicates', async () => {
   assert.equal(await models.Transaction.count({ where: { accountId } }), 1);
 
   // Second sync runs LATER; its start-date is the just-saved lastSyncedAt
-  // (= firstNow), which is AFTER the boundary tx's posted date — a window that
-  // overlaps the boundary row. The bank re-returns that same stable row.
+  // (= firstNow) minus the lookback — a window that overlaps the boundary row.
+  // The bank re-returns that same stable row.
   const secondNow = new Date((POSTED_2 + 86400) * 1000);
   const second = await syncSimplefin({ integrationId, now: secondNow });
   assert.equal(second.runs[0].inserted, 0, 'overlapping boundary tx not re-inserted');
@@ -220,12 +221,12 @@ test('an overlapping re-fetch window inserts zero duplicates', async () => {
     'overlap produced no duplicate',
   );
 
-  // The two syncs requested DIFFERENT start-dates — the second moved forward to
-  // lastSyncedAt, confirming this is a real overlapping re-fetch.
+  // The two syncs requested DIFFERENT start-dates — the second moved forward
+  // from the backfill window, confirming this is a real overlapping re-fetch.
   assert.equal(startDates.length, 2);
   assert.ok(
     startDates[1] > startDates[0],
-    'second sync moved its fetch window forward to lastSyncedAt',
+    'second sync moved its fetch window forward from the backfill window',
   );
 });
 

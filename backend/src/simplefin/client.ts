@@ -232,14 +232,35 @@ export interface SimplefinAccountWithTransactions {
   id: string;
   name: string;
   currency: string | null;
+  /**
+   * Epoch seconds of SimpleFIN's last successful refresh of this account from
+   * the institution. When the institution connection breaks, SimpleFIN keeps
+   * serving the last good data, so a balance-date stuck in the past is the only
+   * per-account signal that nothing new can arrive.
+   */
+  balanceDate: number | null;
   transactions: SimplefinTransaction[];
 }
 
+/** The `/accounts?start-date=` response: accounts plus SimpleFIN's own errors. */
+export interface SimplefinTransactionsResult {
+  accounts: SimplefinAccountWithTransactions[];
+  /**
+   * The payload's top-level `errors` array: human-readable messages such as
+   * "Connection to Royal Bank of Canada may need attention". SimpleFIN still
+   * answers 200 when an institution is broken, so this is the only place the
+   * failure shows up.
+   */
+  errors: string[];
+}
+
 interface SimplefinTransactionsPayload {
+  errors?: unknown[];
   accounts?: Array<{
     id?: string;
     name?: string;
     currency?: string;
+    'balance-date'?: number;
     transactions?: Array<{
       id?: string;
       posted?: number;
@@ -254,6 +275,9 @@ interface SimplefinTransactionsPayload {
  * Fetch accounts with their transactions posted on/after `startDateEpoch`
  * (unix seconds) via `<access>/accounts?start-date=<epoch>` (issue #791).
  *
+ * Returns SimpleFIN's top-level `errors` alongside the accounts: a broken
+ * institution connection is reported there, not as an HTTP failure.
+ *
  * Throws SimplefinError('sync_failed') on transport/HTTP/parse failure. When
  * the access URL returns 401/403 (token revoked/expired) the error carries
  * `unauthorized: true` so the sync engine can mark the integration in error and
@@ -262,7 +286,7 @@ interface SimplefinTransactionsPayload {
 export async function fetchTransactions(
   accessUrl: string,
   startDateEpoch: number,
-): Promise<SimplefinAccountWithTransactions[]> {
+): Promise<SimplefinTransactionsResult> {
   const { base, authHeader } = accessUrlAuth(parseAccessUrl(accessUrl));
   const url = `${base}/accounts?start-date=${Math.floor(startDateEpoch)}`;
   let res: Response;
@@ -291,12 +315,16 @@ export async function fetchTransactions(
     throw new SimplefinError('sync_failed', 'Transaction response was not JSON');
   }
   const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
-  return accounts
+  const errors = (Array.isArray(payload.errors) ? payload.errors : [])
+    .filter((e): e is string => typeof e === 'string' && e.trim() !== '')
+    .map((e) => e.trim());
+  const mapped = accounts
     .filter((a) => typeof a?.id === 'string' && a.id)
     .map((a) => ({
       id: String(a.id),
       name: typeof a.name === 'string' && a.name ? a.name : String(a.id),
       currency: typeof a.currency === 'string' ? a.currency : null,
+      balanceDate: typeof a['balance-date'] === 'number' ? a['balance-date'] : null,
       transactions: (Array.isArray(a.transactions) ? a.transactions : [])
         .filter((tx) => typeof tx?.id === 'string' && tx.id)
         .map((tx) => ({
@@ -307,4 +335,5 @@ export async function fetchTransactions(
           payee: typeof tx.payee === 'string' ? tx.payee : null,
         })),
     }));
+  return { accounts: mapped, errors };
 }
