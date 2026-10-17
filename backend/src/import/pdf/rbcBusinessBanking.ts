@@ -1,7 +1,7 @@
 import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader, StatementParseError } from './types';
 import { rbcBankingResult } from './rbcBankingResult';
 import { signByRunningBalance, type UnsignedRow } from './rbcRunningBalanceSigns';
-import { dayMonthToIso, parseMoney, parsePeriod, type Period } from './dateHelpers';
+import { dayMonthToIso, lastMoneyTokenValue, parseMoney, parsePeriod, type Period } from './dateHelpers';
 
 /**
  * RBC Business/Corporate chequing statement parser.
@@ -293,18 +293,37 @@ export function parseRbcBusinessBankingActivity(
   return { rows: signed.rows, parseErrors: [...parseErrors, ...signed.parseErrors] };
 }
 
-/** Extract the opening balance from the "Opening balance X" line in the activity section. */
-function extractOpeningBalance(lines: PdfLine[]): number {
+/**
+ * Extract the opening balance: the Account Summary "Opening balance on <date>
+ * $X.XX" line or the activity table's "Opening balance   X" row, whichever
+ * first carries a dollar figure.
+ *
+ * Returns null when none does (e.g. the amount wrapped to the next line). Only
+ * money-shaped tokens count — a bare "2026" from the summary date must not
+ * parse as a $2,026.00 balance. Callers treat null as a hard parse error
+ * (requireOpeningBalance): signing is delta-based from the opening, so
+ * defaulting to 0 silently flips leading rows.
+ */
+function extractOpeningBalance(lines: PdfLine[]): number | null {
   for (const l of lines) {
     if (/^[\s]*Opening balance\b/i.test(l.text)) {
-      const tokens = l.text.split(/\s+/);
-      for (let i = tokens.length - 1; i >= 0; i--) {
-        const v = parseMoney(tokens[i]);
-        if (Number.isFinite(v)) return v;
-      }
+      const v = lastMoneyTokenValue(l.text);
+      if (v !== null) return v;
     }
   }
-  return 0; // fallback
+  return null;
+}
+
+function requireOpeningBalance(lines: PdfLine[]): number {
+  const opening = extractOpeningBalance(lines);
+  if (opening === null) {
+    throw new Error(
+      'RBC business banking: could not extract opening balance ' +
+        '("Opening balance" line missing or without a dollar figure) — ' +
+        'transaction signs would be unverifiable',
+    );
+  }
+  return opening;
 }
 
 /**
@@ -320,12 +339,9 @@ function extractClosingBalance(lines: PdfLine[]): number | null {
   const SUMMARY_CLOSING_RE = /Closing balance on\s+[A-Z][a-z]+\s+\d{1,2},\s+\d{4}/i;
   for (const l of lines) {
     if (SUMMARY_CLOSING_RE.test(l.text)) {
-      // Extract the dollar amount — last money-looking token.
-      const tokens = l.text.split(/\s+/);
-      for (let i = tokens.length - 1; i >= 0; i--) {
-        const v = parseMoney(tokens[i]);
-        if (Number.isFinite(v)) return v;
-      }
+      // Last money-shaped token — never the year, if the amount wrapped.
+      const v = lastMoneyTokenValue(l.text);
+      if (v !== null) return v;
     }
   }
 
@@ -339,15 +355,9 @@ function extractClosingBalance(lines: PdfLine[]): number | null {
     }
     if (!inSection) continue;
     if (/^[\s]*Closing balance\b/i.test(l.text)) {
-      // Extract trailing money token (balance column).
-      const tokens = l.text.split(/\s+/);
-      for (let i = tokens.length - 1; i >= 0; i--) {
-        const v = parseMoney(tokens[i]);
-        if (Number.isFinite(v)) {
-          closingFromTable = v;
-          break;
-        }
-      }
+      // Trailing money token (balance column).
+      const v = lastMoneyTokenValue(l.text);
+      if (v !== null) closingFromTable = v;
       // Don't break — if there are multiple pages, take the last one.
     }
     if (/Important information about your account/i.test(l.text)) break;
@@ -362,7 +372,7 @@ export const rbcBusinessBankingParser: PdfParser = {
   parse: (lines, ctx): PdfParseResult => {
     const header = parseRbcBusinessBankingHeader(lines);
     const period: Period = { start: header.periodStart, end: header.periodEnd };
-    const openingBalance = extractOpeningBalance(lines);
+    const openingBalance = requireOpeningBalance(lines);
     const closingBalance = extractClosingBalance(lines);
     const { rows, parseErrors } = parseRbcBusinessBankingActivity(lines, period, openingBalance, closingBalance);
 

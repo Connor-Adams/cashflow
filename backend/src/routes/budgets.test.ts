@@ -241,6 +241,37 @@ test('aggregateSpendByCategory: different currencies are kept separate', () => {
   assert.equal(out.get('USD\0Travel')!.spent, 50);
 });
 
+test('aggregateSpendByCategory: payment/transfer legs are not spend (headline isNonSpend rule)', () => {
+  // $3,000 of card purchases, then the chequing-side leg of paying that card
+  // off (txnType='payment') and a transfer to savings. The dashboard headline
+  // counts only the $3,000; the budget must agree rather than report $7,000.
+  const out = aggregateSpendByCategory([
+    { currency: 'CAD', finalCategory: 'Groceries', amount: -1000, txnType: 'purchase', accountType: 'credit' },
+    { currency: 'CAD', finalCategory: 'Dining', amount: -2000, txnType: null, accountType: 'credit' },
+    { currency: 'CAD', finalCategory: null, amount: -3000, txnType: 'payment', accountType: 'chequing' },
+    { currency: 'CAD', finalCategory: null, amount: -1000, txnType: 'transfer', accountType: 'chequing' },
+  ]);
+  const total = Array.from(out.values()).reduce((s, v) => s + v.spent, 0);
+  assert.equal(total, 3000);
+  assert.equal(out.get('CAD\0'), undefined);
+});
+
+test('aggregateSpendByCategory: a payment row in a budgeted category does not count toward it', () => {
+  const out = aggregateSpendByCategory([
+    { currency: 'CAD', finalCategory: 'Bills', amount: -80, txnType: 'purchase', accountType: 'chequing' },
+    { currency: 'CAD', finalCategory: 'Bills', amount: -500, txnType: 'payment', accountType: 'chequing' },
+  ]);
+  assert.equal(out.get('CAD\0Bills')!.spent, 80);
+});
+
+test('aggregateSpendByCategory: any negative row on an investment account is not spend', () => {
+  const out = aggregateSpendByCategory([
+    { currency: 'CAD', finalCategory: 'Shopping', amount: -40, txnType: 'purchase', accountType: 'credit' },
+    { currency: 'CAD', finalCategory: 'Shopping', amount: -900, txnType: 'purchase', accountType: 'investment' },
+  ]);
+  assert.equal(out.get('CAD\0Shopping')!.spent, 40);
+});
+
 // ---- netRefundsFromSpend -----------------------------------------------
 
 test('netRefundsFromSpend: a PARTIAL refund nets only the refunded amount', () => {

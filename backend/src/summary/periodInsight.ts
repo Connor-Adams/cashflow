@@ -1,11 +1,20 @@
 // backend/src/summary/periodInsight.ts
 import { num } from '../util/numbers';
+import { classifyFlow, countsTowardNetSpend } from './classifyTransactionFlow';
 
 export type OwedBackRow = {
   id: number;
   currency: string;
   amount: string;
   partnerShareAmount?: string | null;
+  /** Flow-classification inputs — the same fields the dashboard headline
+   *  classifies on, so partner share is only counted on rows that count
+   *  toward netSpend. */
+  txnType?: string | null;
+  accountType?: string | null;
+  merchantRaw?: string | null;
+  merchantClean?: string | null;
+  finalCategory?: string | null;
 };
 
 export type OwedBackTotals = {
@@ -27,10 +36,29 @@ export function computeOwedBack(
       acc.reimbursable += reimb;
       acc.owedBack += reimb;
     } else {
-      const ps = Math.abs(num(r.partnerShareAmount) ?? 0);
-      if (ps > 0) {
-        acc.partnerShare += ps;
-        acc.owedBack += ps;
+      // Partner share carries the row's sign (calculateShares splits the
+      // signed amount): −50 on a −100 purchase, +50 on its +100 refund. Owed
+      // back is the NEGATED share so a refund un-owes what the purchase owed —
+      // a fully refunded shared purchase nets to 0, matching its netSpend.
+      // Only rows that count toward headline netSpend (spend / credit) carry
+      // an owed share: a transfer, statement payment, income or unsignaled
+      // deposit isn't in netSpend, so subtracting its share from realCost
+      // would understate it.
+      const ps = num(r.partnerShareAmount) ?? 0;
+      const amount = num(r.amount) ?? 0;
+      if (ps !== 0) {
+        const flow = classifyFlow({
+          amount,
+          txnType: r.txnType,
+          accountType: r.accountType,
+          merchantRaw: r.merchantRaw,
+          merchantClean: r.merchantClean,
+          category: r.finalCategory,
+        });
+        if (countsTowardNetSpend(flow)) {
+          acc.partnerShare -= ps;
+          acc.owedBack -= ps;
+        }
       }
     }
     out.set(r.currency, acc);

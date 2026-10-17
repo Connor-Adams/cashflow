@@ -3,7 +3,9 @@
 ## Prerequisites
 
 - Node.js 20+ (CI uses Node 22)
-- [Yarn Classic](https://classic.yarnpkg.com/) v1 (`yarn` at the repo root)
+- Yarn 4 (Berry), pinned via `packageManager: yarn@4.18.1` and run through
+  [Corepack](https://nodejs.org/api/corepack.html): `corepack enable` once, or call
+  `corepack yarn …` (always at the repo root)
 
 ## Install
 
@@ -21,7 +23,9 @@ Workspaces: `backend` (API), `frontend` (Vite + React), `shared` (shared TypeScr
 yarn db:migrate
 ```
 
-SQLite file defaults to `backend/data/cashflow.sqlite` (see `backend/.env.example`).
+Production is Postgres — set `DATABASE_URL` (see `backend/.env.example`). With it
+unset the backend falls back to a SQLite file (`backend/data/cashflow.sqlite`); that
+fallback exists so unit tests get a per-PID temp DB and is not a supported runtime.
 
 ## Run the app
 
@@ -48,23 +52,31 @@ Frontend only (API must already be on port 3001):
 yarn workspace frontend run dev
 ```
 
-## Checks (same as CI)
+## Checks
 
 ```bash
 yarn ci
 ```
 
-Runs backend `typecheck`, unit tests, integration tests, backend `build`, frontend `vitest`, and frontend production `build`.
+Runs workflow tests (`test:workflows`), shared contract tests, backend `typecheck`,
+unit tests, **integration tests**, backend `build`, frontend `vitest`, frontend
+production `build`, frontend `lint`, and frontend `lint:palette`. The integration
+suite needs Postgres (`TEST_DATABASE_URL`, default `localhost:5432` — see
+`backend/test/integration/_setup/pgTestDb.ts`). `yarn ci` does **not** run backend
+lint or `yarn audit:code`, though `code-audit` is a required status check.
 
-Individual steps:
+Without a local Postgres (agents never use Docker), run this set and let CI run
+the integration suite:
 
 ```bash
-yarn workspace cashflow-backend run typecheck
 yarn workspace cashflow-backend run test
-yarn workspace cashflow-backend run test:integration
-yarn workspace cashflow-backend run build
+yarn workspace cashflow-backend run typecheck
+yarn workspace cashflow-backend run lint
 yarn workspace frontend run test
+yarn workspace frontend run tsc -b
+yarn workspace frontend run lint
 yarn workspace frontend run build
+yarn audit:code
 ```
 
 ## Code health: dead code, complexity & duplication
@@ -112,7 +124,7 @@ Grafana **alerts** follow the same "signal → issue" pattern via [`.github/work
 | Path | Role |
 |------|------|
 | `backend/src/` | Express API, Sequelize models, CSV import |
-| `backend/src/routeRegistry.ts` | Declarative ordered router-mount registry (mount order + auth boundary as data; locked by `backend/test/appRouteOrder.test.ts`) |
+| `backend/src/routeRegistry.ts` | Declarative ordered router-mount registry (mount order + auth boundary as data; locked by `backend/src/auth/appRouteOrder.test.ts`) |
 | `backend/src/migrations/` | Sequelize migrations (JavaScript) |
 | `backend/src/**/*.test.ts` | Colocated unit tests (beside the code). Integration tests in `backend/test/integration/`; migration tests in `backend/src/migrations/__tests__/` |
 | `frontend/src/` | React UI |
@@ -124,4 +136,4 @@ Grafana **alerts** follow the same "signal → issue" pattern via [`.github/work
 
 ## Git hooks
 
-After `yarn install`, Husky runs `yarn prepare`. Staged `frontend/**/*.{ts,tsx}` files trigger **`yarn workspace frontend run lint`** on commit (via [lint-staged](https://github.com/lint-staged/lint-staged)). To skip once: `git commit --no-verify`.
+After `yarn install`, Husky runs `yarn prepare`. Staged `frontend/**/*.{ts,tsx}` files trigger **`yarn workspace frontend run lint`** on commit (via [lint-staged](https://github.com/lint-staged/lint-staged)). Don't bypass it with `--no-verify`.

@@ -19,6 +19,7 @@
 import { Router } from 'express';
 import { type WhereOptions } from 'sequelize';
 import {
+  Account,
   Transaction,
   TransactionTaxMetadata,
   TaxReserveSetting,
@@ -29,6 +30,10 @@ import { visibleTransactionWhere } from '../auth/scope';
 import { num } from '../util/numbers';
 import { resolveDeductiblePercent } from '../tax/util/deductiblePercent';
 import { parseTaxScope, scopeWhere, dateRangeWhere } from './businessTax';
+import {
+  classifyPositiveAmount,
+  isNonSpend,
+} from '../summary/classifyTransactionFlow';
 
 const router = Router();
 
@@ -81,16 +86,30 @@ export interface ReserveInputRow {
   deductiblePercent: string | null;
   /** From TransactionTaxMetadata.hstGstAmount. Null when not classified. */
   hstGstAmount: string | null;
+  /**
+   * Transaction.txnType, the owning account's type, and the merchant/category
+   * text. These feed the dashboard headline's classifier
+   * (summary/classifyTransactionFlow.ts) so only `txnType='income'` rows count
+   * as business income. Absent → treated as unsignaled.
+   */
+  txnType?: string | null;
+  accountType?: string | null;
+  merchantRaw?: string | null;
+  merchantClean?: string | null;
+  finalCategory?: string | null;
 }
 
 export interface ReserveComponents {
-  /** Sum of business income for the period+currency (positive amounts). */
+  /** Sum of business income for the period+currency (positive `txnType='income'` rows). */
   businessIncome: number;
-  /** Sum of |amount| * deductiblePercent for business expenses (negative amounts). */
+  /**
+   * Sum of |amount| * deductiblePercent for business expenses (negative spend
+   * rows), less the same for business refunds/credits, which net against it.
+   */
   deductibleExpenses: number;
   /** Sum of hstGstAmount on income rows (positive amounts where HST/GST collected). */
   hstGstCollected: number;
-  /** Sum of hstGstAmount on expense rows (input tax credits / ITC). */
+  /** Sum of hstGstAmount on expense rows (input tax credits / ITC), less refunded HST/GST. */
   hstGstPaid: number;
 }
 
@@ -113,6 +132,40 @@ export interface ReserveRollup {
    * negative reserve, but HST/GST is always remitted gross of income.
    */
   reserveTarget: number;
+}
+
+/**
+ * Route one business row into the reserve, using the same classification as
+ * the dashboard headline (summary/classifyTransactionFlow.ts):
+ *
+ *   - negative + `isNonSpend` (payment/transfer legs, brokerage flows, any row
+ *     on an investment account, …) → 'skip'; otherwise → 'expense'.
+ *   - positive → `classifyPositiveAmount`: a 'credit' with `txnType='income'`
+ *     is 'income'; any other 'credit' (refund, reward, refund-text fallback)
+ *     is a 'refund' that nets against expenses; 'payment' and 'skip'
+ *     (untyped deposits, transfers) contribute nothing.
+ *
+ * businessTax.ts documents that positive business rows are mostly refunds,
+ * transfers and payments — treating every one as revenue overstated the
+ * reserve.
+ */
+function classifyReserveFlow(
+  row: ReserveInputRow,
+  amount: number,
+): 'income' | 'expense' | 'refund' | 'skip' {
+  if (amount < 0) {
+    return isNonSpend(row.txnType, row.accountType) ? 'skip' : 'expense';
+  }
+  if (amount === 0) return 'skip';
+  const bucket = classifyPositiveAmount({
+    txnType: row.txnType,
+    accountType: row.accountType,
+    merchantRaw: row.merchantRaw,
+    merchantClean: row.merchantClean,
+    category: row.finalCategory,
+  });
+  if (bucket !== 'credit') return 'skip';
+  return row.txnType === 'income' ? 'income' : 'refund';
 }
 
 /**
@@ -148,13 +201,16 @@ export function aggregateReserveRollups(
     const amount = num(row.amount) ?? 0;
     const hstGst = num(row.hstGstAmount) ?? 0;
     if (row.finalBusiness) {
-      if (amount > 0) {
+      const flow = classifyReserveFlow(row, amount);
+      if (flow === 'income') {
         bucket.components.businessIncome += amount;
         bucket.components.hstGstCollected += hstGst;
-      } else if (amount < 0) {
+      } else if (flow === 'expense' || flow === 'refund') {
+        // A refund is a negative expense: it nets the deductible amount and
+        // the input tax credit back down rather than counting as revenue.
         const deductiblePct = resolveDeductiblePercent(row.deductiblePercent, true);
         bucket.components.deductibleExpenses += -amount * deductiblePct;
-        bucket.components.hstGstPaid += hstGst;
+        bucket.components.hstGstPaid += flow === 'refund' ? -hstGst : hstGst;
       }
     }
     buckets.set(key, bucket);
@@ -409,7 +465,17 @@ export async function loadReserveRollups(
 ): Promise<ReserveRollup[]> {
   const rows = await Transaction.findAll({
     where,
-    attributes: ['id', 'date', 'amount', 'currency', 'finalBusiness'],
+    attributes: [
+      'id',
+      'date',
+      'amount',
+      'currency',
+      'finalBusiness',
+      'txnType',
+      'merchantRaw',
+      'merchantClean',
+      'finalCategory',
+    ],
     include: [
       {
         model: TransactionTaxMetadata,
@@ -417,11 +483,19 @@ export async function loadReserveRollups(
         attributes: ['deductiblePercent', 'hstGstAmount'],
         required: false,
       },
+      {
+        model: Account,
+        as: 'account',
+        attributes: ['accountType'],
+        required: false,
+      },
     ],
   });
   const inputRows: ReserveInputRow[] = rows.map((r) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const meta = (r as any).taxMetadata as TransactionTaxMetadata | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const account = (r as any).account as { accountType: string | null } | undefined;
     return {
       date: String(r.date),
       amount: String(r.amount),
@@ -431,6 +505,11 @@ export async function loadReserveRollups(
         meta?.deductiblePercent == null ? null : String(meta.deductiblePercent),
       hstGstAmount:
         meta?.hstGstAmount == null ? null : String(meta.hstGstAmount),
+      txnType: r.txnType ?? null,
+      accountType: account?.accountType ?? null,
+      merchantRaw: r.merchantRaw ?? null,
+      merchantClean: r.merchantClean ?? null,
+      finalCategory: r.finalCategory ?? null,
     };
   });
   // Build per-currency percent lookup from settings.

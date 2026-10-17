@@ -37,6 +37,19 @@ describe('businessIncomeSpend', () => {
     expect(out.spend.business).toBe(100)
   })
 
+  it('never sums across currencies when no single currency is given', () => {
+    const out = businessIncomeSpend(
+      [
+        r({ currency: 'CAD', business: true, netSpend: 100, income: 10 }),
+        r({ currency: 'USD', business: true, netSpend: 999, income: 90 }),
+      ],
+      '',
+    )
+    // '' used to mean "every row", adding CAD and USD into one bare number.
+    expect(out.spend.business).toBe(0)
+    expect(out.income.business).toBe(0)
+  })
+
   it('clamps share to 0 when business spend is negative', () => {
     const out = businessIncomeSpend(
       [

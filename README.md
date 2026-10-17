@@ -6,7 +6,7 @@
 [![release-drafter](https://img.shields.io/github/actions/workflow/status/Connor-Adams/cashflow/release-drafter.yml?branch=main&label=release)](https://github.com/Connor-Adams/cashflow/actions/workflows/release-drafter.yml)
 [![frontend release](https://img.shields.io/github/v/release/Connor-Adams/cashflow?label=frontend)](https://github.com/Connor-Adams/cashflow/releases)
 [![backend release](https://img.shields.io/github/v/release/Connor-Adams/cashflow?label=backend)](https://github.com/Connor-Adams/cashflow/releases)
-[![package manager: yarn](https://img.shields.io/badge/package_manager-yarn_4.17-blue)](https://yarnpkg.com/)
+[![package manager: yarn](https://img.shields.io/badge/package_manager-yarn_4.18.1-blue)](https://yarnpkg.com/)
 [![node](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![typescript](https://img.shields.io/badge/typescript-5.9-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 <!-- END BADGIE TIME -->
@@ -18,9 +18,8 @@ and net worth, plan budgets and forecasts — and see it all roll up into
 per-currency summaries. No third-party services touch your data unless you opt
 into an integration.
 
-It is a real multi-currency ledger, not a spreadsheet: ~90 tables, ~80 API
-routers, an 85-page React app, and an AI layer you can turn on or leave off
-entirely.
+It is a real multi-currency ledger, not a spreadsheet: a Postgres-backed API, a
+React app, and an AI layer you can turn on or leave off entirely.
 
 ## Quick start
 
@@ -29,26 +28,27 @@ yarn setup     # install + run migrations
 yarn dev       # API on :3001, UI on :5173 (proxies /api)
 ```
 
-Open `http://localhost:5173` and click **Continue with demo account** — the
-backend seeds a demo household with sample data on startup, so there is
-something to look at immediately.
+Open `http://localhost:5173` and click **Continue with demo account** — outside
+production the backend seeds a demo household with sample data on startup, so
+there is something to look at immediately.
 
 Requires **Node 20+** and **Yarn 4 (Berry)**, pinned via the `packageManager`
 field and invoked through [Corepack](https://nodejs.org/api/corepack.html) —
-run `corepack enable` once, then the `yarn …` shim resolves to 4.17 (or call
+run `corepack enable` once, then the `yarn …` shim resolves to 4.18.1 (or call
 `corepack yarn …` explicitly). This is a Yarn workspace monorepo — always
 install and run from the **repo root**, never a sub-directory. If stray
 `node_modules` exist inside `backend/` or `frontend/`, delete them and reinstall
 at root.
 
-Optional config lives in `backend/.env` (copy from
-[`backend/.env.example`](backend/.env.example)). Everything has a working
-default — set nothing and it just runs (`DEFAULT_CURRENCY=CAD`).
+Config lives in `backend/.env` (copy from
+[`backend/.env.example`](backend/.env.example)). Point `DATABASE_URL` at a
+Postgres database — that is the supported runtime. Everything else has a working
+default (`DEFAULT_CURRENCY=CAD`).
 
 ## The primitives spine
 
 Cashflow is built on **13 canonical primitives** — a primitive is a distinct
-*status machine + noun*, not a data shape. The ~90 Sequelize models are the
+*status machine + noun*, not a data shape. The Sequelize models are the
 physical tables; they fold into these 13 concepts:
 
 > **Transaction · Expectation · Account · Holding · Principal · Counterparty ·
@@ -86,8 +86,8 @@ This is the single most important thing to understand before contributing.
   monthly-close flow.
 - Debt and credit-card tracking, opportunity-cost and what-if scenarios.
 - Personal and corporate tax scenarios, household plans, and reserve estimation.
-- Investment holdings with scheduled price quotes (Alpha Vantage) and dividend
-  reconciliation, rolled into net-worth tracking.
+- Investment holdings with scheduled price quotes (Yahoo Finance, keyless) and
+  dividend reconciliation, rolled into net-worth tracking.
 - Per-currency dashboards (self / partner / business), Sankey flows, insights,
   and an exportable reporting API.
 
@@ -105,17 +105,17 @@ Three workspaces, one DTO contract:
   `ai/`, …), each pairing domain logic with a `routes/*.ts` router. Router
   mounts live in a declarative, CI-locked registry
   ([`backend/src/routeRegistry.ts`](backend/src/routeRegistry.ts)) — mount order
-  is load-bearing and `backend/test/appRouteOrder.test.ts` locks it.
+  is load-bearing and `backend/src/auth/appRouteOrder.test.ts` locks it.
 - **`frontend/`** — Vite + React 19, react-router v7, Tailwind v4 (Radix,
-  lucide, recharts). 85 pages in `pages/`, shared API client in `lib/api.ts`.
+  lucide, recharts). Pages in `pages/`, shared API client in `lib/api.ts`.
   The build also emits Amazon/Apple capture bookmarklets.
 - **`shared/`** — a single file, `shared/api-types.ts`, the API DTO contract
   imported by both sides as `@cashflow/shared`.
 
-The DB is **dual-dialect**: Postgres in production (set `DATABASE_URL`), with an
-embedded file DB for zero-setup local dev — all Sequelize is written to run on
-both. Multi-currency throughout, with
-an `FxRate` table. Auth is cookie-session and household-scoped behind a global
+The DB is **Postgres** (set `DATABASE_URL`). When it is unset the backend falls
+back to a SQLite file; that fallback exists so unit tests get a per-PID temp DB
+and is not a supported runtime. Multi-currency throughout, with an `FxRate`
+table. Auth is cookie-session and household-scoped behind a global
 `requireAuth` boundary. Observability is pino logs + OpenTelemetry over OTLP;
 `infra/` brings up Grafana/Loki/Tempo/Prometheus locally
 ([docs/observability.md](docs/observability.md)).
@@ -124,7 +124,7 @@ an `FxRate` table. Auth is cookie-session and household-scoped behind a global
 
 Everything mounts under `/api`. A few routes (health, version, config, auth,
 capture, `/api/v1` reporting, audit) sit *before* `requireAuth`; the rest need a
-session. The ~80 routers group into families:
+session. The routers group into families:
 
 | Family | Examples | Purpose |
 |---|---|---|
@@ -152,13 +152,12 @@ common knobs:
 | Variable | Default | Purpose |
 |---|---|---|
 | `DEFAULT_CURRENCY` | `CAD` | Fallback when a transaction has no currency |
-| `DATABASE_URL` | _(unset)_ | Postgres connection; an embedded file DB is used when unset |
+| `DATABASE_URL` | _(unset)_ | Postgres connection (the supported runtime). Unset falls back to the unit-test SQLite file — not supported |
 | `CSV_UPLOAD_DIR` | `./uploads/csv` | Folder-scan import source |
 | `RECEIPTS_UPLOAD_DIR` | `./uploads/receipts` | Local receipt storage |
 | `OPENAI_API_KEY` | _(unset)_ | Enables AI suggestions, vision, chat |
-| `ALPHA_VANTAGE_API_KEY` | _(unset)_ | Enables stock quotes + dividends |
 | `EMAIL_INTEGRATION_ENCRYPTION_KEY` | _(unset)_ | **Required** for SimpleFIN bank-connect and email integrations — encrypts stored secrets at rest. 64-char hex; generate with `openssl rand -hex 32` |
-| `DEMO_ACCOUNT_ENABLED` | `true` | Seed the demo household on startup |
+| `DEMO_ACCOUNT_ENABLED` | on outside production, off in production | Seed the demo household + enable demo login |
 
 Without `EMAIL_INTEGRATION_ENCRYPTION_KEY`, connecting a bank via SimpleFIN
 returns a `503 encryption_unconfigured` error (and the server logs a warning at
@@ -173,9 +172,15 @@ AI models (`OPENAI_MODEL`, `OPENAI_VISION_MODEL`), the quote scheduler
 ## Tests
 
 ```bash
-yarn test    # backend unit + integration + frontend Vitest
-yarn ci      # everything CI runs: typecheck, tests, both production builds
+yarn test    # shared + backend unit + backend integration + frontend Vitest
+yarn ci      # workflow tests, shared/backend/frontend tests (incl. integration),
+             # backend typecheck + build, frontend build + lint + palette lint
 ```
+
+Both include the integration suite, which needs Postgres (`TEST_DATABASE_URL`,
+default `localhost:5432`). Without one, run backend `test`/`typecheck`/`lint`,
+frontend `test`/`tsc -b`/`lint`/`build`, and `yarn audit:code` (a required check),
+and let CI run integration.
 
 Backend unit tests are **colocated** (`foo.test.ts` beside `foo.ts` under
 `backend/src/`) and auto-discovered — a new test runs with no glob to maintain.
@@ -186,14 +191,17 @@ filter-by-name invocations are in [CLAUDE.md](CLAUDE.md).
 
 ## Demo account
 
-Seeded on startup (including in production) unless `DEMO_ACCOUNT_ENABLED=false`:
+Seeded on startup outside production. In production it is **off** unless
+`DEMO_ACCOUNT_ENABLED=true` is set explicitly (`false` turns it off anywhere) —
+see [`backend/src/demo/demoConfig.ts`](backend/src/demo/demoConfig.ts).
 
-- Email: `dev@cashflow.local`
-- Password: `cashflow-demo`
+- Email: `dev@cashflow.local` (override with `DEMO_ACCOUNT_EMAIL`)
+- Password: none fixed. **Continue with demo account** signs you in directly;
+  unless `DEMO_ACCOUNT_PASSWORD` is set, the stored password is a random value.
 
-Override with `DEMO_ACCOUNT_EMAIL` / `DEMO_ACCOUNT_PASSWORD` /
-`DEMO_ACCOUNT_NAME`. The seed is idempotent — the user, household, account,
-rules, and sample transactions are ensured without duplicating on later deploys.
+`DEMO_ACCOUNT_NAME` sets the display name. The seed is idempotent — the user,
+household, account, rules, and sample transactions are ensured without
+duplicating on later deploys.
 
 ## Deploy
 

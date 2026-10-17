@@ -15,7 +15,9 @@
  * Primary-key collisions are handled by a per-table id-remap. The
  * incoming row's id is replaced by the autoincrement value picked by
  * the DB; references to that id from later tables get rewritten on
- * the fly. This is why TABLES is ordered parent-first.
+ * the fly. This is why TABLES is ordered parent-first. Self-references
+ * (transactions.linked_transaction_id) are patched in a second pass once
+ * the whole table is written — see SELF_REF_REMAP.
  *
  * `household_id` is rewritten everywhere to the target household.
  */
@@ -56,20 +58,25 @@ const FK_REMAP: Record<string, Array<{ column: string; refTable: string }>> = {
     { column: 'account_id', refTable: 'accounts' },
     { column: 'applied_rule_id', refTable: 'rules' },
     { column: 'ownership_contact_id', refTable: 'contacts' },
-    // linked_transaction_id intentionally NOT remapped — self-ref is
-    // patched in a second pass after all transactions are written
-    // (TODO follow-up; for V1 we null it out on restore).
+    // linked_transaction_id is a SELF-reference — see SELF_REF_REMAP.
   ],
 };
 
-/** Columns NULLed when their source value can't be remapped — e.g.
- *  linked_transaction_id self-ref (patched in a later pass; V1 nulls it).
- *  entity_id is deliberately NOT listed: the bundle's source entity id is
- *  meaningless in the target, but accounts/transactions.entity_id is NOT NULL
- *  (migration 20260619000001) and Postgres rejects a NULL at INSERT time, so
- *  restore re-derives the target-household entity_id up front (see
- *  restoreBundle) rather than nulling-then-fixing. */
-const NULL_ON_RESTORE: Record<string, string[]> = {
+/** Self-referencing FK columns (a row pointing at another row of the SAME
+ *  table), e.g. transactions.linked_transaction_id pairing transfer legs and
+ *  charge/refund. They can't be remapped at INSERT time: the target row may
+ *  not be written yet, and the FK is enforced immediately on Postgres. So the
+ *  column is inserted as NULL, and once every row of the table is in (and the
+ *  table's old-id -> new-id map is complete) a second pass UPDATEs it to the
+ *  target's NEW id. A link whose target was not in the bundle (e.g. it pointed
+ *  at another household's row) stays NULL rather than dangling.
+ *
+ *  entity_id is deliberately NOT handled by any remap: the bundle's source
+ *  entity id is meaningless in the target, but accounts/transactions.entity_id
+ *  is NOT NULL (migration 20260619000001) and Postgres rejects a NULL at
+ *  INSERT time, so restore re-derives the target-household entity_id up front
+ *  (see restoreBundle) rather than nulling-then-fixing. */
+const SELF_REF_REMAP: Record<string, string[]> = {
   transactions: ['linked_transaction_id'],
 };
 
@@ -231,6 +238,7 @@ export async function restoreBundle(
         continue;
       }
       let count = 0;
+      const pendingSelfRefs: Array<{ newId: number; column: string; sourceTarget: number }> = [];
       for (const raw of rows) {
         if (!raw || typeof raw !== 'object') continue;
         const row = { ...(raw as Record<string, unknown>) };
@@ -248,9 +256,13 @@ export async function restoreBundle(
           const newVal = remap.get(Number(oldVal));
           row[fk.column] = newVal ?? null;
         }
-        // NULL out columns we can't remap in V1.
-        for (const col of NULL_ON_RESTORE[spec.table] ?? []) {
-          if (col in row) row[col] = null;
+        // Defer self-references to the second pass below: insert NULL now,
+        // remember the source target id.
+        const selfRefs: Array<{ column: string; sourceTarget: number }> = [];
+        for (const col of SELF_REF_REMAP[spec.table] ?? []) {
+          if (!(col in row)) continue;
+          if (row[col] != null) selfRefs.push({ column: col, sourceTarget: Number(row[col]) });
+          row[col] = null;
         }
         // Never trust bundle-supplied user ids (#837): normalize any non-null
         // value to the restoring user (a known member), or null it when no
@@ -277,9 +289,28 @@ export async function restoreBundle(
         if (sourceId && newId) {
           idRemap[spec.table].set(sourceId, newId);
         }
+        if (newId) {
+          for (const ref of selfRefs) pendingSelfRefs.push({ newId, ...ref });
+        }
         count += 1;
       }
       inserted[spec.table] = count;
+
+      // Second pass: every row of this table is written, so its id-remap is
+      // complete — point each deferred self-reference at its target's NEW id.
+      // Targets absent from the bundle stay NULL (already inserted as NULL).
+      for (const ref of pendingSelfRefs) {
+        const newTarget = idRemap[spec.table].get(ref.sourceTarget);
+        if (newTarget == null) continue;
+        await sequelize.query(
+          `UPDATE "${spec.table}" SET "${ref.column}" = :target WHERE "id" = :id AND "household_id" = :hid`,
+          {
+            replacements: { target: newTarget, id: ref.newId, hid: householdId },
+            type: QueryTypes.UPDATE,
+            transaction: t,
+          },
+        );
+      }
     }
 
     await t.commit();

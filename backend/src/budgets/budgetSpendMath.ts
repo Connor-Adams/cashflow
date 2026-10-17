@@ -13,6 +13,7 @@ import { splitTxnByItems } from '../import/splitTxnByItems';
 import type { ItemAllocationContext } from '../summary/loadItemAllocations';
 import type { CategoryTree } from '../categories/rollup';
 import type { PeriodBounds } from './budgetPeriods';
+import { isNonSpend } from '../summary/classifyTransactionFlow';
 
 /**
  * A category's own name plus every descendant category name, used to roll a
@@ -59,6 +60,15 @@ export type SpendRow = {
    * period locally rather than issuing a query per period.
    */
   date?: string;
+  /**
+   * Transaction.txnType and the owning account's type. Together they drive the
+   * dashboard headline's `isNonSpend` rule, so a budget never counts money
+   * movement (the chequing leg of a card payment, a transfer to savings, a
+   * brokerage buy, any outflow on an investment account) as spend. Absent →
+   * treated as an ordinary purchase, same as the headline treats null.
+   */
+  txnType?: string | null;
+  accountType?: string | null;
 };
 
 export type SpendByCategory = Map<
@@ -124,6 +134,12 @@ function allocationsForRow(
  * spend elsewhere but a budget tracks gross outflow against a target. The
  * dashboard's category report already nets credits separately if desired.
  *
+ * A negative row only counts when the dashboard headline would count it as
+ * spend: `isNonSpend(txnType, accountType)` drops payment/transfer/investment/
+ * dividend/refund/reward/income rows and every row on an investment account.
+ * Without it an overall budget double-counted a paid-off card (purchases plus
+ * the chequing payment leg) and counted savings transfers as spending.
+ *
  * Pure helper exported so the route's correctness can be tested without a DB.
  */
 export function aggregateSpendByCategory(
@@ -134,6 +150,7 @@ export function aggregateSpendByCategory(
   for (const row of rows) {
     const amount = num(row.amount);
     if (amount == null || amount >= 0) continue;
+    if (isNonSpend(row.txnType, row.accountType)) continue;
     for (const alloc of allocationsForRow(row, amount, itemContext)) {
       if (alloc.amount >= 0) continue;
       const spend = -alloc.amount;

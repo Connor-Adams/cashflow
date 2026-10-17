@@ -478,3 +478,71 @@ test('rbcBusinessBankingParser.parse emits opening + closing statement balances'
   const result = rbcBusinessBankingParser.parse(SINGLE_TXN_LINES, { defaultCurrency: 'CAD' });
   assert.deepEqual(result.statementBalances, { opening: 266.8, closing: 260.8 });
 });
+
+// ─── Opening / closing balance extraction ─────────────────────────────────────
+//
+// Signing is delta-based from the opening balance, so a missing opening must be
+// a hard parse error (same convention as rbcCreditLine): defaulting to 0 flips
+// the sign of leading rows. And an Account Summary line whose dollar figure
+// wrapped to the next line must NOT read the year ("2026") as a $2,026.00
+// balance — only money-shaped tokens count.
+
+const BIZ_HEADER_LINES: PdfLine[] = [
+  mkHeaderLine(' Business Account Statement', 1, 721),
+  mkHeaderLine(' March 1, 2026 to April 1, 2026', 1, 664),
+  mkHeaderLine(' CDG LABS INC.', 1, 647),
+  mkHeaderLine(' Account number:   03592   105-488-1', 1, 632),
+  mkHeaderLine(' RBC Digital Choice Business            account package', 1, 492),
+];
+
+const BIZ_ACTIVITY_HEAD: PdfLine[] = [
+  mkHeaderLine(' Account Activity Details', 1, 342),
+  mkLine('Date   Description   Cheques & Debits ($)   Deposits & Credits ($)   Balance ($)', 1, 321, 45),
+];
+
+test('wrapped "Opening/Closing balance on <date>" summary lines do not read the year as a balance', () => {
+  const lines: PdfLine[] = [
+    ...BIZ_HEADER_LINES,
+    // Dollar figures wrapped to the next line. Old code took "2026" from these
+    // summary lines as the opening and closing balances.
+    mkHeaderLine(' Opening balance on March 1, 2026', 1, 449),
+    mkHeaderLine(' Closing balance on April 1, 2026', 1, 440),
+    ...BIZ_ACTIVITY_HEAD,
+    mkLine('Opening balance   100.00', 1, 307, 90),
+    mkLine('10 Mar   Monthly fee   10.00   90.00', 1, 293, 45),
+    mkLine('Closing balance   90.00', 1, 278, 90),
+  ];
+  const result = rbcBusinessBankingParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.deepEqual(result.statementBalances, { opening: 100, closing: 90 });
+  assert.deepEqual(result.transactions.map((t) => t.amount), [-10]);
+  assert.deepEqual(result.parseErrors, []);
+});
+
+test('parse throws when the opening balance is missing entirely (no silent 0)', () => {
+  const lines: PdfLine[] = [
+    ...BIZ_HEADER_LINES,
+    mkHeaderLine(' Closing balance on April 1, 2026   $90.00', 1, 440),
+    ...BIZ_ACTIVITY_HEAD,
+    mkLine('10 Mar   Monthly fee   10.00   90.00', 1, 293, 45),
+    mkLine('Closing balance   90.00', 1, 278, 90),
+  ];
+  assert.throws(
+    () => rbcBusinessBankingParser.parse(lines, { defaultCurrency: 'CAD' }),
+    /opening balance/i,
+  );
+});
+
+test('parse throws when the only opening balance line has no dollar figure (year is not a balance)', () => {
+  const lines: PdfLine[] = [
+    ...BIZ_HEADER_LINES,
+    mkHeaderLine(' Opening balance on March 1, 2026', 1, 449),
+    mkHeaderLine(' Closing balance on April 1, 2026   $90.00', 1, 440),
+    ...BIZ_ACTIVITY_HEAD,
+    mkLine('10 Mar   Monthly fee   10.00   90.00', 1, 293, 45),
+    mkLine('Closing balance   90.00', 1, 278, 90),
+  ];
+  assert.throws(
+    () => rbcBusinessBankingParser.parse(lines, { defaultCurrency: 'CAD' }),
+    /opening balance/i,
+  );
+});

@@ -1,11 +1,18 @@
 # Observability stack (Phase 3)
 
-Cashflow runs a self-hosted observability stack on Railway:
+> **Hosting note.** The production observability stack ran on **Railway**, which was
+> retired on 2026-09-26; cashflow now runs on **Dokploy**, and telemetry is moving to
+> a separate stack ([telemetry extraction design](superpowers/specs/2026-09-23-telemetry-extraction-design.md)).
+> Sections marked **RETIRED** below describe the Railway deployment and are
+> historical only. Local development (`infra/` + docker-compose), the log schema,
+> the alert rules and the alert-to-issue routing still describe the code.
+
+Cashflow has a self-hosted observability stack:
 
 - `otel-collector` — receives OTLP from the backend, forwards logs to Loki, traces to Tempo, and metrics to Prometheus.
 - `loki` — log storage, 30-day retention, 10GB filesystem volume.
-- `tempo` — trace storage, 7-day retention, local filesystem volume on Railway.
-- `prometheus` — metrics storage, 15-day retention, local filesystem volume on Railway.
+- `tempo` — trace storage, 7-day retention, local filesystem volume.
+- `prometheus` — metrics storage, 15-day retention, local filesystem volume.
 - `grafana` — self-hosted Grafana for querying Loki, Tempo, and Prometheus via private networking. Loki log lines auto-correlate to Tempo traces via `trace_id` derived field.
 
 ## Local development
@@ -60,6 +67,10 @@ cd infra && docker compose down -v
 ```
 
 ## Railway setup (one-time)
+
+> **RETIRED — historical only.** Railway was retired on 2026-09-26 (cashflow now
+> runs on Dokploy). These steps created the Railway services. `*.railway.internal` hosts, `railway …` CLI commands
+> and Railway service IDs no longer resolve.
 
 The backend and frontend deploy as GHCR images, not source builds. The observability services follow the same pattern — `build-images.yml` publishes images to GHCR on every merge to `main`; `promote-to-production.yml` retags `:sha-XXX` as `:production` on each GitHub release and triggers `railway redeploy`.
 
@@ -126,6 +137,10 @@ Dashboard: **Cashflow Postgres Engine** (`cashflow-postgres-engine`), auto-provi
 
 One-time Railway setup (on the existing `otel-collector` service):
 
+> **RETIRED — historical only.** Railway was retired on 2026-09-26 (cashflow now
+> runs on Dokploy). This wiring targeted the Railway Postgres. `*.railway.internal` hosts, `railway …` CLI commands
+> and Railway service IDs no longer resolve.
+
 1. **Create a read-only monitoring role** on the Railway Postgres. `pg_monitor`
    unlocks the optional metrics (deadlocks, locks); core metrics work without it.
    ```sql
@@ -153,6 +168,10 @@ The cashflow stack includes a self-hosted Grafana instance for querying Loki, Te
 
 ### One-time Railway setup
 
+> **RETIRED — historical only.** Railway was retired on 2026-09-26 (cashflow now
+> runs on Dokploy). These steps created the Railway Grafana service. `*.railway.internal` hosts, `railway …` CLI commands
+> and Railway service IDs no longer resolve.
+
 1. Create the `grafana` service.
    - New Service → Deploy from Docker image → `ghcr.io/connor-adams/cashflow-grafana:main`
    - Add a persistent volume mounted at `/var/lib/grafana` (5GB).
@@ -172,6 +191,10 @@ Open the Grafana public URL. Log in with the admin credentials. Navigate to Expl
 
 ### Datasource access from Grafana
 
+> **RETIRED — historical only.** Railway was retired on 2026-09-26 (cashflow now
+> runs on Dokploy). The hosts below were Railway private networking. `*.railway.internal` hosts, `railway …` CLI commands
+> and Railway service IDs no longer resolve.
+
 Loki, Tempo, and Prometheus stay on Railway private networking:
 
 - `loki.railway.internal:3100`
@@ -186,10 +209,14 @@ Tempo receives traces from the otel-collector and makes them queryable in Grafan
 
 ### One-time Railway setup
 
+> **RETIRED — historical only.** Railway was retired on 2026-09-26 (cashflow now
+> runs on Dokploy). These steps created the Railway Tempo service. `*.railway.internal` hosts, `railway …` CLI commands
+> and Railway service IDs no longer resolve.
+
 1. **Create the `tempo` Railway service.**
    - New Service → "Deploy from Docker image".
    - Image: `ghcr.io/connor-adams/cashflow-tempo:main` (initially) — bump to `:production` once a release has tagged it.
-   - Add a persistent volume, mount at `/var/tempo`, size 10GB. **The mount path MUST be `/var/tempo`** — using the bare `/tempo` path would shadow the `grafana/tempo` binary and fail-start the container. The storage paths in `infra/tempo/config.yaml` (`storage.trace.wal.path` and `storage.trace.local.path`) are hard-pinned under `/var/tempo`; the regression-guard test `backend/test/tempoConfig.test.ts` asserts this in CI.
+   - Add a persistent volume, mount at `/var/tempo`, size 10GB. **The mount path MUST be `/var/tempo`** — using the bare `/tempo` path would shadow the `grafana/tempo` binary and fail-start the container. The storage paths in `infra/tempo/config.yaml` (`storage.trace.wal.path` and `storage.trace.local.path`) are hard-pinned under `/var/tempo`; the regression-guard tests `test/tempoConfig.test.cjs` and `backend/src/observability/tempoConfig.test.ts` assert this in CI.
    - Set service name to `tempo` (Railway exposes it as `tempo.railway.internal` in private networking).
    - Set env var: `PORT=3200`.
    - Deploy.
@@ -201,6 +228,10 @@ Tempo receives traces from the otel-collector and makes them queryable in Grafan
 3. **Add the service ID to `.github/workflows/promote-to-production.yml`** (`RAILWAY_TEMPO_SERVICE_ID`). Open a follow-up PR with the value filled in.
 
 ### Verifying the volume mount
+
+> **RETIRED — historical only.** Railway was retired on 2026-09-26 (cashflow now
+> runs on Dokploy). This checked the Railway tempo volume. `*.railway.internal` hosts, `railway …` CLI commands
+> and Railway service IDs no longer resolve.
 
 After deploying — or any time you suspect the mount has drifted — verify the tempo service is writing to the persistent volume rather than to the container's ephemeral overlay filesystem.
 
@@ -242,6 +273,10 @@ After deploying — or any time you suspect the mount has drifted — verify the
 4. **Confirm trace durability across a deploy.** Note the current WAL block UUID, force a redeploy (`railway redeploy --service tempo -y`), and re-list — the prior WAL block should now appear under `/var/tempo/traces/single-tenant/<uuid>/` with `data.parquet`, `bloom-0`, `index`, `meta.json` files, proving it survived the container swap. A new WAL block starts for fresh ingestion.
 
 ### Creating a missing tempo volume
+
+> **RETIRED — historical only.** Railway was retired on 2026-09-26 (cashflow now
+> runs on Dokploy). This used the Railway GraphQL API. `*.railway.internal` hosts, `railway …` CLI commands
+> and Railway service IDs no longer resolve.
 
 If `railway volume list` does not show `tempo-volume` at all (e.g. it was deleted, or the service was created without a volume), create it via the Railway GraphQL API rather than the dashboard so the mount path is set atomically with creation:
 
@@ -298,6 +333,10 @@ forever, so the only user-visible signal was "no new traces in Grafana."
 
 ### Decision: `restartPolicyType: ALWAYS` for tempo, loki, prometheus
 
+> **RETIRED — historical only.** Railway was retired on 2026-09-26 (cashflow now
+> runs on Dokploy). This was a Railway service setting. `*.railway.internal` hosts, `railway …` CLI commands
+> and Railway service IDs no longer resolve.
+
 For each of the `tempo`, `loki`, and `prometheus` Railway services, set:
 
 ```
@@ -324,6 +363,12 @@ storage and are safe to restart at any time) and have no graceful-shutdown
 ordering requirement that an ALWAYS policy would violate.
 
 ### Defense in depth: Grafana alerts on collector self-metrics
+
+> **RETIRED — historical only.** Railway was retired on 2026-09-26 (cashflow now
+> runs on Dokploy). The alert rules are still in `infra/`, but the `railway logs` / `railway ssh` /
+> `railway redeploy` remediation steps in the runbooks below are Railway-only; on
+> Dokploy, logs and redeploys go through the (LAN-only) Dokploy panel. `*.railway.internal` hosts, `railway …` CLI commands
+> and Railway service IDs no longer resolve.
 
 `ALWAYS` covers the crash case but not the "container running, pipeline
 unhealthy" case (e.g. tempo accepts the TCP connection but rejects writes due
@@ -495,6 +540,10 @@ failure may be transient.
 2. Review backend logs filtered by job name for error details.
 3. Recovery: job succeeds on next tick.
 ### Verification
+
+> **RETIRED — historical only.** Railway was retired on 2026-09-26 (cashflow now
+> runs on Dokploy). This exercised Railway's restart policy. `*.railway.internal` hosts, `railway …` CLI commands
+> and Railway service IDs no longer resolve.
 
 Once `restartPolicyType: ALWAYS` is set on tempo, simulate the original
 incident:

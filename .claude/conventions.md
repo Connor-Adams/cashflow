@@ -16,7 +16,7 @@ format (`__metadata: version 10`).
 |---|---|---|
 | backend | `cashflow-backend` | NOT `backend`. Express + Sequelize. |
 | frontend | `frontend` | Vite + React 19. **No `typecheck` script** — use `tsc -b`. |
-| shared | `shared` | One file `shared/api-types.ts`, imported as `@cashflow/shared`. |
+| shared | `@cashflow/shared` | NOT `shared`. One file `shared/api-types.ts`. |
 
 ## Tests
 
@@ -41,10 +41,21 @@ format (`__metadata: version 10`).
 
 ## Verify suite (before claiming done / opening a PR)
 
-Prefer the full gate: **`yarn ci`** (= test:workflows + backend typecheck + backend
-unit + backend integration + backend build + frontend test + frontend build).
+**Agents never use Docker or a local Postgres**, so the agent gate is NOT `yarn ci`:
+`yarn ci` (= test:workflows + shared test + backend typecheck + backend unit +
+backend **integration** + backend build + frontend test + frontend build + frontend
+lint + frontend lint:palette) includes the integration suite, which hard-requires
+Postgres at `localhost:5432` (`backend/test/integration/_setup/pgTestDb.ts`).
 
-Partial / faster:
+Agent gate — run all of these:
+- Backend: `yarn workspace cashflow-backend run test`, `... run typecheck`, `... run lint`
+- Frontend: `yarn workspace frontend run test`, `yarn workspace frontend run tsc -b`,
+  `... run lint`, `... run build`
+- `yarn audit:code` — `code-audit` is a required status check on `main`
+
+Integration tests run in CI (`backend-test-integration`, with a Postgres service).
+
+Individual commands:
 - Backend typecheck: `yarn workspace cashflow-backend run typecheck` (`tsc --noEmit`)
 - Frontend typecheck: `yarn workspace frontend run tsc -b` (no `typecheck` script)
 - Backend lint: `yarn workspace cashflow-backend run lint` (`eslint src --ext .ts`)
@@ -98,7 +109,7 @@ Before a new model/route/page, answer 3 checks:
 2. Persistent or derived? Derived → no table, add a query. Persistent → which primitive owns it?
 3. Shape mirrors an existing primitive under a new name? → STOP, fold via a discriminator.
 
-Mount order is load-bearing and locked by `backend/test/appRouteOrder.test.ts`; routes
+Mount order is load-bearing and locked by `backend/src/auth/appRouteOrder.test.ts`; routes
 mount via the declarative `backend/src/routeRegistry.ts`.
 
 ## Commit / PR

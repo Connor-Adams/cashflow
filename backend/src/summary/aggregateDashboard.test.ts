@@ -228,3 +228,104 @@ test('monthly bucket peels income out of totalCredits into totalIncome', () => {
   assert.equal(monthly.totalCredits, 0);
   assert.equal(monthly.netSpend, 40, 'monthly netSpend excludes income');
 });
+
+// ---- Breakdowns reconcile with the headline (same flow classification) ----
+
+const twoAccounts = new Map<number, AccountRow>([
+  [1, { id: 1, name: 'Chequing', shortCode: null, accountType: 'chequing' }],
+  [2, { id: 2, name: 'Visa', shortCode: null, accountType: 'credit' }],
+]);
+
+/** Σ over every breakdown that claims to decompose the headline netSpend. */
+function breakdownTotals(out: ReturnType<typeof aggregateDashboard>, cur = 'CAD') {
+  const cats = Array.from(out.byCategory.values()).filter((c) => c.currency === cur);
+  const reports = Array.from(out.categoryReports.values()).filter((c) => c.currency === cur);
+  const business = Array.from(out.netSpendByBusiness.values()).filter((b) => b.currency === cur);
+  return {
+    byCategorySpend: -cats.reduce((s, c) => s + c.sumAmount, 0),
+    categoryReportsNet: reports.reduce((s, c) => s + c.netSpend, 0),
+    businessNet: business.reduce((s, b) => s + b.netSpend, 0),
+    categories: cats.map((c) => c.category),
+    reportCategories: reports.map((c) => c.category),
+  };
+}
+
+test('negative chequing-side card-payment leg (txnType=payment) is excluded from every breakdown', () => {
+  const out = aggregateDashboard(
+    [
+      row({ id: 1, accountId: 2, amount: '-200.00', finalCategory: 'Groceries', finalBusiness: false }),
+      // Chequing side of paying the card off.
+      row({
+        id: 2,
+        accountId: 1,
+        amount: '-200.00',
+        txnType: 'payment',
+        finalCategory: 'Credit Card Payment',
+        finalBusiness: false,
+        merchantRaw: 'VISA PAYMENT',
+        merchantClean: 'VISA PAYMENT',
+      }),
+      // Card side of the same payment.
+      row({
+        id: 3,
+        accountId: 2,
+        amount: '200.00',
+        txnType: 'payment',
+        finalCategory: 'Credit Card Payment',
+        finalBusiness: false,
+        merchantRaw: 'PAYMENT THANK YOU',
+        merchantClean: 'PAYMENT THANK YOU',
+      }),
+    ],
+    twoAccounts,
+    emptyCtx,
+  );
+  assert.equal(metricsOf(out)?.netSpend, 200);
+  const t = breakdownTotals(out);
+  assert.deepEqual(t.categories, ['Groceries']);
+  assert.deepEqual(t.reportCategories, ['Groceries']);
+  assert.equal(t.byCategorySpend, 200);
+  assert.equal(t.categoryReportsNet, 200);
+  assert.equal(t.businessNet, 200);
+});
+
+test('positive row the headline classifies as skip (unknown deposit) is excluded from every breakdown', () => {
+  const out = aggregateDashboard(
+    [
+      row({ id: 1, amount: '-200.00', finalCategory: 'Groceries', finalBusiness: false }),
+      row({
+        id: 2,
+        amount: '150.00',
+        txnType: 'unknown',
+        finalCategory: null,
+        finalBusiness: false,
+        merchantRaw: 'DEPOSIT FROM MOM',
+        merchantClean: 'DEPOSIT FROM MOM',
+      }),
+    ],
+    accounts,
+    emptyCtx,
+  );
+  assert.equal(metricsOf(out)?.netSpend, 200);
+  const t = breakdownTotals(out);
+  assert.deepEqual(t.categories, ['Groceries']);
+  assert.equal(t.byCategorySpend, 200);
+  assert.equal(t.categoryReportsNet, 200);
+  assert.equal(t.businessNet, 200);
+});
+
+test('refund credits still net against category breakdowns and reconcile with headline', () => {
+  const out = aggregateDashboard(
+    [
+      row({ id: 1, amount: '-200.00', finalCategory: 'Groceries', finalBusiness: false }),
+      row({ id: 2, amount: '50.00', txnType: 'refund', finalCategory: 'Groceries', finalBusiness: false }),
+    ],
+    accounts,
+    emptyCtx,
+  );
+  assert.equal(metricsOf(out)?.netSpend, 150);
+  const t = breakdownTotals(out);
+  assert.equal(t.byCategorySpend, 150);
+  assert.equal(t.categoryReportsNet, 150);
+  assert.equal(t.businessNet, 150);
+});

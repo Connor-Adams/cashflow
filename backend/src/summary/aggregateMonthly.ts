@@ -1,5 +1,5 @@
 import { num, toUnits, fromUnits } from '../util/numbers';
-import { classifyPositiveAmount, isNonCategorical } from './classifyTransactionFlow';
+import { classifyFlow, countsTowardNetSpend } from './classifyTransactionFlow';
 import { splitTxnByItems } from '../import/splitTxnByItems';
 import type { ItemAllocationContext } from './loadItemAllocations';
 
@@ -45,7 +45,9 @@ export type MonthlyResult = {
  * breakdown driven by `splitTxnByItems` — so an itemized receipt feeds its
  * line-item categories into the monthly trend instead of the txn category.
  *
- * Excluded:
+ * Rows are gated by `classifyFlow` — the dashboard headline's classifier —
+ * so the curve reconciles with headline netSpend. Only 'spend' and 'credit'
+ * rows count; excluded:
  *  - statement payments, both legs (any txnType='payment' row, plus positive
  *    amounts resolving to 'payment' via `classifyPositiveAmount` merchant
  *    text — not category data, would double count the card spend they cover)
@@ -55,10 +57,12 @@ export type MonthlyResult = {
  *    or a category-offsetting credit; peeled from BOTH points and
  *    categoryPoints so a paycheck doesn't inflate the null/Uncategorized
  *    bucket or the activity curve (matches the dashboard income peel)
+ *  - unsignaled positives classified 'skip' (txnType unknown deposits) and
+ *    negative non-spend rows (e.g. a negative refund/reward reversal)
  *
  * Included:
- *  - refunds / rewards — they net against the same month's spend in the UI,
- *    which is what users expect
+ *  - spend, and positive refunds / rewards / credit-keyword rows — they net
+ *    against the same month's spend in the UI, which is what users expect
  *  - rows whose `num()` parse fails are silently skipped (legacy data)
  *
  * Sorting is left to the route so this stays a pure data transform.
@@ -74,37 +78,26 @@ export function aggregateMonthly(
     const amount = num(row.amount);
     if (amount == null) continue;
     const accountType = accountTypeById.get(row.accountId);
-    // Income (txnType='income') is inflow, not category spend nor a
-    // category-offsetting credit. Peel it out entirely so it inflates
-    // neither the activity curve (points) nor any category bucket
-    // (categoryPoints) — both signs dropped (a negative income reversal is
-    // money-movement, not spend). Keeps points == Σ categoryPoints intact.
-    if (row.txnType === 'income') continue;
-    // Statement payments are money movement, not category data — BOTH legs:
-    // the positive card-side leg (txnType or merchant-text via
-    // classifyPositiveAmount) and the negative checking-side leg
-    // (txnType='payment'). The card purchases the payment covers are already
-    // summed, so keeping either leg would double count the month.
-    if (row.txnType === 'payment') continue;
-    if (
-      amount > 0 &&
-      classifyPositiveAmount({
-        txnType: row.txnType,
-        accountType,
-        merchantRaw: row.merchantRaw,
-        merchantClean: row.merchantClean,
-        category: row.finalCategory,
-      }) === 'payment'
-    ) {
-      continue;
-    }
-    // /monthly aggregates signed amounts into a single "activity"
-    // curve, so refunds/rewards stay IN (they net against month spend
-    // for the same category in the UI). We only drop transfers and
-    // investment / dividend flows that don't belong to any category.
-    if (isNonCategorical(row.txnType, accountType)) {
-      continue;
-    }
+    // Same classification as the dashboard headline: only rows that count
+    // toward netSpend (spend, or a refund/reward credit that nets against it)
+    // feed the activity curve. That drops, both signs:
+    //  - income — inflow, not category spend nor a category-offsetting credit
+    //  - statement payments, BOTH legs (positive card-side via txnType or
+    //    merchant text; negative checking-side txnType='payment' is non-spend)
+    //    — the card purchases they cover are already summed
+    //  - transfers / investment / dividend flows and investment accounts
+    //  - unsignaled positives the headline classifies 'skip' (e.g. "DEPOSIT
+    //    FROM MOM", txnType unknown) — not a refund against spend
+    // Keeps points == Σ categoryPoints and reconciles with headline netSpend.
+    const flow = classifyFlow({
+      amount,
+      txnType: row.txnType,
+      accountType,
+      merchantRaw: row.merchantRaw,
+      merchantClean: row.merchantClean,
+      category: row.finalCategory,
+    });
+    if (!countsTowardNetSpend(flow)) continue;
     const month = String(row.date).slice(0, 7);
     const key = `${month}\0${row.currency}`;
     const existing = points.get(key) ?? {
