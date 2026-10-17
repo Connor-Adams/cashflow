@@ -143,6 +143,26 @@ export function dayMonthToIso(dayMonth: string, period: Period): string {
   return toIso(year, month, day);
 }
 
+/** A cents-precision money token: "96.49", "1,234.56", "-6.00", "$270.49", "-$6.00". */
+const STRICT_MONEY_TOKEN_RE = /^-?\$?[\d,]+\.\d{2}$/;
+
+/**
+ * The value of the last money-shaped whitespace-separated token in `text`, or
+ * null when there is none. For statement balance lines ("Opening balance on
+ * March 1, 2026   $1,234.56"): only tokens with cents count, so when the
+ * dollar figure wrapped to the next line the year ("2026") or the day ("1,")
+ * is not misread as the balance.
+ */
+export function lastMoneyTokenValue(text: string): number | null {
+  const tokens = text.trim().split(/\s+/);
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    if (!STRICT_MONEY_TOKEN_RE.test(tokens[i])) continue;
+    const v = parseMoney(tokens[i]);
+    if (Number.isFinite(v)) return v;
+  }
+  return null;
+}
+
 /** Parse a number string like "$1,234.56" or "(123.45)" or "12.34CR" or "-12.34". */
 export function parseMoney(raw: string): number {
   const trimmed = raw.replace(/[\s$]/g, '');

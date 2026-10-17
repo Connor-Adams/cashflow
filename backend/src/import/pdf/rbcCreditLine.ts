@@ -1,6 +1,6 @@
 import type { PdfLine, PdfParser, PdfParseResult, PdfRatePeriod, PdfStatementHeader, StatementParseError } from './types';
 import { normalizeMerchant } from '../normalizeMerchant';
-import { dayMonthToIso, parseLongDate, parseMoney, type Period } from './dateHelpers';
+import { dayMonthToIso, lastMoneyTokenValue, parseLongDate, parseMoney, type Period } from './dateHelpers';
 
 /**
  * RBC Royal Credit Line statement parser.
@@ -132,13 +132,8 @@ function extractOpeningPrincipal(lines: PdfLine[]): number | null {
   // through to later lines (the next one is the closing balance).
   for (const l of lines) {
     if (/Principal balance on\b/i.test(l.text)) {
-      const tokens = l.text.trim().split(/\s+/);
-      for (let i = tokens.length - 1; i >= 0; i--) {
-        if (!isMoneyToken(tokens[i])) continue;
-        const v = parseMoney(tokens[i]);
-        if (Number.isFinite(v)) return Math.abs(v);
-      }
-      return null;
+      const v = lastMoneyTokenValue(l.text);
+      return v === null ? null : Math.abs(v);
     }
   }
   return null;
@@ -154,15 +149,8 @@ function extractClosingPrincipal(lines: PdfLine[]): number | null {
   let closing: number | null = null;
   for (const l of lines) {
     if (/Principal balance on\b/i.test(l.text)) {
-      const tokens = l.text.trim().split(/\s+/);
-      for (let i = tokens.length - 1; i >= 0; i--) {
-        if (!isMoneyToken(tokens[i])) continue;
-        const v = parseMoney(tokens[i]);
-        if (Number.isFinite(v)) {
-          closing = Math.abs(v);
-          break;
-        }
-      }
+      const v = lastMoneyTokenValue(l.text);
+      if (v !== null) closing = Math.abs(v);
     }
   }
   return closing;
