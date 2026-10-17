@@ -12,7 +12,7 @@
  */
 import fs from 'fs/promises';
 import path from 'path';
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import { createWriteStream, createReadStream } from 'fs';
 import { QueryTypes } from 'sequelize';
 
@@ -195,7 +195,9 @@ export async function buildDataExportArchive(
       { householdId },
     ),
     queryAll(
-      `SELECT id, transaction_id, original_name, content_type, byte_size, created_at, updated_at
+      `SELECT id, transaction_id, original_name,
+              mime_type AS content_type, size_bytes AS byte_size,
+              created_at, updated_at
          FROM receipts
         WHERE transaction_id IN (
           SELECT id FROM transactions WHERE household_id = :householdId
@@ -204,14 +206,14 @@ export async function buildDataExportArchive(
       { householdId },
     ),
     queryAll(
-      `SELECT * FROM chat_threads WHERE household_id = :householdId ORDER BY id`,
-      { householdId },
+      `SELECT * FROM chat_threads WHERE user_id = :userId ORDER BY id`,
+      { userId },
     ),
     queryAll(
       `SELECT * FROM chat_messages WHERE thread_id IN (
-         SELECT id FROM chat_threads WHERE household_id = :householdId
+         SELECT id FROM chat_threads WHERE user_id = :userId
        ) ORDER BY id`,
-      { householdId },
+      { userId },
     ),
     queryAll(
       `SELECT hs.* FROM holding_snapshots hs
@@ -277,7 +279,7 @@ export async function buildDataExportArchive(
   // Build ZIP.
   await new Promise<void>((resolve, reject) => {
     const output = createWriteStream(absolutePath);
-    const archive = archiver('zip', { zlib: { level: 6 } });
+    const archive = new ZipArchive({ zlib: { level: 6 } });
 
     output.on('close', resolve);
     archive.on('error', reject);
