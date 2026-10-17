@@ -38,10 +38,8 @@ import { currentAuth } from '../auth/middleware';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 import { num } from '../util/numbers';
 import { classifyPositiveFlow } from '../summary/classifyTransactionFlow';
-import {
-  detectRecurring,
-  type RecurringInputTxn,
-} from './recurring';
+import { detectRecurring } from './recurring';
+import { loadRecurringCandidates } from '../subscriptions/recurringCandidates';
 import {
   detectMoneyLeaks,
   type LeakSubscription,
@@ -234,54 +232,10 @@ router.get('/', async (req, res, next) => {
     )
       .toISOString()
       .slice(0, 10);
-    const recurringRows = await Transaction.findAll({
-      where: {
-        ...visibleTransactionWhere(req),
-        date: { [Op.gte]: sinceRecurring },
-      },
-      attributes: [
-        'date',
-        'currency',
-        'amount',
-        'merchantRaw',
-        'merchantClean',
-        'finalCategory',
-      ],
-      raw: true,
+    const candidates = await loadRecurringCandidates({
+      ...visibleTransactionWhere(req),
+      date: { [Op.gte]: sinceRecurring },
     });
-    type Row = {
-      date: string;
-      currency: string;
-      amount: unknown;
-      merchantRaw: string | null;
-      merchantClean: string | null;
-      finalCategory: string | null;
-    };
-    const candidates: RecurringInputTxn[] = [];
-    for (const row of recurringRows as unknown as Row[]) {
-      const amount = num(row.amount);
-      if (amount == null) continue;
-      if (amount >= 0) continue;
-      if (
-        classifyPositiveFlow({
-          merchantRaw: row.merchantRaw,
-          merchantClean: row.merchantClean,
-          category: row.finalCategory,
-        }) === 'payment'
-      ) {
-        continue;
-      }
-      const merchant =
-        (row.merchantClean ?? '').trim() || (row.merchantRaw ?? '').trim();
-      if (!merchant) continue;
-      candidates.push({
-        merchant,
-        amount,
-        currency: row.currency,
-        date: row.date,
-        category: row.finalCategory,
-      });
-    }
     const recurringItems = detectRecurring(candidates);
     const recurringGroups: LeakRecurringGroup[] = recurringItems.map((item) => ({
       merchant: item.merchant,
