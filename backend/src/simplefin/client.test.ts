@@ -91,3 +91,44 @@ test('mapDiscoveredAccounts treats ambiguous (multi) matches as unlinked', () =>
   assert.equal(linked, 0);
   assert.equal(unlinked.length, 1);
 });
+
+test('fetchTransactions surfaces SimpleFIN errors and each account balance-date', async () => {
+  const { fetchTransactions } = await import('./client.js');
+  const originalFetch = globalThis.fetch;
+  let requested = '';
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    requested = String(input);
+    return new Response(
+      JSON.stringify({
+        errors: ['Connection to Royal Bank of Canada  may need attention. Broken.'],
+        accounts: [
+          { id: 'ACT-1', name: 'RBC (6985)', currency: 'CAD', 'balance-date': 1782005423, transactions: [] },
+          { id: 'ACT-2', name: 'Cobalt (1005)', currency: 'CAD', transactions: [] },
+        ],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+  }) as unknown as typeof globalThis.fetch;
+  try {
+    const result = await fetchTransactions('https://u:p@bridge.example/simplefin', 1700000000);
+    assert.ok(requested.endsWith('/accounts?start-date=1700000000'));
+    assert.deepEqual(result.errors, ['Connection to Royal Bank of Canada  may need attention. Broken.']);
+    assert.equal(result.accounts[0].balanceDate, 1782005423);
+    assert.equal(result.accounts[1].balanceDate, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('fetchTransactions tolerates a payload without an errors array', async () => {
+  const { fetchTransactions } = await import('./client.js');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ accounts: [] }), { status: 200 })) as unknown as typeof globalThis.fetch;
+  try {
+    const result = await fetchTransactions('https://u:p@bridge.example/simplefin', 0);
+    assert.deepEqual(result.errors, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

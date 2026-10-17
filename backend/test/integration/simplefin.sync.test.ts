@@ -1,7 +1,8 @@
 /**
  * Integration tests for the SimpleFIN daily transaction sync (issue #791).
  * Postgres-backed; stubs globalThis.fetch for the connect handshake and the
- * `/accounts?start-date=` transaction fetch. Covers AC 1,3,4,5,6,8,9,10,11.
+ * `/accounts?start-date=` transaction fetch. Covers AC 1,3,4,5,6,8,9,10,11,
+ * plus institution errors and the statement-coverage floor.
  */
 import { after, before, beforeEach, afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -103,6 +104,7 @@ afterEach(async () => {
 function stubTxnFetch(opts: {
   status?: number;
   accounts?: unknown[];
+  errors?: unknown[];
 }) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -110,7 +112,7 @@ function stubTxnFetch(opts: {
       if (opts.status && opts.status >= 400) {
         return new Response('denied', { status: opts.status });
       }
-      return new Response(JSON.stringify({ accounts: opts.accounts ?? [] }), {
+      return new Response(JSON.stringify({ errors: opts.errors ?? [], accounts: opts.accounts ?? [] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -309,6 +311,99 @@ test('AC8: a 401 from the access URL sets status=error and does not advance last
     'lastSyncedAt unchanged',
   );
   assert.equal(await models.Transaction.count({ where: { accountId } }), 0);
+});
+
+// Prod 2026-10-17: SimpleFIN answered 200 with errors for RBC, Wealthsimple and
+// CIBC and served their last good data, frozen for weeks. The sync ignored
+// `errors`, advanced lastSyncedAt and reported success every night.
+test('institution errors set status=error, keep lastSyncedAt, and still commit healthy rows', async () => {
+  const before = await models.UserSimplefinIntegration.findOne({ where: { userId } });
+  const lastBefore = before!.lastSyncedAt;
+  const message = 'Connection to Royal Bank of Canada  may need attention. Broken.';
+  stubTxnFetch({
+    errors: [message],
+    accounts: [
+      sampleAccount([
+        { id: 'STX-1', posted: POSTED, amount: '-10.00', description: 'STORE A', payee: 'Store A' },
+      ]),
+    ],
+  });
+  const res = await authed.post('/api/simplefin/sync').send({});
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.deepEqual(res.body.institutionErrors, [message]);
+  assert.equal(res.body.runs[0].inserted, 1, 'rows that did arrive are still committed');
+
+  const after = await models.UserSimplefinIntegration.findOne({ where: { userId } });
+  assert.equal(after!.status, 'error');
+  assert.match(after!.statusReason ?? '', /^institution_attention: .*Royal Bank of Canada/);
+  assert.equal(
+    after!.lastSyncedAt ? after!.lastSyncedAt.getTime() : null,
+    lastBefore ? lastBefore.getTime() : null,
+    'lastSyncedAt held so the outage is re-fetched once repaired',
+  );
+});
+
+test('an account SimpleFIN stopped refreshing is an error run', async () => {
+  const twoWeeksAgo = Math.floor(Date.now() / 1000) - 14 * 86400;
+  stubTxnFetch({ accounts: [{ ...sampleAccount([]), 'balance-date': twoWeeksAgo }] });
+  const res = await authed.post('/api/simplefin/sync').send({});
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.runs[0].status, 'error');
+  const after = await models.UserSimplefinIntegration.findOne({ where: { userId } });
+  assert.equal(after!.status, 'error');
+  assert.match(after!.statusReason ?? '', /Checking/);
+});
+
+test('feed rows dated before the newest statement-imported row are not inserted', async () => {
+  const { stableIdentityFingerprint, rowFingerprint } = await import(
+    '../../src/import/fingerprint.js'
+  );
+  // A statement import already holds the account through POSTED_DATE, under
+  // its own reference and wording, which commit-path dedup cannot pair with a
+  // SimpleFIN row.
+  const merchantRaw = 'STATEMENT WORDING';
+  await models.Transaction.create({
+    accountId,
+    householdId,
+    importBatch: '2025-03-statement',
+    date: POSTED_DATE,
+    merchantRaw,
+    merchantClean: 'statement wording',
+    amount: '-99.00',
+    currency: 'CAD',
+    sourceReference: 'AT-STATEMENT-1',
+    sourceRowFingerprint: rowFingerprint({
+      accountId,
+      date: POSTED_DATE,
+      amount: -99,
+      currency: 'CAD',
+      merchantRaw,
+      sourceReference: 'AT-STATEMENT-1',
+    }),
+    sourceIdentityFingerprint: stableIdentityFingerprint({
+      accountId,
+      date: POSTED_DATE,
+      amount: -99,
+      currency: 'CAD',
+      merchantRaw,
+    }),
+    status: 'posted',
+  } as never);
+
+  stubTxnFetch({
+    accounts: [
+      sampleAccount([
+        { id: 'STX-OLD', posted: POSTED - 2 * 86400, amount: '-5.00', description: 'Covered', payee: 'Covered' },
+        { id: 'STX-NEW', posted: POSTED + 86400, amount: '-6.00', description: 'New', payee: 'New' },
+      ]),
+    ],
+  });
+  const res = await authed.post('/api/simplefin/sync').send({});
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.runs[0].inserted, 1);
+  assert.equal(res.body.runs[0].skippedCovered, 1);
+  const refs = (await models.Transaction.findAll({ where: { accountId } })).map((t) => t.sourceReference);
+  assert.deepEqual(refs.sort(), ['AT-STATEMENT-1', 'STX-NEW']);
 });
 
 test('AC10: unauthenticated POST /api/simplefin/sync returns 401', async () => {

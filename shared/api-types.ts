@@ -2315,12 +2315,20 @@ export interface SimplefinSyncRun {
   accountId: number;
   inserted: number;
   skippedDuplicate: number;
+  /** Feed rows left out because a statement/CSV import already covers their date. */
+  skippedCovered: number;
+  /** 'error' when SimpleFIN has stopped refreshing this account from its bank. */
   status: SimplefinStatus;
 }
 
 /** Success body for POST /api/simplefin/sync. */
 export interface SimplefinSyncResponse {
   runs: SimplefinSyncRun[];
+  /**
+   * SimpleFIN's own per-institution errors ("Connection to … may need
+   * attention"). Fixed by re-authenticating the institution in SimpleFIN Bridge.
+   */
+  institutionErrors: string[];
 }
 
 // ---------------------------------------------------------------------------

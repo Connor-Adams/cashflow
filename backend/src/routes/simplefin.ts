@@ -165,10 +165,10 @@ router.post('/sync', async (req, res, next) => {
       return;
     }
 
-    const { runs } = await syncSimplefin({ userId: user.id, integrationId });
-    if (runs.some((r) => r.status === 'error')) {
+    const { runs, institutionErrors } = await syncSimplefin({ userId: user.id, integrationId });
+    if (runs.some((r) => r.status === 'error') || institutionErrors.length > 0) {
       logger.warn(
-        { userId: user.id, integrationId, runs: runs.length },
+        { userId: user.id, integrationId, runs: runs.length, institutionErrors },
         'simplefin_manual_sync_partial_error',
       );
     } else {
@@ -177,7 +177,7 @@ router.post('/sync', async (req, res, next) => {
         'simplefin_manual_sync_ok',
       );
     }
-    const payload: SimplefinSyncResponse = { runs };
+    const payload: SimplefinSyncResponse = { runs, institutionErrors };
     res.json(payload);
   } catch (e) {
     if (e instanceof SimplefinError && e.unauthorized) {
