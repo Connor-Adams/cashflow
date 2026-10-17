@@ -7,6 +7,7 @@ import {
   getCalendarMonthRange,
   getCalendarQuarterRange,
   getCalendarYearRange,
+  getPreviousComparisonRange,
 } from './dateInput'
 
 /**
@@ -242,5 +243,93 @@ describe('getCalendarYearRange', () => {
       from: '2025-01-01',
       to: '2025-12-31',
     })
+  })
+})
+
+describe('getPreviousComparisonRange', () => {
+  // Local noon so the local calendar day is the same in every process TZ.
+  const at = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12)
+  const oct17 = at(2026, 10, 17)
+
+  it('compares "This month" to date against the same day-span of last month', () => {
+    // The original bug: Oct 1..Oct 31 on Oct 17 compared 17 days of data
+    // against the 31 days of Aug 31..Sep 30.
+    expect(getPreviousComparisonRange('2026-10-01', '2026-10-31', oct17)).toEqual({
+      from: '2026-09-01',
+      to: '2026-09-17',
+    })
+  })
+
+  it('clamps the day-of-month to a shorter previous month', () => {
+    expect(getPreviousComparisonRange('2026-03-01', '2026-03-31', at(2026, 3, 30))).toEqual({
+      from: '2026-02-01',
+      to: '2026-02-28',
+    })
+  })
+
+  it('uses the leap-day end of February', () => {
+    expect(getPreviousComparisonRange('2028-03-01', '2028-03-31', at(2028, 3, 30))).toEqual({
+      from: '2028-02-01',
+      to: '2028-02-29',
+    })
+  })
+
+  it('compares a complete month against the complete previous month', () => {
+    expect(getPreviousComparisonRange('2026-09-01', '2026-09-30', oct17)).toEqual({
+      from: '2026-08-01',
+      to: '2026-08-31',
+    })
+    // Last day of the month: nothing to clamp, so Feb is the full month.
+    expect(getPreviousComparisonRange('2026-03-01', '2026-03-31', at(2026, 3, 31))).toEqual({
+      from: '2026-02-01',
+      to: '2026-02-28',
+    })
+  })
+
+  it('rolls "This month" in January back into the previous December', () => {
+    expect(getPreviousComparisonRange('2026-01-01', '2026-01-31', at(2026, 1, 10))).toEqual({
+      from: '2025-12-01',
+      to: '2025-12-10',
+    })
+  })
+
+  it('compares "This quarter" to date against the same span of last quarter', () => {
+    expect(getPreviousComparisonRange('2026-10-01', '2026-12-31', oct17)).toEqual({
+      from: '2026-07-01',
+      to: '2026-07-17',
+    })
+  })
+
+  it('compares "This year" to date against the same span of last year', () => {
+    expect(getPreviousComparisonRange('2026-01-01', '2026-12-31', oct17)).toEqual({
+      from: '2025-01-01',
+      to: '2025-10-17',
+    })
+  })
+
+  it('clamps a custom range that runs past today, then shifts by its day-span', () => {
+    // Oct 10..Oct 24 only has data through Oct 17 → 8 days → Oct 2..Oct 9.
+    expect(getPreviousComparisonRange('2026-10-10', '2026-10-24', oct17)).toEqual({
+      from: '2026-10-02',
+      to: '2026-10-09',
+    })
+  })
+
+  it('shifts a past custom range back by its own day-span', () => {
+    expect(getPreviousComparisonRange('2026-09-10', '2026-09-19', oct17)).toEqual({
+      from: '2026-08-31',
+      to: '2026-09-09',
+    })
+  })
+
+  it('returns null for a range that starts after today', () => {
+    expect(getPreviousComparisonRange('2026-11-01', '2026-11-30', oct17)).toBeNull()
+  })
+
+  it('returns null for missing, malformed, or inverted bounds', () => {
+    expect(getPreviousComparisonRange('', '2026-10-31', oct17)).toBeNull()
+    expect(getPreviousComparisonRange('2026-10-01', '', oct17)).toBeNull()
+    expect(getPreviousComparisonRange('2026-10-31', '2026-10-01', oct17)).toBeNull()
+    expect(getPreviousComparisonRange('nope', '2026-10-01', oct17)).toBeNull()
   })
 })

@@ -28,6 +28,7 @@ import { InboxSummaryTile } from '@/components/dashboard/InboxSummaryTile'
 import { BudgetStatusCard } from '@/components/dashboard/BudgetStatusCard'
 import { ActivationCardDeck } from '@/components/dashboard/ActivationCardDeck'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
+import { CurrencyPickNotice } from '@/components/dashboard/CurrencyPickNotice'
 
 import { formatCurrency } from '../lib/formatCurrency'
 import { BudgetCarryNote } from '../components/dashboard/BudgetCarryNote'
@@ -41,6 +42,7 @@ import {
   getCalendarMonthRange,
   getCalendarQuarterRange,
   getCalendarYearRange,
+  getPreviousComparisonRange,
   toDateInputValue,
   todayDateInputValue,
 } from '../lib/dateInput'
@@ -190,20 +192,6 @@ const CHART_TOOLTIP_CURSOR = {
   fill: 'color-mix(in oklch, var(--accent) 30%, transparent)',
 }
 
-function getPreviousRange(
-  dateFrom: string,
-  dateTo: string
-): { from: string; to: string } | null {
-  const from = fromDateInputValue(dateFrom)
-  const to = fromDateInputValue(dateTo)
-  if (!from || !to || from > to) return null
-  const dayMs = 24 * 60 * 60 * 1000
-  const spanDays = Math.floor((to.getTime() - from.getTime()) / dayMs) + 1
-  const prevTo = new Date(from.getTime() - dayMs)
-  const prevFrom = new Date(prevTo.getTime() - (spanDays - 1) * dayMs)
-  return { from: toDateInputValue(prevFrom), to: toDateInputValue(prevTo) }
-}
-
 /**
  * Anchor for default-range calculations: UTC midnight of the user's local
  * calendar day. Routing all default-range math through this anchor keeps the
@@ -316,8 +304,11 @@ export function DashboardPage() {
     () => summaryQueryString({ currency, dateFrom, dateTo }),
     [currency, dateFrom, dateTo]
   )
+  // Like-for-like comparison window: the selected range clamped at today,
+  // against the same span of the previous period (see
+  // getPreviousComparisonRange). The selected range itself is not changed.
   const previousRange = useMemo(
-    () => getPreviousRange(dateFrom, dateTo),
+    () => getPreviousComparisonRange(dateFrom, dateTo),
     [dateFrom, dateTo]
   )
 
@@ -433,10 +424,18 @@ export function DashboardPage() {
     return Array.from(s).sort()
   }, [data, monthly])
 
+  // The one currency money tiles may show: the filter, or the only currency
+  // in the data. '' when "All currencies" spans several — there are no
+  // FX-converted figures here, so those tiles ask for a currency
+  // (CurrencyPickNotice) rather than add CAD and USD into one number.
+  const displayCurrency = currency || (currencies.length === 1 ? currencies[0] : '')
+  const needsCurrencyPick = !displayCurrency && currencies.length > 1
+
   const chartData = useMemo(() => {
     const byCat = new Map<string, number>()
     for (const r of data?.byCategory ?? []) {
-      if (currency && r.currency !== currency) continue
+      // Strict match: with no single display currency nothing is summed.
+      if (r.currency !== displayCurrency) continue
       const raw = (r.category ?? '').trim().toLowerCase()
       if (raw === 'investments') continue
       const label =
@@ -454,7 +453,7 @@ export function DashboardPage() {
     return Array.from(byCat.entries())
       .map(([name, total]) => ({ name, total: -total }))
       .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
-  }, [data, currency])
+  }, [data, displayCurrency])
 
   // Drill from a category bar into a pre-filtered Transactions view. Preserves
   // the active currency and date filters so the destination opens with the
@@ -513,7 +512,7 @@ export function DashboardPage() {
       }
     >()
     for (const row of rows) {
-      if (currency && row.currency !== currency) continue
+      if (row.currency !== displayCurrency) continue
       const existing = byMonth.get(row.month) ?? {
         month: row.month,
         totalSpend: 0,
@@ -528,11 +527,11 @@ export function DashboardPage() {
       byMonth.set(row.month, existing)
     }
     return Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month))
-  }, [data?.monthlyByCurrency, currency])
+  }, [data?.monthlyByCurrency, displayCurrency])
 
   const bizSplit = useMemo(
-    () => businessIncomeSpend(data?.netSpendByBusiness ?? [], currency),
-    [data?.netSpendByBusiness, currency]
+    () => businessIncomeSpend(data?.netSpendByBusiness ?? [], displayCurrency),
+    [data?.netSpendByBusiness, displayCurrency]
   )
 
   const merchantReportData = useMemo(
@@ -581,13 +580,18 @@ export function DashboardPage() {
   ])
 
   // Resolve the period-insight entry matching the selected currency. With no
-  // currency filter, fall back to the first currency (multi-currency full
-  // breakdown is a follow-up).
+  // currency filter it is shown only when the period holds a single currency
+  // — never the first of several, which used to pass one currency's numbers
+  // off as the whole period.
   const insightForCurrency: PeriodInsightCurrency | null = useMemo(() => {
     if (!insight) return null
     if (currency) return insight.byCurrency.find((c) => c.currency === currency) ?? null
-    return insight.byCurrency[0] ?? null
+    return insight.byCurrency.length === 1 ? insight.byCurrency[0] : null
   }, [insight, currency])
+  const insightCurrencies = useMemo(
+    () => (insight?.byCurrency ?? []).map((c) => c.currency).sort(),
+    [insight]
+  )
 
   const activeRangeLabel = useMemo(() => {
     if (!dateFrom && !dateTo) return 'All dates'
@@ -621,15 +625,15 @@ export function DashboardPage() {
     dateFrom !== defaultRange.from ||
     dateTo !== defaultRange.to
 
-  // True only when a real previous window exists. `getPreviousRange` returns
-  // null whenever either bound is missing or the range is empty, so this
+  // True only when a real previous window exists. `getPreviousComparisonRange`
+  // returns null whenever either bound is missing, the range is empty, or it
+  // starts after today, so this
   // tracks the actual fetch outcome rather than re-deriving from raw inputs.
   // Single-bound filters (only dateFrom or only dateTo) previously slipped
   // through `Boolean(dateFrom || dateTo)` and rendered fabricated deltas
   // against $0 prior-period totals.
   const hasComparisonPeriod = Boolean(previousRange)
 
-  const displayCurrency = currency || (currencies.length === 1 ? currencies[0] : '')
   const formatDashboardAmount = (value: number): string =>
     displayCurrency
       ? formatCurrency(value, displayCurrency)
@@ -753,7 +757,7 @@ export function DashboardPage() {
             currency={currency}
             onCurrencyChange={setCurrency}
             availableCurrencies={currencies}
-            allCurrenciesLabel="All (category chart may mix currencies)"
+            allCurrenciesLabel="All currencies"
             dateFrom={dateFrom}
             dateTo={dateTo}
             onDateChange={(from, to) => {
@@ -1051,6 +1055,12 @@ export function DashboardPage() {
                 )?.label
               }
             />
+          ) : !currency && insightCurrencies.length > 1 ? (
+            <CurrencyPickNotice
+              subject="the period breakdown"
+              currencies={insightCurrencies}
+              onPick={setCurrency}
+            />
           ) : (
             <div className="text-sm text-muted-foreground">
               Pick a start and end date to see the period breakdown.
@@ -1095,13 +1105,21 @@ export function DashboardPage() {
           label="Income · business vs personal"
           description="Earned income split by business vs personal."
         >
-          <SplitPanel
-            business={bizSplit.income.business}
-            personal={bizSplit.income.personal}
-            businessShare={bizSplit.incomeShare}
-            currency={displayCurrency}
-            emptyCaption="No income in current filters."
-          />
+          {needsCurrencyPick ? (
+            <CurrencyPickNotice
+              subject="the income split"
+              currencies={currencies}
+              onPick={setCurrency}
+            />
+          ) : (
+            <SplitPanel
+              business={bizSplit.income.business}
+              personal={bizSplit.income.personal}
+              businessShare={bizSplit.incomeShare}
+              currency={displayCurrency}
+              emptyCaption="No income in current filters."
+            />
+          )}
         </BentoTile>
 
         <BentoTile
@@ -1112,16 +1130,38 @@ export function DashboardPage() {
           label="Spend · business vs personal"
           description="Spend (gross outflows net of refunds) split by business vs personal."
         >
-          <SplitPanel
-            business={bizSplit.spend.business}
-            personal={bizSplit.spend.personal}
-            businessShare={bizSplit.spendShare}
-            currency={displayCurrency}
-            emptyCaption="No net spend in current filters."
-          />
+          {needsCurrencyPick ? (
+            <CurrencyPickNotice
+              subject="the spend split"
+              currencies={currencies}
+              onPick={setCurrency}
+            />
+          ) : (
+            <SplitPanel
+              business={bizSplit.spend.business}
+              personal={bizSplit.spend.personal}
+              businessShare={bizSplit.spendShare}
+              currency={displayCurrency}
+              emptyCaption="No net spend in current filters."
+            />
+          )}
         </BentoTile>
 
-        {chartData.length === 0 ? (
+        {needsCurrencyPick ? (
+          <BentoTile
+            span={12}
+            rows={1}
+            aria-busy={loading}
+            label="Net spend by category"
+            description="Payments and transfers are excluded."
+          >
+            <CurrencyPickNotice
+              subject="category totals"
+              currencies={currencies}
+              onPick={setCurrency}
+            />
+          </BentoTile>
+        ) : chartData.length === 0 ? (
           <BentoTile
             span={12}
             rows={1}
@@ -1167,7 +1207,7 @@ export function DashboardPage() {
             className="col-span-full sm:col-span-6 lg:col-span-12 row-span-1"
             title="Net spend by category"
             subtitle="Click a bar to open those transactions with the current filters applied. Payments and transfers are excluded."
-            currency={currency || undefined}
+            currency={displayCurrency || undefined}
             rows={chartData.map((entry) => ({
               category: entry.name.toLowerCase(),
               label: entry.name,
@@ -1195,7 +1235,13 @@ export function DashboardPage() {
           label="Monthly flow"
           description="Gross spend, refunds / credits, and payments / transfers by month."
         >
-          {monthlyBreakdownData.length === 0 ? (
+          {needsCurrencyPick ? (
+            <CurrencyPickNotice
+              subject="the monthly flow"
+              currencies={currencies}
+              onPick={setCurrency}
+            />
+          ) : monthlyBreakdownData.length === 0 ? (
             !loading ? (
               <p className="m-0 text-muted-foreground">No monthly breakdown data for these filters.</p>
             ) : null

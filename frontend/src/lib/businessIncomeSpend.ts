@@ -5,6 +5,9 @@
  * `netSpend` is the Spend value (gross outflows minus offset credits — income
  * is excluded by the backend aggregate). `income` is true earned income
  * (txnType='income'). Shares are clamped to [0, 100] and guard divide-by-zero.
+ *
+ * Only rows in exactly `currency` are counted — there is no "all currencies"
+ * mode, because the rows carry raw (unconverted) amounts.
  */
 export type BusinessIncomeSpendRow = {
   currency: string
@@ -37,7 +40,9 @@ export function businessIncomeSpend(
   let bizSpend = 0
   let perSpend = 0
   for (const row of rows) {
-    if (currency && row.currency !== currency) continue
+    // Strict: amounts in different currencies are never added together, so
+    // an empty `currency` matches no rows rather than all of them.
+    if (row.currency !== currency) continue
     if (row.business) {
       bizIncome += row.income
       bizSpend += row.netSpend
