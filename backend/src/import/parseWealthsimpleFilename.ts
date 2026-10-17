@@ -108,9 +108,16 @@ const CREDIT_CARD_PDF_RE = /(?:^|[\\/])([A-Za-z0-9]+)_\d{4}-\d{2}_CREDIT_CARD\.p
 const STATEMENT_PDF_RE =
   /(?:^|[\/])([A-Za-z0-9]+)_(?:identity|corporation)-[A-Za-z0-9]+_\d{4}-\d{2}_v_\d+(?:\s*\(\d+\))?\.pdf$/i;
 
+// And renamed again for the 2026-09 statements: the display name leads and the
+// WSID sits between the statement kind and the period, e.g.
+// `Corporate chequing-monthly-statement-WK79NVW07CAD-2026-09-v_0.pdf` and
+// `Credit Card-credit-card-statement-C13BRX957CAD-2026-09-v_0.pdf`.
+const NAMED_STATEMENT_PDF_RE =
+  /(?:^|[\/])[^\/]*?-(?:monthly|credit-card)-statement-([A-Za-z0-9]+)-\d{4}-\d{2}-v_\d+(?:\s*\(\d+\))?\.pdf$/i;
+
 /**
  * Extract the stable Wealthsimple account id (WSID) from any WS statement PDF
- * filename — the 2026 convention above, or the older
+ * filename — either 2026 convention above, or the older
  * `<WSID>_<YYYY-MM>_CREDIT_CARD.pdf`.
  *
  * This is the only stable account key those files carry: the chequing body
@@ -121,6 +128,8 @@ const STATEMENT_PDF_RE =
 export function parseWsPdfWsid(name: string): string | null {
   const modern = STATEMENT_PDF_RE.exec(name);
   if (modern) return modern[1];
+  const named = NAMED_STATEMENT_PDF_RE.exec(name);
+  if (named) return named[1];
   return parseWsCreditCardPdfWsid(name);
 }
 
