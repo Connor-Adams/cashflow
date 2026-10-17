@@ -256,6 +256,35 @@ export function syncRunFailureMessage(summary: {
   return parts.length > 0 ? `simplefin_sync degraded: ${parts.join('; ')}` : null;
 }
 
+/**
+ * Log each unresolved link and append an error run for it, so the job run and
+ * the manual "Sync now" both report it. Returns display names for the
+ * integration's statusReason.
+ */
+function recordUnresolvedLinks(
+  integrationId: number,
+  unresolved: Array<{ simplefinAccountId: string; accountId: number }>,
+  accounts: Array<{ id: number; name: string }>,
+  runs: SimplefinSyncAccountRun[],
+): string[] {
+  return unresolved.map((link) => {
+    logger.warn(
+      { integrationId, simplefinAccountId: link.simplefinAccountId, accountId: link.accountId },
+      'simplefin_sync_linked_account_not_in_feed',
+    );
+    runs.push({
+      integrationId,
+      accountId: link.accountId,
+      inserted: 0,
+      skippedDuplicate: 0,
+      skippedCovered: 0,
+      status: 'error',
+    });
+    const name = accounts.find((a) => a.id === link.accountId)?.name;
+    return name ?? `account #${link.accountId} (${link.simplefinAccountId})`;
+  });
+}
+
 /** Newest posted date a statement/CSV import wrote to the account, if any. */
 async function importedThrough(accountId: number): Promise<string | null> {
   const max = await Transaction.max<string | Date | null, Transaction>('date', {
@@ -457,30 +486,12 @@ export async function syncIntegration(
     );
   }
 
-  const unresolved = unresolvedLinks(links, resolvedSimplefinIds);
-  const unresolvedAccountNames = unresolved.map((l) => {
-    const name = accounts.find((a) => a.id === l.accountId)?.name;
-    return name ?? `account #${l.accountId} (${l.simplefinAccountId})`;
-  });
-  for (const link of unresolved) {
-    logger.warn(
-      {
-        integrationId: integration.id,
-        simplefinAccountId: link.simplefinAccountId,
-        accountId: link.accountId,
-      },
-      'simplefin_sync_linked_account_not_in_feed',
-    );
-    // An error run so the job run and the manual "Sync now" both report it.
-    runs.push({
-      integrationId: integration.id,
-      accountId: link.accountId,
-      inserted: 0,
-      skippedDuplicate: 0,
-      skippedCovered: 0,
-      status: 'error',
-    });
-  }
+  const unresolvedAccountNames = recordUnresolvedLinks(
+    integration.id,
+    unresolvedLinks(links, resolvedSimplefinIds),
+    accounts,
+    runs,
+  );
 
   const attention = institutionAttentionReason(
     institutionErrors,
