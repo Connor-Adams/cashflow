@@ -12,7 +12,7 @@
  */
 import fs from 'fs/promises';
 import path from 'path';
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import { createWriteStream, createReadStream } from 'fs';
 import { QueryTypes } from 'sequelize';
 
@@ -279,7 +279,7 @@ export async function buildDataExportArchive(
   // Build ZIP.
   await new Promise<void>((resolve, reject) => {
     const output = createWriteStream(absolutePath);
-    const archive = archiver('zip', { zlib: { level: 6 } });
+    const archive = new ZipArchive({ zlib: { level: 6 } });
 
     output.on('close', resolve);
     archive.on('error', reject);
