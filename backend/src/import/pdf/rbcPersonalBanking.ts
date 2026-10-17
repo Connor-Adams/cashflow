@@ -1,5 +1,6 @@
 import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader, StatementParseError } from './types';
 import { rbcBankingResult } from './rbcBankingResult';
+import { signByRunningBalance, type UnsignedRow } from './rbcRunningBalanceSigns';
 import { dayMonthToIso, parseLongDate, parseMoney, type Period } from './dateHelpers';
 
 /**
@@ -27,7 +28,8 @@ import { dayMonthToIso, parseLongDate, parseMoney, type Period } from './dateHel
  * x-position classification are not applicable. Instead we:
  *   1. Split each row on 2+ spaces to find field boundaries.
  *   2. Identify trailing money tokens (last 2 = [amount, balance]; last 1 = [balance-only]).
- *   3. Sign each transaction using the running-balance delta (mirror rbcBusinessBanking).
+ *   3. Sign each transaction from the running balance (signByRunningBalance —
+ *      runs of balance-less same-day rows are solved together).
  *   4. Gate with extractClosingBalance + reconciliation check (opening + Σsigned ≈ closing).
  */
 
@@ -217,16 +219,12 @@ function extractClosingBalance(lines: PdfLine[]): number | null {
   return null;
 }
 
-type PendingRow = {
-  date: string;       // ISO yyyy-mm-dd
-  description: string;
-  rawAmount: number;  // absolute value from PDF
-  balance: number | null; // null if no balance column on this row
-};
+type PendingRow = UnsignedRow;
 
 export function parseRbcPersonalBankingActivity(
   lines: PdfLine[],
   period: Period,
+  closingBalance: number | null = extractClosingBalance(lines),
 ): { rows: Array<{ date: string; description: string; amount: number }>; parseErrors: StatementParseError[] } {
   const parseErrors: StatementParseError[] = [];
 
@@ -335,83 +333,8 @@ export function parseRbcPersonalBankingActivity(
     }
   }
 
-  // Sign transactions using running-balance delta (mirror rbcBusinessBanking).
-  const rows: Array<{ date: string; description: string; amount: number }> = [];
-  let runningBalance = openingBalance;
-
-  for (let i = 0; i < pending.length; i++) {
-    const row = pending[i];
-
-    if (row.balance !== null) {
-      // Balance column present: delta determines sign.
-      const delta = row.balance - runningBalance;
-      // delta ≈ +rawAmount → deposit (credit); delta ≈ -rawAmount → withdrawal (debit).
-      const signed = Math.abs(delta - row.rawAmount) < 0.015 ? row.rawAmount : -row.rawAmount;
-      rows.push({ date: row.date, description: row.description, amount: signed });
-      runningBalance = row.balance;
-    } else {
-      // No balance column: look ahead to the next known-balance row.
-      let nextBalance: number | null = null;
-      let unknownsBetween = 0;
-      for (let j = i + 1; j < pending.length; j++) {
-        if (pending[j].balance !== null) {
-          nextBalance = pending[j].balance;
-          break;
-        }
-        unknownsBetween++;
-      }
-
-      if (nextBalance !== null && unknownsBetween === 0) {
-        // One no-balance row before the next known-balance row.
-        const nextRow = pending.find((p, j) => j > i && p.balance !== null)!;
-        const nextNextBalance = nextRow.balance!;
-        const totalDelta = nextNextBalance - runningBalance;
-        const r1 = row.rawAmount;
-        const r2 = nextRow.rawAmount;
-
-        const candidates: [number, number][] = [
-          [r1, r2], [r1, -r2], [-r1, r2], [-r1, -r2],
-        ];
-        const matching = candidates.filter(([s1, s2]) => Math.abs(s1 + s2 - totalDelta) < 0.015);
-
-        if (matching.length > 1) {
-          const [s1, s2] = matching[0];
-          rows.push({ date: row.date, description: row.description, amount: s1 });
-          runningBalance += s1;
-          rows.push({ date: nextRow.date, description: nextRow.description, amount: s2 });
-          runningBalance = nextNextBalance;
-          i++;
-          parseErrors.push({
-            rowIndex: i,
-            message: `ambiguous sign for no-balance row pair: ${matching.length} combinations match delta ${totalDelta.toFixed(2)} (${row.description} / ${nextRow.description}); best-guess used`,
-          });
-        } else if (matching.length === 1) {
-          const [s1, s2] = matching[0];
-          rows.push({ date: row.date, description: row.description, amount: s1 });
-          runningBalance += s1;
-          rows.push({ date: nextRow.date, description: nextRow.description, amount: s2 });
-          runningBalance = nextNextBalance;
-          i++;
-        } else {
-          rows.push({ date: row.date, description: row.description, amount: row.rawAmount });
-          parseErrors.push({ rowIndex: i + 1, message: `Could not determine sign for no-balance row: ${row.description}` });
-          runningBalance += row.rawAmount;
-        }
-      } else if (nextBalance === null) {
-        // Last transaction, no more balances — default to credit.
-        rows.push({ date: row.date, description: row.description, amount: row.rawAmount });
-        parseErrors.push({ rowIndex: i + 1, message: `Last transaction has no balance column; defaulting to credit: ${row.description}` });
-        runningBalance += row.rawAmount;
-      } else {
-        // Multiple no-balance rows — rare; best guess.
-        rows.push({ date: row.date, description: row.description, amount: row.rawAmount });
-        parseErrors.push({ rowIndex: i + 1, message: `No-balance row with multiple unknowns ahead; defaulting to credit: ${row.description}` });
-        runningBalance += row.rawAmount;
-      }
-    }
-  }
-
-  return { rows, parseErrors };
+  const signed = signByRunningBalance(pending, openingBalance, closingBalance);
+  return { rows: signed.rows, parseErrors: [...parseErrors, ...signed.parseErrors] };
 }
 
 export const rbcPersonalBankingParser: PdfParser = {
@@ -426,7 +349,7 @@ export const rbcPersonalBankingParser: PdfParser = {
     const period: Period = { start: header.periodStart, end: header.periodEnd };
     const openingBalance = extractOpeningBalance(lines);
     const closingBalance = extractClosingBalance(lines);
-    const { rows, parseErrors } = parseRbcPersonalBankingActivity(lines, period);
+    const { rows, parseErrors } = parseRbcPersonalBankingActivity(lines, period, closingBalance);
 
     return rbcBankingResult({
       header,

@@ -352,3 +352,76 @@ test('rbcPersonalBankingParser.parse emits opening + closing statement balances'
     Math.abs(result.statementBalances.opening! + sum - result.statementBalances.closing!) < 0.015,
   );
 });
+
+// ─── Same-day runs where RBC prints the balance only on the last row ──────────
+//
+// Mirrors "Chequing Statement-6985 2026-10-02.pdf". On 2 Oct three rows share
+// one balance: the transfer and the fee carry no balance, the rebate does.
+// Signing only one balance-less row at a time defaulted the transfer to a
+// credit, so the statement missed reconciliation by exactly 2 × 17.93 and the
+// import was refused.
+const SAME_DAY_RUN_LINES: PdfLine[] = [
+  mkHeader(' Your RBC personal banking account statement', 1, 744),
+  mkHeader(' From September 2, 2026 to October 2, 2026', 1, 675),
+  mkHeader(' Your account number:   02022-5016985', 1, 637),
+  mkHeader(' RBC Day to Day Banking   02022-5016985', 1, 494),
+  mkHeader(' Your opening balance on September 2, 2026   $257.32', 1, 446),
+  mkHeader(' Your closing balance on October 2, 2026   = $160.36', 1, 404),
+  mkHeader(' Details of your account activity', 1, 360),
+  mkLine(' Date   Description   Withdrawals ($)   Deposits ($)   Balance ($)', 1, 340),
+  mkLine(' Opening Balance   257.32', 1, 326, 90),
+  mkLine('8 Sep   Loan interest   189.03   68.29', 1, 312),
+  mkLine('14 Sep   e-Transfer - Autodeposit', 1, 298),
+  mkLine('Connor Douglas Greene Adams', 1, 288, 98),
+  mkLine('bzmsF33cqxG6SFA9zd5L4c2nam1JHAzmYJe   150.00   218.29', 1, 278, 98),
+  mkLine('15 Sep   ATM withdrawal - KF450729   40.00   178.29', 1, 264),
+  mkLine('2 Oct   Online Banking transfer - 4243   17.93', 1, 250),
+  mkLine('Monthly fee   4.00', 1, 236, 90),
+  mkLine('Monthly Fee Rebate   4.00   160.36', 1, 222, 90),
+  mkLine(' Closing Balance   $160.36', 1, 208, 90),
+];
+
+test('same-day run: two balance-less rows before the balance are all signed correctly', () => {
+  const period = { start: '2026-09-02', end: '2026-10-02' };
+  const { rows, parseErrors } = parseRbcPersonalBankingActivity(SAME_DAY_RUN_LINES, period);
+
+  assert.deepEqual(rows.map((r) => r.amount), [-189.03, 150, -40, -17.93, -4, 4]);
+  assert.deepEqual(parseErrors, []);
+});
+
+test('same-day run: the statement reconciles', () => {
+  const result = rbcPersonalBankingParser.parse(SAME_DAY_RUN_LINES, { defaultCurrency: 'CAD' });
+  const sum = result.transactions.reduce((a, t) => a + t.amount, 0);
+  assert.equal(Number((257.32 + sum).toFixed(2)), 160.36);
+});
+
+// Mirrors "Chequing Statement-6985 2026-09-02.pdf": a fee and its rebate with
+// one balance between them. Both sign orders net to zero, so the old best guess
+// stored the fee as a credit and the rebate as a debit — reconciled, but wrong.
+const FEE_REBATE_LINES: PdfLine[] = [
+  mkHeader(' Your RBC personal banking account statement', 1, 744),
+  mkHeader(' From August 3, 2026 to September 2, 2026', 1, 675),
+  mkHeader(' Your account number:   02022-5016985', 1, 637),
+  mkHeader(' RBC Day to Day Banking   02022-5016985', 1, 494),
+  mkHeader(' Your opening balance on August 3, 2026   $287.32', 1, 446),
+  mkHeader(' Your closing balance on September 2, 2026   = $257.32', 1, 404),
+  mkHeader(' Details of your account activity', 1, 360),
+  mkLine(' Date   Description   Withdrawals ($)   Deposits ($)   Balance ($)', 1, 340),
+  mkLine(' Opening Balance   287.32', 1, 326, 90),
+  mkLine('31 Aug   Online Banking transfer - 9067   30.00   257.32', 1, 312),
+  mkLine('2 Sep   Monthly fee   4.00', 2, 700),
+  mkLine('Monthly Fee Rebate   4.00   257.32', 2, 686, 90),
+  mkLine(' Closing Balance   $257.32', 2, 672, 90),
+];
+
+test('fee + rebate pair: the fee is a debit and the rebate a credit', () => {
+  const period = { start: '2026-08-03', end: '2026-09-02' };
+  const { rows, parseErrors } = parseRbcPersonalBankingActivity(FEE_REBATE_LINES, period);
+
+  assert.deepEqual(rows.map((r) => [r.description, r.amount]), [
+    ['Online Banking transfer - 9067', -30],
+    ['Monthly fee', -4],
+    ['Monthly Fee Rebate', 4],
+  ]);
+  assert.deepEqual(parseErrors, []);
+});
