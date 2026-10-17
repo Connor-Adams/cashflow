@@ -149,9 +149,9 @@ function row(over: Partial<ReserveInputRow> = {}): ReserveInputRow {
 test('aggregateReserveRollups: groups by (currency, period) and applies percent', () => {
   const rollup = aggregateReserveRollups(
     [
-      row({ date: '2026-01-15', amount: '5000', hstGstAmount: '650' }), // Q1 income
+      row({ date: '2026-01-15', amount: '5000', hstGstAmount: '650', txnType: 'income' }), // Q1 income
       row({ date: '2026-02-15', amount: '-1000', hstGstAmount: '130' }), // Q1 expense
-      row({ date: '2026-04-15', amount: '8000', hstGstAmount: '1040' }), // Q2 income
+      row({ date: '2026-04-15', amount: '8000', hstGstAmount: '1040', txnType: 'income' }), // Q2 income
     ],
     'quarterly',
     new Map([['CAD', 0.25]]),
@@ -177,9 +177,9 @@ test('aggregateReserveRollups: non-business rows ignored', () => {
   // feed the reserve. Personal income and expenses must not move the dial.
   const rollup = aggregateReserveRollups(
     [
-      row({ date: '2026-03-01', amount: '5000', finalBusiness: false }),
+      row({ date: '2026-03-01', amount: '5000', finalBusiness: false, txnType: 'income' }),
       row({ date: '2026-03-15', amount: '-200', finalBusiness: false }),
-      row({ date: '2026-03-20', amount: '1000' }), // this one counts
+      row({ date: '2026-03-20', amount: '1000', txnType: 'income' }), // this one counts
     ],
     'quarterly',
     new Map(),
@@ -193,7 +193,7 @@ test('aggregateReserveRollups: non-business rows ignored', () => {
 test('aggregateReserveRollups: deductible percent applies to expenses', () => {
   const rollup = aggregateReserveRollups(
     [
-      row({ amount: '2000' }), // income
+      row({ amount: '2000', txnType: 'income' }), // income
       // 50% deductible meals: 400 deducted out of 1000 expense.
       row({ amount: '-1000', deductiblePercent: '0.5000' }),
     ],
@@ -211,8 +211,8 @@ test('aggregateReserveRollups: separates currencies', () => {
   // AC: "Calculate suggested reserve by period and currency"
   const rollup = aggregateReserveRollups(
     [
-      row({ amount: '1000', currency: 'CAD' }),
-      row({ amount: '500', currency: 'USD' }),
+      row({ amount: '1000', currency: 'CAD', txnType: 'income' }),
+      row({ amount: '500', currency: 'USD', txnType: 'income' }),
     ],
     'quarterly',
     new Map([
@@ -231,7 +231,7 @@ test('aggregateReserveRollups: separates currencies', () => {
 
 test('aggregateReserveRollups: missing currency falls back to default percent', () => {
   const rollup = aggregateReserveRollups(
-    [row({ amount: '1000', currency: 'EUR' })],
+    [row({ amount: '1000', currency: 'EUR', txnType: 'income' })],
     'quarterly',
     new Map(),
     0.15,
@@ -243,9 +243,9 @@ test('aggregateReserveRollups: missing currency falls back to default percent', 
 test('aggregateReserveRollups: monthly periodicity buckets into YYYY-MM', () => {
   const rollup = aggregateReserveRollups(
     [
-      row({ date: '2026-01-15', amount: '1000' }),
-      row({ date: '2026-02-15', amount: '2000' }),
-      row({ date: '2026-02-28', amount: '500' }),
+      row({ date: '2026-01-15', amount: '1000', txnType: 'income' }),
+      row({ date: '2026-02-15', amount: '2000', txnType: 'income' }),
+      row({ date: '2026-02-28', amount: '500', txnType: 'income' }),
     ],
     'monthly',
     new Map([['CAD', 0.2]]),
@@ -259,10 +259,10 @@ test('aggregateReserveRollups: monthly periodicity buckets into YYYY-MM', () => 
 test('aggregateReserveRollups: sort order is (currency asc, period asc)', () => {
   const rollup = aggregateReserveRollups(
     [
-      row({ date: '2026-04-15', currency: 'USD', amount: '100' }),
-      row({ date: '2026-01-15', currency: 'USD', amount: '100' }),
-      row({ date: '2026-04-15', currency: 'CAD', amount: '100' }),
-      row({ date: '2026-01-15', currency: 'CAD', amount: '100' }),
+      row({ date: '2026-04-15', currency: 'USD', amount: '100', txnType: 'income' }),
+      row({ date: '2026-01-15', currency: 'USD', amount: '100', txnType: 'income' }),
+      row({ date: '2026-04-15', currency: 'CAD', amount: '100', txnType: 'income' }),
+      row({ date: '2026-01-15', currency: 'CAD', amount: '100', txnType: 'income' }),
     ],
     'quarterly',
     new Map(),
@@ -276,6 +276,96 @@ test('aggregateReserveRollups: sort order is (currency asc, period asc)', () => 
 
 test('aggregateReserveRollups: empty input returns empty array', () => {
   assert.deepEqual(aggregateReserveRollups([], 'quarterly', new Map(), 0.25), []);
+});
+
+test('aggregateReserveRollups: an untyped positive business deposit is not income', () => {
+  // The dashboard routes an unsignaled deposit to 'skip' — it is a transfer,
+  // loan movement or owner contribution far more often than revenue.
+  const rollup = aggregateReserveRollups(
+    [
+      row({ amount: '1000', txnType: 'income' }),
+      row({ amount: '4000', txnType: null, merchantRaw: 'DEPOSIT' }),
+      row({ amount: '2500', txnType: 'unknown', merchantRaw: 'MOBILE DEPOSIT' }),
+    ],
+    'quarterly',
+    new Map(),
+    0.25,
+  );
+  assert.equal(rollup[0].components.businessIncome, 1000);
+  assert.equal(rollup[0].reserveTarget, 250);
+});
+
+test('aggregateReserveRollups: payment and transfer legs are neither income nor expense', () => {
+  // businessTax.ts documents that positive business rows include payments and
+  // transfers; the card-side payment leg and an owner transfer are not revenue,
+  // and the chequing-side legs are not deductible expenses.
+  const rollup = aggregateReserveRollups(
+    [
+      row({ amount: '3000', txnType: 'income' }),
+      row({ amount: '1500', txnType: 'payment', merchantRaw: 'PAYMENT THANK YOU' }),
+      row({ amount: '2000', txnType: 'transfer' }),
+      row({ amount: '-1500', txnType: 'payment' }),
+      row({ amount: '-700', txnType: 'transfer' }),
+      row({ amount: '-400', txnType: 'purchase' }),
+    ],
+    'quarterly',
+    new Map(),
+    0.25,
+  );
+  assert.equal(rollup[0].components.businessIncome, 3000);
+  assert.equal(rollup[0].components.deductibleExpenses, 400);
+  assert.equal(rollup[0].netBusinessIncome, 2600);
+});
+
+test('aggregateReserveRollups: a business refund nets against expenses, not income', () => {
+  // A $300 refund of a $1,000 business purchase leaves $700 of deductible
+  // expense; the refunded HST likewise reduces the input tax credit.
+  const rollup = aggregateReserveRollups(
+    [
+      row({ amount: '5000', txnType: 'income', hstGstAmount: '650' }),
+      row({ amount: '-1000', txnType: 'purchase', hstGstAmount: '130' }),
+      row({ amount: '300', txnType: 'refund', hstGstAmount: '39' }),
+    ],
+    'quarterly',
+    new Map(),
+    0.25,
+  );
+  const c = rollup[0].components;
+  assert.equal(c.businessIncome, 5000);
+  assert.equal(c.deductibleExpenses, 700);
+  assert.equal(c.hstGstCollected, 650);
+  assert.equal(c.hstGstPaid, 91);
+  assert.equal(rollup[0].netBusinessIncome, 4300);
+});
+
+test('aggregateReserveRollups: an untyped positive with refund text nets as a refund', () => {
+  // Same merchant-text fallback the dashboard's classifyPositiveAmount uses.
+  const rollup = aggregateReserveRollups(
+    [
+      row({ amount: '-200', txnType: 'purchase' }),
+      row({ amount: '50', txnType: null, merchantRaw: 'AMAZON REFUND' }),
+    ],
+    'quarterly',
+    new Map(),
+    0.25,
+  );
+  assert.equal(rollup[0].components.businessIncome, 0);
+  assert.equal(rollup[0].components.deductibleExpenses, 150);
+});
+
+test('aggregateReserveRollups: rows on an investment account are ignored', () => {
+  const rollup = aggregateReserveRollups(
+    [
+      row({ amount: '1000', txnType: 'income' }),
+      row({ amount: '9000', txnType: 'income', accountType: 'investment' }),
+      row({ amount: '-5000', txnType: 'purchase', accountType: 'investment' }),
+    ],
+    'quarterly',
+    new Map(),
+    0.25,
+  );
+  assert.equal(rollup[0].components.businessIncome, 1000);
+  assert.equal(rollup[0].components.deductibleExpenses, 0);
 });
 
 // ---- validateReservePatch ----------------------------------------------

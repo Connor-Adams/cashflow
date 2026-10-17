@@ -24,7 +24,7 @@
 
 import { num } from '../util/numbers';
 import type { SubscriptionCadence } from '../models/PlannedEvent';
-import { isNonCategorical, isNonSpend } from './classifyTransactionFlow';
+import { classifyPositiveAmount, isNonSpend } from './classifyTransactionFlow';
 
 /** Transaction row consumed by the aggregator. Mirrors the attribute list
  *  the route requests from Sequelize — kept here so editors get type
@@ -41,6 +41,9 @@ export interface ExplainMonthTxnRow {
   reviewFlag: boolean;
   receiptCount: number;
   txnType: string | null;
+  /** The owning account's type. Drives the dashboard's isNonSpend rule (any
+   *  outflow on an investment account is money movement). Absent → null. */
+  accountType?: string | null;
 }
 
 /** Subscription row consumed by the aggregator. Same shape as
@@ -183,26 +186,41 @@ interface CurrencyBucket {
   byCategory: Map<string, number>;
 }
 
-/** Compute per-currency totals from a list of transactions. Positive
- *  amounts are income; negative amounts are spend (recorded as absolute
- *  value). Income includes refunds/rewards — they net against spend at
- *  the byCategory level too, which matches how /summary/monthly treats
- *  them. Real income (txnType='income') counts toward the income total
- *  but is peeled from byCategory (a paycheck is not category data).
- *  isNonSpend is a SPEND-side filter, so it only gates negative rows;
- *  the positive side gets its own peel (money-movement legs are not
- *  income). */
+/** Compute per-currency totals from a list of transactions, using the
+ *  dashboard headline's classification (summary/classifyTransactionFlow.ts)
+ *  so this report reconciles with it:
+ *
+ *   - negative rows count as spend unless `isNonSpend(txnType, accountType)`
+ *     (payment/transfer legs, brokerage flows, any investment-account row).
+ *   - positive rows go through `classifyPositiveAmount`. Only a 'credit'
+ *     with `txnType='income'` is income — and it is peeled from byCategory
+ *     (a paycheck is not category data). Any other 'credit' (refund, reward,
+ *     refund-text fallback) nets against spend, at the headline and in
+ *     byCategory, the way the dashboard's netSpend does. 'payment' and 'skip'
+ *     (untyped deposits, transfers) contribute nothing.
+ *
+ *  `spend` is therefore net spend (gross outflow less credits), so
+ *  `income - spend` is unchanged by where a refund is filed. */
 function tallyByCurrency(rows: ExplainMonthTxnRow[]): Map<string, CurrencyBucket> {
   const out = new Map<string, CurrencyBucket>();
   for (const row of rows) {
     const amount = num(row.amount);
-    if (amount == null) continue;
+    if (amount == null || amount === 0) continue;
+    const accountType = row.accountType ?? null;
+    let flow: 'spend' | 'income' | 'credit';
     if (amount < 0) {
-      if (isNonSpend(row.txnType, null)) continue;
-    } else if (isNonCategorical(row.txnType, null) || row.txnType === 'payment') {
-      // Transfers, brokerage flows, dividends, and the card-side leg of a
-      // statement payment are money movement, not income.
-      continue;
+      if (isNonSpend(row.txnType, accountType)) continue;
+      flow = 'spend';
+    } else {
+      const bucket = classifyPositiveAmount({
+        txnType: row.txnType,
+        accountType,
+        merchantRaw: row.merchantRaw,
+        merchantClean: row.merchantClean,
+        category: row.finalCategory,
+      });
+      if (bucket !== 'credit') continue;
+      flow = row.txnType === 'income' ? 'income' : 'credit';
     }
     const bucket = out.get(row.currency) ?? {
       currency: row.currency,
@@ -210,12 +228,11 @@ function tallyByCurrency(rows: ExplainMonthTxnRow[]): Map<string, CurrencyBucket
       income: 0,
       byCategory: new Map<string, number>(),
     };
-    if (amount < 0) {
-      bucket.spend += Math.abs(amount);
-    } else {
+    if (flow === 'income') {
       bucket.income += amount;
-    }
-    if (row.txnType !== 'income') {
+    } else {
+      // spend: amount < 0 adds |amount|; credit: amount > 0 nets it back out.
+      bucket.spend -= amount;
       const cat = row.finalCategory ?? '(uncategorized)';
       const existing = bucket.byCategory.get(cat) ?? 0;
       bucket.byCategory.set(cat, existing + amount);

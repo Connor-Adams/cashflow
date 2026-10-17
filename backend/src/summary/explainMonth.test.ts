@@ -81,7 +81,10 @@ test('explainMonth returns empty result when no transactions present', () => {
   assert.equal(result.aiSummary, null);
 });
 
-test('monthOverMonth: positive amounts go to income, negative to spend', () => {
+test('monthOverMonth: a refund-text credit nets spend instead of counting as income', () => {
+  // Untyped positive whose text says "refund" — the dashboard's
+  // classifyPositiveAmount routes it to credits (netted against spend), never
+  // to income. Net is unchanged: -100 spend + 50 credit = -50.
   const result = explainMonth({
     month: '2026-05',
     currentTxns: [
@@ -94,8 +97,8 @@ test('monthOverMonth: positive amounts go to income, negative to spend', () => {
   });
   const cad = result.monthOverMonth.find((m) => m.currency === 'CAD');
   assert.ok(cad);
-  assert.equal(cad!.currentSpend, 100);
-  assert.equal(cad!.currentIncome, 50);
+  assert.equal(cad!.currentSpend, 50);
+  assert.equal(cad!.currentIncome, 0);
   assert.equal(cad!.netCurrent, -50);
 });
 
@@ -414,7 +417,7 @@ test('tallyByCurrency counts typed income (txnType=income) toward income totals'
   assert.equal(uncat, undefined);
 });
 
-test('tallyByCurrency counts positive refunds/rewards as income and nets them by category', () => {
+test('tallyByCurrency nets positive refunds/rewards against spend, never as income', () => {
   const result = explainMonth({
     month: '2026-05',
     currentTxns: [
@@ -428,8 +431,11 @@ test('tallyByCurrency counts positive refunds/rewards as income and nets them by
   });
   const cad = result.monthOverMonth.find((m) => m.currency === 'CAD');
   assert.ok(cad);
-  assert.equal(cad!.currentIncome, 50, 'refunds/rewards count toward income per the docstring');
-  assert.equal(cad!.currentSpend, 100);
+  // Dashboard parity: only txnType='income' is income; refunds/rewards are
+  // credits that reduce net spend (100 - 40 - 10).
+  assert.equal(cad!.currentIncome, 0);
+  assert.equal(cad!.currentSpend, 50);
+  assert.equal(cad!.netCurrent, -50);
   const dining = cad!.byCategory.find((c) => c.category === 'Dining');
   assert.ok(dining);
   assert.equal(dining!.current, -60, 'refund nets against the category spend');
@@ -455,6 +461,47 @@ test('tallyByCurrency excludes positive money-movement legs from income', () => 
   assert.ok(cad);
   assert.equal(cad!.currentIncome, 0);
   assert.equal(cad!.currentSpend, 20);
+});
+
+test('tallyByCurrency: an untyped deposit is neither income nor category data', () => {
+  // The dashboard routes an unsignaled positive (txnType unknown/purchase/null,
+  // no refund or payment text) to 'skip'.
+  const result = explainMonth({
+    month: '2026-05',
+    currentTxns: [
+      txn({ id: 1, amount: '4000', finalCategory: null, txnType: 'unknown', merchantRaw: 'MOBILE DEPOSIT', merchantClean: 'Mobile Deposit' }),
+      txn({ id: 2, amount: '900', finalCategory: null, txnType: null, merchantRaw: 'DEPOSIT', merchantClean: 'Deposit' }),
+      txn({ id: 3, amount: '2500', finalCategory: null, txnType: 'income', merchantRaw: 'PAYROLL', merchantClean: 'Payroll' }),
+      txn({ id: 4, amount: '-30', finalCategory: 'Coffee', txnType: 'purchase' }),
+    ],
+    previousTxns: [],
+    subscriptions: [],
+    currency: null,
+  });
+  const cad = result.monthOverMonth.find((m) => m.currency === 'CAD');
+  assert.ok(cad);
+  assert.equal(cad!.currentIncome, 2500);
+  assert.equal(cad!.currentSpend, 30);
+  assert.equal(cad!.byCategory.find((c) => c.category === '(uncategorized)'), undefined);
+});
+
+test('tallyByCurrency: a negative row on an investment account is not spend', () => {
+  // isNonSpend treats any outflow on an investment account as money movement;
+  // explainMonth used to pass accountType: null and miss it.
+  const result = explainMonth({
+    month: '2026-05',
+    currentTxns: [
+      txn({ id: 1, amount: '-5000', finalCategory: 'Shopping', txnType: 'purchase', accountType: 'investment' }),
+      txn({ id: 2, amount: '-40', finalCategory: 'Shopping', txnType: 'purchase', accountType: 'credit' }),
+    ],
+    previousTxns: [],
+    subscriptions: [],
+    currency: null,
+  });
+  const cad = result.monthOverMonth.find((m) => m.currency === 'CAD');
+  assert.ok(cad);
+  assert.equal(cad!.currentSpend, 40);
+  assert.equal(cad!.byCategory.find((c) => c.category === 'Shopping')!.current, -40);
 });
 
 test('explainMonth: missing_receipt sorts by amount desc', () => {
