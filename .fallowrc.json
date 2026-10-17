@@ -91,6 +91,26 @@
       "exports": [
         "VaultEncryptionAlgorithm"
       ]
+    },
+    {
+      "file": "backend/lib/categoryMergePlan.js",
+      "exports": [
+        "planCategoryMerges",
+        "subtreeNames"
+      ]
+    },
+    {
+      "file": "backend/lib/merchantNormalization.js",
+      "exports": [
+        "normalizeMerchant"
+      ]
+    },
+    {
+      "file": "backend/src/categories/mergePlan.ts",
+      "exports": [
+        "PlanCategory",
+        "PlanBudget"
+      ]
     }
   ],
   "rules": {
