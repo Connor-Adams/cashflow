@@ -166,3 +166,42 @@ export function classifyPositiveAmount(input: {
   // ~$108k Net understatement from txnType='unknown' deposits.
   return matchPositiveText(input) ?? 'skip';
 }
+
+/**
+ * Where a signed row lands in the dashboard headline:
+ *   - 'spend'   → totalSpend (negative, not non-spend)
+ *   - 'credit'  → totalCredits (positive refund/reward/credit keyword)
+ *   - 'income'  → totalIncome (positive txnType='income')
+ *   - 'payment' → totalPayments (positive statement payment)
+ *   - 'skip'    → nothing (negative non-spend, unsignaled positive, zero)
+ *
+ * netSpend = Σspend − Σcredit, so only 'spend' and 'credit' rows count toward
+ * it. Every breakdown that claims to decompose the headline (by category,
+ * business/personal, monthly activity, owed-back) must gate on THIS so it
+ * reconciles — see `countsTowardNetSpend`.
+ */
+export type FlowBucket = 'spend' | 'credit' | 'income' | 'payment' | 'skip';
+
+export function classifyFlow(input: {
+  amount: number;
+  txnType?: string | null;
+  accountType?: string | null;
+  merchantRaw?: string | null;
+  merchantClean?: string | null;
+  category?: string | null;
+}): FlowBucket {
+  if (input.amount < 0) {
+    return isNonSpend(input.txnType, input.accountType) ? 'skip' : 'spend';
+  }
+  if (input.amount > 0) {
+    const bucket = classifyPositiveAmount(input);
+    if (bucket === 'credit' && input.txnType === 'income') return 'income';
+    return bucket;
+  }
+  return 'skip';
+}
+
+/** True when the flow contributes to headline netSpend (spend or credit). */
+export function countsTowardNetSpend(flow: FlowBucket): boolean {
+  return flow === 'spend' || flow === 'credit';
+}

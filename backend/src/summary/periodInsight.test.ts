@@ -100,3 +100,38 @@ test('isNonLoanCategory flags Rent/Household case-insensitively, not loans/null'
   assert.equal(isNonLoanCategory(undefined), false);
   assert.equal(isNonLoanCategory(''), false);
 });
+
+test('computeOwedBack: a fully refunded shared purchase nets owedBack to 0 (sign kept)', () => {
+  // −100 shared purchase (partner owes 50), then the full +100 refund carrying
+  // a +50 partner share. netSpend for the window is 0, so realCost must be 0.
+  const out = computeOwedBack(
+    [
+      row({ id: 1, amount: '-100.00', partnerShareAmount: '-50.00', txnType: 'purchase' }),
+      row({ id: 2, amount: '100.00', partnerShareAmount: '50.00', txnType: 'refund' }),
+    ],
+    new Map(),
+  );
+  assert.equal(out.get('CAD')?.partnerShare, 0);
+  assert.equal(out.get('CAD')?.owedBack, 0);
+  assert.equal(realCostOf(0, out.get('CAD')?.owedBack ?? 0), 0);
+});
+
+test('computeOwedBack: partner shares on rows outside netSpend (transfer/payment/skip) are ignored', () => {
+  const out = computeOwedBack(
+    [
+      row({ id: 1, amount: '-100.00', partnerShareAmount: '-50.00', txnType: 'purchase' }),
+      row({ id: 2, amount: '-400.00', partnerShareAmount: '-200.00', txnType: 'transfer' }),
+      row({ id: 3, amount: '-300.00', partnerShareAmount: '-150.00', txnType: 'payment' }),
+      row({
+        id: 4,
+        amount: '80.00',
+        partnerShareAmount: '40.00',
+        txnType: 'unknown',
+        merchantRaw: 'DEPOSIT FROM MOM',
+      }),
+    ],
+    new Map(),
+  );
+  assert.equal(out.get('CAD')?.partnerShare, 50);
+  assert.equal(out.get('CAD')?.owedBack, 50);
+});
