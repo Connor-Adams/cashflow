@@ -66,6 +66,15 @@ export function initSecurityDailyPrice(
       tableName: 'security_daily_prices',
       underscored: true,
       timestamps: true,
+      // Mirrors the migration's index. Declared here so upsert() conflicts on
+      // it rather than falling back to ON CONFLICT (id).
+      indexes: [
+        {
+          unique: true,
+          fields: ['security_id', 'date'],
+          name: 'security_daily_prices_security_date_unique',
+        },
+      ],
     },
   );
   return SecurityDailyPrice;

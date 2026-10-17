@@ -12,6 +12,7 @@ import { isEncryptionKeyConfigured } from './util/symmetricEncryption';
 import { sequelize } from './db';
 // Register job definitions (side-effect imports).
 import './jobs/definitions/yahooQuote';
+import './jobs/definitions/yahooDailyHistory';
 import './jobs/definitions/dailySnapshot';
 import './jobs/definitions/forwardIncome';
 import './jobs/definitions/enrichmentBackfill';

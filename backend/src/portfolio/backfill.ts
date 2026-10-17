@@ -13,7 +13,14 @@
  * budget counter. Every call is still recorded in `provider_job_log` for
  * diagnostics, retry/stale logic, and rate-limit detection.
  */
-import { Security, SecurityDailyPrice, SecurityDividend } from '../models';
+import { Op } from 'sequelize';
+import {
+  HoldingSnapshot,
+  ProviderJobLog,
+  Security,
+  SecurityDailyPrice,
+  SecurityDividend,
+} from '../models';
 import * as defaultYahoo from '../integrations/yahoo/client';
 import { YahooFinanceError } from '../integrations/yahoo/client';
 import { recordCall } from '../integrations/yahoo/jobLog';
@@ -21,6 +28,7 @@ import { overviewToMetadata } from '../integrations/yahoo/overviewMetadata';
 import { enumerateYahooSymbols } from '../integrations/yahoo/symbol';
 import * as env from '../config/env';
 import { logger } from '../observability/logger';
+import { latestActivePositions } from './latestHoldings';
 import { reconcileDividendsForSecurity } from './reconcileDividends';
 
 function symbolCandidates(sec: Security): string[] {
@@ -226,6 +234,95 @@ async function upsertBars(
       fetchedAt: now,
     });
   }
+}
+
+/**
+ * A DAILY_HISTORY attempt of any outcome this recent defers the scheduled
+ * refresh — so a delisted symbol that comes back not_found on every suffix
+ * costs one round of calls per day instead of one per run.
+ */
+const DAILY_REFRESH_BACKOFF_MS = 20 * 60 * 60 * 1000;
+
+export interface HeldDailyRefreshSummary {
+  held: number;
+  attempted: number;
+  skippedFresh: number;
+  skippedBackoff: number;
+  skippedUnresolvable: number;
+}
+
+/** Securities with a non-zero current position in any account. */
+async function heldSecurityIds(): Promise<number[]> {
+  const snapshots = await HoldingSnapshot.findAll({
+    attributes: ['id', 'accountId', 'securityId', 'statementDate', 'quantity'],
+    order: [
+      ['statementDate', 'DESC'],
+      ['id', 'DESC'],
+    ],
+  });
+  const ids = new Set<number>();
+  for (const p of latestActivePositions(snapshots)) {
+    if (Number(p.quantity) !== 0) ids.add(p.securityId);
+  }
+  return [...ids].sort((a, b) => a - b);
+}
+
+/**
+ * Scheduled counterpart to `ensureDailyPrices`: brings `security_daily_prices`
+ * up to yesterday for every held security, sequentially, instead of waiting
+ * for someone to open the security's detail page.
+ */
+export async function refreshHeldDailyPrices(): Promise<HeldDailyRefreshSummary> {
+  const summary: HeldDailyRefreshSummary = {
+    held: 0,
+    attempted: 0,
+    skippedFresh: 0,
+    skippedBackoff: 0,
+    skippedUnresolvable: 0,
+  };
+  const ids = await heldSecurityIds();
+  summary.held = ids.length;
+  if (ids.length === 0) return summary;
+  const securities = await Security.findAll({ where: { id: { [Op.in]: ids } } });
+  const backoffCutoff = new Date(Date.now() - DAILY_REFRESH_BACKOFF_MS);
+
+  for (const sec of securities) {
+    const candidates = symbolCandidates(sec);
+    if (candidates.length === 0) {
+      summary.skippedUnresolvable += 1;
+      continue;
+    }
+    const latest = await SecurityDailyPrice.findOne({
+      where: { securityId: sec.id },
+      order: [['date', 'DESC']],
+      attributes: ['date'],
+    });
+    const latestDate = latest?.date ?? null;
+    if (latestDate != null && latestDate >= yesterdayISODate()) {
+      summary.skippedFresh += 1;
+      continue;
+    }
+    const recentAttempt = await ProviderJobLog.findOne({
+      where: {
+        provider: defaultYahoo.YAHOO_PROVIDER,
+        function: 'DAILY_HISTORY',
+        symbol: { [Op.in]: candidates },
+        fetchedAt: { [Op.gte]: backoffCutoff },
+      },
+      attributes: ['id'],
+    });
+    if (recentAttempt) {
+      summary.skippedBackoff += 1;
+      continue;
+    }
+    const key = `prices:${sec.id}`;
+    // Shares the lazy path's in-flight slot so a detail-page visit and the
+    // job never fetch the same security concurrently.
+    enqueue(key, () => backfillDaily(sec, latestDate == null ? 'full' : 'compact'));
+    await inFlight.get(key);
+    summary.attempted += 1;
+  }
+  return summary;
 }
 
 export async function ensureDividends(securityId: number): Promise<BackfillStatus> {
