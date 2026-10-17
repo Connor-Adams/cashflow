@@ -842,3 +842,68 @@ test('a cash mirror on a corp brokerage account is not counted as revenue', asyn
     )}`,
   );
 });
+
+// --- FX fallback visibility ---
+//
+// toCad substitutes a rate when none is on file for the transaction date: the
+// nearest earlier row with no staleness cap, or failing that the newest row
+// even if it post-dates the transaction. Which rate it picks is a product call;
+// a T2 built on a substituted rate must at least say so.
+
+async function withNetworkDisabled<T>(fn: () => Promise<T>): Promise<T> {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('network disabled in buildCorpFacts.test.ts');
+  }) as unknown as typeof fetch;
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+test('revenue converted at a stale fallback rate is warned about with both dates', async () => {
+  const ctx = await seedPerimeterCorp();
+  await FxRate.create({
+    fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: '2024-12-31',
+    rate: '1.44', source: 'manual_seed', fetchedAt: new Date(),
+  } as never);
+  await seedTxn(ctx, ctx.wiseUsd, {
+    date: '2025-03-13', amount: '5000.0000', currency: 'USD', txnType: 'transfer',
+    merchantRaw: 'Received money from WANDERCOM', finalBusiness: false,
+  });
+
+  const facts = await withNetworkDisabled(() =>
+    buildCorpFacts(ctx.entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' }),
+  );
+
+  // The chosen rate is unchanged: 5000 x 1.44.
+  assert.equal(facts.activeBusinessIncome[0].cadAmount.toFixed(2), '7200.00');
+  const fx = (facts.factWarnings ?? []).filter((w) => w.includes('USD→CAD'));
+  assert.equal(fx.length, 1, JSON.stringify(facts.factWarnings));
+  assert.match(fx[0], /2025-03-13/);
+  assert.match(fx[0], /2024-12-31/);
+});
+
+test('a dividend converted at a rate dated after the transaction is warned about', async () => {
+  const ctx = await seedPerimeterCorp();
+  await FxRate.create({
+    fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: '2026-01-02',
+    rate: '1.38', source: 'manual_seed', fetchedAt: new Date(),
+  } as never);
+  await seedTxn(ctx, ctx.wiseUsd, {
+    date: '2025-06-30', amount: '-1000.0000', currency: 'USD', txnType: 'transfer',
+    merchantRaw: 'Dividend to owner', taxTreatmentOverride: 'eligible_dividend',
+  });
+
+  const facts = await withNetworkDisabled(() =>
+    buildCorpFacts(ctx.entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' }),
+  );
+
+  assert.equal(facts.dividendsPaid[0].amount.toFixed(2), '1380.00');
+  const fx = (facts.factWarnings ?? []).filter((w) => w.includes('USD→CAD'));
+  assert.equal(fx.length, 1, JSON.stringify(facts.factWarnings));
+  assert.match(fx[0], /2025-06-30/);
+  assert.match(fx[0], /2026-01-02/);
+  assert.match(fx[0], /AFTER/);
+});

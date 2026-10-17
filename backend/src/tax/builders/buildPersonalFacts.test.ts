@@ -1100,3 +1100,36 @@ test('a transaction both typed interest and classified as a dividend is counted 
   );
 });
 
+
+// toCad substitutes a rate when none is on file for the date (nearest earlier,
+// no staleness cap; else newest, even if later). The T1 must say so.
+test('income converted at a fallback FX rate is warned about with both dates', async () => {
+  const { household, entity, account } = await seedPersonalInvestmentAccount('FX fallback');
+  const sec = await Security.create({
+    symbol: 'AAPL', name: 'Apple', currency: 'USD', householdId: household.id,
+  } as never);
+  await FxRate.create({
+    fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: '2024-12-31',
+    rate: '1.44', source: 'manual_seed', fetchedAt: new Date(),
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'interest',
+    tradeDate: '2025-05-15', quantity: null, amount: '100.0000', currency: 'USD', fees: null,
+    description: 'interest', sourceRowFingerprint: 'fp-fx-fallback-1', importBatch: 'seed',
+  } as never);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('network disabled in buildPersonalFacts.test.ts');
+  }) as unknown as typeof fetch;
+  try {
+    const facts = await buildPersonalFacts(entity.id, 2025);
+    assert.equal(sumCad(facts.interestIncome).toFixed(2), '144.00', 'chosen rate unchanged');
+    const fx = (facts.factWarnings ?? []).filter((w) => w.includes('USD→CAD'));
+    assert.equal(fx.length, 1, JSON.stringify(facts.factWarnings));
+    assert.match(fx[0], /2025-05-15/);
+    assert.match(fx[0], /2024-12-31/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
