@@ -23,6 +23,7 @@ import type {
 import { computeAcb, type AcbActivity, type AcbRealizedEvent } from '../../portfolio/acb';
 import { resolveTaxTreatment } from './resolveTaxTreatment';
 import { createCadConverter } from '../completeness/cadConverter';
+import { createFxFallbackCollector } from '../../fx/fxFallbackWarnings';
 import { dividendDedupDays } from '../../config/env';
 import { resolveDeductiblePercent } from '../util/deductiblePercent';
 import { parseSlipAmount } from '../util/parseSlipAmount';
@@ -140,7 +141,11 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   // Memoised, and a missing rate degrades to the unconverted amount plus a
   // warning instead of throwing — raw `toCad` 500'd the whole return.
   const factWarnings: string[] = [];
+  // Conversions made on a substituted rate (see fx/fxFallbackWarnings.ts). Read
+  // into factWarnings once every conversion below has run.
+  const fxFallbacks = createFxFallbackCollector();
   const convert = createCadConverter({
+    onRateUsed: (currency, date, result) => fxFallbacks.record(currency, date, result),
     onUnavailable: (currency, date) => {
       factWarnings.push(
         `No ${currency}→CAD exchange rate for ${date}; ${currency} amounts on that date `
@@ -604,7 +609,7 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     rentalIncome,
     rentalExpenses,
     acbWarnings: [...new Set(acbWarnings)],
-    factWarnings,
+    factWarnings: [...factWarnings, ...fxFallbacks.warnings()],
   };
 }
 

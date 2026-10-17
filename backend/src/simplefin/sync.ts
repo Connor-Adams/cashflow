@@ -111,14 +111,35 @@ export function resolveAccountId(
  * status stayed `connected`, `lastSyncedAt` advanced daily, and zero rows were
  * ever imported.
  *
- * Partial resolution is deliberately NOT a failure: one stale link should not
- * hold back the sync window for the accounts that did resolve.
+ * Partial resolution is not a hard failure: the accounts that resolved are still
+ * committed. It is still an attention state, though (see `unresolvedLinks`): the
+ * integration goes to `status='error'` and `lastSyncedAt` holds until every
+ * link resolves again.
  */
 export function resolutionFailureReason(
   linkCount: number,
   resolvedCount: number,
 ): 'links_unresolved' | null {
   return linkCount > 0 && resolvedCount === 0 ? 'links_unresolved' : null;
+}
+
+/**
+ * Links that did not resolve to a live Cashflow account on this fetch: the
+ * remote account is absent from the payload (SimpleFIN stops listing an
+ * account whose institution needs re-authenticating, often without an entry in
+ * `errors`), or the local account was merged/deleted under the link.
+ *
+ * Any unresolved link must hold `lastSyncedAt`. Advancing it because OTHER
+ * accounts resolved opens the next window after the outage, so the missing
+ * account's charges from the outage are never fetched again. Holding costs the
+ * healthy accounts nothing: they are committed every run, and re-fetched rows
+ * dedup on their SimpleFIN transaction id.
+ */
+export function unresolvedLinks<L extends { simplefinAccountId: string }>(
+  links: L[],
+  resolvedSimplefinIds: ReadonlySet<string>,
+): L[] {
+  return links.filter((l) => !resolvedSimplefinIds.has(l.simplefinAccountId));
 }
 
 /** Convert SimpleFIN posted epoch seconds to a YYYY-MM-DD (UTC) date. */
@@ -183,8 +204,14 @@ export function isBalanceStale(balanceDate: number | null, now: Date): boolean {
 export function institutionAttentionReason(
   institutionErrors: string[],
   staleAccountNames: string[],
+  unresolvedAccountNames: string[] = [],
 ): string | null {
   const parts = [...institutionErrors];
+  if (unresolvedAccountNames.length > 0) {
+    parts.push(
+      `linked accounts missing from the SimpleFIN feed: ${unresolvedAccountNames.join(', ')}`,
+    );
+  }
   if (staleAccountNames.length > 0) {
     parts.push(
       `not refreshed by SimpleFIN in over ${STALE_BALANCE_DAYS} days: ${staleAccountNames.join(', ')}`,
@@ -227,6 +254,35 @@ export function syncRunFailureMessage(summary: {
     parts.push(`SimpleFIN reported: ${summary.institutionErrors.join(' | ')}`);
   }
   return parts.length > 0 ? `simplefin_sync degraded: ${parts.join('; ')}` : null;
+}
+
+/**
+ * Log each unresolved link and append an error run for it, so the job run and
+ * the manual "Sync now" both report it. Returns display names for the
+ * integration's statusReason.
+ */
+function recordUnresolvedLinks(
+  integrationId: number,
+  unresolved: Array<{ simplefinAccountId: string; accountId: number }>,
+  accounts: Array<{ id: number; name: string }>,
+  runs: SimplefinSyncAccountRun[],
+): string[] {
+  return unresolved.map((link) => {
+    logger.warn(
+      { integrationId, simplefinAccountId: link.simplefinAccountId, accountId: link.accountId },
+      'simplefin_sync_linked_account_not_in_feed',
+    );
+    runs.push({
+      integrationId,
+      accountId: link.accountId,
+      inserted: 0,
+      skippedDuplicate: 0,
+      skippedCovered: 0,
+      status: 'error',
+    });
+    const name = accounts.find((a) => a.id === link.accountId)?.name;
+    return name ?? `account #${link.accountId} (${link.simplefinAccountId})`;
+  });
 }
 
 /** Newest posted date a statement/CSV import wrote to the account, if any. */
@@ -280,9 +336,9 @@ function buildPreview(
  * Sync a single integration. Resolves its household + accounts, fetches
  * transactions since the last sync (minus the lookback), and commits each
  * account's transactions. On a clean fetch advances `lastSyncedAt` to `now`
- * and sets `status='connected'`. When SimpleFIN reports institution errors or
- * serves stale accounts, commits what did arrive but sets `status='error'`
- * WITHOUT advancing `lastSyncedAt`. On an unauthorized (401/403) failure sets
+ * and sets `status='connected'`. When SimpleFIN reports institution errors,
+ * serves stale accounts, or omits a linked account, commits what did arrive
+ * but sets `status='error'` WITHOUT advancing `lastSyncedAt`. On an unauthorized (401/403) failure sets
  * `status='error'` WITHOUT advancing `lastSyncedAt`, and rethrows so the
  * caller reports the run as failed.
  */
@@ -340,6 +396,7 @@ export async function syncIntegration(
 
   const runs: SimplefinSyncAccountRun[] = [];
   const staleAccountNames: string[] = [];
+  const resolvedSimplefinIds = new Set<string>();
   let resolvedCount = 0;
   for (const remote of remoteAccounts) {
     const accountId = resolveAccountId(remote, linksBySimplefinId);
@@ -360,6 +417,7 @@ export async function syncIntegration(
       continue;
     }
     resolvedCount += 1;
+    resolvedSimplefinIds.add(remote.id);
     const stale = isBalanceStale(remote.balanceDate, now);
     if (stale) {
       staleAccountNames.push(remote.name);
@@ -428,7 +486,18 @@ export async function syncIntegration(
     );
   }
 
-  const attention = institutionAttentionReason(institutionErrors, staleAccountNames);
+  const unresolvedAccountNames = recordUnresolvedLinks(
+    integration.id,
+    unresolvedLinks(links, resolvedSimplefinIds),
+    accounts,
+    runs,
+  );
+
+  const attention = institutionAttentionReason(
+    institutionErrors,
+    staleAccountNames,
+    unresolvedAccountNames,
+  );
   if (attention) {
     // Rows from healthy institutions were committed above. Hold lastSyncedAt:
     // once the connection is repaired SimpleFIN backfills the outage, and those
@@ -436,7 +505,12 @@ export async function syncIntegration(
     integration.set({ status: 'error', statusReason: attention });
     await integration.save();
     logger.error(
-      { integrationId: integration.id, institutionErrors, staleAccounts: staleAccountNames },
+      {
+        integrationId: integration.id,
+        institutionErrors,
+        staleAccounts: staleAccountNames,
+        unresolvedAccounts: unresolvedAccountNames,
+      },
       'simplefin_sync_institution_attention',
     );
   } else {
