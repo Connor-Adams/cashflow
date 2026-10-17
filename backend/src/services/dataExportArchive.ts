@@ -206,14 +206,14 @@ export async function buildDataExportArchive(
       { householdId },
     ),
     queryAll(
-      `SELECT * FROM chat_threads WHERE household_id = :householdId ORDER BY id`,
-      { householdId },
+      `SELECT * FROM chat_threads WHERE user_id = :userId ORDER BY id`,
+      { userId },
     ),
     queryAll(
       `SELECT * FROM chat_messages WHERE thread_id IN (
-         SELECT id FROM chat_threads WHERE household_id = :householdId
+         SELECT id FROM chat_threads WHERE user_id = :userId
        ) ORDER BY id`,
-      { householdId },
+      { userId },
     ),
     queryAll(
       `SELECT hs.* FROM holding_snapshots hs
