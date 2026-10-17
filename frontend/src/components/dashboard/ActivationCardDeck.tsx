@@ -58,7 +58,7 @@ const CARDS: CardDef[] = [
     id: 'invite',
     title: 'Invite a partner or family member',
     description: 'Share your household for joint budgeting and fair-share tracking.',
-    href: '/settings/household',
+    href: '/settings/partner-invite',
     cta: 'Send invite',
     done: (s) => s.hasOutboundInvite,
   },

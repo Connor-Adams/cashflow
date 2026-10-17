@@ -235,7 +235,7 @@ export function NetWorthPage() {
             title="No accounts yet"
             description="Connect or add an account so we can track your assets and liabilities over time."
             actions={
-              <Link to="/settings/accounts">
+              <Link to="/accounts">
                 <Button size="sm">Add an account</Button>
               </Link>
             }
