@@ -40,17 +40,14 @@ function dueLabel(card: CreditCardType): { text: string; tone: 'warn' | 'soon' |
 export function CreditCardPlannerPage() {
   const { data, loading, error, refresh } = useCreditCards()
 
-  const currency = data?.currency ?? 'CAD'
   const cards = useMemo(() => data?.cards ?? [], [data])
-
-  const totalStatement = useMemo(
-    () => cards.reduce((acc, c) => acc + (c.statementBalance ?? c.currentBalance), 0),
-    [cards],
-  )
-  const totalMinimum = useMemo(
-    () => cards.reduce((acc, c) => acc + c.minimumPayment, 0),
-    [cards],
-  )
+  // Totals come FX-converted to CAD from the server; summing `cards` here would
+  // add a USD balance to a CAD one under a single currency label.
+  const totals = data?.totals
+  const totalsCurrency = totals?.currency ?? 'CAD'
+  const excludedNote = totals?.unconvertedCurrencies.length
+    ? `Excludes ${totals.unconvertedCurrencies.join(', ')} (no FX rate)`
+    : undefined
   const dueSoonCount = useMemo(() => cards.filter((c) => c.dueSoon).length, [cards])
 
   return (
@@ -80,12 +77,14 @@ export function CreditCardPlannerPage() {
         />
         <SummaryTile
           label="Total statement owed"
-          value={cards.length ? formatMoney(totalStatement, currency) : '—'}
+          value={cards.length && totals ? formatMoney(totals.statementOwed, totalsCurrency) : '—'}
+          description={excludedNote}
           loading={loading}
         />
         <SummaryTile
           label="Total minimum due"
-          value={cards.length ? formatMoney(totalMinimum, currency) : '—'}
+          value={cards.length && totals ? formatMoney(totals.minimumDue, totalsCurrency) : '—'}
+          description={excludedNote}
           loading={loading}
         />
         <SummaryTile
@@ -103,7 +102,7 @@ export function CreditCardPlannerPage() {
           <h2 className="text-sm font-semibold">Your cards</h2>
         </div>
         {cards.length > 0 ? (
-          <CardsTable cards={cards} currency={currency} onChanged={refresh} />
+          <CardsTable cards={cards} onChanged={refresh} />
         ) : (
           <EmptyState
             title="No credit cards found"
@@ -121,11 +120,9 @@ export function CreditCardPlannerPage() {
 
 function CardsTable({
   cards,
-  currency,
   onChanged,
 }: {
   cards: CreditCardType[]
-  currency: string
   onChanged: () => void
 }) {
   return (
@@ -143,7 +140,7 @@ function CardsTable({
       </TableHeader>
       <TableBody>
         {cards.map((card) => (
-          <CardRow key={card.accountId} card={card} currency={currency} onChanged={onChanged} />
+          <CardRow key={card.accountId} card={card} onChanged={onChanged} />
         ))}
       </TableBody>
     </Table>
@@ -152,13 +149,13 @@ function CardsTable({
 
 function CardRow({
   card,
-  currency,
   onChanged,
 }: {
   card: CreditCardType
-  currency: string
   onChanged: () => void
 }) {
+  // Each card renders in its own native currency.
+  const currency = card.currency
   const { showToast } = useToast()
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)

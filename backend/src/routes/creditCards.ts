@@ -5,6 +5,8 @@ import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
 import { currentOwed, utilizationPct } from '../cards/utilization';
 import { materializeCreditCardPayment } from '../cards/materializePayment';
+import { summarizeCards } from '../cards/summarizeCards';
+import { makeCadConverter } from '../fx/cadConverter';
 import { computeSafeToSpend, type SafeToSpendResult } from '../cashflow/safeToSpend';
 
 /**
@@ -109,6 +111,8 @@ type CardRow = {
   daysUntilDue: number | null;
   /** True when a payment is due within DUE_SOON_DAYS. */
   dueSoon: boolean;
+  /** Closed on or before asOf — excluded from the summary totals. */
+  closed: boolean;
 };
 
 /** Assemble the household's credit cards joined with their liability profiles. */
@@ -157,6 +161,7 @@ async function loadCards(req: Request, asOf: string): Promise<CardRow[]> {
       nextDueDate: due,
       daysUntilDue,
       dueSoon: daysUntilDue != null && daysUntilDue >= 0 && daysUntilDue <= DUE_SOON_DAYS,
+      closed: isClosed,
     });
   }
   return rows;
@@ -174,8 +179,16 @@ router.get('/', async (req, res, next) => {
   try {
     const asOf = parseAsOf(req);
     const cards = await loadCards(req, asOf);
-    const currency = cards[0]?.currency ?? 'CAD';
-    res.json({ currency, asOfDate: asOf, cards: cards.map(serializeCard) });
+    // Totals are FX-converted to CAD server-side; each card keeps its own
+    // native `currency`. (Previously `currency` was the first card's and the
+    // client summed mixed currencies under it.)
+    const totals = await summarizeCards(cards, makeCadConverter(asOf));
+    res.json({
+      currency: totals.currency,
+      asOfDate: asOf,
+      totals,
+      cards: cards.map(serializeCard),
+    });
   } catch (e) {
     next(e);
   }
