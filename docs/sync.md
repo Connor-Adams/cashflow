@@ -102,13 +102,15 @@ Add new tables by appending to `TABLES` and bumping `BUNDLE_SCHEMA_VERSION`.
 Primary keys are remapped on restore — the bundle's `id` collides with
 target-DB autoincrement values, so the target DB picks fresh ids and the
 restore code rewrites references column-by-column. The remap is driven
-by `FK_REMAP` in `restoreBundle.ts`. When a column can't be safely
-remapped (e.g. self-referencing `linked_transaction_id`), it's listed in
-`NULL_ON_RESTORE` and NULLed.
+by `FK_REMAP` in `restoreBundle.ts`. A reference whose target was not in
+the bundle is NULLed rather than left dangling.
 
-Self-referencing FK columns are a TODO for V1: the in-bundle id is
-nulled rather than re-linked. A two-pass restore (insert with NULL, then
-patch from the id-remap) is the obvious follow-up.
+Self-referencing FK columns (`transactions.linked_transaction_id`, which
+pairs transfer legs and charge/refund) are listed in `SELF_REF_REMAP` and
+restored in two passes: each row is inserted with the column NULL, then,
+once the whole table is written, the column is UPDATEd to the target's
+new id from the id-remap — inside the same restore transaction. A link
+whose target was not in the bundle stays NULL.
 
 ## Extension points for cloud sync
 
