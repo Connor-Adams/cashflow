@@ -11,7 +11,7 @@ function mk(text: string, page = 1, y = 0): PdfLine {
 // WK79NVW07CAD_identity-…_2026-08_v_0.pdf — a Wealthsimple Business chequing
 // monthly statement, which had no parser at all.
 
-function header(): PdfLine[] {
+function header(opening = '$10,274.80', closing = '$15,802.33'): PdfLine[] {
   return [
     mk('Chequing monthly statement'),
     mk('Wealthsimple    Aug 1 - Aug 31, 2026'),
@@ -22,7 +22,7 @@ function header(): PdfLine[] {
     mk(' Account number:   44681757'),
     mk('AUG 1 BALANCE             AUG 31 BALANCE'),
     mk(' Your August summary'),
-    mk(' $10,274.80       $15,802.33'),
+    mk(` ${opening}       ${closing}`),
     mk(' Activity'),
     mk(' DATE   POSTED DATE   DESCRIPTION   AMOUNT (CAD)   BALANCE (CAD)'),
   ];
@@ -94,7 +94,7 @@ test('WS chequing: rows carry the transaction date, not the posted date', () => 
 test('WS chequing: prose and footers are not transactions', () => {
   const r = wealthsimpleChequingParser.parse(
     [
-      ...header(),
+      ...header('$10,274.80', '$10,302.33'),
       mk(' 2026-08-01   2026-08-01   Interest earned   $27.53   $10,302.33'),
       mk(' Date   is when the transaction happened.'),
       mk(' Posted date   is when the transaction is processed and finalized. Use this for accounting purposes.'),
@@ -108,7 +108,69 @@ test('WS chequing: prose and footers are not transactions', () => {
 });
 
 test('WS chequing: a statement with no activity parses to nothing, not an error', () => {
-  const r = wealthsimpleChequingParser.parse(header(), { defaultCurrency: 'CAD' });
+  const r = wealthsimpleChequingParser.parse(header('$10,274.80', '$10,274.80'), { defaultCurrency: 'CAD' });
   assert.deepEqual(r.transactions, []);
   assert.deepEqual(r.parseErrors, []);
+});
+
+// pdfjs sometimes splits a pair of 1s with a kerning gap: "$11,305.92" comes
+// out as "$1 1,305.92" and "2026-09-11" as "2026-09-1 1". The strict row
+// pattern then failed and the row was skipped without a word — the 2026-09
+// personal statement lost +10,000 and +4,500 of transfers that way. Lines are
+// verbatim from Chequing-monthly-statement-WK3DD9X35CAD-2026-09-v_0.pdf.
+test('WS chequing: digits split by a kerning gap still parse', () => {
+  const r = wealthsimpleChequingParser.parse(
+    [
+      ...header('$1,303.65', '$10,913.88'),
+      mk('2026-09-01   2026-09-01   Interest earned   $2.27   $1,305.92'),
+      mk('2026-09-06   2026-09-06   Transfer in from CDG Labs Inc.   $10,000.00   $1 1,305.92'),
+      mk('2026-09-06   2026-09-06   Transfer out to Credit Card   –$4,738.22   $6,567.70'),
+      mk('2026-09-09   2026-09-09   Transfer in from Business Investing   $4,500.00   $1 1,067.70'),
+      mk('2026-09-09   2026-09-09   Cash sent   –$90.00   $10,977.70'),
+      mk('2026-09-08   2026-09-10   Steamgames.com 4259522   –$7.33   $10,970.37'),
+      mk('2026-09-1 1   2026-09-13   Wl *Steam Purchase   –$56.49   $10,913.88'),
+    ],
+    { defaultCurrency: 'CAD' },
+  );
+  assert.deepEqual(r.parseErrors, []);
+  assert.deepEqual(
+    r.transactions.map((t) => [t.date, t.amount]),
+    [
+      ['2026-09-01', 2.27],
+      ['2026-09-06', 10000],
+      ['2026-09-06', -4738.22],
+      ['2026-09-09', 4500],
+      ['2026-09-09', -90],
+      ['2026-09-08', -7.33],
+      ['2026-09-11', -56.49],
+    ],
+  );
+});
+
+test('WS chequing: emits the statement opening and closing balances', () => {
+  const r = wealthsimpleChequingParser.parse(
+    [...header('$10,274.80', '$10,302.33'), mk('2026-08-01   2026-08-01   Interest earned   $27.53   $10,302.33')],
+    { defaultCurrency: 'CAD' },
+  );
+  assert.deepEqual(r.statementBalances, { opening: 10274.8, closing: 10302.33 });
+});
+
+test('WS chequing: a statement that does not reconcile is blocked, not silently short', () => {
+  // A dropped row must surface: opening + rows ≠ closing → blocking error.
+  const r = wealthsimpleChequingParser.parse(
+    [...header('$1,303.65', '$11,305.92'), mk('2026-09-01   2026-09-01   Interest earned   $2.27   $1,305.92')],
+    { defaultCurrency: 'CAD' },
+  );
+  assert.ok(r.parseErrors.some((e) => e.blocking), JSON.stringify(r.parseErrors));
+});
+
+test('WS chequing: a dated line it cannot read is reported, not skipped', () => {
+  const r = wealthsimpleChequingParser.parse(
+    [...header('$10,274.80', '$10,274.80'), mk('2026-08-05   2026-08-05   Something odd   $12.3   $10,274.80')],
+    { defaultCurrency: 'CAD' },
+  );
+  assert.ok(
+    r.parseErrors.some((e) => !e.blocking && e.message.includes('Something odd')),
+    JSON.stringify(r.parseErrors),
+  );
 });

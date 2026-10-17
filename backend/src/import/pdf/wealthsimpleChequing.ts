@@ -1,5 +1,5 @@
-import type { PdfLine, PdfParseResult, PdfParser, PdfStatementHeader } from './types';
-import { normalizeMerchant } from '../normalizeMerchant';
+import type { PdfLine, PdfParseResult, PdfParser, PdfStatementHeader, StatementParseError } from './types';
+import { rbcBankingResult } from './rbcBankingResult';
 
 /**
  * Wealthsimple chequing monthly statement (personal and Business).
@@ -21,6 +21,16 @@ import { normalizeMerchant } from '../normalizeMerchant';
  *    already loaded from CSV would otherwise duplicate every row whose posting
  *    lagged a day. Consistency with the other ingest path wins.
  *
+ * 3. pdfjs sometimes splits a pair of 1s with a kerning gap — "$11,305.92"
+ *    arrives as "$1 1,305.92", "2026-09-11" as "2026-09-1 1". `joinSplitDigits`
+ *    closes those gaps inside dates and money before matching. Columns are
+ *    separated by 2+ spaces, so a single space between digits is never a
+ *    column boundary.
+ *
+ * The statement's summary prints the period's opening and closing balance;
+ * the result runs the shared reconciliation gate on them, so a row the
+ * pattern misses blocks the import instead of silently shortening it.
+ *
  * The body prints an internal account number, whose last 4 become
  * `accountSuffix`. That is NOT the stable Wealthsimple account id — the WSID
  * lives in the filename (`WK79NVW07CAD_…`), and `resolvePdfAccountFromHeader`
@@ -39,6 +49,44 @@ const CURRENCY_RE = /AMOUNT\s*\(([A-Z]{3})\)/;
 // EN/EM dashes Wealthsimple uses for negatives as well as a plain hyphen.
 const ROW_RE =
   /^(\d{4}-\d{2}-\d{2})\s+(\d{4}-\d{2}-\d{2})\s+(.+?)\s{2,}([–—-]?)\$([\d,]+\.\d{2})\s{2,}[–—-]?\$[\d,]+\.\d{2}$/;
+
+// A line that starts with a transaction date — anything like this that ROW_RE
+// cannot read is reported rather than dropped.
+const DATED_LINE_RE = /^\d{4}-\d{2}-\d{2}\s/;
+// The summary's balance pair: " $1,303.65      $2,802.94" under "SEP 1 BALANCE   SEP 30 BALANCE".
+const BALANCE_HEADER_RE = /^\s*[A-Z]{3}\s+\d{1,2}\s+BALANCE\s{2,}[A-Z]{3}\s+\d{1,2}\s+BALANCE\s*$/;
+const BALANCE_PAIR_RE = /^\s*([–—-]?)\$([\d,]+\.\d{2})\s{2,}([–—-]?)\$([\d,]+\.\d{2})\s*$/;
+
+/** Close single-space kerning gaps inside dates ("2026-09-1 1") and money ("$1 1,305.92"). */
+function joinSplitDigits(text: string): string {
+  let prev: string;
+  let out = text;
+  do {
+    prev = out;
+    out = out
+      .replace(/(\d{4}-\d{2}-\d) (\d)/g, '$1$2')
+      .replace(/(\$[\d,]*\d) ([\d,]*\d\.\d{2})/g, '$1$2')
+      .replace(/(\$[\d,]*\.\d) (\d)/g, '$1$2');
+  } while (out !== prev);
+  return out;
+}
+
+function signedMoney(dash: string, digits: string): number {
+  const magnitude = Number(digits.replace(/,/g, ''));
+  return dash === '' ? magnitude : -magnitude;
+}
+
+/** Opening and closing balance from the summary block, or nulls when absent. */
+function extractSummaryBalances(lines: PdfLine[]): { opening: number | null; closing: number | null } {
+  for (let i = 0; i < lines.length; i++) {
+    if (!BALANCE_HEADER_RE.test(lines[i].text)) continue;
+    for (const next of lines.slice(i + 1, i + 4)) {
+      const m = BALANCE_PAIR_RE.exec(joinSplitDigits(next.text));
+      if (m) return { opening: signedMoney(m[1], m[2]), closing: signedMoney(m[3], m[4]) };
+    }
+  }
+  return { opening: null, closing: null };
+}
 
 const MONTHS: Record<string, number> = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
@@ -98,24 +146,32 @@ export const wealthsimpleChequingParser: PdfParser = {
   parse: (lines, ctx): PdfParseResult => {
     const header = parseWsChequingHeader(lines);
     const currency = header.currency ?? ctx.defaultCurrency;
-    const transactions = [];
-    for (const line of lines) {
-      const row = ROW_RE.exec(line.text.trim());
-      if (!row) continue;
-      const description = row[3].trim();
-      const magnitude = Number(row[5].replace(/,/g, ''));
-      if (!Number.isFinite(magnitude)) continue;
-      transactions.push({
-        date: row[1],
-        merchantRaw: description,
-        merchantClean: normalizeMerchant(description),
-        amount: row[4] === '' ? magnitude : -magnitude,
-        currency,
-        // The statement prints no per-row identifier, so dedup falls back to
-        // the identity fingerprint (account + date + amount + description).
-        sourceReference: null,
-      });
-    }
-    return { transactions, header, warnings: [], parseErrors: [] };
+    const rows: Array<{ date: string; description: string; amount: number }> = [];
+    const parseErrors: StatementParseError[] = [];
+    lines.forEach((line, idx) => {
+      const text = joinSplitDigits(line.text.trim());
+      const row = ROW_RE.exec(text);
+      if (!row) {
+        if (DATED_LINE_RE.test(text)) {
+          parseErrors.push({ rowIndex: idx + 1, message: `Could not read transaction line: ${text}` });
+        }
+        return;
+      }
+      // The statement prints no per-row identifier, so dedup falls back to
+      // the identity fingerprint (account + date + amount + description).
+      rows.push({ date: row[1], description: row[3].trim(), amount: signedMoney(row[4], row[5]) });
+    });
+
+    // No summary block → closingBalance null, and the shared result reports
+    // the gate as skipped instead of reconciling against a made-up opening.
+    const { opening, closing } = extractSummaryBalances(lines);
+    return rbcBankingResult({
+      header,
+      rows,
+      parseErrors,
+      openingBalance: opening ?? 0,
+      closingBalance: opening === null ? null : closing,
+      currency,
+    });
   },
 };
