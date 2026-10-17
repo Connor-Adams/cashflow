@@ -6,8 +6,9 @@ type Props = { data: PeriodInsightCurrency; currency: string; rangeLabel?: strin
 
 /**
  * Period-scoped "this period at a glance" band. Two ideas only:
- *   1. the real-spend-vs-loaned split (what you actually consumed vs what
- *      comes back to you), and
+ *   1. the real-spend-vs-owed split (what you actually consumed vs what
+ *      comes back to you — a partner's split share or a reimbursable
+ *      expense, never a loan; loans are the separate "Lent out" figure), and
  *   2. a "where the money moved this period" breakdown (spend / credits /
  *      income / payments).
  * Everything here is scoped to the selected window — no cross-period
@@ -18,6 +19,14 @@ export function PeriodInsightBand({ data, currency, rangeLabel }: Props) {
   // own currency so values still render as money, but keep the caption clean.
   const fmtCode = currency || data.currency
   const money = (n: number) => formatCurrency(n, fmtCode)
+
+  // Name the owed-back chip after what it is made of, so a partner's rent
+  // share never reads as money you lent out.
+  const owedBackSources = [
+    data.owedBackBreakdown.partnerShare > 0 ? "partner's share" : null,
+    data.owedBackBreakdown.reimbursable > 0 ? 'reimbursable' : null,
+  ].filter(Boolean).join(' + ')
+  const owedBackLabel = owedBackSources ? `${owedBackSources} · owed to you` : 'owed to you'
 
   const breakdown: Array<{ label: string; value: number }> = [
     { label: 'Spend', value: data.totalSpend },
@@ -42,7 +51,7 @@ export function PeriodInsightBand({ data, currency, rangeLabel }: Props) {
         {[rangeLabel || 'this period', currency].filter(Boolean).join(' · ')}
       </p>
 
-      {/* Real-spend headline + loaned split */}
+      {/* Real-spend headline + owed-to-you split */}
       <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
         <div>
           <p className="text-sm text-muted-foreground">Real spend</p>
@@ -56,7 +65,7 @@ export function PeriodInsightBand({ data, currency, rangeLabel }: Props) {
             <span className="font-medium">
               {money(data.owedBack)}
             </span>
-            &nbsp;loaned out · comes back to you
+            &nbsp;{owedBackLabel}
           </span>
         )}
       </div>
