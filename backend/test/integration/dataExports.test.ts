@@ -422,6 +422,92 @@ test('buildDataExportArchive includes receipts for a household with a receipt', 
 });
 
 // ---------------------------------------------------------------------------
+// buildDataExportArchive — holdings / securities / dividends / subscriptions
+//
+// These sections once queried `holding_snapshots` (real table:
+// `holdings_snapshots`) and `subscriptions` (folded into `planned_events` with
+// kind='subscription'). queryAll swallowed Postgres 42P01, so all four files
+// shipped as `[]` in every export. Seed one of each and assert they land, with
+// securities/dividends de-duplicated across multiple snapshots and another
+// household's holdings excluded.
+// ---------------------------------------------------------------------------
+
+test('buildDataExportArchive includes holdings, securities, dividends and subscriptions', async () => {
+  const models = await import('../../src/models/index.js');
+  const { buildDataExportArchive } = await import('../../src/services/dataExportArchive.js');
+  const { readZipEntry } = await import('./_setup/readZipEntry.js');
+  const { seedAccount, seedSecurity, seedHolding, seedDividend } = await import('./portfolioFixtures.js');
+
+  const membership = await models.HouseholdMember.findOne({ where: { userId: userAId } });
+  assert.ok(membership, 'UserA should belong to a household');
+  const householdId = membership.householdId;
+  const otherMembership = await models.HouseholdMember.findOne({ where: { userId: userBId } });
+  assert.ok(otherMembership, 'UserB should belong to a household');
+
+  const suffix = crypto.randomBytes(3).toString('hex');
+  const acct = await seedAccount(models, householdId, userAId, 'A TFSA', `TFSA-${suffix}`);
+  const sec = await seedSecurity(models, householdId, `XEQT${suffix}`, 'iShares XEQT', 'etf');
+  // Two snapshots of the same security: securities/dividends must not duplicate.
+  await seedHolding(models, {
+    accountId: acct.id, householdId, securityId: sec.id,
+    statementDate: '2026-04-30', quantity: 10, price: 30, marketValue: 300,
+  });
+  await seedHolding(models, {
+    accountId: acct.id, householdId, securityId: sec.id,
+    statementDate: '2026-05-31', quantity: 12, price: 31, marketValue: 372,
+  });
+  await seedDividend(models, { securityId: sec.id, exDividendDate: '2026-05-20', amount: 0.25, currency: 'CAD' });
+
+  // Another household's holding must stay out of UserA's export.
+  const otherAcct = await seedAccount(models, otherMembership.householdId, userBId, 'B RRSP', `RRSP-${suffix}`);
+  const otherSec = await seedSecurity(models, otherMembership.householdId, `VFV${suffix}`, 'Vanguard S&P', 'etf');
+  await seedHolding(models, {
+    accountId: otherAcct.id, householdId: otherMembership.householdId, securityId: otherSec.id,
+    statementDate: '2026-05-31', quantity: 1,
+  });
+
+  const sub = await models.PlannedEvent.create({
+    userId: userAId, householdId, type: 'expense', name: 'Netflix',
+    amount: '-20.99', currency: 'CAD', expectedDate: '2026-06-01',
+    kind: 'subscription', cadence: 'monthly', normalizedName: `netflix-${suffix}`,
+  } as never);
+  const planned = await models.PlannedEvent.create({
+    userId: userAId, householdId, type: 'expense', name: 'Car insurance',
+    amount: '-900.00', currency: 'CAD', expectedDate: '2026-07-01',
+  } as never);
+
+  const result = await buildDataExportArchive(userAId, householdId, 987655);
+  const read = (name: string) =>
+    JSON.parse(readZipEntry(result.absolutePath, name).toString('utf8')) as Record<string, unknown>[];
+
+  const holdings = read('holdings.json');
+  assert.equal(holdings.length, 2, 'both snapshots exported');
+  assert.ok(holdings.every((h) => h.security_id === sec.id), 'no other-household holdings');
+
+  const securities = read('securities.json');
+  assert.deepEqual(securities.map((s) => s.id), [sec.id], 'one row per security');
+
+  const dividends = read('dividends.json');
+  assert.equal(dividends.length, 1, 'one row per dividend, not per snapshot');
+  assert.equal(dividends[0].security_id, sec.id);
+
+  const subscriptions = read('subscriptions.json');
+  assert.deepEqual(subscriptions.map((s) => s.id), [sub.id]);
+  assert.equal(subscriptions[0].kind, 'subscription');
+
+  const plannedEvents = read('planned_events.json');
+  const plannedIds = plannedEvents.map((p) => p.id);
+  assert.ok(plannedIds.includes(planned.id), 'planned event exported');
+  assert.ok(!plannedIds.includes(sub.id), 'subscription not duplicated into planned_events.json');
+
+  const meta = JSON.parse(readZipEntry(result.absolutePath, 'meta.json').toString('utf8'));
+  assert.equal(meta.modelCounts.holdings, 2);
+  assert.equal(meta.modelCounts.securities, 1);
+  assert.equal(meta.modelCounts.dividends, 1);
+  assert.equal(meta.modelCounts.subscriptions, 1);
+});
+
+// ---------------------------------------------------------------------------
 // Unauthenticated requests are rejected
 // ---------------------------------------------------------------------------
 

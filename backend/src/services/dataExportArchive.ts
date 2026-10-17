@@ -25,37 +25,19 @@ import { logger } from '../observability/logger';
 // ---------------------------------------------------------------------------
 
 /**
- * Run a household-scoped SELECT, tolerating tables that no longer exist.
+ * Run a household-scoped SELECT.
  *
- * The export is a best-effort point-in-time snapshot, and the physical schema
- * evolves (tables get folded/renamed as primitives are unified). A query that
- * targets a since-dropped table must not fail the whole backup — it just yields
- * an empty section. We swallow only the "relation/table does not exist" errors
- * (Postgres 42P01, SQLite "no such table") and re-throw anything else so real
- * failures (bad SQL, connection loss) still surface.
+ * No error swallowing: every table here is a live physical table, so a query
+ * against a renamed/dropped one must fail the export (and the integration
+ * test) loudly. A previous "tolerate 42P01" guard hid exactly that drift —
+ * `subscriptions` and `holding_snapshots` had been folded/renamed and four
+ * sections shipped empty in every export with only a warn log.
  */
 async function queryAll(sql: string, replacements: Record<string, unknown>): Promise<unknown[]> {
-  try {
-    return await sequelize.query(sql, {
-      type: QueryTypes.SELECT,
-      replacements,
-    });
-  } catch (err: unknown) {
-    if (isMissingRelationError(err)) {
-      logger.warn({ sql }, 'data_export_skip_missing_relation');
-      return [];
-    }
-    throw err;
-  }
-}
-
-/** True when the error is a "table/relation does not exist" from PG or SQLite. */
-function isMissingRelationError(err: unknown): boolean {
-  const e = err as { parent?: { code?: string }; original?: { code?: string }; message?: string };
-  // Postgres undefined_table
-  if (e?.parent?.code === '42P01' || e?.original?.code === '42P01') return true;
-  // SQLite
-  return typeof e?.message === 'string' && /no such table/i.test(e.message);
+  return sequelize.query(sql, {
+    type: QueryTypes.SELECT,
+    replacements,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -76,9 +58,9 @@ Files included
   rules.json          – Auto-categorisation rules.
   budgets.json        – Budget targets and exclusions.
   labels.json         – Label tags (categories).
-  planned_events.json – Planned income/expense events.
+  planned_events.json – Planned income/expense events (excl. subscriptions).
   recurring.json      – Recurring transaction patterns.
-  subscriptions.json  – Detected subscription services.
+  subscriptions.json  – Subscriptions (recurring expected charges).
   receipts.json       – Receipt metadata (no binary images in v1).
   notes.json          – Inline notes on transactions.
   preferences.json    – Your app preferences.
@@ -182,7 +164,9 @@ export async function buildDataExportArchive(
       { householdId },
     ),
     queryAll(
-      `SELECT * FROM planned_events WHERE household_id = :householdId ORDER BY id`,
+      `SELECT * FROM planned_events
+        WHERE household_id = :householdId AND kind <> 'subscription'
+        ORDER BY id`,
       { householdId },
     ),
     // recurring — inferred from transaction signals; store transaction-level
@@ -191,7 +175,11 @@ export async function buildDataExportArchive(
       { householdId },
     ),
     queryAll(
-      `SELECT * FROM subscriptions WHERE household_id = :householdId ORDER BY id`,
+      // Subscriptions folded into the Expectation primitive (planned_events,
+      // kind='subscription').
+      `SELECT * FROM planned_events
+        WHERE household_id = :householdId AND kind = 'subscription'
+        ORDER BY id`,
       { householdId },
     ),
     queryAll(
@@ -216,27 +204,32 @@ export async function buildDataExportArchive(
       { userId },
     ),
     queryAll(
-      `SELECT hs.* FROM holding_snapshots hs
+      `SELECT hs.* FROM holdings_snapshots hs
         JOIN accounts a ON a.id = hs.account_id
        WHERE a.household_id = :householdId
        ORDER BY hs.id`,
       { householdId },
     ),
-    // securities referenced by this household's holdings
+    // securities referenced by this household's holdings. EXISTS rather than
+    // JOIN + DISTINCT: one row per security (not per snapshot), and DISTINCT
+    // can't compare the json `metadata` column on Postgres.
     queryAll(
-      `SELECT DISTINCT s.* FROM securities s
-        JOIN holding_snapshots hs ON hs.security_id = s.id
-        JOIN accounts a ON a.id = hs.account_id
-       WHERE a.household_id = :householdId
+      `SELECT s.* FROM securities s
+       WHERE EXISTS (
+         SELECT 1 FROM holdings_snapshots hs
+           JOIN accounts a ON a.id = hs.account_id
+          WHERE hs.security_id = s.id AND a.household_id = :householdId
+       )
        ORDER BY s.id`,
       { householdId },
     ),
     queryAll(
       `SELECT sd.* FROM security_dividends sd
-        JOIN securities s ON s.id = sd.security_id
-        JOIN holding_snapshots hs ON hs.security_id = s.id
-        JOIN accounts a ON a.id = hs.account_id
-       WHERE a.household_id = :householdId
+       WHERE EXISTS (
+         SELECT 1 FROM holdings_snapshots hs
+           JOIN accounts a ON a.id = hs.account_id
+          WHERE hs.security_id = sd.security_id AND a.household_id = :householdId
+       )
        ORDER BY sd.id`,
       { householdId },
     ),
