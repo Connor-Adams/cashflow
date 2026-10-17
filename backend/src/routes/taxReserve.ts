@@ -453,6 +453,84 @@ router.delete('/settings/:currency', async (req, res, next) => {
 });
 
 /**
+ * Load business transactions matching `where` (+ their tax metadata) and the
+ * household's per-currency reserve settings, and roll them up. The single
+ * source of the reserve number: GET /summary below and the /api/v1 reporting
+ * routes both call this, so they can never drift apart.
+ */
+export async function loadReserveRollups(
+  householdId: number,
+  where: WhereOptions,
+  periodicity: Periodicity,
+): Promise<ReserveRollup[]> {
+  const rows = await Transaction.findAll({
+    where,
+    attributes: [
+      'id',
+      'date',
+      'amount',
+      'currency',
+      'finalBusiness',
+      'txnType',
+      'merchantRaw',
+      'merchantClean',
+      'finalCategory',
+    ],
+    include: [
+      {
+        model: TransactionTaxMetadata,
+        as: 'taxMetadata',
+        attributes: ['deductiblePercent', 'hstGstAmount'],
+        required: false,
+      },
+      {
+        model: Account,
+        as: 'account',
+        attributes: ['accountType'],
+        required: false,
+      },
+    ],
+  });
+  const inputRows: ReserveInputRow[] = rows.map((r) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const meta = (r as any).taxMetadata as TransactionTaxMetadata | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const account = (r as any).account as { accountType: string | null } | undefined;
+    return {
+      date: String(r.date),
+      amount: String(r.amount),
+      currency: String(r.currency),
+      finalBusiness: Boolean(r.finalBusiness),
+      deductiblePercent:
+        meta?.deductiblePercent == null ? null : String(meta.deductiblePercent),
+      hstGstAmount:
+        meta?.hstGstAmount == null ? null : String(meta.hstGstAmount),
+      txnType: r.txnType ?? null,
+      accountType: account?.accountType ?? null,
+      merchantRaw: r.merchantRaw ?? null,
+      merchantClean: r.merchantClean ?? null,
+      finalCategory: r.finalCategory ?? null,
+    };
+  });
+  // Build per-currency percent lookup from settings.
+  const settings = await TaxReserveSetting.findAll({
+    where: { householdId },
+  });
+  const reservePercents = new Map<string, number>();
+  for (const s of settings) {
+    const v = Number(s.reservePercent);
+    if (Number.isFinite(v)) reservePercents.set(s.currency, v);
+  }
+  const defaultPercent = Number(DEFAULT_TAX_RESERVE_PERCENT);
+  return aggregateReserveRollups(
+    inputRows,
+    periodicity,
+    reservePercents,
+    defaultPercent,
+  );
+}
+
+/**
  * GET /api/tax/reserve/summary
  *
  * Period rollup of business income, deductible expenses, HST/GST collected
@@ -479,71 +557,7 @@ router.get('/summary', async (req, res, next) => {
       ...scopeWhere(scope),
       ...dateRangeWhere(from, to),
     };
-    const rows = await Transaction.findAll({
-      where,
-      attributes: [
-        'id',
-        'date',
-        'amount',
-        'currency',
-        'finalBusiness',
-        'txnType',
-        'merchantRaw',
-        'merchantClean',
-        'finalCategory',
-      ],
-      include: [
-        {
-          model: TransactionTaxMetadata,
-          as: 'taxMetadata',
-          attributes: ['deductiblePercent', 'hstGstAmount'],
-          required: false,
-        },
-        {
-          model: Account,
-          as: 'account',
-          attributes: ['accountType'],
-          required: false,
-        },
-      ],
-    });
-    const inputRows: ReserveInputRow[] = rows.map((r) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const meta = (r as any).taxMetadata as TransactionTaxMetadata | undefined;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const account = (r as any).account as { accountType: string | null } | undefined;
-      return {
-        date: String(r.date),
-        amount: String(r.amount),
-        currency: String(r.currency),
-        finalBusiness: Boolean(r.finalBusiness),
-        deductiblePercent:
-          meta?.deductiblePercent == null ? null : String(meta.deductiblePercent),
-        hstGstAmount:
-          meta?.hstGstAmount == null ? null : String(meta.hstGstAmount),
-        txnType: r.txnType ?? null,
-        accountType: account?.accountType ?? null,
-        merchantRaw: r.merchantRaw ?? null,
-        merchantClean: r.merchantClean ?? null,
-        finalCategory: r.finalCategory ?? null,
-      };
-    });
-    // Build per-currency percent lookup from settings.
-    const settings = await TaxReserveSetting.findAll({
-      where: { householdId: household.id },
-    });
-    const reservePercents = new Map<string, number>();
-    for (const s of settings) {
-      const v = Number(s.reservePercent);
-      if (Number.isFinite(v)) reservePercents.set(s.currency, v);
-    }
-    const defaultPercent = Number(DEFAULT_TAX_RESERVE_PERCENT);
-    const rollups = aggregateReserveRollups(
-      inputRows,
-      periodicity,
-      reservePercents,
-      defaultPercent,
-    );
+    const rollups = await loadReserveRollups(household.id, where, periodicity);
     res.json({
       data: rollups,
       scope,

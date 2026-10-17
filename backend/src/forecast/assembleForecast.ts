@@ -29,9 +29,9 @@ import {
 } from './gatherOccurrences';
 import { type ForecastOccurrence } from './buildForecast';
 import { detectRecurringIncome, type IncomeInputTxn } from './detectIncome';
-import { detectRecurring, type RecurringInputTxn } from '../routes/recurring';
+import { detectRecurring } from '../routes/recurring';
 import { num } from '../util/numbers';
-import { classifyPositiveFlow } from '../summary/classifyTransactionFlow';
+import { toRecurringCandidates } from '../subscriptions/recurringCandidates';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -200,31 +200,7 @@ export async function assembleForecast(
       txnType: string | null;
     };
 
-    const candidates: RecurringInputTxn[] = [];
-    for (const row of txnRows as unknown as RawTxnRow[]) {
-      const amount = num(row.amount);
-      if (amount == null) continue;
-      if (amount >= 0) continue; // charges only
-      if (
-        classifyPositiveFlow({
-          merchantRaw: row.merchantRaw,
-          merchantClean: row.merchantClean,
-          category: row.finalCategory,
-        }) === 'payment'
-      ) {
-        continue;
-      }
-      const merchant =
-        (row.merchantClean ?? '').trim() || (row.merchantRaw ?? '').trim();
-      if (!merchant) continue;
-      candidates.push({
-        merchant,
-        amount,
-        currency: row.currency,
-        date: row.date,
-        category: row.finalCategory,
-      });
-    }
+    const candidates = toRecurringCandidates(txnRows as unknown as RawTxnRow[]);
 
     const recurringItems = detectRecurring(candidates, {
       minOccurrences: RECURRING_MIN_OCCURRENCES,

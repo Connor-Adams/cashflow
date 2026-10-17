@@ -17,7 +17,8 @@ import {
 import {
   LIABILITY_TYPES,
   loadLiabilities,
-  toDebtInputs,
+  summarizeLiabilities,
+  toCadDebtInputs,
   type LiabilityRow,
 } from '../debt/loadLiabilities';
 
@@ -54,17 +55,18 @@ router.get('/', async (req, res, next) => {
       if (Number.isFinite(n) && n >= 0) extraMonthlyPayment = n;
     }
 
-    const debts = toDebtInputs(liabilities);
+    // Totals and the payoff plan are in CAD: each liability is FX-converted
+    // first, so a USD card and a CAD loan are never summed or ordered as if
+    // they shared a currency. `extraMonthlyPayment` is read as CAD.
+    const debts = toCadDebtInputs(liabilities);
     const comparison = debts.length > 0 ? comparePayoff(debts, extraMonthlyPayment, asOf) : null;
-
-    const currency = liabilities[0]?.currency ?? 'CAD';
-    const totalOwed = liabilities.reduce((acc, l) => acc + l.balance, 0);
-    const totalMinimum = liabilities.reduce((acc, l) => acc + l.minimumPayment, 0);
+    const summary = summarizeLiabilities(liabilities);
 
     res.json({
-      currency,
-      totalOwed: Math.round(totalOwed * 100) / 100,
-      totalMinimumPayment: Math.round(totalMinimum * 100) / 100,
+      currency: summary.currency,
+      totalOwed: summary.totalOwed,
+      totalMinimumPayment: summary.totalMinimumPayment,
+      unconvertedCurrencies: summary.unconvertedCurrencies,
       extraMonthlyPayment,
       liabilities,
       comparison,
@@ -304,7 +306,7 @@ function planForScenario(
   startDate: string,
 ): PayoffPlan {
   return computePayoffPlan({
-    debts: toDebtInputs(liabilities),
+    debts: toCadDebtInputs(liabilities),
     strategy,
     extraMonthlyPayment,
     customOrder: customOrder ?? undefined,
@@ -333,13 +335,15 @@ async function syncForecastDebtEvent(
   // Clear prior debt-sourced events for this household (single-scenario feed).
   await PlannedEvent.destroy({ where: { householdId, source: 'debt' } });
 
+  // Same CAD basis as the plan: sum FX-converted minimums (rows with no rate
+  // are already out of the plan) so the forecast outflow never mixes currencies.
   const monthlyBudget =
-    liabilities.reduce((acc, l) => (l.balance > 0 ? acc + l.minimumPayment : acc), 0) +
+    toCadDebtInputs(liabilities).reduce((acc, d) => acc + d.minimumPayment, 0) +
     Number(scenario.extraMonthlyPayment);
   if (monthlyBudget <= 0 || plan.totalMonths <= 0) return;
 
   const months = Math.min(plan.totalMonths, FORECAST_HORIZON_MONTHS);
-  const currency = liabilities.find((l) => l.balance > 0)?.currency ?? 'CAD';
+  const currency = 'CAD';
 
   await PlannedEvent.create({
     userId,

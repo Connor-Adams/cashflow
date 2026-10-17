@@ -21,6 +21,7 @@ const populatedOverview: DebtOverview = {
   currency: 'CAD',
   totalOwed: 12000,
   totalMinimumPayment: 350,
+  unconvertedCurrencies: [],
   extraMonthlyPayment: 200,
   liabilities: [
     {
@@ -33,6 +34,8 @@ const populatedOverview: DebtOverview = {
       minimumPayment: 350,
       statementBalance: null,
       dueDay: 15,
+      balanceCad: 12000,
+      minimumPaymentCad: 350,
     },
   ],
   comparison: {
@@ -66,6 +69,7 @@ const emptyOverview: DebtOverview = {
   currency: 'CAD',
   totalOwed: 0,
   totalMinimumPayment: 0,
+  unconvertedCurrencies: [],
   extraMonthlyPayment: 0,
   liabilities: [],
   comparison: null,

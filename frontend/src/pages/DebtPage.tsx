@@ -90,6 +90,11 @@ export function DebtPage() {
         <SummaryTile
           label="Total owed"
           value={data ? formatMoney(data.totalOwed, currency) : '—'}
+          description={
+            data?.unconvertedCurrencies.length
+              ? `Excludes ${data.unconvertedCurrencies.join(', ')} (no FX rate)`
+              : undefined
+          }
           loading={loading}
         />
         <SummaryTile
@@ -115,11 +120,7 @@ export function DebtPage() {
       <Card className="mb-4 p-3">
         <h2 className="mb-2 text-sm font-semibold">Your debts</h2>
         {data && data.liabilities.length > 0 ? (
-          <LiabilitiesTable
-            liabilities={data.liabilities}
-            currency={currency}
-            onSaved={refresh}
-          />
+          <LiabilitiesTable liabilities={data.liabilities} onSaved={refresh} />
         ) : (
           <EmptyState
             title="No debts found"
@@ -147,11 +148,10 @@ export function DebtPage() {
 
 type LiabilitiesTableProps = {
   liabilities: DebtLiability[]
-  currency: string
   onSaved: () => void
 }
 
-function LiabilitiesTable({ liabilities, currency, onSaved }: LiabilitiesTableProps) {
+function LiabilitiesTable({ liabilities, onSaved }: LiabilitiesTableProps) {
   return (
     <Table>
       <TableHeader>
@@ -165,7 +165,7 @@ function LiabilitiesTable({ liabilities, currency, onSaved }: LiabilitiesTablePr
       </TableHeader>
       <TableBody>
         {liabilities.map((l) => (
-          <LiabilityRow key={l.accountId} liability={l} currency={currency} onSaved={onSaved} />
+          <LiabilityRow key={l.accountId} liability={l} onSaved={onSaved} />
         ))}
       </TableBody>
     </Table>
@@ -174,13 +174,13 @@ function LiabilitiesTable({ liabilities, currency, onSaved }: LiabilitiesTablePr
 
 function LiabilityRow({
   liability,
-  currency,
   onSaved,
 }: {
   liability: DebtLiability
-  currency: string
   onSaved: () => void
 }) {
+  // Rows render in the liability's own currency; only totals/plan are CAD.
+  const currency = liability.currency
   const { showToast } = useToast()
   const [editing, setEditing] = useState(false)
   const [apr, setApr] = useState(String(liability.interestRate))
