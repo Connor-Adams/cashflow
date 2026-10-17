@@ -13,14 +13,12 @@
  *   - Side-by-side comparison panel: baseline vs scenario closing balance,
  *     lowest balance, and a dual-sparkline (inline SVG, no lib needed)
  *
- * NOTE: debt-payoff assumption type is intentionally omitted — the debt
- * planner (#202) is still open. A "TODO: add debt-payoff when #202 ships"
- * comment is left in the form.
+ * NOTE: there is no debt-payoff assumption type. The debt planner (#202)
+ * shipped as its own page/route (`/api/debt`) and was never wired into
+ * scenarios; the backend rejects `debt_payoff` overrides with a 400.
  *
- * NOTE on opportunity cost (#252): the scenario result exposes the daily
- * forecast series, which is exactly the data needed to compute the future
- * value / opportunity cost of a lump-sum change. Issue #252 can be resolved
- * without a backend schema change — just add a FV helper to this UI.
+ * Opportunity cost (#252) shipped separately as its own tab
+ * (`/scenarios/opportunity-cost`, backed by POST /api/opportunity-cost/calculate).
  */
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
@@ -405,8 +403,8 @@ function ScenarioEditor({ scenario, onClose, onSaved }: EditorProps) {
                 ))}
               </div>
             )}
-            {/* NOTE: debt-payoff assumption type is not supported yet — it
-                depends on the debt planner (issue #202). */}
+            {/* NOTE: no debt-payoff assumption type — the debt planner (#202)
+                lives on its own page and isn't wired into scenarios. */}
           </div>
 
           <div className="mt-auto flex justify-end gap-2 pt-4 border-t border-border">

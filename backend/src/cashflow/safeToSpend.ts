@@ -461,27 +461,6 @@ async function resolveCorpLinkedTxnIds(
 }
 
 /**
- * Recurring-paycheck income only. Thin wrapper over `getIncomeLegs`, kept
- * because callers and tests address the paycheck leg by name.
- */
-export async function getExpectedIncome(
-  householdId: number,
-  currency: string,
-  asOfDate: string,
-  windowEndDate: string,
-  corpEntityIds: ReadonlySet<number> = new Set(),
-): Promise<number> {
-  const legs = await getIncomeLegs(
-    householdId,
-    currency,
-    asOfDate,
-    windowEndDate,
-    corpEntityIds,
-  );
-  return legs.recurringIncome;
-}
-
-/**
  * Sum required expense planned-events (type=expense) inside
  * [asOfDate, windowEndDate], in the requested currency, scoped to the
  * household. `debt_payment` is handled separately by the credit-card branch

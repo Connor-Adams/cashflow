@@ -1,6 +1,6 @@
 /**
  * Unit tests for the pure helpers in routes/returnWarranty.ts. Exercises:
- *  - isWithinReturnWindow / isExpiringSoon / daysUntil deadline math
+ *  - isWithinReturnWindow / daysUntil deadline math
  *  - validateReturnPatch input shape + edge cases
  *  - serializeReturnMetadata view shape with and without metadata
  *  - rowToListView convenience flags
@@ -11,7 +11,6 @@ import assert from 'node:assert/strict';
 import {
   daysUntil,
   isWithinReturnWindow,
-  isExpiringSoon,
   isoDate,
   validateReturnPatch,
   serializeReturnMetadata,
@@ -67,29 +66,6 @@ test('isWithinReturnWindow false when deadline has passed', () => {
 
 test('isWithinReturnWindow false for null deadline', () => {
   assert.equal(isWithinReturnWindow(null, '2026-05-26'), false);
-});
-
-// ----- isExpiringSoon -------------------------------------------------------
-
-test('isExpiringSoon true when within window', () => {
-  assert.equal(isExpiringSoon('2026-05-28', 7, '2026-05-26'), true);
-});
-
-test('isExpiringSoon true on the inclusive far edge', () => {
-  // 2026-05-26 + 7 days = 2026-06-02. Deadline on cutoff still counts.
-  assert.equal(isExpiringSoon('2026-06-02', 7, '2026-05-26'), true);
-});
-
-test('isExpiringSoon false beyond the window', () => {
-  assert.equal(isExpiringSoon('2026-06-03', 7, '2026-05-26'), false);
-});
-
-test('isExpiringSoon false for already-expired deadlines', () => {
-  assert.equal(isExpiringSoon('2026-05-25', 7, '2026-05-26'), false);
-});
-
-test('isExpiringSoon false for null deadline', () => {
-  assert.equal(isExpiringSoon(null, 7, '2026-05-26'), false);
 });
 
 // ----- validateReturnPatch --------------------------------------------------

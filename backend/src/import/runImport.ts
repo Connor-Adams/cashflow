@@ -960,26 +960,7 @@ export async function importWsBundleFile(opts: {
   };
 }
 
-// ─── PDF bundle import (RBC, CIBC, Questrade) ───────────────────────────────
-
-/** Per-file result emitted by `importPdfBundleFile`. */
-export type PdfBundleFileResult = {
-  file: string;
-  accountSuffix: string | null;
-  productLabel: string | null;
-  accountId: number | null;
-  accountName: string | null;
-  accountCreated: boolean;
-  inserted: number;
-  insertedTransactions: number;
-  insertedInvestmentActivities: number;
-  insertedHoldings: number;
-  skippedDuplicates: number;
-  rowErrors: number;
-  parseErrors: StatementParseError[];
-  warnings: string[];
-  error?: string;
-};
+// ─── PDF statement account resolution (RBC, CIBC, Questrade, …) ─────────────
 
 type PdfAccountTemplate = {
   name: string;
@@ -1088,30 +1069,10 @@ export async function linkWsAccountToCorpEntity(
   }
 }
 
-function emptyPdfBundleResult(file: string, error: string): PdfBundleFileResult {
-  return {
-    file,
-    accountSuffix: null,
-    productLabel: null,
-    accountId: null,
-    accountName: null,
-    accountCreated: false,
-    inserted: 0,
-    insertedTransactions: 0,
-    insertedInvestmentActivities: 0,
-    insertedHoldings: 0,
-    skippedDuplicates: 0,
-    rowErrors: 0,
-    parseErrors: [],
-    warnings: [],
-    error,
-  };
-}
-
 /**
  * Resolve (find-or-create) the Account for a PDF statement from its parsed
- * header, applying the corp-entity + business-override logic. Shared by the
- * synchronous bundle path and the async pdfImportProcess worker.
+ * header, applying the corp-entity + business-override logic. Used by the
+ * async pdfImportProcessor worker.
  */
 export async function resolvePdfAccountFromHeader(
   header: import('./pdf/types').PdfStatementHeader,
@@ -1182,9 +1143,9 @@ export async function resolvePdfAccountFromHeader(
     await account.update({ entityId: entity.id });
   }
 
-  // Credit-card statement → calendar auto-fill (#243 follow-up). Runs for both
-  // the bundle path and the async pdfImportProcessor worker, since both resolve
-  // their account through this function. Self-guards on accountType.
+  // Credit-card statement → calendar auto-fill (#243 follow-up). Runs for every
+  // PDF the async pdfImportProcessor worker resolves through this function.
+  // Self-guards on accountType.
   try {
     await applyCreditCardStatementSummary({ account, header, userId, householdId });
   } catch (err) {
@@ -1214,104 +1175,6 @@ export async function resolvePdfAccountFromHeader(
   }
 
   return { account, accountCreated, overrideBusiness };
-}
-
-/**
- * Import a single PDF statement from a bundle upload. Works with any parser
- * registered via `registerBuiltInPdfParsers` (RBC, CIBC, Questrade today).
- *
- * Pipeline:
- *   1. Extract PDF lines once, find the matching parser via sniff.
- *   2. Parse to get `header` (accountSuffix, productLabel, accountType, period).
- *   3. `Account.findOrCreate` keyed on `(householdId, shortCode=accountSuffix)`.
- *      The productLabel determines name + accountType from `PDF_ACCOUNT_TEMPLATES`.
- *   4. Run the standard parseStatementFile → commitStatementImport pipeline so
- *      fingerprinting / dedup / enrichment matches single-file uploads.
- *
- * Generic multi-parser entry point currently superseded by importWsBundleFile;
- * kept as the documented seam for re-wiring the non-Wealthsimple bundle path.
- */
-// fallow-ignore-next-line unused-export
-export async function importPdfBundleFile(opts: {
-  buffer: Buffer;
-  fileName: string;
-  householdId: number;
-  userId: number;
-}): Promise<PdfBundleFileResult> {
-  const file = path.basename(opts.fileName || 'statement.pdf').replace(/[\\/]/g, '');
-
-  // Lazy-require to dodge the same circular-init concern as registry.ts.
-  /* eslint-disable @typescript-eslint/no-require-imports */
-  const { extractPdfLines } = require('./pdf/extractLines');
-  const { findPdfParser, registerBuiltInPdfParsers } = require('./pdf/registry');
-  /* eslint-enable @typescript-eslint/no-require-imports */
-  registerBuiltInPdfParsers();
-
-  let lines;
-  try {
-    lines = await extractPdfLines(opts.buffer);
-  } catch (err) {
-    return emptyPdfBundleResult(file, `Could not read PDF: ${(err as Error).message}`);
-  }
-
-  const parser = findPdfParser(lines);
-  if (!parser) {
-    return emptyPdfBundleResult(file, 'No PDF parser matched this statement layout');
-  }
-  let parseOut;
-  try {
-    parseOut = parser.parse(lines, { defaultCurrency: 'CAD' });
-  } catch (err) {
-    return emptyPdfBundleResult(file, `Parser ${parser.id} threw: ${(err as Error).message}`);
-  }
-  if (!parseOut.header) {
-    return emptyPdfBundleResult(file, `Parser ${parser.id} produced no header for account match`);
-  }
-  const header = parseOut.header;
-  const { account, accountCreated, overrideBusiness } = await resolvePdfAccountFromHeader(
-    header, opts.householdId, opts.userId, file,
-  );
-
-  const preview = await parseStatementFile({
-    buffer: opts.buffer,
-    fileName: file,
-    accountId: account.id,
-    householdId: opts.householdId,
-    overrideBusiness: overrideBusiness ? true : undefined,
-    preExtractedLines: lines,
-  });
-  if ('error' in preview) {
-    return {
-      ...emptyPdfBundleResult(file, preview.error),
-      accountSuffix: header.accountSuffix,
-      productLabel: header.productLabel,
-      accountId: account.id,
-      accountName: account.name,
-      accountCreated,
-    };
-  }
-
-  const commit = await commitStatementImport(preview, opts.userId, opts.householdId);
-
-  return {
-    file,
-    accountSuffix: header.accountSuffix,
-    productLabel: header.productLabel,
-    accountId: account.id,
-    accountName: account.name,
-    accountCreated,
-    inserted:
-      commit.insertedTransactions +
-      commit.insertedInvestmentActivities +
-      commit.insertedHoldings,
-    insertedTransactions: commit.insertedTransactions,
-    insertedInvestmentActivities: commit.insertedInvestmentActivities,
-    insertedHoldings: commit.insertedHoldings,
-    skippedDuplicates: commit.skippedDuplicates,
-    rowErrors: commit.rowErrors,
-    parseErrors: commit.parseErrors,
-    warnings: commit.warnings,
-  };
 }
 
 // ─── Wealthsimple holdings import ───────────────────────────────────────────

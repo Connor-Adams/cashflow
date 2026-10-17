@@ -64,8 +64,9 @@ export class BudgetTarget extends Model<
    */
   declare scope: CreationOptional<BudgetTargetScope>;
   /**
-   * If true, surplus from one period rolls into the next. We persist the
-   * toggle in this PR but the rollover *behavior* is a follow-up.
+   * If true, the signed remainder of prior periods (surplus or overspend)
+   * carries into the current one as `carriedIn` — computed in
+   * `budgets/budgetSpend.ts` and applied in `budgets/budgetSpendMath.ts`.
    */
   declare rolloverEnabled: CreationOptional<boolean>;
   /**

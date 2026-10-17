@@ -20,16 +20,14 @@ export interface ResolvedPath {
  * Resolving parent-scoped is what let the nightly enrichment job fork 15
  * categories into duplicate roots on 2026-09-29.
  *
- * The household-wide uniqueness guarantee this leans on does NOT exist yet: the
- * live schema still carries only the two PARTIAL indexes
- * (`categories_household_parent_name_key_unique` and
- * `categories_household_root_name_key_unique`), and `createCategory.ts` enforces
- * uniqueness only among siblings — so a user can still mint a root `Groceries`
- * beside a nested `Groceries` today. The household-wide unique index arrives
- * with the Task 6 merge migration; until it lands, duplicates exist and this
- * lookup must be deterministic about which one it picks.
+ * The household-wide uniqueness guarantee this leans on is enforced by the
+ * `categories_household_name_key_unique` index on (household_id, name_key),
+ * added by migration 20260930000001-merge-duplicate-category-names (which
+ * merged the existing duplicates and dropped the two older PARTIAL indexes),
+ * so a migrated database holds at most one match per name.
  *
- * Hence `ORDER BY id ASC`: the OLDEST node wins. Postgres guarantees no heap
+ * `ORDER BY id ASC` stays as a determinism guard for any database that predates
+ * that migration: the OLDEST node wins. Postgres guarantees no heap
  * order, so an unordered `LIMIT 1` returns whichever half of a duplicate pair
  * the planner happens to hand back — and that shifts after updates and VACUUM,
  * so two nightly enrichment runs could resolve the same name to different

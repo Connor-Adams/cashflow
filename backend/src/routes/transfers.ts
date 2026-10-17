@@ -61,10 +61,11 @@ const router = Router();
 const VALID_PURPOSES = new Set<string>(TRANSFER_PURPOSES);
 
 /**
- * Window (days) used by /suggestions for amount-equal and sourceReference
- * matches. Matches the default `transferWindowDays` used by the enrichment
- * pipeline. Wider than necessary on purpose: a stale unmatched transfer
- * may sit in the queue for weeks while the user catches up on imports.
+ * Window (calendar days) used by /suggestions for amount-equal and
+ * sourceReference matches. Deliberately independent of, and much wider than,
+ * the enrichment pipeline's `transferWindowDays` (ENRICHMENT_TRANSFER_WINDOW_DAYS,
+ * default 2 *business* days): a stale unmatched transfer may sit in the queue
+ * for weeks while the user catches up on imports.
  */
 export const SUGGESTION_WINDOW_DAYS = 7;
 

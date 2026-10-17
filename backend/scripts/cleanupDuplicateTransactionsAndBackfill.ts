@@ -1,5 +1,4 @@
 #!/usr/bin/env tsx
-// fallow-ignore-file unused-file
 /**
  * One-shot cleanup for the source-reference-instability dedup gap.
  *

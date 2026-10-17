@@ -13,8 +13,8 @@
  * - DELETE /api/tax/reserve/settings/:currency — delete one currency's row.
  * - GET    /api/tax/reserve/summary?scope&from&to&periodicity — per-period rollup.
  *
- * The pure helpers (`composeTaxReserve`, `bucketByPeriod`, `aggregateReserveRows`)
- * are exported for unit tests in test/taxReserve.test.ts.
+ * The pure helpers (`parsePeriodicity`, `periodKey`, `aggregateReserveRollups`,
+ * `validateReservePatch`) are exported for unit tests in taxReserve.test.ts.
  */
 import { Router } from 'express';
 import { type WhereOptions } from 'sequelize';
@@ -196,36 +196,6 @@ export function aggregateReserveRollups(
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
-}
-
-/**
- * Pure single-period reserve calc — exposed so the dashboard tile and the
- * AI summarizer can reuse the same math without re-aggregating from raw
- * transactions. Mirrors the formula used by aggregateReserveRollups but
- * takes pre-aggregated totals.
- */
-export function composeTaxReserve(input: {
-  businessIncome: number;
-  deductibleExpenses: number;
-  hstGstCollected: number;
-  hstGstPaid: number;
-  reservePercent: number;
-}): {
-  netBusinessIncome: number;
-  netHstGst: number;
-  reserveTarget: number;
-} {
-  const netBusinessIncome = input.businessIncome - input.deductibleExpenses;
-  const netHstGst = input.hstGstCollected - input.hstGstPaid;
-  const reserveTarget = round2(
-    Math.max(0, netBusinessIncome) * input.reservePercent +
-      Math.max(0, netHstGst),
-  );
-  return {
-    netBusinessIncome: round2(netBusinessIncome),
-    netHstGst: round2(netHstGst),
-    reserveTarget,
-  };
 }
 
 // ---------- Settings serializer + validator ------------------------------

@@ -302,11 +302,6 @@ export function getOverrideKey(key: string): OverrideKeyDef | undefined {
   return indexByKey.get(key) ?? intercorpEntryFor(key) ?? ownerCompEntryFor(key);
 }
 
-/** Returns the subset of the registry that applies to a given entity kind. */
-export function getOverrideKeysForKind(kind: 'personal' | 'corp'): OverrideKeyDef[] {
-  return overrideKeyRegistry.filter((k) => k.kind === kind);
-}
-
 /**
  * Validates a complete override map: rejects unknown keys, runs per-key validators,
  * and rejects cross-kind usage (personal key on corp scenario or vice versa).

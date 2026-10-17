@@ -20,10 +20,9 @@ import type {
   ResolvedProduct,
 } from './costcoResolverShared';
 import { itemNumbersMatch } from './costcoResolverShared';
-// Re-export the shared contracts/helper so existing importers of this module
-// (tests, callers) keep their import paths unchanged after the extraction.
+// Re-export the shared contracts so existing importers of this module keep
+// their import paths unchanged after the extraction.
 export type { ItemNumberToResolve, PerItemResolver, ResolvedProduct } from './costcoResolverShared';
-export { itemNumbersMatch } from './costcoResolverShared';
 import { ExternalOrder, ExternalOrderItem, CostcoProduct } from '../../models';
 import { costcoEnrichmentEnabled, costcoEnrichmentMaxItemsPerRun } from '../../config/env';
 import { getCostcoScraperConfig, getCostcoProvider, getGoogleCseConfig } from '../../config/costco';
