@@ -25,7 +25,7 @@ import {
   unreconciledStatementError,
 } from '../import/reconciliationGate';
 import { commitStatementImport } from '../import/commitStatementImport';
-import { syncTransactionEntityIds } from '../tax/services/syncTransactionEntityIds';
+import { ENTITY_SYNC_FAILED_WARNING, syncTransactionEntityIds } from '../tax/services/syncTransactionEntityIds';
 import {
   executeRollback,
   previewRollback,
@@ -610,13 +610,15 @@ router.post(
       // The per-row inheritance hook handles new rows, but a corp account that
       // only gets linked mid-bundle (linkWsAccountToCorpEntity) leaves earlier
       // rows on the personal default — this heals them. Best-effort: a repair
-      // failure must not fail the user's import.
+      // failure must not fail the user's import — but it must be visible, so
+      // the warning rides on every file result.
       try {
         await syncTransactionEntityIds(household.id);
       } catch (e) {
         logImportEvent('bundle_entity_sync_failed', {
           error: e instanceof Error ? e.message : String(e),
         });
+        for (const r of results) r.warnings.push(ENTITY_SYNC_FAILED_WARNING);
       }
 
       const accountsCreated = results.filter((r) => r.accountCreated).length;

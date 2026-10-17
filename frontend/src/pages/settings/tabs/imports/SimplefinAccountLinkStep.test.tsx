@@ -29,6 +29,8 @@ function account(id: number, name: string): Account {
 function setupFetch(opts: {
   discovered: SimplefinAccountLinkState[]
   household?: Account[]
+  /** HTTP status for GET /api/accounts; non-2xx simulates a failed load. */
+  householdStatus?: number
   onLink?: (simplefinId: string, body: unknown) => Response | Promise<Response>
 }) {
   const household = opts.household ?? [account(42, 'Chequing (RBC)')]
@@ -42,8 +44,9 @@ function setupFetch(opts: {
       })
     }
     if (url.endsWith('/api/accounts') && method === 'GET') {
-      return new Response(JSON.stringify(household), {
-        status: 200,
+      const status = opts.householdStatus ?? 200
+      return new Response(JSON.stringify(status >= 400 ? { error: 'boom' } : household), {
+        status,
         headers: { 'Content-Type': 'application/json' },
       })
     }
@@ -211,5 +214,24 @@ describe('SimplefinAccountLinkStep', () => {
     await user.click(screen.getByRole('button', { name: /^create a new account$/i }))
 
     await waitFor(() => expect(screen.getByRole('button', { name: /unlink/i })).toBeInTheDocument())
+  })
+
+  it('a failed /api/accounts load shows the error + Retry instead of an empty link-to-existing list', async () => {
+    // Swallowing this failure used to render the link list with NO existing
+    // accounts to pick from, nudging the user to "create a new account" and
+    // duplicate one that already exists.
+    vi.stubGlobal(
+      'fetch',
+      setupFetch({
+        discovered: [
+          { simplefinId: 'ACT-2', name: 'Savings', linkedAccountId: null, suggestedAccountId: null, alreadyLinkedElsewhere: false },
+        ],
+        householdStatus: 500,
+      }),
+    )
+    render(<SimplefinAccountLinkStep />)
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+    expect(screen.queryByText('Savings')).not.toBeInTheDocument()
   })
 })

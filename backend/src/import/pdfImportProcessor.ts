@@ -5,7 +5,10 @@ import { parseStatementFile } from './parseStatementFile';
 import { commitStatementImport } from './commitStatementImport';
 import { resolvePdfAccountFromHeader } from './runImport';
 import { logger } from '../observability/logger';
-import { syncTransactionEntityIds } from '../tax/services/syncTransactionEntityIds';
+import {
+  ENTITY_SYNC_FAILED_WARNING,
+  syncTransactionEntityIds,
+} from '../tax/services/syncTransactionEntityIds';
 
 export type DrainSummary = { processed: number; succeeded: number; failed: number; skipped: number };
 
@@ -100,6 +103,7 @@ export async function drainPendingChunk(
 
   const summary: DrainSummary = { processed: 0, succeeded: 0, failed: 0, skipped: 0 };
   const touchedBatches = new Set<string>();
+  const doneItemIds: string[] = [];
   const start = Date.now();
   let count = 0;
   while (Date.now() - start < budgetMs && count < maxItems) {
@@ -111,7 +115,11 @@ export async function drainPendingChunk(
     if (b && !b.startedAt) { b.startedAt = new Date(); await b.save(); }
     try {
       const outcome = await processItem(item);
-      if (outcome === 'skipped') summary.skipped += 1; else summary.succeeded += 1;
+      if (outcome === 'skipped') summary.skipped += 1;
+      else {
+        summary.succeeded += 1;
+        doneItemIds.push(item.id);
+      }
     } catch (err) {
       item.status = 'failed';
       item.error = (err as Error).message;
@@ -129,19 +137,45 @@ export async function drainPendingChunk(
     await new Promise<void>((r) => setImmediate(r)); // yield — pdfjs is CPU-bound
   }
   for (const batchId of touchedBatches) await recomputeBatch(batchId);
-  // Heal step: re-assert transaction.entity_id parity after any account→entity
-  // changes that the import may have triggered. Best-effort: a failure must not
-  // fail the drain (mirrors the post-bundle heal in restoreBundle / routes/import).
-  if (touchedBatches.size > 0) {
-    const batches = await PdfImportBatch.findAll({ where: { id: [...touchedBatches] } });
-    for (const hid of new Set(batches.map((bb) => bb.householdId))) {
-      try {
-        await syncTransactionEntityIds(hid);
-      } catch (err) {
-        logger.error({ err, hid }, 'pdf_import_entity_sync_failed');
+  await healEntityIdsAfterDrain(touchedBatches, doneItemIds);
+  const pendingRemaining = await PdfImportItem.count({ where: { status: 'pending' } });
+  return { ...summary, pendingRemaining };
+}
+
+/**
+ * Heal step after a drain: re-assert transaction.entity_id parity after any
+ * account→entity changes the import may have triggered. Best-effort — a failure
+ * must not fail the drain (mirrors the post-bundle heal in routes/import) — but
+ * it must not be silent either: unhealed rows can put corp income on the T1.
+ * On failure, the household's items that completed in this drain get
+ * {@link ENTITY_SYNC_FAILED_WARNING} appended to `resultJson.warnings` and set
+ * as `reason` (which the batch-detail view renders).
+ */
+export async function healEntityIdsAfterDrain(
+  touchedBatchIds: Iterable<string>,
+  doneItemIds: readonly string[],
+): Promise<void> {
+  const batchIds = [...touchedBatchIds];
+  if (batchIds.length === 0) return;
+  const batches = await PdfImportBatch.findAll({ where: { id: batchIds } });
+  for (const hid of new Set(batches.map((bb) => bb.householdId))) {
+    try {
+      await syncTransactionEntityIds(hid);
+    } catch (err) {
+      logger.error({ err, hid }, 'pdf_import_entity_sync_failed');
+      const hhBatchIds = batches.filter((bb) => bb.householdId === hid).map((bb) => bb.id);
+      if (doneItemIds.length === 0) continue;
+      const items = await PdfImportItem.findAll({
+        where: { id: [...doneItemIds], batchId: hhBatchIds, status: 'done' },
+      });
+      for (const it of items) {
+        const prior = (it.resultJson ?? {}) as { warnings?: unknown };
+        const warnings = Array.isArray(prior.warnings) ? [...(prior.warnings as string[])] : [];
+        warnings.push(ENTITY_SYNC_FAILED_WARNING);
+        it.resultJson = { ...prior, warnings } as unknown as typeof it.resultJson;
+        it.reason = ENTITY_SYNC_FAILED_WARNING;
+        await it.save();
       }
     }
   }
-  const pendingRemaining = await PdfImportItem.count({ where: { status: 'pending' } });
-  return { ...summary, pendingRemaining };
 }

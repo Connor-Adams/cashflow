@@ -2,6 +2,16 @@ import { QueryTypes } from 'sequelize';
 import { sequelize } from '../../models';
 
 /**
+ * User-facing warning for an import whose post-import entity heal failed. The
+ * heal is best-effort (it must not fail the import), but a silent failure can
+ * leave corp-account rows on the personal entity — counting corporate income on
+ * the T1 — so callers attach this to the import result instead of only logging.
+ */
+export const ENTITY_SYNC_FAILED_WARNING =
+  'Imported, but re-tagging transactions with their account’s tax entity failed — ' +
+  'income on a corporate account may be counted as personal (T1) until this import is re-run.';
+
+/**
  * Re-assert the invariant that a transaction's entity_id mirrors its account's
  * entity_id. Nothing at the DB level enforces it: after bulk imports or an
  * account→entity reassignment, transactions can carry NULL or a stale entity

@@ -1104,10 +1104,12 @@ router.get('/export', async (req, res, next) => {
   } catch (e) {
     // If headers haven't been sent yet, let express handle it normally.
     // If streaming already started (headers sent), we can't change status —
-    // just end the response and log.
+    // destroy the socket so the download visibly fails. A clean `res.end()`
+    // would terminate the chunked body normally and the browser would save a
+    // truncated CSV that looks complete.
     if (res.headersSent) {
       logger.error({ err: e }, 'transactions_export_streaming_error');
-      try { res.end(); } catch { /* ignore */ }
+      res.destroy(e instanceof Error ? e : new Error(String(e)));
     } else {
       next(e);
     }

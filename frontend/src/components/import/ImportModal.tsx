@@ -274,10 +274,13 @@ export function ImportModal({
         const { results } = await postFormData<{ results: WsBundleFileResult[] }>(WS_BUNDLE_URL, fd)
         const ok = results.filter((r) => !r.error).length
         const inserted = results.reduce((s, r) => s + r.inserted, 0)
+        // Bundle-level warnings (e.g. the post-import entity re-tag failed) are
+        // attached to every file result — show each distinct one once.
+        const warnings = [...new Set(results.flatMap((r) => r.warnings ?? []))]
         setFeedback({
-          variant: ok === results.length ? 'success' : 'warning',
+          variant: ok === results.length && warnings.length === 0 ? 'success' : 'warning',
           title: `WS bundle: ${ok}/${results.length} imported · ${inserted} row(s)`,
-          lines: results.slice(0, 8).map(wsBundleLine),
+          lines: [...results.slice(0, 8).map(wsBundleLine), ...warnings.slice(0, 5)],
         })
         if (onAccountsChanged) onAccountsChanged()
         else onCommitted()

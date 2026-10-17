@@ -32,6 +32,7 @@ import {
   buildCfoBriefing,
   CFO_BRIEFING_PROMPT_VERSION,
   DETERMINISTIC_BRIEFING_MODEL,
+  incompleteBriefingNote,
   MAX_BRIEFING_WINDOW_DAYS,
   resolveDefaultBriefingPeriod,
 } from '../cfo/briefingBuilder';
@@ -181,6 +182,11 @@ router.post('/briefings', aiSuggestLimiter, async (req, res, next) => {
       summary = built.summary;
       safeToSpendSnapshot = built.safeToSpendSnapshot;
       model = built.model;
+      // A partial briefing still completes, but records which sources were
+      // missing so the stored row is not indistinguishable from a full one.
+      if (built.failedSources.length > 0) {
+        errorMessage = incompleteBriefingNote(built.failedSources);
+      }
     } catch (e) {
       status = 'failed';
       errorMessage = e instanceof Error ? e.message : 'Unknown error';

@@ -17,7 +17,7 @@
  * The link-items pipeline stage matches the new orders to card transactions
  * on the next backfill / import.
  */
-import { QueryTypes, type Transaction as DbTransaction } from 'sequelize';
+import { Op, QueryTypes, type Transaction as DbTransaction } from 'sequelize';
 import {
   sequelize,
   ExternalOrder,
@@ -59,6 +59,7 @@ import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransac
 import { categorizeAndApplyReceiptItems } from '../import/categorizeReceiptItems';
 import { buildExternalOrderItemRows } from '../import/externalOrderItemRows';
 import { openDailyAiBudget, type AiExtractionBudget } from './aiExtractionBudget';
+import { parseEmailAddress } from './receiptSenderSuggestions';
 
 /**
  * Default sender allowlist baked into the app. Every household gets these
@@ -110,6 +111,65 @@ export async function getEffectiveAllowlist(householdId: number): Promise<string
   for (const d of DEFAULT_RECEIPT_SENDERS) merged.add(d.address.toLowerCase());
   for (const r of customRows) merged.add(r.emailAddress.toLowerCase());
   return [...merged];
+}
+
+/**
+ * ProcessedEmailMessage statuses that record a failure worth retrying, not a
+ * verdict on the message: a thrown error during fetch/extract/persist (OpenAI,
+ * DB, Gmail blip) and a skipped AI call because the household's daily cap was
+ * spent. Every other status ('extracted', 'duplicate', 'filtered_subject',
+ * 'no_items', 'auto_learned', 'suggested_sender') is terminal. 'empty body'
+ * also records as 'extraction_failed'; retrying it only costs a Gmail fetch.
+ */
+export const RETRYABLE_EMAIL_STATUSES: readonly string[] = ['extraction_failed', 'ai_capped'];
+
+/**
+ * Retry cap without an attempts column: a failed message is retried on later
+ * scans only while its FIRST failure (the row's `createdAt` -- `upsert` never
+ * rewrites it) is younger than this. Bounds the repeat Gmail/AI spend on a
+ * message that fails permanently.
+ */
+export const EMAIL_RETRY_WINDOW_DAYS = 7;
+
+/** Most out-of-window failed messages the fast scan re-fetches per run. */
+export const MAX_EMAIL_RETRIES_PER_SCAN = 25;
+
+export function emailRetryCutoff(now: Date = new Date()): Date {
+  return new Date(now.getTime() - EMAIL_RETRY_WINDOW_DAYS * 86_400_000);
+}
+
+/** True when a recorded message should be processed again, not skipped. */
+export function isRetryableProcessedEmail(
+  row: { status: string; createdAt: Date },
+  cutoff: Date = emailRetryCutoff(),
+): boolean {
+  return RETRYABLE_EMAIL_STATUSES.includes(row.status) && row.createdAt >= cutoff;
+}
+
+/**
+ * Message ids already recorded for this household that a scan must skip:
+ * terminal outcomes, plus retryable failures whose retry window has closed.
+ */
+export async function loadSeenEmailMessageIds(
+  householdId: number,
+  messageIds: string[],
+): Promise<Set<string>> {
+  const seen = new Set<string>();
+  if (messageIds.length === 0) return seen;
+  const rows = await ProcessedEmailMessage.findAll({
+    where: { householdId, provider: 'google', messageId: messageIds },
+    attributes: ['messageId', 'status', 'createdAt'],
+  });
+  const cutoff = emailRetryCutoff();
+  for (const r of rows) {
+    if (!isRetryableProcessedEmail(r, cutoff)) seen.add(r.messageId);
+  }
+  return seen;
+}
+
+/** Gmail answers 404 for an id that is not in THIS mailbox (or was deleted). */
+function isGmailNotFound(err: unknown): boolean {
+  return err instanceof Error && /Gmail get failed \(404\)/.test(err.message);
 }
 
 export function buildGmailQuery(opts: { sinceDate: Date | null; senders: string[] }): string {
@@ -599,23 +659,53 @@ export async function scanInbox(
     onPage: ({ fetched, hasMore }) =>
       callbacks.onPhase?.({ phase: 'listing', fetched, hasMore }),
   });
-  callbacks.onPhase?.({ phase: 'processing-start', total: summaries.length });
 
   // Pre-load the set of already-seen Gmail message IDs for this household so
-  // we can skip them before fetching/extracting.
-  const seen = new Set<string>();
-  if (opts.householdId != null && summaries.length > 0) {
-    const seenRows = await ProcessedEmailMessage.findAll({
+  // we can skip them before fetching/extracting. Transient failures still in
+  // their retry window are NOT seen -- they get processed again.
+  const seen =
+    opts.householdId != null
+      ? await loadSeenEmailMessageIds(opts.householdId, summaries.map((s) => s.id))
+      : new Set<string>();
+  for (const id of opts.forceReprocessMessageIds ?? []) seen.delete(id);
+
+  // Failed messages the query no longer returns: the Gmail query is bounded
+  // by `after:<lastScanAt>`, which advances on every run (including the one
+  // that failed), so a retry has to fetch those ids explicitly. Only ids that
+  // turn out to be from an allowlisted sender in THIS mailbox are processed --
+  // the table is household-wide and shared with discovery (see processOne).
+  const allowedSenders = new Set(senders.map((a) => a.toLowerCase()));
+  const explicitRetryIds = new Set<string>();
+  if (opts.householdId != null) {
+    const listed = summaries.map((s) => s.id);
+    const retryRows = await ProcessedEmailMessage.findAll({
       where: {
         householdId: opts.householdId,
         provider: 'google',
-        messageId: summaries.map((s) => s.id),
+        status: [...RETRYABLE_EMAIL_STATUSES],
+        createdAt: { [Op.gte]: emailRetryCutoff() },
+        ...(listed.length > 0 ? { messageId: { [Op.notIn]: listed } } : {}),
       },
-      attributes: ['messageId'],
+      attributes: ['messageId', 'fromAddr'],
+      order: [['scannedAt', 'ASC']],
     });
-    for (const r of seenRows) seen.add(r.messageId);
+    // Filter by sender BEFORE applying the per-run limit: discovery's failures
+    // (non-allowlisted senders) are skipped without being re-recorded, so if
+    // they counted toward the limit they could hold every retry slot for the
+    // whole window. A null fromAddr (the fetch itself failed) is unknown — try it.
+    for (const r of retryRows) {
+      if (explicitRetryIds.size >= MAX_EMAIL_RETRIES_PER_SCAN) break;
+      const addr = parseEmailAddress(r.fromAddr);
+      if (r.fromAddr == null || (addr != null && allowedSenders.has(addr))) {
+        explicitRetryIds.add(r.messageId);
+      }
+    }
   }
-  for (const id of opts.forceReprocessMessageIds ?? []) seen.delete(id);
+  const toProcess: Array<{ id: string }> = [
+    ...summaries,
+    ...[...explicitRetryIds].map((id) => ({ id })),
+  ];
+  callbacks.onPhase?.({ phase: 'processing-start', total: toProcess.length });
 
   const results: ScanResultMessage[] = [];
   let created = 0;
@@ -690,11 +780,36 @@ export async function scanInbox(
       return result;
     }
 
+    const isExplicitRetry = explicitRetryIds.has(summary.id);
     try {
-      const full = await fetchMessage({ accessToken, messageId: summary.id });
+      let full: Awaited<ReturnType<typeof fetchMessage>>;
+      try {
+        full = await fetchMessage({ accessToken, messageId: summary.id });
+      } catch (err) {
+        // An explicit retry id may belong to another household member's
+        // mailbox -- leave its row alone for their scan to retry.
+        if (isExplicitRetry && isGmailNotFound(err)) {
+          result.status = 'skipped_already_seen';
+          skippedAlreadySeen++;
+          return result;
+        }
+        throw err;
+      }
       result.from = getHeader(full.payload, 'From');
       result.subject = getHeader(full.payload, 'Subject');
       result.internalDate = full.internalDate;
+
+      // An explicit retry from a sender outside the allowlist is a discovery
+      // failure (discovery handles non-allowlisted senders) -- the fast scan
+      // must not hijack it into an auto-created order.
+      if (isExplicitRetry) {
+        const addr = parseEmailAddress(result.from);
+        if (addr == null || !allowedSenders.has(addr)) {
+          result.status = 'skipped_already_seen';
+          skippedAlreadySeen++;
+          return result;
+        }
+      }
 
       const subjectVerdict = classifySubject(result.subject);
       if (subjectVerdict.decision === 'block') {
@@ -961,11 +1076,11 @@ export async function scanInbox(
     return result;
   }
 
-  for (let i = 0; i < summaries.length; i++) {
-    const result = await processOne(summaries[i]);
+  for (let i = 0; i < toProcess.length; i++) {
+    const result = await processOne(toProcess[i]);
     results.push(result);
     callbacks.onMessage?.(result);
-    callbacks.onPhase?.({ phase: 'processed', index: i + 1, total: summaries.length });
+    callbacks.onPhase?.({ phase: 'processed', index: i + 1, total: toProcess.length });
   }
 
   integ.set({ lastScanAt: new Date() });
@@ -982,7 +1097,7 @@ export async function scanInbox(
   }
 
   return {
-    scannedMessages: summaries.length,
+    scannedMessages: toProcess.length,
     createdOrders: created,
     duplicateOrders: dupes,
     filteredBySubject,
