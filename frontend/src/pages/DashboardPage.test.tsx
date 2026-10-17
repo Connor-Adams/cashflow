@@ -1,6 +1,6 @@
 import React from 'react'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ToastProvider } from '@/components/ui/toast'
 import { getJson } from '@/lib/api'
@@ -167,5 +167,150 @@ describe('DashboardPage (characterization)', () => {
     } finally {
       vi.mocked(getJson).mockImplementation(original!)
     }
+  })
+})
+
+const EMPTY_DASH = {
+  byCategory: [],
+  metricsByCurrency: [],
+  monthlyByCurrency: [],
+  netSpendByBusiness: [],
+  categoryReports: [],
+  merchantSummaries: [],
+  accountSummaries: [],
+  reviewQueue: [],
+  categoryTree: [],
+}
+
+function insightRow(currency: string) {
+  return {
+    currency,
+    netSpend: 100,
+    realCost: 100,
+    owedBack: 0,
+    owedBackBreakdown: { reimbursable: 0, partnerShare: 0 },
+    peerLending: { lent: 0, received: 0 },
+    totalSpend: 100,
+    totalCredits: 0,
+    totalIncome: 0,
+    totalPayments: 0,
+  }
+}
+
+/** Dashboard payload with the same category/month/business rows in CAD and USD. */
+function twoCurrencyDash(currencies: string[]) {
+  return {
+    ...EMPTY_DASH,
+    byCategory: currencies.map((currency, i) => ({
+      currency,
+      category: 'Groceries',
+      sumAmount: -(100 + i * 23),
+      finalBusiness: false,
+      finalSplitType: 'personal',
+    })),
+    metricsByCurrency: currencies.map((currency) => ({
+      currency,
+      totalSpend: 100,
+      totalCredits: 0,
+      totalPayments: 0,
+      totalIncome: 50,
+      netSpend: 100,
+      transactionCount: 3,
+    })),
+    monthlyByCurrency: currencies.map((currency) => ({
+      month: '2026-10',
+      currency,
+      totalSpend: 100,
+      totalCredits: 0,
+      totalPayments: 0,
+      totalIncome: 50,
+      netSpend: 100,
+    })),
+    netSpendByBusiness: currencies.map((currency) => ({
+      currency,
+      business: false,
+      totalSpend: 100,
+      totalCredits: 0,
+      netSpend: 100,
+      income: 50,
+    })),
+  }
+}
+
+function withPayloads(dash: unknown, insight: unknown) {
+  const original = vi.mocked(getJson).getMockImplementation()!
+  vi.mocked(getJson).mockImplementation(((path: string) => {
+    if (path.startsWith('/api/summary/dashboard')) return Promise.resolve(dash)
+    if (path.startsWith('/api/summary/period-insight')) return Promise.resolve(insight)
+    return original(path)
+  }) as typeof getJson)
+  return () => vi.mocked(getJson).mockImplementation(original)
+}
+
+describe('DashboardPage comparison window', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear()
+    // Local noon on Oct 17 — "This month" is Oct 1..Oct 31 but only 17 days
+    // of it have happened.
+    vi.useFakeTimers({ now: new Date(2026, 9, 17, 12), toFake: ['Date'] })
+    vi.mocked(getJson).mockClear()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('compares This month to date against the same days of last month', async () => {
+    await renderPage()
+    await waitFor(() => {
+      const paths = vi.mocked(getJson).mock.calls.map(([p]) => String(p))
+      expect(paths).toContain(
+        '/api/summary/dashboard?currency=CAD&dateFrom=2026-09-01&dateTo=2026-09-17',
+      )
+    })
+    const paths = vi.mocked(getJson).mock.calls.map(([p]) => String(p))
+    // The selected range itself is untouched.
+    expect(paths).toContain(
+      '/api/summary/dashboard?currency=CAD&dateFrom=2026-10-01&dateTo=2026-10-31',
+    )
+    // The old equal-day-span window is gone.
+    expect(paths.some((p) => p.includes('dateFrom=2026-08-31'))).toBe(false)
+  })
+})
+
+describe('DashboardPage with "All currencies" selected', () => {
+  let restore: () => void = () => {}
+  beforeEach(() => {
+    window.sessionStorage.clear()
+    window.sessionStorage.setItem('dashboard.currency', JSON.stringify(''))
+  })
+  afterEach(() => {
+    restore()
+    window.sessionStorage.clear()
+  })
+
+  it('never sums money across currencies — the money tiles ask for a currency', async () => {
+    restore = withPayloads(twoCurrencyDash(['CAD', 'USD']), {
+      byCurrency: [insightRow('CAD'), insightRow('USD')],
+    })
+    await renderPage()
+    // Category chart, period band, income split, spend split, monthly flow.
+    await waitFor(() => {
+      expect(screen.getAllByText(/pick a currency to see/i)).toHaveLength(5)
+    })
+    // The category chart no longer renders a CAD+USD "Groceries" bar.
+    expect(screen.queryByText('Groceries')).toBeNull()
+    // The period band no longer silently shows the first currency.
+    expect(screen.queryByText('Refunds / credits')).toBeNull()
+    // Each notice offers the real currencies to pick from.
+    expect(screen.getAllByRole('button', { name: 'Show USD' }).length).toBeGreaterThan(0)
+  })
+
+  it('renders the tiles normally when the data holds a single currency', async () => {
+    restore = withPayloads(twoCurrencyDash(['USD']), {
+      byCurrency: [insightRow('USD')],
+    })
+    await renderPage()
+    expect(await screen.findByText('Groceries')).toBeInTheDocument()
+    expect(screen.queryByText(/pick a currency to see/i)).toBeNull()
   })
 })

@@ -16,6 +16,7 @@ const mockedGetJson = vi.mocked(getJson)
 const overview: CreditCardsOverview = {
   currency: 'CAD',
   asOfDate: '2026-06-18',
+  totals: { currency: 'CAD', statementOwed: 1500, minimumDue: 50, unconvertedCurrencies: [] },
   cards: [
     {
       accountId: 1,
@@ -36,6 +37,7 @@ const overview: CreditCardsOverview = {
       nextDueDate: '2026-06-22',
       daysUntilDue: 4,
       dueSoon: true,
+      closed: false,
     },
   ],
 }
@@ -76,6 +78,33 @@ describe('CreditCardPlannerPage', () => {
     expect(await screen.findByText('Aeroplan Visa Infinite')).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: /^card$/i })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: /autopay/i })).toBeInTheDocument()
+  })
+
+  it('renders the server CAD totals and each card in its own currency', async () => {
+    // USD 2,000 card + CAD 10,000 card: the tile must show the server's
+    // FX-converted CAD total, not a client-side sum labelled "CA$12,000".
+    mockedGetJson.mockResolvedValue({
+      ...overview,
+      totals: { currency: 'CAD', statementOwed: 12800, minimumDue: 270, unconvertedCurrencies: [] },
+      cards: [
+        { ...overview.cards[0], accountId: 1, name: 'USD Card', currency: 'USD', currentBalance: 2000, statementBalance: null, minimumPayment: 50 },
+        { ...overview.cards[0], accountId: 2, name: 'CAD Card', currency: 'CAD', currentBalance: 10000, statementBalance: null, minimumPayment: 220 },
+      ],
+    })
+    renderPage()
+    expect(await screen.findByText('USD Card')).toBeInTheDocument()
+    expect(screen.getByText('$12,800.00')).toBeInTheDocument()
+    expect(screen.queryByText('$12,000.00')).not.toBeInTheDocument()
+    expect(screen.getByText('US$2,000.00')).toBeInTheDocument()
+  })
+
+  it('flags currencies left out of the totals for want of an FX rate', async () => {
+    mockedGetJson.mockResolvedValue({
+      ...overview,
+      totals: { ...overview.totals, unconvertedCurrencies: ['EUR'] },
+    })
+    renderPage()
+    expect(await screen.findAllByText(/excludes EUR/i)).toHaveLength(2)
   })
 
   it('renders the empty state when there are no cards', async () => {

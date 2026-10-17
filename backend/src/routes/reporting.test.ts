@@ -53,6 +53,7 @@ beforeEach(async () => {
   await models.SecurityPrice.destroy({ where: {}, truncate: true });
   await models.Security.destroy({ where: {}, truncate: true });
   await models.TaxReserveSetting.destroy({ where: {}, truncate: true });
+  await models.FxRate.destroy({ where: {}, truncate: true });
   await models.Account.destroy({ where: {}, truncate: true });
   await models.Household.destroy({ where: {}, truncate: true });
   household = await models.Household.create({ name: 'Reporting Test HH' });
@@ -238,9 +239,58 @@ test('GET /tax: grossIncome counts only txnType=income rows', async () => {
   const res = await request(app).get('/tax');
   assert.equal(res.status, 200);
   assert.equal(res.body.grossIncome, 8000);
-  // Default reserve percent is 0.25.
-  assert.equal(res.body.estimatedTaxOwed, 2000);
-  assert.equal(res.body.taxReserveTarget, 2000);
+  // None of these rows is business income, so the app's reserve (the same
+  // computation as /api/tax/reserve) is 0 — not grossIncome x 25%.
+  assert.equal(res.body.estimatedTaxOwed, 0);
+  assert.equal(res.body.taxReserveTarget, 0);
+});
+
+/** Business income + a deductible business expense + HST collected, plus a
+ *  personal paycheque that must NOT be reserved against. */
+async function seedBusinessFixture(dates: { income: string; expense: string; pay: string }) {
+  const checking = await seedAccount('Chequing', 'checking');
+  const incomeId = await seedTxnReturningId(checking, dates.income, 10000, 'income');
+  const expenseId = await seedTxnReturningId(checking, dates.expense, -2000, 'purchase');
+  await seedTxn(checking, dates.pay, 5000, 'income');
+  await models.Transaction.update(
+    { finalBusiness: true },
+    { where: { id: [incomeId, expenseId] } },
+  );
+  await models.TransactionTaxMetadata.create({
+    transactionId: incomeId,
+    hstGstAmount: '1300',
+  } as never);
+}
+
+test('GET /tax: reserve target is the app reserve (net business income x pct + net HST); actual is null', async () => {
+  const year = new Date().getFullYear();
+  await seedBusinessFixture({
+    income: `${year}-01-10`,
+    expense: `${year}-01-12`,
+    pay: `${year}-01-15`,
+  });
+  const res = await request(app).get('/tax');
+  assert.equal(res.status, 200);
+  // max(0, 10000 - 2000) x 0.25 + max(0, 1300) = 3300.
+  assert.equal(res.body.taxReserveTarget, 3300);
+  assert.equal(res.body.estimatedTaxOwed, 3300);
+  // No reserve balance is tracked anywhere: null, never a fake 0 that makes
+  // reserveDelta always equal the target.
+  assert.equal(res.body.taxReserveActual, null);
+  assert.equal(res.body.reserveDelta, null);
+});
+
+test('GET /summary: taxReserveRequired is the app reserve over the 90d window; actual is null', async () => {
+  await seedBusinessFixture({
+    income: isoDaysAgo(20),
+    expense: isoDaysAgo(18),
+    pay: isoDaysAgo(15),
+  });
+  const res = await request(app).get('/summary');
+  assert.equal(res.status, 200);
+  // Old: monthlyIncome x 3 x pct = (10000 + 5000) x 0.25 = 3750.
+  assert.equal(res.body.taxReserveRequired, 3300);
+  assert.equal(res.body.taxReserveActual, null);
 });
 
 // ---- GET /summary ----------------------------------------------------------
@@ -252,6 +302,39 @@ test('GET /summary: netWorth uses holdings market value for investment accounts'
   // 3000 cash + 100000 portfolio — not 3000 + 2000 txn-stream residual.
   assert.equal(res.body.netWorth, 103000);
   assert.equal(res.body.liquidCash, 3000);
+});
+
+test('GET /summary: netWorth FX-unifies every currency like /net-worth', async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const checking = await seedAccount('Chequing', 'checking');
+  await seedTxn(checking, isoDaysAgo(10), 3000, 'income');
+  const usd = await models.Account.create({
+    householdId: household.id,
+    ownerUserId: null,
+    owner: 'me',
+    visibility: 'shared',
+    name: 'USD Savings',
+    accountType: 'savings',
+    defaultCurrency: 'USD',
+    shortCode: 'USD',
+  });
+  const usdTxnId = await seedTxnReturningId(usd.id, isoDaysAgo(10), 1000, 'income');
+  await models.Transaction.update({ currency: 'USD' }, { where: { id: usdTxnId } });
+  await models.FxRate.create({
+    fromCurrency: 'USD',
+    toCurrency: 'CAD',
+    ratedDate: today,
+    rate: '1.4',
+    source: 'test',
+    fetchedAt: new Date(),
+  } as never);
+
+  const res = await request(app).get('/summary');
+  assert.equal(res.status, 200);
+  // 3000 CAD + 1000 USD x 1.4 — the old single-currency sum said 3000.
+  assert.equal(res.body.netWorth, 4400);
+  const nw = await request(app).get(`/net-worth?start=${today}&end=${today}&interval=day`);
+  assert.equal(nw.body.points.at(-1).netWorth, res.body.netWorth);
 });
 
 test('GET /summary: holdings on a non-investment account do not double-count', async () => {

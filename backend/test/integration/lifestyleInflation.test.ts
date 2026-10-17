@@ -171,6 +171,8 @@ async function seedInflationSeries(opts: {
       category: null,
       merchant: 'Payroll',
       currency: opts.currency,
+      // Only income-classified rows count as income (dashboard parity).
+      txnType: 'income',
     });
   }
 }

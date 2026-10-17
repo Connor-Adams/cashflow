@@ -167,7 +167,7 @@ describe('NetWorthPage', () => {
       )
       expect(screen.getByText('No accounts yet')).toBeInTheDocument()
       const cta = screen.getByRole('link', { name: /add an account/i })
-      expect(cta).toHaveAttribute('href', '/settings/accounts')
+      expect(cta).toHaveAttribute('href', '/accounts')
     } finally {
       vi.mocked(useNetWorthCurrent).mockImplementation(() => loadedCurrent())
     }

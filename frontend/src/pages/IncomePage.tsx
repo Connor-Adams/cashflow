@@ -80,6 +80,63 @@ const SOURCE_VARIANT: Record<
 }
 
 const DEFAULT_CURRENCY = 'CAD'
+/** GET /api/income caps `limit` at 500 server-side. */
+const INCOME_PAGE_SIZE = 500
+
+/**
+ * Fetch every income entry, page by page. The summary cards total all
+ * entries, so loading only the first page would total a slice while the
+ * "Entries" card reports the full count. Stops when the server's `total` is
+ * reached or a page comes back empty.
+ */
+async function fetchAllIncome(): Promise<IncomeListResponse> {
+  const items: IncomeEntry[] = []
+  let total = 0
+  for (;;) {
+    const page = await getJson<IncomeListResponse>(
+      `/api/income?limit=${INCOME_PAGE_SIZE}&offset=${items.length}`,
+    )
+    total = page.total
+    items.push(...page.items)
+    if (page.items.length === 0 || items.length >= total) break
+  }
+  return { total, items }
+}
+
+type CurrencyTotal = { currency: string; grossCents: number; netCents: number }
+
+/** Gross / net per currency — amounts in different currencies never add up. */
+function incomeTotalsByCurrency(entries: IncomeEntry[]): CurrencyTotal[] {
+  const by = new Map<string, CurrencyTotal>()
+  for (const e of entries) {
+    const t = by.get(e.currency) ?? { currency: e.currency, grossCents: 0, netCents: 0 }
+    t.grossCents += e.grossAmountCents
+    t.netCents += e.netAmountCents
+    by.set(e.currency, t)
+  }
+  return Array.from(by.values()).sort((a, b) => a.currency.localeCompare(b.currency))
+}
+
+function CurrencyTotalsCard({
+  label,
+  totals,
+  pick,
+}: {
+  label: string
+  totals: CurrencyTotal[]
+  pick: (t: CurrencyTotal) => number
+}) {
+  return (
+    <Card className="p-4">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      {totals.map((t) => (
+        <p key={t.currency} className="mt-1 text-lg font-semibold">
+          {formatMoney(pick(t) / 100, t.currency)}
+        </p>
+      ))}
+    </Card>
+  )
+}
 
 interface FormState {
   occurredOn: string
@@ -337,7 +394,7 @@ export function IncomePage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await getJson<IncomeListResponse>('/api/income?limit=100')
+      const data = await fetchAllIncome()
       setEntries(data.items)
       setTotal(data.total)
     } catch {
@@ -388,9 +445,7 @@ export function IncomePage() {
     }
   }
 
-  const netTotal = entries.reduce((sum, e) => sum + e.netAmountCents, 0)
-  const grossTotal = entries.reduce((sum, e) => sum + e.grossAmountCents, 0)
-  const primaryCurrency = entries[0]?.currency ?? DEFAULT_CURRENCY
+  const totals = incomeTotalsByCurrency(entries)
 
   return (
     <div className="space-y-6">
@@ -407,18 +462,12 @@ export function IncomePage() {
 
       {!loading && entries.length > 0 && (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-          <Card className="p-4">
-            <p className="text-xs text-muted-foreground">Gross (shown)</p>
-            <p className="mt-1 text-lg font-semibold">
-              {formatMoney(grossTotal / 100, primaryCurrency)}
-            </p>
-          </Card>
-          <Card className="p-4">
-            <p className="text-xs text-muted-foreground">Net (after tax)</p>
-            <p className="mt-1 text-lg font-semibold">
-              {formatMoney(netTotal / 100, primaryCurrency)}
-            </p>
-          </Card>
+          <CurrencyTotalsCard label="Gross (before tax)" totals={totals} pick={(t) => t.grossCents} />
+          <CurrencyTotalsCard
+            label="Net (after tax)"
+            totals={totals}
+            pick={(t) => t.netCents}
+          />
           <Card className="p-4">
             <p className="text-xs text-muted-foreground">Entries</p>
             <p className="mt-1 text-lg font-semibold">{total}</p>

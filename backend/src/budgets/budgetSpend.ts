@@ -31,7 +31,7 @@
  * rewrites the accumulated carry.
  */
 import { Op, type WhereOptions } from 'sequelize';
-import { BudgetExclusion, Transaction } from '../models';
+import { Account, BudgetExclusion, Transaction } from '../models';
 import type {
   BudgetTargetPeriod,
   BudgetTargetScope,
@@ -170,7 +170,30 @@ const SPEND_ATTRIBUTES = [
   'finalSplitType',
   'amount',
   'businessAmount',
+  // txnType + accountId feed the headline's isNonSpend rule (see
+  // aggregateSpendByCategory); accountId resolves to an account type below.
+  'txnType',
+  'accountId',
 ] as const;
+
+/**
+ * Attach each row's account type so `aggregateSpendByCategory` can apply the
+ * dashboard's `isNonSpend` rule (an outflow on an investment account is never
+ * spend). One query over the distinct account ids in the window.
+ */
+async function withAccountTypes(
+  rows: Array<SpendRow & { accountId: number }>,
+): Promise<SpendRow[]> {
+  const accountIds = Array.from(new Set(rows.map((r) => r.accountId)));
+  if (accountIds.length === 0) return rows;
+  const accounts = (await Account.findAll({
+    where: { id: { [Op.in]: accountIds } },
+    attributes: ['id', 'accountType'],
+    raw: true,
+  })) as unknown as Array<{ id: number; accountType: string | null }>;
+  const typeById = new Map(accounts.map((a) => [a.id, a.accountType]));
+  return rows.map((r) => ({ ...r, accountType: typeById.get(r.accountId) ?? null }));
+}
 
 /**
  * Compute one budget's current-period spend, target and (when enabled) carry.
@@ -242,7 +265,7 @@ export async function loadBudgetSpend(args: {
       }));
   }
 
-  const rows = (await Transaction.findAll({
+  const rawRows = (await Transaction.findAll({
     where: {
       ...householdScope,
       currency: budget.currency,
@@ -252,7 +275,8 @@ export async function loadBudgetSpend(args: {
     } as WhereOptions,
     attributes: [...SPEND_ATTRIBUTES],
     raw: true,
-  })) as unknown as SpendRow[];
+  })) as unknown as Array<SpendRow & { accountId: number }>;
+  const rows = await withAccountTypes(rawRows);
 
   const categoryNames =
     budget.categoryId != null

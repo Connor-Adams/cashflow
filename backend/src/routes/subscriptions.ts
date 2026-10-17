@@ -4,21 +4,17 @@ import {
   SUBSCRIPTION_CADENCES,
   type SubscriptionCadence,
 } from '../models/PlannedEvent';
-import { PlannedEvent, HouseholdMember, Transaction, Insight } from '../models';
+import { PlannedEvent, HouseholdMember, Insight } from '../models';
 import {
   fromSubscriptionStatus,
   serializeSubscription,
   toSubscriptionStatus,
   type SubscriptionStatus,
 } from '../expectations/subscriptionMapper';
-import { num } from '../util/numbers';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 import { currentAuth } from '../auth/middleware';
-import { classifyPositiveFlow } from '../summary/classifyTransactionFlow';
-import {
-  detectRecurring,
-  type RecurringInputTxn,
-} from './recurring';
+import { detectRecurring } from './recurring';
+import { loadRecurringCandidates } from '../subscriptions/recurringCandidates';
 import {
   annualizeCost,
   mergeDetectionWithExisting,
@@ -188,56 +184,10 @@ export async function refreshDetectedSubscriptions(args: {
     .toISOString()
     .slice(0, 10);
 
-  const txnRows = await Transaction.findAll({
-    where: {
-      ...args.visibleWhere,
-      date: { [Op.gte]: since },
-    },
-    attributes: [
-      'date',
-      'currency',
-      'amount',
-      'merchantRaw',
-      'merchantClean',
-      'finalCategory',
-    ],
-    raw: true,
+  const candidates = await loadRecurringCandidates({
+    ...args.visibleWhere,
+    date: { [Op.gte]: since },
   });
-
-  type Row = {
-    date: string;
-    currency: string;
-    amount: unknown;
-    merchantRaw: string | null;
-    merchantClean: string | null;
-    finalCategory: string | null;
-  };
-
-  const candidates: RecurringInputTxn[] = [];
-  for (const row of txnRows as unknown as Row[]) {
-    const amount = num(row.amount);
-    if (amount == null) continue;
-    if (amount >= 0) continue;
-    if (
-      classifyPositiveFlow({
-        merchantRaw: row.merchantRaw,
-        merchantClean: row.merchantClean,
-        category: row.finalCategory,
-      }) === 'payment'
-    ) {
-      continue;
-    }
-    const merchant =
-      (row.merchantClean ?? '').trim() || (row.merchantRaw ?? '').trim();
-    if (!merchant) continue;
-    candidates.push({
-      merchant,
-      amount,
-      currency: row.currency,
-      date: row.date,
-      category: row.finalCategory,
-    });
-  }
 
   const detected = detectRecurring(candidates, { minOccurrences });
 

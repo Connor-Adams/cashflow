@@ -2,19 +2,18 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
 import {
-  Account, Category, Entity, FxRate, HouseholdMember, InvestmentActivity, Security, TaxSlip, Transaction,
-  Carryforward, Household, User,
+  Account, Category, Entity, FxRate, Household, InvestmentActivity, Security, Transaction,
 } from '../../models';
 import { D } from '../util/decimal';
 import { buildPersonalFacts } from './buildPersonalFacts';
 
 beforeEach(async () => {
-  // Re-sync per test — multiple tax test files race on shared SQLite when run in parallel;
-  // beforeEach guarantees this file owns the schema during each test body.
+  // Fresh schema per test so seeded rows never leak between tests. (Each test
+  // process already gets its own temp DB — test/setup.ts, keyed by PID.)
   await sequelize.sync({ force: true });
 });
 
-test.skip('builds facts from seeded data', async () => {
+test('builds facts from seeded data', async () => {
   const household = await Household.create({ name: 'Test' });
   const entity = await Entity.create({
     householdId: household.id, kind: 'personal', legalName: 'Personal', jurisdiction: 'CA-ON', fiscalYearEnd: null,
@@ -38,9 +37,73 @@ test.skip('builds facts from seeded data', async () => {
   assert.equal(facts.employmentIncome[0].cadAmount.toFixed(2), '5000.00');
 });
 
-test.skip('USD interest converted to CAD via FxRate', async () => {
-  // Engineer: seed Security + InvestmentActivity in USD + FxRate USD->CAD = 1.35
-  // then assert interestIncome[0].cadAmount = amount * 1.35
+test('USD interest converted to CAD via FxRate', async () => {
+  // Investment income is converted at the trade-date rate: `amount` keeps the
+  // original USD figure, `cadAmount` is what the T1 engine sums. A currency with
+  // no rate at all degrades to the unconverted amount plus a fact warning
+  // (createCadConverter) instead of throwing and 500-ing the whole return.
+  const household = await Household.create({ name: 'USD Interest' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'USD Interest', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const account = await Account.create({
+    name: 'Invest', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'USD',
+  } as never);
+  const sec = await Security.create({
+    symbol: 'TBILL', name: 'US T-Bill', currency: 'USD', householdId: household.id,
+  } as never);
+  await FxRate.create({
+    fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: '2024-05-15',
+    rate: '1.35', source: 'manual_seed', fetchedAt: new Date(),
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'interest',
+    tradeDate: '2024-05-15', quantity: null, amount: '100.0000', currency: 'USD', fees: null,
+    description: 'USD interest', sourceRowFingerprint: 'fp-int-usd-001', importBatch: 'seed-int',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'interest',
+    tradeDate: '2024-06-15', quantity: null, amount: '40.0000', currency: 'CAD', fees: null,
+    description: 'CAD interest', sourceRowFingerprint: 'fp-int-cad-001', importBatch: 'seed-int',
+  } as never);
+  // No EUR→CAD rate exists anywhere.
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'interest',
+    tradeDate: '2024-07-15', quantity: null, amount: '10.0000', currency: 'EUR', fees: null,
+    description: 'EUR interest', sourceRowFingerprint: 'fp-int-eur-001', importBatch: 'seed-int',
+  } as never);
+
+  // Stub fetch so a cache miss can never reach the Bank of Canada API.
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('network disabled in buildPersonalFacts.test.ts');
+  }) as unknown as typeof fetch;
+  try {
+    const facts = await buildPersonalFacts(entity.id, 2024);
+    const byDate = new Map(facts.interestIncome.map((i) => [i.source.split(' ').pop(), i]));
+    assert.equal(facts.interestIncome.length, 3);
+
+    const usd = byDate.get('2024-05-15');
+    assert.ok(usd, 'USD interest row present');
+    assert.equal(usd.amount.toFixed(2), '100.00', 'amount keeps the original USD figure');
+    assert.equal(usd.cadAmount.toFixed(2), '135.00', 'US$100 × 1.35 trade-date rate');
+
+    const cad = byDate.get('2024-06-15');
+    assert.ok(cad, 'CAD interest row present');
+    assert.equal(cad.cadAmount.toFixed(2), '40.00', 'CAD passes through unconverted');
+
+    const eur = byDate.get('2024-07-15');
+    assert.ok(eur, 'EUR interest row present');
+    assert.equal(eur.cadAmount.toFixed(2), '10.00', 'no rate → unconverted amount, not a crash');
+    assert.ok(
+      (facts.factWarnings ?? []).some((w) => w.includes('EUR→CAD') && w.includes('2024-07-15')),
+      'a missing rate is surfaced as a fact warning',
+    );
+    assert.ok(!(facts.factWarnings ?? []).some((w) => w.includes('USD→CAD')), 'USD had a rate — no warning');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('donations, rrspContribs, fhsaContribs sourced from transactions by category', async () => {
@@ -96,7 +159,7 @@ test('donations, rrspContribs, fhsaContribs sourced from transactions by categor
   assert.equal(facts.fhsaContribs[0].amount.toFixed(2), '8000.00');
 });
 
-test.skip('per-security dividend eligibility routes to eligible or nonEligible', async () => {
+test('per-security dividend eligibility routes to eligible or nonEligible', async () => {
   const household = await Household.create({ name: 'Dividend Routing Test' });
   const entity = await Entity.create({
     householdId: household.id, kind: 'personal', legalName: 'Div Routing', jurisdiction: 'CA-ON', fiscalYearEnd: null,
@@ -1100,3 +1163,36 @@ test('a transaction both typed interest and classified as a dividend is counted 
   );
 });
 
+
+// toCad substitutes a rate when none is on file for the date (nearest earlier,
+// no staleness cap; else newest, even if later). The T1 must say so.
+test('income converted at a fallback FX rate is warned about with both dates', async () => {
+  const { household, entity, account } = await seedPersonalInvestmentAccount('FX fallback');
+  const sec = await Security.create({
+    symbol: 'AAPL', name: 'Apple', currency: 'USD', householdId: household.id,
+  } as never);
+  await FxRate.create({
+    fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: '2024-12-31',
+    rate: '1.44', source: 'manual_seed', fetchedAt: new Date(),
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'interest',
+    tradeDate: '2025-05-15', quantity: null, amount: '100.0000', currency: 'USD', fees: null,
+    description: 'interest', sourceRowFingerprint: 'fp-fx-fallback-1', importBatch: 'seed',
+  } as never);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('network disabled in buildPersonalFacts.test.ts');
+  }) as unknown as typeof fetch;
+  try {
+    const facts = await buildPersonalFacts(entity.id, 2025);
+    assert.equal(sumCad(facts.interestIncome).toFixed(2), '144.00', 'chosen rate unchanged');
+    const fx = (facts.factWarnings ?? []).filter((w) => w.includes('USD→CAD'));
+    assert.equal(fx.length, 1, JSON.stringify(facts.factWarnings));
+    assert.match(fx[0], /2025-05-15/);
+    assert.match(fx[0], /2024-12-31/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

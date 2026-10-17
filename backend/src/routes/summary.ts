@@ -37,27 +37,8 @@ import {
 import { householdWhere, visibleAccountWhere, visibleTransactionWhere } from '../auth/scope';
 import { currentAuth } from '../auth/middleware';
 import { loadCategoryTree, buildRollupRowsByCurrency } from '../categories/rollup';
+import { netSpendByCurrencyCategory } from '../summary/categorySpend';
 import type { PeriodInsightResp, PeriodInsightCurrency } from '@cashflow/shared';
-
-/**
- * Build a per-currency raw spend map from points that each carry a `currency`,
- * `categoryId`, and `sumAmount`. Skips null categoryIds. Uses Math.abs so that
- * credit rows don't cancel out spend. The result is:
- *   Map<currency, Map<categoryId, absSpend>>
- * suitable for passing to `buildRollupRowsByCurrency`.
- */
-function rawSpendByCurrencyCat(
-  points: Array<{ currency: string; categoryId: number | null; sumAmount: number }>,
-): Map<string, Map<number, number>> {
-  const outer = new Map<string, Map<number, number>>();
-  for (const p of points) {
-    if (p.categoryId == null) continue;
-    let inner = outer.get(p.currency);
-    if (!inner) { inner = new Map(); outer.set(p.currency, inner); }
-    inner.set(p.categoryId, (inner.get(p.categoryId) ?? 0) + Math.abs(p.sumAmount));
-  }
-  return outer;
-}
 
 /** One window's inclusive ISO date range. */
 type DateRange = { from: string; to: string };
@@ -146,7 +127,7 @@ router.get('/dashboard', async (req, res, next) => {
     // byCategory fans one category across multiple buckets (currency\0category\0business\0split);
     // re-sum per (currency, categoryId) before rolling up so totals stay currency-scoped.
     const categoryTree = buildRollupRowsByCurrency(
-      rawSpendByCurrencyCat(Array.from(aggregates.byCategory.values())),
+      netSpendByCurrencyCategory(Array.from(aggregates.byCategory.values())),
       await loadCategoryTree(householdId),
     );
 
@@ -558,7 +539,7 @@ router.get('/monthly', async (req, res, next) => {
 
     const householdId = currentAuth(req).household.id;
     const categoryTree = buildRollupRowsByCurrency(
-      rawSpendByCurrencyCat(categoryPoints),
+      netSpendByCurrencyCategory(categoryPoints),
       await loadCategoryTree(householdId),
     );
 

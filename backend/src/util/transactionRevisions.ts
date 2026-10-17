@@ -21,6 +21,7 @@ import {
   type TransactionRevisionSource,
 } from '../models/TransactionRevision';
 import { logger } from '../observability/logger';
+import { inSavepoint } from './inSavepoint';
 
 /**
  * Fields whose pre/post values are persisted to {@link TransactionRevision}.
@@ -140,20 +141,28 @@ export async function recordTransactionRevision(
   const aiSuggestionId =
     ctx?.aiSuggestionId ?? options.fallback?.aiSuggestionId ?? null;
   try {
-    return await TransactionRevision.create(
-      {
-        transactionId: txn.id,
-        householdId: txn.householdId,
-        changedByUserId,
-        source,
-        aiSuggestionId,
-        changes: JSON.stringify(diff),
-      },
-      { transaction: options.transaction ?? undefined },
+    // Own SAVEPOINT inside the caller's transaction: on Postgres a failed
+    // INSERT aborts the whole transaction, so catching it here without the
+    // savepoint would turn the caller's COMMIT into a ROLLBACK and lose the
+    // very update this audit row describes. See util/inSavepoint.ts.
+    return await inSavepoint(options.transaction, (transaction) =>
+      TransactionRevision.create(
+        {
+          transactionId: txn.id,
+          householdId: txn.householdId,
+          changedByUserId,
+          source,
+          aiSuggestionId,
+          changes: JSON.stringify(diff),
+        },
+        { transaction },
+      ),
     );
   } catch (err) {
-    // Never let a revision-write failure break the underlying save. Log and
-    // continue — the original change still lands; we just lose the audit row.
+    // Never let a revision-write failure break the underlying save. The failed
+    // insert was rolled back to its savepoint (or ran in autocommit with no
+    // caller transaction), so the caller's transaction is still usable and the
+    // original change still lands; we just lose the audit row.
     logger.warn(
       {
         err,

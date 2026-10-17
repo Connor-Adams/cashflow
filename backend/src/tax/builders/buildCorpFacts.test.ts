@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
 import {
   Account,
-  Carryforward,
   Entity,
   FxRate,
   Household,
@@ -16,16 +15,17 @@ import { D } from '../util/decimal';
 import { buildCorpFacts } from './buildCorpFacts';
 
 beforeEach(async () => {
-  // Re-sync per test — multiple tax test files race on shared SQLite when run in parallel;
-  // beforeEach guarantees this file owns the schema during each test body.
+  // Fresh schema per test so seeded rows never leak between tests. (Each test
+  // process already gets its own temp DB — test/setup.ts, keyed by PID.)
   await sequelize.sync({ force: true });
 });
 
-// NOTE: this test was already skipped, and its premise is now obsolete —
-// `finalBusiness` no longer decides what counts as active business income. See
-// corpPerimeter.ts and the perimeter tests at the bottom of this file for the
-// current rule. Do not un-skip without rewriting the assertions.
-test.skip('builds corp facts from seeded business transaction', async () => {
+// Rewritten from the original "builds corp facts from seeded business
+// transaction" test, whose premise (sum of `finalBusiness = true` rows) was
+// retired by the perimeter rule in corpPerimeter.ts. `finalBusiness` is a spend
+// flag, not a revenue marker: what counts is whether the money crossed the
+// corporate perimeter and is not a non-operating treatment.
+test('builds corp facts: active business income follows the perimeter, not finalBusiness', async () => {
   const household = await Household.create({ name: 'Corp Test HH' });
   const entity = await Entity.create({
     householdId: household.id,
@@ -42,40 +42,37 @@ test.skip('builds corp facts from seeded business transaction', async () => {
     taxStatus: 'non_registered',
     defaultCurrency: 'CAD',
   } as never);
-
-  // Business transaction — should appear in activeBusinessIncome
-  await Transaction.create({
+  const seed = (fp: string, over: Record<string, unknown>) => Transaction.create({
     accountId: account.id,
     householdId: household.id,
     entityId: entity.id,
-    date: '2025-06-15',
-    amount: '120000.0000',
     currency: 'CAD',
-    finalCategory: 'business_income',
-    finalBusiness: true,
-    merchantRaw: 'CLIENT ABC',
-    merchantClean: 'CLIENT ABC',
     importBatch: 'test-corp-seed',
-    sourceRowFingerprint: 'fp-corp-001',
-    sourceIdentityFingerprint: 'sif-corp-001',
+    sourceRowFingerprint: `fp-corp-${fp}`,
+    sourceIdentityFingerprint: `sif-corp-${fp}`,
+    ...over,
   } as never);
 
-  // Non-business transaction — should NOT appear in activeBusinessIncome
-  await Transaction.create({
-    accountId: account.id,
-    householdId: household.id,
-    entityId: entity.id,
-    date: '2025-07-01',
-    amount: '500.0000',
-    currency: 'CAD',
-    finalCategory: 'other',
-    finalBusiness: false,
-    merchantRaw: 'OFFICE SUPPLIES',
-    merchantClean: 'OFFICE SUPPLIES',
-    importBatch: 'test-corp-seed',
-    sourceRowFingerprint: 'fp-corp-002',
-    sourceIdentityFingerprint: 'sif-corp-002',
-  } as never);
+  // External customer receipt NOT flagged business — still revenue.
+  await seed('001', {
+    date: '2025-06-15', amount: '120000.0000', txnType: 'income', finalBusiness: false,
+    finalCategory: 'business_income', merchantRaw: 'CLIENT ABC', merchantClean: 'CLIENT ABC',
+  });
+  // External operating cost NOT flagged business — still deducted.
+  await seed('002', {
+    date: '2025-07-01', amount: '-500.0000', txnType: 'unknown', finalBusiness: false,
+    finalCategory: 'other', merchantRaw: 'OFFICE SUPPLIES', merchantClean: 'OFFICE SUPPLIES',
+  });
+  // Flagged business, but a shareholder-loan advance is not income.
+  await seed('003', {
+    date: '2025-08-01', amount: '20000.0000', txnType: 'income', finalBusiness: true,
+    taxTreatmentOverride: 'loan_advance', merchantRaw: 'SHAREHOLDER LOAN', merchantClean: 'SHAREHOLDER LOAN',
+  });
+  // Flagged business, but outside the fiscal year.
+  await seed('004', {
+    date: '2024-12-31', amount: '9999.0000', txnType: 'income', finalBusiness: true,
+    merchantRaw: 'CLIENT XYZ', merchantClean: 'CLIENT XYZ',
+  });
 
   const fiscalYear = { startDate: '2025-01-01', endDate: '2025-12-31' };
   const facts = await buildCorpFacts(entity.id, fiscalYear);
@@ -83,14 +80,17 @@ test.skip('builds corp facts from seeded business transaction', async () => {
   assert.equal(facts.fiscalYear.startDate, '2025-01-01');
   assert.equal(facts.fiscalYear.endDate, '2025-12-31');
   assert.equal(facts.jurisdiction, 'CA-ON');
-  assert.equal(facts.activeBusinessIncome.length, 1, 'only business txn included');
-  assert.equal(facts.activeBusinessIncome[0].cadAmount.toFixed(2), '120000.00');
-  assert.ok(Array.isArray(facts.investmentIncome.interest));
-  assert.ok(Array.isArray(facts.investmentIncome.eligibleDividends));
-  assert.ok(Array.isArray(facts.investmentIncome.nonEligibleDividends));
-  assert.ok(Array.isArray(facts.capitalGainEvents));
-  assert.ok(Array.isArray(facts.dividendsPaid));
+  const abi = facts.activeBusinessIncome.map((i) => i.cadAmount.toFixed(2)).sort();
+  assert.deepEqual(abi, ['-500.00', '120000.00'], 'the receipt and the cost, whatever their finalBusiness flag');
+  const net = facts.activeBusinessIncome.reduce((s, i) => s.plus(i.cadAmount), D(0));
+  assert.equal(net.toFixed(2), '119500.00', 'expenses keep their sign and net off revenue');
+  assert.equal(facts.investmentIncome.interest.length, 0);
+  assert.equal(facts.investmentIncome.eligibleDividends.length, 0);
+  assert.equal(facts.investmentIncome.nonEligibleDividends.length, 0);
+  assert.equal(facts.capitalGainEvents.length, 0);
+  assert.equal(facts.dividendsPaid.length, 0);
   assert.ok(facts.salaryPaid.equals(D(0)));
+  assert.deepEqual(facts.factWarnings ?? [], [], 'named external counterparties need no warning');
 });
 
 test('tolerates an investment activity with a null amount (e.g. activityType "other")', async () => {
@@ -292,7 +292,7 @@ test('corp prior-fiscal-year dispositions advance ACB state but emit no event fo
   assert.equal(facts.investmentIncome.eligibleDividends.length, 0, 'prior-FY dividend stays out of FY2025 income');
 });
 
-test.skip('rejects non-corp entity', async () => {
+test('rejects non-corp entity', async () => {
   const household = await Household.create({ name: 'Personal HH' });
   const entity = await Entity.create({
     householdId: household.id,
@@ -308,7 +308,7 @@ test.skip('rejects non-corp entity', async () => {
   );
 });
 
-test.skip('populates dividendsPaid and salaryPaid from ShareholderLoan rows', async () => {
+test('populates dividendsPaid and salaryPaid from ShareholderLoan rows', async () => {
   const household = await Household.create({ name: 'Corp SL HH' });
   const entity = await Entity.create({
     householdId: household.id,
@@ -362,7 +362,7 @@ test.skip('populates dividendsPaid and salaryPaid from ShareholderLoan rows', as
   assert.equal(facts.salaryPaid.toFixed(2), '16000.00', 'two salary credits summed');
 });
 
-test.skip('zero carryforwards when none seeded', async () => {
+test('zero carryforwards when none seeded', async () => {
   const household = await Household.create({ name: 'Corp Zero CF HH' });
   const entity = await Entity.create({
     householdId: household.id,
@@ -383,7 +383,7 @@ test.skip('zero carryforwards when none seeded', async () => {
   assert.ok(facts.carryforwards.netCapitalLoss.equals(D(0)));
 });
 
-test.skip('dividend investment income routes to eligible vs non_eligible by security', async () => {
+test('dividend investment income routes to eligible vs non_eligible by security', async () => {
   const household = await Household.create({ name: 'Corp Div HH' });
   const entity = await Entity.create({
     householdId: household.id,
@@ -841,4 +841,69 @@ test('a cash mirror on a corp brokerage account is not counted as revenue', asyn
       facts.activeBusinessIncome.map((i) => i.cadAmount.toString()),
     )}`,
   );
+});
+
+// --- FX fallback visibility ---
+//
+// toCad substitutes a rate when none is on file for the transaction date: the
+// nearest earlier row with no staleness cap, or failing that the newest row
+// even if it post-dates the transaction. Which rate it picks is a product call;
+// a T2 built on a substituted rate must at least say so.
+
+async function withNetworkDisabled<T>(fn: () => Promise<T>): Promise<T> {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('network disabled in buildCorpFacts.test.ts');
+  }) as unknown as typeof fetch;
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+test('revenue converted at a stale fallback rate is warned about with both dates', async () => {
+  const ctx = await seedPerimeterCorp();
+  await FxRate.create({
+    fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: '2024-12-31',
+    rate: '1.44', source: 'manual_seed', fetchedAt: new Date(),
+  } as never);
+  await seedTxn(ctx, ctx.wiseUsd, {
+    date: '2025-03-13', amount: '5000.0000', currency: 'USD', txnType: 'transfer',
+    merchantRaw: 'Received money from WANDERCOM', finalBusiness: false,
+  });
+
+  const facts = await withNetworkDisabled(() =>
+    buildCorpFacts(ctx.entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' }),
+  );
+
+  // The chosen rate is unchanged: 5000 x 1.44.
+  assert.equal(facts.activeBusinessIncome[0].cadAmount.toFixed(2), '7200.00');
+  const fx = (facts.factWarnings ?? []).filter((w) => w.includes('USD→CAD'));
+  assert.equal(fx.length, 1, JSON.stringify(facts.factWarnings));
+  assert.match(fx[0], /2025-03-13/);
+  assert.match(fx[0], /2024-12-31/);
+});
+
+test('a dividend converted at a rate dated after the transaction is warned about', async () => {
+  const ctx = await seedPerimeterCorp();
+  await FxRate.create({
+    fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: '2026-01-02',
+    rate: '1.38', source: 'manual_seed', fetchedAt: new Date(),
+  } as never);
+  await seedTxn(ctx, ctx.wiseUsd, {
+    date: '2025-06-30', amount: '-1000.0000', currency: 'USD', txnType: 'transfer',
+    merchantRaw: 'Dividend to owner', taxTreatmentOverride: 'eligible_dividend',
+  });
+
+  const facts = await withNetworkDisabled(() =>
+    buildCorpFacts(ctx.entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' }),
+  );
+
+  assert.equal(facts.dividendsPaid[0].amount.toFixed(2), '1380.00');
+  const fx = (facts.factWarnings ?? []).filter((w) => w.includes('USD→CAD'));
+  assert.equal(fx.length, 1, JSON.stringify(facts.factWarnings));
+  assert.match(fx[0], /2025-06-30/);
+  assert.match(fx[0], /2026-01-02/);
+  assert.match(fx[0], /AFTER/);
 });

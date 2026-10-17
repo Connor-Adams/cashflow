@@ -14,6 +14,7 @@ import {
   resolveAccountId,
   startDateEpoch,
   syncRunFailureMessage,
+  unresolvedLinks,
 } from './sync';
 
 // Regression cover for a sync that ran daily for three months and imported
@@ -44,8 +45,8 @@ test('full resolution is not a failure', () => {
 });
 
 test('partial resolution is not treated as total failure', () => {
-  // One stale link among many is a per-account warning, not a reason to fail the
-  // run and hold back the sync window for the accounts that did resolve.
+  // One stale link among many does not throw: the accounts that did resolve are
+  // still committed. It still holds lastSyncedAt via unresolvedLinks below.
   assert.equal(resolutionFailureReason(29, 28), null);
   assert.equal(resolutionFailureReason(29, 1), null);
 });
@@ -225,4 +226,20 @@ test('#813: resolveAccountId returns null for an unlinked simplefin id (no name 
   const links = new Map<string, number>([['ACT-1', 10]]);
   assert.equal(resolveAccountId({ id: 'ACT-UNLINKED' }, links), null);
   assert.equal(resolveAccountId({ id: 'ACT-1' }, new Map()), null);
+});
+
+test('unresolvedLinks returns the links that did not resolve on this fetch', () => {
+  const links = [
+    { simplefinAccountId: 'ACT-1', accountId: 1 },
+    { simplefinAccountId: 'ACT-2', accountId: 2 },
+  ];
+  assert.deepEqual(unresolvedLinks(links, new Set(['ACT-1'])), [links[1]]);
+  assert.deepEqual(unresolvedLinks(links, new Set(['ACT-1', 'ACT-2'])), []);
+});
+
+test('institutionAttentionReason names linked accounts missing from the feed', () => {
+  const reason = institutionAttentionReason([], [], ['CIBC Visa']);
+  assert.ok(reason);
+  assert.match(reason, /^institution_attention: /);
+  assert.match(reason, /linked accounts missing from the SimpleFIN feed: CIBC Visa/);
 });

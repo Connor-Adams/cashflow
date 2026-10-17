@@ -9,7 +9,8 @@ import {
 } from '../../models';
 import { D } from '../util/decimal';
 import { computeAcb } from '../../portfolio/acb';
-import { toCad } from '../../fx/toCad';
+import { toCad as convertToCad } from '../../fx/toCad';
+import { createFxFallbackCollector } from '../../fx/fxFallbackWarnings';
 import { partitionCorpPerimeter } from './corpPerimeter';
 import { loadCorpPerimeterInputs } from './loadCorpPerimeterInputs';
 import { isOwnerPaidCorpExpense } from './ownerPaidCorpExpense';
@@ -35,6 +36,16 @@ export async function buildCorpFacts(
     await loadCorpPerimeterInputs(entityId, fiscalYear);
 
   const perimeter = partitionCorpPerimeter(perimeterInput, perimeterOptions);
+
+  // Every conversion below goes through this, so one made on a substituted rate
+  // (stale or post-dated; see fx/fxFallbackWarnings.ts) reaches factWarnings
+  // instead of being discarded with the rest of the toCad result.
+  const fxFallbacks = createFxFallbackCollector();
+  const toCad: typeof convertToCad = async (amount, currency, date) => {
+    const result = await convertToCad(amount, currency, date);
+    fxFallbacks.record(currency, date, result);
+    return result;
+  };
 
   // Revenue and expenses both land in activeBusinessIncome; expenses keep their
   // negative sign so the engine's signed sum nets them off.
@@ -329,6 +340,11 @@ export async function buildCorpFacts(
     dividendsPaid,
     salaryPaid,
     carryforwards,
-    factWarnings: [...perimeter.warnings, ...ownerPaidWarnings, ...mirrorWarnings],
+    factWarnings: [
+      ...perimeter.warnings,
+      ...ownerPaidWarnings,
+      ...mirrorWarnings,
+      ...fxFallbacks.warnings(),
+    ],
   };
 }

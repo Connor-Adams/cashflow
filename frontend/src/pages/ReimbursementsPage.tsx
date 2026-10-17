@@ -21,7 +21,7 @@ import { SkeletonRow } from '@/lib/ds-extras'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@connor-adams/designsystem'
 import { Tabs } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
-import { getJson, postJson, patchJson } from '../lib/api'
+import { getJson, postJson, putJson } from '../lib/api'
 import { todayDateInputValue } from '../lib/dateInput'
 import { formatMoneyOr } from '../lib/formatMoney'
 import type { Contact } from '@cashflow/shared'
@@ -127,7 +127,7 @@ export function ReimbursementsPage() {
   const setStatus = useCallback(
     async (row: ReimbursementView, status: ReimbursementStatus) => {
       try {
-        await patchJson<ReimbursementItemResponse>(
+        await putJson<ReimbursementItemResponse>(
           `/api/reimbursements/${row.id}`,
           { status },
         )

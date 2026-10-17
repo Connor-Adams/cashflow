@@ -13,12 +13,14 @@
  * - DELETE /api/tax/reserve/settings/:currency — delete one currency's row.
  * - GET    /api/tax/reserve/summary?scope&from&to&periodicity — per-period rollup.
  *
- * The pure helpers (`parsePeriodicity`, `periodKey`, `aggregateReserveRollups`,
- * `validateReservePatch`) are exported for unit tests in taxReserve.test.ts.
+ * The pure helpers (`composeTaxReserve`, `parsePeriodicity`, `periodKey`,
+ * `aggregateReserveRollups`, `validateReservePatch`) are exported; reporting.ts
+ * reuses `composeTaxReserve` and `loadReserveRollups`.
  */
 import { Router } from 'express';
 import { type WhereOptions } from 'sequelize';
 import {
+  Account,
   Transaction,
   TransactionTaxMetadata,
   TaxReserveSetting,
@@ -29,6 +31,10 @@ import { visibleTransactionWhere } from '../auth/scope';
 import { num } from '../util/numbers';
 import { resolveDeductiblePercent } from '../tax/util/deductiblePercent';
 import { parseTaxScope, scopeWhere, dateRangeWhere } from './businessTax';
+import {
+  classifyPositiveAmount,
+  isNonSpend,
+} from '../summary/classifyTransactionFlow';
 
 const router = Router();
 
@@ -81,16 +87,30 @@ export interface ReserveInputRow {
   deductiblePercent: string | null;
   /** From TransactionTaxMetadata.hstGstAmount. Null when not classified. */
   hstGstAmount: string | null;
+  /**
+   * Transaction.txnType, the owning account's type, and the merchant/category
+   * text. These feed the dashboard headline's classifier
+   * (summary/classifyTransactionFlow.ts) so only `txnType='income'` rows count
+   * as business income. Absent → treated as unsignaled.
+   */
+  txnType?: string | null;
+  accountType?: string | null;
+  merchantRaw?: string | null;
+  merchantClean?: string | null;
+  finalCategory?: string | null;
 }
 
 export interface ReserveComponents {
-  /** Sum of business income for the period+currency (positive amounts). */
+  /** Sum of business income for the period+currency (positive `txnType='income'` rows). */
   businessIncome: number;
-  /** Sum of |amount| * deductiblePercent for business expenses (negative amounts). */
+  /**
+   * Sum of |amount| * deductiblePercent for business expenses (negative spend
+   * rows), less the same for business refunds/credits, which net against it.
+   */
   deductibleExpenses: number;
   /** Sum of hstGstAmount on income rows (positive amounts where HST/GST collected). */
   hstGstCollected: number;
-  /** Sum of hstGstAmount on expense rows (input tax credits / ITC). */
+  /** Sum of hstGstAmount on expense rows (input tax credits / ITC), less refunded HST/GST. */
   hstGstPaid: number;
 }
 
@@ -113,6 +133,40 @@ export interface ReserveRollup {
    * negative reserve, but HST/GST is always remitted gross of income.
    */
   reserveTarget: number;
+}
+
+/**
+ * Route one business row into the reserve, using the same classification as
+ * the dashboard headline (summary/classifyTransactionFlow.ts):
+ *
+ *   - negative + `isNonSpend` (payment/transfer legs, brokerage flows, any row
+ *     on an investment account, …) → 'skip'; otherwise → 'expense'.
+ *   - positive → `classifyPositiveAmount`: a 'credit' with `txnType='income'`
+ *     is 'income'; any other 'credit' (refund, reward, refund-text fallback)
+ *     is a 'refund' that nets against expenses; 'payment' and 'skip'
+ *     (untyped deposits, transfers) contribute nothing.
+ *
+ * businessTax.ts documents that positive business rows are mostly refunds,
+ * transfers and payments — treating every one as revenue overstated the
+ * reserve.
+ */
+function classifyReserveFlow(
+  row: ReserveInputRow,
+  amount: number,
+): 'income' | 'expense' | 'refund' | 'skip' {
+  if (amount < 0) {
+    return isNonSpend(row.txnType, row.accountType) ? 'skip' : 'expense';
+  }
+  if (amount === 0) return 'skip';
+  const bucket = classifyPositiveAmount({
+    txnType: row.txnType,
+    accountType: row.accountType,
+    merchantRaw: row.merchantRaw,
+    merchantClean: row.merchantClean,
+    category: row.finalCategory,
+  });
+  if (bucket !== 'credit') return 'skip';
+  return row.txnType === 'income' ? 'income' : 'refund';
 }
 
 /**
@@ -148,13 +202,16 @@ export function aggregateReserveRollups(
     const amount = num(row.amount) ?? 0;
     const hstGst = num(row.hstGstAmount) ?? 0;
     if (row.finalBusiness) {
-      if (amount > 0) {
+      const flow = classifyReserveFlow(row, amount);
+      if (flow === 'income') {
         bucket.components.businessIncome += amount;
         bucket.components.hstGstCollected += hstGst;
-      } else if (amount < 0) {
+      } else if (flow === 'expense' || flow === 'refund') {
+        // A refund is a negative expense: it nets the deductible amount and
+        // the input tax credit back down rather than counting as revenue.
         const deductiblePct = resolveDeductiblePercent(row.deductiblePercent, true);
         bucket.components.deductibleExpenses += -amount * deductiblePct;
-        bucket.components.hstGstPaid += hstGst;
+        bucket.components.hstGstPaid += flow === 'refund' ? -hstGst : hstGst;
       }
     }
     buckets.set(key, bucket);
@@ -196,6 +253,35 @@ export function aggregateReserveRollups(
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/**
+ * Pure single-period reserve calc over pre-aggregated totals. Used by the
+ * /api/v1 reporting routes (reporting.ts) so they report the same reserve
+ * as this tab. Mirrors the formula in aggregateReserveRollups.
+ */
+export function composeTaxReserve(input: {
+  businessIncome: number;
+  deductibleExpenses: number;
+  hstGstCollected: number;
+  hstGstPaid: number;
+  reservePercent: number;
+}): {
+  netBusinessIncome: number;
+  netHstGst: number;
+  reserveTarget: number;
+} {
+  const netBusinessIncome = input.businessIncome - input.deductibleExpenses;
+  const netHstGst = input.hstGstCollected - input.hstGstPaid;
+  const reserveTarget = round2(
+    Math.max(0, netBusinessIncome) * input.reservePercent +
+      Math.max(0, netHstGst),
+  );
+  return {
+    netBusinessIncome: round2(netBusinessIncome),
+    netHstGst: round2(netHstGst),
+    reserveTarget,
+  };
 }
 
 // ---------- Settings serializer + validator ------------------------------
@@ -367,6 +453,84 @@ router.delete('/settings/:currency', async (req, res, next) => {
 });
 
 /**
+ * Load business transactions matching `where` (+ their tax metadata) and the
+ * household's per-currency reserve settings, and roll them up. The single
+ * source of the reserve number: GET /summary below and the /api/v1 reporting
+ * routes both call this, so they can never drift apart.
+ */
+export async function loadReserveRollups(
+  householdId: number,
+  where: WhereOptions,
+  periodicity: Periodicity,
+): Promise<ReserveRollup[]> {
+  const rows = await Transaction.findAll({
+    where,
+    attributes: [
+      'id',
+      'date',
+      'amount',
+      'currency',
+      'finalBusiness',
+      'txnType',
+      'merchantRaw',
+      'merchantClean',
+      'finalCategory',
+    ],
+    include: [
+      {
+        model: TransactionTaxMetadata,
+        as: 'taxMetadata',
+        attributes: ['deductiblePercent', 'hstGstAmount'],
+        required: false,
+      },
+      {
+        model: Account,
+        as: 'account',
+        attributes: ['accountType'],
+        required: false,
+      },
+    ],
+  });
+  const inputRows: ReserveInputRow[] = rows.map((r) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const meta = (r as any).taxMetadata as TransactionTaxMetadata | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const account = (r as any).account as { accountType: string | null } | undefined;
+    return {
+      date: String(r.date),
+      amount: String(r.amount),
+      currency: String(r.currency),
+      finalBusiness: Boolean(r.finalBusiness),
+      deductiblePercent:
+        meta?.deductiblePercent == null ? null : String(meta.deductiblePercent),
+      hstGstAmount:
+        meta?.hstGstAmount == null ? null : String(meta.hstGstAmount),
+      txnType: r.txnType ?? null,
+      accountType: account?.accountType ?? null,
+      merchantRaw: r.merchantRaw ?? null,
+      merchantClean: r.merchantClean ?? null,
+      finalCategory: r.finalCategory ?? null,
+    };
+  });
+  // Build per-currency percent lookup from settings.
+  const settings = await TaxReserveSetting.findAll({
+    where: { householdId },
+  });
+  const reservePercents = new Map<string, number>();
+  for (const s of settings) {
+    const v = Number(s.reservePercent);
+    if (Number.isFinite(v)) reservePercents.set(s.currency, v);
+  }
+  const defaultPercent = Number(DEFAULT_TAX_RESERVE_PERCENT);
+  return aggregateReserveRollups(
+    inputRows,
+    periodicity,
+    reservePercents,
+    defaultPercent,
+  );
+}
+
+/**
  * GET /api/tax/reserve/summary
  *
  * Period rollup of business income, deductible expenses, HST/GST collected
@@ -393,48 +557,7 @@ router.get('/summary', async (req, res, next) => {
       ...scopeWhere(scope),
       ...dateRangeWhere(from, to),
     };
-    const rows = await Transaction.findAll({
-      where,
-      attributes: ['id', 'date', 'amount', 'currency', 'finalBusiness'],
-      include: [
-        {
-          model: TransactionTaxMetadata,
-          as: 'taxMetadata',
-          attributes: ['deductiblePercent', 'hstGstAmount'],
-          required: false,
-        },
-      ],
-    });
-    const inputRows: ReserveInputRow[] = rows.map((r) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const meta = (r as any).taxMetadata as TransactionTaxMetadata | undefined;
-      return {
-        date: String(r.date),
-        amount: String(r.amount),
-        currency: String(r.currency),
-        finalBusiness: Boolean(r.finalBusiness),
-        deductiblePercent:
-          meta?.deductiblePercent == null ? null : String(meta.deductiblePercent),
-        hstGstAmount:
-          meta?.hstGstAmount == null ? null : String(meta.hstGstAmount),
-      };
-    });
-    // Build per-currency percent lookup from settings.
-    const settings = await TaxReserveSetting.findAll({
-      where: { householdId: household.id },
-    });
-    const reservePercents = new Map<string, number>();
-    for (const s of settings) {
-      const v = Number(s.reservePercent);
-      if (Number.isFinite(v)) reservePercents.set(s.currency, v);
-    }
-    const defaultPercent = Number(DEFAULT_TAX_RESERVE_PERCENT);
-    const rollups = aggregateReserveRollups(
-      inputRows,
-      periodicity,
-      reservePercents,
-      defaultPercent,
-    );
+    const rollups = await loadReserveRollups(household.id, where, periodicity);
     res.json({
       data: rollups,
       scope,

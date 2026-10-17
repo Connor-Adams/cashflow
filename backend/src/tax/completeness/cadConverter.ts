@@ -1,5 +1,5 @@
 import { D, type Decimal } from '../util/decimal';
-import { toCad } from '../../fx/toCad';
+import { toCad, type ToCadResult } from '../../fx/toCad';
 import { logger } from '../../observability/logger';
 
 /**
@@ -23,6 +23,15 @@ import { logger } from '../../observability/logger';
 export function createCadConverter(options: {
   /** Called once per currency/date pair that has no rate, so a caller can surface it. */
   onUnavailable?: (currency: string, date: string) => void;
+  /**
+   * Called once per currency/date pair that DID convert, with the rate's date and
+   * source, so a caller can surface a substituted (`fallback_*`) rate.
+   */
+  onRateUsed?: (
+    currency: string,
+    date: string,
+    result: Pick<ToCadResult, 'ratedDate' | 'source'>,
+  ) => void;
 } = {}): (
   amount: Decimal,
   currency: string,
@@ -38,7 +47,10 @@ export function createCadConverter(options: {
       // Cache the RATE per unit, not the converted amount — several rows share a pair
       // with different amounts.
       rate = toCad(D('1'), currency, date)
-        .then((r) => r.cad)
+        .then((r) => {
+          options.onRateUsed?.(currency, date, r);
+          return r.cad;
+        })
         .catch((err: unknown) => {
           logger.warn(
             { err, currency, date },

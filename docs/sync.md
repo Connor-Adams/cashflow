@@ -6,7 +6,7 @@
 ## Product model
 
 Cashflow is self-hosted: the database lives on a single server you control
-(Railway-hosted Postgres in the reference deploy), and the user trusts that
+(Dokploy-hosted Postgres in the reference deploy), and the user trusts that
 one server. The "sync" surface lets a
 user (1) take an encrypted snapshot of their finance data and (2) restore
 it on a fresh install or a different household. Encryption happens
@@ -102,13 +102,15 @@ Add new tables by appending to `TABLES` and bumping `BUNDLE_SCHEMA_VERSION`.
 Primary keys are remapped on restore — the bundle's `id` collides with
 target-DB autoincrement values, so the target DB picks fresh ids and the
 restore code rewrites references column-by-column. The remap is driven
-by `FK_REMAP` in `restoreBundle.ts`. When a column can't be safely
-remapped (e.g. self-referencing `linked_transaction_id`), it's listed in
-`NULL_ON_RESTORE` and NULLed.
+by `FK_REMAP` in `restoreBundle.ts`. A reference whose target was not in
+the bundle is NULLed rather than left dangling.
 
-Self-referencing FK columns are a TODO for V1: the in-bundle id is
-nulled rather than re-linked. A two-pass restore (insert with NULL, then
-patch from the id-remap) is the obvious follow-up.
+Self-referencing FK columns (`transactions.linked_transaction_id`, which
+pairs transfer legs and charge/refund) are listed in `SELF_REF_REMAP` and
+restored in two passes: each row is inserted with the column NULL, then,
+once the whole table is written, the column is UPDATEd to the target's
+new id from the id-remap — inside the same restore transaction. A link
+whose target was not in the bundle stays NULL.
 
 ## Extension points for cloud sync
 
@@ -136,9 +138,9 @@ use:
 
 ## Test plan
 
-- `backend/test/syncBundleFormat.test.ts` — codec round-trip, tamper,
+- `backend/src/sync/syncBundleFormat.test.ts` — codec round-trip, tamper,
   wrong-passphrase, version, schemaVersion checks.
-- `backend/test/migrations/syncBackupsMigration.test.ts` — schema +
+- `backend/src/migrations/__tests__/syncBackupsMigration.test.ts` — schema +
   index + down-migration.
 - `backend/test/integration/sync.test.ts` — end-to-end via the API:
   encrypt → preview → restore, merge-refuses, replace-succeeds,

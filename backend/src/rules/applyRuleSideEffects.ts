@@ -13,14 +13,19 @@
  *     txn insert and deterministic in tests; rule alerts are explicitly
  *     user-configured so per-type muting is not applied here.
  *
- * Best-effort and non-fatal as a whole: any failure is logged and swallowed so
- * a misconfigured action never aborts an import. Scalar effects
+ * Best-effort: a failed label attach or alert insert is logged and swallowed so
+ * a misconfigured action never aborts an import. Each of those writes runs in
+ * its own SAVEPOINT of the caller's transaction (util/inSavepoint.ts): on
+ * Postgres a failed statement aborts the whole transaction, so swallowing it
+ * without rolling back to a savepoint would poison the import's transaction and
+ * fail every row after it. Scalar effects
  * (category/business/split) are NOT handled here — they flow through the Signal
  * fields unchanged.
  */
 import type { Transaction as SequelizeTransaction } from 'sequelize';
 import { Label, TransactionLabel, Notification, Rule } from '../models';
 import { logger } from '../observability/logger';
+import { inSavepoint } from '../util/inSavepoint';
 import { RULE_ACTION_FIRED_TYPE } from './actions';
 import type { Signal } from '../import/enrichment/types';
 
@@ -67,11 +72,15 @@ export async function applyRuleSideEffects(input: ApplyRuleSideEffectsInput): Pr
       try {
         // findOrCreate keeps it idempotent across re-enrichment without
         // relying on dialect-specific upsert semantics.
-        await TransactionLabel.findOrCreate({
-          where: { transactionId, labelId },
-          defaults: { transactionId, labelId },
-          transaction,
-        });
+        // findOrCreate opens a savepoint of its own but only rolls it back on a
+        // unique violation, hence the explicit one.
+        await inSavepoint(transaction, (sp) =>
+          TransactionLabel.findOrCreate({
+            where: { transactionId, labelId },
+            defaults: { transactionId, labelId },
+            transaction: sp,
+          }),
+        );
       } catch (err) {
         logger.warn(
           { err, module: 'rule-actions', ruleId: ruleActions.ruleId, labelId, transactionId },
@@ -96,16 +105,18 @@ export async function applyRuleSideEffects(input: ApplyRuleSideEffectsInput): Pr
     } else {
       for (const alert of ruleActions.alerts) {
         try {
-          await Notification.create(
-            {
-              userId,
-              type: RULE_ACTION_FIRED_TYPE,
-              severity: alert.severity,
-              title: alert.title ?? `Rule matched: ${rule?.merchantPattern ?? ''}`.slice(0, 160),
-              body: alert.body ?? `A transaction matched rule "${rule?.merchantPattern ?? ''}".`,
-              dataJson: { ruleId: ruleActions.ruleId, transactionId },
-            },
-            { transaction },
+          await inSavepoint(transaction, (sp) =>
+            Notification.create(
+              {
+                userId,
+                type: RULE_ACTION_FIRED_TYPE,
+                severity: alert.severity,
+                title: alert.title ?? `Rule matched: ${rule?.merchantPattern ?? ''}`.slice(0, 160),
+                body: alert.body ?? `A transaction matched rule "${rule?.merchantPattern ?? ''}".`,
+                dataJson: { ruleId: ruleActions.ruleId, transactionId },
+              },
+              { transaction: sp },
+            ),
           );
         } catch (err) {
           logger.warn(

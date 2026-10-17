@@ -5,13 +5,19 @@ import { DEFAULT_TAX_RESERVE_PERCENT } from '../models/TaxReserveSetting';
 import { serializeSubscription } from '../expectations/subscriptionMapper';
 import { balanceAtDate } from '../networth/balanceAtDate';
 import {
+  buildNetWorthAt,
   buildSeries,
   monthEndDatesInRange,
   daysInRange,
+  looseHistoricalFxLookup,
   PORTFOLIO_DRIVEN_TYPES,
 } from '../networth/aggregate';
+import { withCadCrossRates } from '../fx/crossCurrencyFxLookup';
+import { composeTaxReserve, loadReserveRollups } from './taxReserve';
+import { scopeWhere, dateRangeWhere } from './businessTax';
+import { loadRecurringCandidates } from '../subscriptions/recurringCandidates';
 import { portfolioMarketValueAt } from '../networth/portfolioMarketValueAt';
-import { detectRecurring, type RecurringInputTxn } from './recurring';
+import { detectRecurring } from './recurring';
 import { num } from '../util/numbers';
 import { isNonSpend } from '../summary/classifyTransactionFlow';
 import { summarizeReportingCashflow } from '../reporting/cashflowTotals';
@@ -93,7 +99,11 @@ router.get('/summary', async (req, res, next) => {
     }
 
     const forCurrency = balEntries.filter((e) => e.currency === currency);
-    const netWorth = round2(forCurrency.reduce((s, e) => s + e.amount, 0));
+    // Net worth reuses /net-worth's computation (buildNetWorthAt: every
+    // currency FX-unified to CAD), then is expressed in the requested
+    // currency. It used to sum only the requested currency's balances, so a
+    // USD account silently vanished from a CAD net worth.
+    const netWorth = await householdNetWorth(household.id, today, currency);
     const liquidCash = round2(
       forCurrency
         .filter((e) => LIQUID_ACCOUNT_TYPES.has(e.accountType))
@@ -129,14 +139,13 @@ router.get('/summary', async (req, res, next) => {
       monthlyIncome > 0 ? round4((monthlyIncome - monthlyBurn) / monthlyIncome) : 0;
     const runwayMonths = monthlyBurn > 0 ? round2(liquidCash / monthlyBurn) : null;
 
-    const reserveSetting = await TaxReserveSetting.findOne({
-      where: { householdId: household.id, currency },
-    });
-    const reservePercent = reserveSetting
-      ? Number(reserveSetting.reservePercent)
-      : Number(DEFAULT_TAX_RESERVE_PERCENT);
-    const taxReserveRequired = round2(monthlyIncome * months * reservePercent);
-    const taxReserveActual = 0;
+    // Same reserve the app computes (routes/taxReserve), over the same 90-day
+    // window: max(0, net business income) x pct + max(0, net HST/GST). It used
+    // to be monthlyIncome x 3 x pct — all income, no expenses, no HST.
+    const taxReserveRequired = await appReserveTarget(household.id, currency, fromDate, today);
+    // No tax-reserve balance is tracked anywhere in the app, so there is no
+    // actual to report: null, not a fabricated 0.
+    const taxReserveActual = null;
 
     res.json({
       asOf,
@@ -734,36 +743,14 @@ router.get('/recurring', async (req, res, next) => {
     const fromDate = sixMonthsAgo.toISOString().slice(0, 10);
     const today = new Date().toISOString().slice(0, 10);
 
+    // The same candidate loader /api/recurring, subscriptions, money leaks and
+    // the forecast use — so this external view never disagrees with the app.
     const txnWhere: Record<string, unknown> = {
       householdId: household.id,
       date: { [Op.gte]: fromDate, [Op.lte]: today },
-      amount: { [Op.lt]: 0 },
-      txnType: { [Op.notIn]: ['payment', 'transfer', 'refund'] },
     };
     if (currency) txnWhere.currency = currency;
-
-    const rawTxns = await Transaction.findAll({
-      where: txnWhere,
-      attributes: ['merchantClean', 'merchantRaw', 'amount', 'currency', 'date', 'finalCategory', 'finalCategoryId'], // B2: finalCategoryId selected for future rollup
-      raw: true,
-    });
-
-    const candidates: RecurringInputTxn[] = (
-      rawTxns as unknown as {
-        merchantClean: string | null;
-        merchantRaw: string | null;
-        amount: unknown;
-        currency: string;
-        date: string;
-        finalCategory: string | null;
-      }[]
-    ).map((t) => ({
-      merchant: t.merchantClean || t.merchantRaw || null,
-      amount: num(t.amount) ?? 0,
-      currency: t.currency,
-      date: t.date,
-      category: t.finalCategory,
-    }));
+    const candidates = await loadRecurringCandidates(txnWhere);
 
     const inferred = detectRecurring(candidates);
 
@@ -861,17 +848,13 @@ router.get('/tax', async (req, res, next) => {
     }));
     const grossIncome = round2(summarizeReportingCashflow(taxTxns).totalIncome);
 
-    const reserveSetting = await TaxReserveSetting.findOne({
-      where: { householdId: household.id, currency },
-    });
-    const reservePercent = reserveSetting
-      ? Number(reserveSetting.reservePercent)
-      : Number(DEFAULT_TAX_RESERVE_PERCENT);
-
-    const estimatedTaxOwed = round2(grossIncome * reservePercent);
-    const taxReserveTarget = estimatedTaxOwed;
-    const taxReserveActual = 0;
-    const reserveDelta = round2(taxReserveTarget - taxReserveActual);
+    // The app's reserve for the year (routes/taxReserve), not grossIncome x pct.
+    const taxReserveTarget = await appReserveTarget(household.id, currency, yearStart, yearEnd);
+    const estimatedTaxOwed = taxReserveTarget;
+    // No reserve balance is tracked, so actual (and therefore the delta) is
+    // unknown — null rather than a 0 that made reserveDelta always == target.
+    const taxReserveActual: number | null = null;
+    const reserveDelta: number | null = null;
 
     res.json({
       year,
@@ -1036,6 +1019,54 @@ function isoWeekStart(date: string): string {
   const isoDow = dow === 0 ? 7 : dow; // 1=Mon .. 7=Sun
   const monday = new Date(dt.getTime() - (isoDow - 1) * 86400000);
   return monday.toISOString().slice(0, 10);
+}
+
+/**
+ * The app's tax-reserve target for one currency over [from, to], via the same
+ * loader + formula as /api/tax/reserve/summary. Components are summed across
+ * period buckets first and the formula applied once, so the window is treated
+ * as a single period (a 90-day window may straddle a year boundary).
+ */
+async function appReserveTarget(
+  householdId: number,
+  currency: string,
+  from: string,
+  to: string,
+): Promise<number> {
+  const rollups = await loadReserveRollups(
+    householdId,
+    { householdId, currency, ...scopeWhere('business'), ...dateRangeWhere(from, to) },
+    'annual',
+  );
+  if (rollups.length === 0) return 0;
+  const sum = (k: keyof (typeof rollups)[number]['components']) =>
+    rollups.reduce((acc, r) => acc + r.components[k], 0);
+  return composeTaxReserve({
+    businessIncome: sum('businessIncome'),
+    deductibleExpenses: sum('deductibleExpenses'),
+    hstGstCollected: sum('hstGstCollected'),
+    hstGstPaid: sum('hstGstPaid'),
+    reservePercent: rollups[0].reservePercent,
+  }).reserveTarget;
+}
+
+const crossFx = withCadCrossRates(looseHistoricalFxLookup);
+
+/**
+ * Household net worth exactly as /net-worth computes it (buildNetWorthAt over
+ * every household account, FX-unified to CAD), expressed in `currency`.
+ * Null when no CAD→currency rate resolves.
+ */
+async function householdNetWorth(
+  householdId: number,
+  asOf: string,
+  currency: string,
+): Promise<number | null> {
+  const accounts = await Account.findAll({ where: { householdId }, attributes: ['id'] });
+  const { total } = await buildNetWorthAt(asOf, accounts.map((a) => a.id));
+  if (currency === 'CAD') return round2(total);
+  const fx = await crossFx('CAD', currency, asOf);
+  return fx ? round2(total * fx.rate) : null;
 }
 
 function round2(n: number): number {

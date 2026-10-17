@@ -1747,6 +1747,10 @@ export type DebtLiability = {
   statementBalance: number | null
   /** Optional day-of-month (1-31) the payment is due. */
   dueDay: number | null
+  /** `balance` FX-converted to CAD; null when no rate resolves. */
+  balanceCad: number | null
+  /** `minimumPayment` FX-converted to CAD; null when no rate resolves. */
+  minimumPaymentCad: number | null
 }
 
 /** One debt's line within a payoff month. */
@@ -1796,11 +1800,17 @@ export type DebtPayoffComparison = {
   interestSaved: number
 }
 
-/** Response shape of GET /api/debt. */
+/**
+ * Response shape of GET /api/debt. Totals and `comparison` are in `currency`
+ * (always CAD): each liability is FX-converted before summing/planning. Each
+ * `liabilities[]` row keeps its own native `currency`.
+ */
 export type DebtOverview = {
   currency: string
   totalOwed: number
   totalMinimumPayment: number
+  /** Currencies with no FX rate, excluded from the totals and the plan. */
+  unconvertedCurrencies: string[]
   extraMonthlyPayment: number
   liabilities: DebtLiability[]
   comparison: DebtPayoffComparison | null
@@ -1937,12 +1947,29 @@ export type CreditCard = {
   daysUntilDue: number | null
   /** True when a payment is due within the warning window. */
   dueSoon: boolean
+  /** Closed on or before asOfDate — excluded from `totals`. */
+  closed: boolean
 }
 
-/** Response shape of GET /api/credit-cards. */
+/** CAD totals across open cards for the planner summary tiles. */
+export type CreditCardTotals = {
+  currency: string
+  /** Σ (statementBalance ?? currentBalance), FX-converted to CAD. */
+  statementOwed: number
+  /** Σ minimumPayment, FX-converted to CAD. */
+  minimumDue: number
+  /** Currencies with no FX rate, excluded from the totals. */
+  unconvertedCurrencies: string[]
+}
+
+/**
+ * Response shape of GET /api/credit-cards. `currency` is the totals currency
+ * (always CAD); each card carries its own native `currency`.
+ */
 export type CreditCardsOverview = {
   currency: string
   asOfDate: string
+  totals: CreditCardTotals
   cards: CreditCard[]
 }
 

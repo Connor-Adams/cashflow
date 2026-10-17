@@ -62,7 +62,7 @@ Never install or run from a sub-directory; if stray `backend/node_modules` or
 |---|---|
 | Install + migrate | `yarn setup` |
 | Dev (API + Vite together) | `yarn dev` — API on `:3001`, UI on `:5173` (proxies `/api`) |
-| Everything CI runs | `yarn ci` — typecheck, all tests, both production builds |
+| Everything CI runs | `yarn ci` — workflow tests, shared + backend unit + **integration** tests, backend typecheck + build, frontend test + build + lint + palette lint. Needs Postgres on `localhost:5432` (integration) — see the agent verify gate below |
 | All tests | `yarn test` |
 | Backend typecheck | `yarn workspace cashflow-backend run typecheck` |
 | Backend / frontend lint | `yarn workspace cashflow-backend run lint` · `yarn workspace frontend run lint` |
@@ -101,6 +101,19 @@ Backend tests use **`node:test` via `tsx`** (not vitest/jest); frontend uses **v
   `...run test:integration`) need **Postgres**; set `TEST_DATABASE_URL`. CI runs
   them in a dedicated job with a Postgres service.
 
+### Agent verify gate (no Docker)
+
+Agents never run Docker or a local Postgres, so `yarn ci` / `yarn test` (which
+include the integration suite — `backend/test/integration/_setup/pgTestDb.ts`
+hard-requires Postgres at `localhost:5432` unless `TEST_DATABASE_URL` is set) are
+not the agent gate. Before claiming done, run:
+
+- Backend: `yarn workspace cashflow-backend run test` · `... run typecheck` · `... run lint`
+- Frontend: `yarn workspace frontend run test` · `yarn workspace frontend run tsc -b` · `... run lint` · `... run build`
+- `yarn audit:code` — `code-audit` is a required status check on `main`
+
+Integration tests run in CI (`backend-test-integration`, a Postgres service).
+
 ## Architecture
 
 Three workspaces: **`backend`** (Express + Sequelize API), **`frontend`** (Vite +
@@ -117,9 +130,9 @@ observability stack), `docs/` (specs under `docs/superpowers/`, ADRs under
   (specific before catch-all `/api`; capture CORS before the global `cors()`;
   folded endpoints return `410 Gone`, e.g. `/api/tax/{personal,corp}-scenarios` →
   `/api/tax/scenarios/:kind`) — but it is now data with a `why` per entry, and
-  `backend/test/appRouteOrder.test.ts` locks the invariants so a bad reorder or a
+  `backend/src/auth/appRouteOrder.test.ts` locks the invariants so a bad reorder or a
   dropped fold-stub fails CI.
-- **~90 Sequelize models** in `models/` are the *physical* tables; the **13
+- **The Sequelize models** in `models/` are the *physical* tables; the **13
   primitives** are the *conceptual* spine many of them fold into. Consult the
   spine table before adding a model.
 - **Feature modules** are the top-level dirs under `src/` (`ai/`, `amazon/`,
@@ -131,9 +144,12 @@ observability stack), `docs/` (specs under `docs/superpowers/`, ADRs under
   `requireAuth` at `/api`; request context (`withContext`) carries
   `userId`/`householdId`/`role` for logging. Health, config, auth, capture,
   reporting (`/api/v1`), and audit routes mount *before* `requireAuth`.
-- **DB is dual-dialect**: SQLite by default (file `backend/data/cashflow.sqlite`),
-  Postgres when `DATABASE_URL` / `TEST_DATABASE_URL` is set. Write Sequelize that
-  runs on both. Multi-currency throughout (`DEFAULT_CURRENCY=CAD`, `FxRate` table).
+- **DB is Postgres**: production runs on Postgres (`DATABASE_URL`); integration
+  tests use `TEST_DATABASE_URL`. The SQLite fallback (`backend/data/cashflow.sqlite`
+  when `DATABASE_URL` is unset) exists only so unit tests get a per-PID temp DB —
+  don't reason about SQLite semantics or concurrency; reason about Postgres (row
+  locks, real concurrent writers). Sequelize still has to run under the unit-test
+  SQLite DB. Multi-currency throughout (`DEFAULT_CURRENCY=CAD`, `FxRate` table).
 - **Observability**: pino logs + OpenTelemetry traces/metrics over OTLP. `infra/`
   brings up Grafana/Loki/Tempo/Prometheus locally via docker-compose; see
   `docs/observability.md`.
@@ -147,6 +163,9 @@ Apple **bookmarklets** (`vite.bookmarklets.config.ts`) that POST receipts/orders
 
 ### Deploy
 Image-based: on merge to `main`, CI builds and pushes `backend`/`frontend` images
-to GHCR — **`main` does not auto-deploy**. Publishing a GitHub Release re-tags the
-images `:production` and fires Railway redeploys. Full pipeline, version-bump
-rules, and rollback steps are in `README.md`.
+to GHCR — **`main` does not auto-deploy**. Publishing a GitHub Release does **not**
+deploy either: `promote-to-production.yml` stamps each image `:vX.Y.Z` and moves
+`:production` onto the changed services, then stops. Hosting is **Dokploy**
+(Railway was retired 2026-09-26); the Dokploy panel is LAN-only, so a human
+redeploys the services the promote run names. Full pipeline, version-bump rules,
+and rollback steps are in `docs/releasing.md`.

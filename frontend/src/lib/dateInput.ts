@@ -150,3 +150,91 @@ export function getCalendarYearRange(
   const to = new Date(Date.UTC(year, 11, 31))
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/** Last calendar day (1–31) of the UTC month `monthIndex` (may overflow). */
+function lastDayOfMonth(year: number, monthIndex: number): number {
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate()
+}
+
+/**
+ * Previous window for a calendar-aligned range of `months` months, keeping
+ * the day-of-month of `effectiveTo` when the range was clamped at today.
+ */
+function shiftByMonths(
+  from: Date,
+  to: Date,
+  effectiveTo: Date,
+  months: number
+): { from: Date; to: Date } {
+  const prevFrom = new Date(
+    Date.UTC(from.getUTCFullYear(), from.getUTCMonth() - months, 1)
+  )
+  if (effectiveTo.getTime() === to.getTime()) {
+    // Complete period → complete previous period (ends on its month-end).
+    return {
+      from: prevFrom,
+      to: new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth() - months + 1, 0)),
+    }
+  }
+  const y = effectiveTo.getUTCFullYear()
+  const m = effectiveTo.getUTCMonth() - months
+  const day = Math.min(effectiveTo.getUTCDate(), lastDayOfMonth(y, m))
+  return { from: prevFrom, to: new Date(Date.UTC(y, m, day)) }
+}
+
+/**
+ * The window a period should be compared against, like-for-like.
+ *
+ * The selected range can end in the future ("This month" runs to the 31st),
+ * but only the days up to today hold data. Comparing it against a full prior
+ * window of the same day-count set 17 days of October against all of
+ * Aug 31..Sep 30. So:
+ *
+ *   1. The current side is clamped at local today (`to` = min(to, today)).
+ *   2. A calendar-aligned range (starts on the 1st, ends on a month-end —
+ *      This/Last month, quarter, year) shifts back by its own number of
+ *      months, keeping the day-of-month: Oct 1..Oct 17 → Sep 1..Sep 17;
+ *      Mar 1..Mar 30 → Feb 1..Feb 28 (clamped to the shorter month); a
+ *      complete past month compares to the complete previous month.
+ *   3. Any other range shifts back by its (clamped) day-span, ending the day
+ *      before it starts.
+ *
+ * Returns `null` when there is nothing honest to compare: a missing,
+ * malformed or inverted bound, or a range that starts after today.
+ *
+ * This only decides the comparison window — the range the user picked (and
+ * the picker shows) is unchanged.
+ *
+ * Optional `now` argument is for tests.
+ */
+export function getPreviousComparisonRange(
+  dateFrom: string,
+  dateTo: string,
+  now: Date = new Date()
+): { from: string; to: string } | null {
+  const from = fromDateInputValue(dateFrom)
+  const to = fromDateInputValue(dateTo)
+  if (!from || !to || from > to) return null
+  const today = fromDateInputValue(todayDateInputValue(now))!
+  if (from > today) return null
+  const effectiveTo = to > today ? today : to
+
+  const calendarAligned =
+    from.getUTCDate() === 1 &&
+    to.getUTCDate() === lastDayOfMonth(to.getUTCFullYear(), to.getUTCMonth())
+  if (calendarAligned) {
+    const months =
+      (to.getUTCFullYear() - from.getUTCFullYear()) * 12 +
+      (to.getUTCMonth() - from.getUTCMonth()) +
+      1
+    const prev = shiftByMonths(from, to, effectiveTo, months)
+    return { from: toDateInputValue(prev.from), to: toDateInputValue(prev.to) }
+  }
+
+  const spanDays = Math.round((effectiveTo.getTime() - from.getTime()) / DAY_MS) + 1
+  const prevTo = new Date(from.getTime() - DAY_MS)
+  const prevFrom = new Date(prevTo.getTime() - (spanDays - 1) * DAY_MS)
+  return { from: toDateInputValue(prevFrom), to: toDateInputValue(prevTo) }
+}
