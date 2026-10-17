@@ -10,12 +10,23 @@ import { pathToFileURL } from 'node:url';
 export const REPO_ROOT = '/Users/connoradams/Developer/cashflow';
 const FORBIDDEN_STAGED = /(\.sqlite(-journal)?$)|(^|\/)node_modules\/|(^|\/)backend\/data\//;
 
+// True when `command` actually INVOKES `git <sub>` — at the start of the command or
+// after a shell separator (`&&`, `||`, `;`, `|`, newline, `(`), optionally behind env
+// assignments or `git -C <dir>` / `-c k=v`. Text that merely mentions it
+// (`grep "git commit" …`, a heredoc body) does not match.
+export function invokesGit(command, sub) {
+  const re = new RegExp(
+    String.raw`(?:^|[;&|(\n])\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*` +
+    String.raw`git(?:\s+-[Cc]\s+\S+)*\s+` + sub + String.raw`(?=\s|$|[;&|)])`);
+  return re.test(command || '');
+}
+
 // Pure classifier. Caller supplies stagedFiles (or null when not a git commit/add)
 // and worktree facts. Returns { deny?: string, warnings: string[] }.
 export function classifyBash({ command, stagedFiles, worktreeRoot, worktreeHasNodeModules }) {
   const warnings = [];
   const inWorktree = !!worktreeRoot;
-  const isGitCommit = /\bgit\s+commit\b/.test(command);
+  const isGitCommit = invokesGit(command, 'commit');
 
   // G4a — hard deny: staging files that must never be committed.
   if (Array.isArray(stagedFiles)) {
@@ -34,22 +45,17 @@ export function classifyBash({ command, stagedFiles, worktreeRoot, worktreeHasNo
       stagedFiles.some((f) => /routeRegistry\.ts$|(^|\/)backend\/src\/app\.ts$/.test(f))) {
     warnings.push(
       'routeRegistry.ts/app.ts staged — run the mount-order regression test before merge: ' +
-      '`cd backend && yarn tsx --import ./test/setup.ts --test test/appRouteOrder.test.ts`.');
-  }
-
-  // G1a — warn: yarn install/setup (or bare yarn) under a worktree fails (vite-link).
-  if (inWorktree &&
-      (/\byarn\s+(install|setup)\b/.test(command) || /^\s*yarn\s*(&&|;|\|\||$)/.test(command))) {
-    warnings.push(
-      `yarn install/setup fails under .claude/worktrees (vite-link). Install from the main ` +
-      `checkout, or run binaries via \`PATH=${REPO_ROOT}/node_modules/.bin:$PATH …\`.`);
+      '`cd backend && yarn tsx --import ./test/setup.ts --test src/auth/appRouteOrder.test.ts`.');
   }
 
   // G1c — warn: git commit in a worktree with no node_modules → husky/lint-staged fails (127).
+  // Under Yarn 4 the worktree root IS its own install root (see .claude/conventions.md),
+  // so the fix is installing there — never from, or borrowing, the main checkout.
   if (inWorktree && isGitCommit && worktreeHasNodeModules === false) {
     warnings.push(
       `This worktree has no node_modules — \`git commit\` will fail at husky→lint-staged ` +
-      `(code 127). Prefix with \`PATH=${REPO_ROOT}/node_modules/.bin:$PATH git commit …\`.`);
+      `(code 127). Run \`corepack yarn install\` inside the worktree (${worktreeRoot}) ` +
+      `first; do not install from the main checkout.`);
   }
 
   // G1b — warn: absolute main-checkout path used inside a worktree.
@@ -111,7 +117,7 @@ async function main() {
   const command = payload?.tool_input?.command || '';
   const cwd = payload?.cwd || process.cwd();
   const worktreeRoot = worktreeRootOf(cwd);
-  const isGit = /\bgit\s+(commit|add)\b/.test(command);
+  const isGit = invokesGit(command, 'commit') || invokesGit(command, 'add');
   const stagedFiles = isGit ? gitStagedFiles(cwd) : null;
   const worktreeHasNodeModules = worktreeRoot ? existsSync(`${worktreeRoot}/node_modules`) : null;
 

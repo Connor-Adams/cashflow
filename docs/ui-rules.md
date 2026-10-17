@@ -1,6 +1,8 @@
 # Cashflow UI Rules
 
-North-star: the Dashboard's *look*. Implementation target: the `components/ui/` primitives.
+North-star: the Dashboard's *look*. Implementation target: the `@connor-adams/designsystem`
+primitives (plus `frontend/src/lib/ds-extras/` gap-fillers and the app composites in
+`frontend/src/components/ui/`); tokens from `@connor-adams/tokens`.
 "Match the Dashboard" means match its polish — NOT copy its raw-CSS/inline-style internals.
 
 ## Spacing

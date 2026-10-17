@@ -6,7 +6,7 @@
 ## Product model
 
 Cashflow is self-hosted: the database lives on a single server you control
-(Railway-hosted Postgres in the reference deploy), and the user trusts that
+(Dokploy-hosted Postgres in the reference deploy), and the user trusts that
 one server. The "sync" surface lets a
 user (1) take an encrypted snapshot of their finance data and (2) restore
 it on a fresh install or a different household. Encryption happens
@@ -138,9 +138,9 @@ use:
 
 ## Test plan
 
-- `backend/test/syncBundleFormat.test.ts` — codec round-trip, tamper,
+- `backend/src/sync/syncBundleFormat.test.ts` — codec round-trip, tamper,
   wrong-passphrase, version, schemaVersion checks.
-- `backend/test/migrations/syncBackupsMigration.test.ts` — schema +
+- `backend/src/migrations/__tests__/syncBackupsMigration.test.ts` — schema +
   index + down-migration.
 - `backend/test/integration/sync.test.ts` — end-to-end via the API:
   encrypt → preview → restore, merge-refuses, replace-succeeds,
