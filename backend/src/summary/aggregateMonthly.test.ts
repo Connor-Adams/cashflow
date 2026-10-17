@@ -164,3 +164,29 @@ test('aggregateMonthly: income (txnType=income) is excluded from both points and
   const catSum = out.categoryPoints.reduce((s, p) => s + p.sumAmount, 0);
   assert.equal(may.sumAmount, catSum);
 });
+
+test('aggregateMonthly: positive row the headline classifies as skip (unknown deposit) is excluded', () => {
+  // Headline: Groceries −200 + an unsignaled +150 "DEPOSIT FROM MOM" → spend
+  // 200 (classifyPositiveAmount → 'skip'). The activity curve must agree.
+  const out = aggregateMonthly(
+    [
+      row({ id: 1, date: '2026-05-02', amount: '-200', finalCategory: 'Groceries' }),
+      row({
+        id: 2,
+        date: '2026-05-03',
+        amount: '150',
+        txnType: 'unknown',
+        finalCategory: null,
+        merchantRaw: 'DEPOSIT FROM MOM',
+        merchantClean: 'DEPOSIT FROM MOM',
+      }),
+    ],
+    new Map(),
+  );
+  const may = out.points.find((p) => p.month === '2026-05');
+  assert.ok(may);
+  assert.equal(may.sumAmount, -200);
+  assert.equal(out.categoryPoints.length, 1);
+  assert.equal(out.categoryPoints[0].category, 'Groceries');
+  assert.equal(out.categoryPoints[0].sumAmount, -200);
+});

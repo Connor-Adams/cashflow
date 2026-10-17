@@ -1,8 +1,8 @@
 import { num, toUnits, fromUnits } from '../util/numbers';
 import {
-  classifyPositiveAmount,
-  isNonCategorical,
+  classifyFlow,
   isNonSpend,
+  type PositiveBucket,
 } from './classifyTransactionFlow';
 import { splitTxnByItems } from '../import/splitTxnByItems';
 import type { ItemAllocationContext } from './loadItemAllocations';
@@ -183,8 +183,9 @@ export type DashboardAggregates = {
  * Single-pass aggregator powering the /api/summary/dashboard endpoint.
  *
  * For each transaction row, this:
- *  - classifies the amount via `classifyPositiveAmount` / `isNonSpend` to
- *    route the value into the correct bucket (spend / credit / payment /
+ *  - classifies the amount via `classifyFlow` (isNonSpend for negatives,
+ *    classifyPositiveAmount for positives) to route the value into the
+ *    correct bucket (spend / credit / income / payment /
  *    skip — see `classifyTransactionFlow.ts` for the rules)
  *  - updates seven per-currency / per-bucket Maps in lock-step so the
  *    headline numbers reconcile against the breakdowns
@@ -241,19 +242,21 @@ export function aggregateDashboard(
     };
     metrics.transactionCount += 1;
 
-    // Route positives via the authoritative classifier: txnType wins,
-    // then merchant regex as fallback. 'skip' = non-categorical money
-    // movement (transfer/invest/dividend) — contributes to nothing.
-    const positiveBucket =
-      amount > 0
-        ? classifyPositiveAmount({
-            txnType: row.txnType,
-            accountType: account?.accountType,
-            merchantRaw: row.merchantRaw,
-            merchantClean: row.merchantClean,
-            category: row.finalCategory,
-          })
-        : 'skip';
+    // One classification drives the headline AND every breakdown below, so
+    // they reconcile. Positives route via the authoritative classifier
+    // (txnType wins, then merchant regex as fallback); 'skip' = money
+    // movement that contributes to nothing (transfer/invest/dividend,
+    // unsignaled deposits, negative non-spend legs like card payments).
+    const flow = classifyFlow({
+      amount,
+      txnType: row.txnType,
+      accountType: account?.accountType,
+      merchantRaw: row.merchantRaw,
+      merchantClean: row.merchantClean,
+      category: row.finalCategory,
+    });
+    const positiveBucket: PositiveBucket =
+      flow === 'income' ? 'credit' : flow === 'spend' ? 'skip' : flow;
     const merchantKey = `${currency}\0${merchant}`;
     const merchantSummary = merchantSummaries.get(merchantKey) ?? {
       currency,
@@ -384,12 +387,13 @@ export function aggregateDashboard(
     monthlyByCurrency.set(monthlyKey, monthly);
     netSpendBySplit.set(splitKey, split);
 
-    // Per-business aggregation needs allocations, which require
-    // non-categorical rows to be present. But business split only makes
-    // sense for spend/credit/income — not payments or non-categorical.
-    // Guard it with the same exclusions as byCategory below.
-    const skipForCategory = (amount > 0 && positiveBucket === 'payment')
-      || isNonCategorical(row.txnType, account?.accountType);
+    // Per-business / per-category breakdowns decompose the headline, so they
+    // admit exactly the rows the headline counts: spend, credit, and (for the
+    // business tile's income line only) income. Payments (either leg — the
+    // negative chequing-side txnType='payment' leg is non-spend), negative
+    // non-spend rows, and positives the headline classifies 'skip' (e.g. an
+    // unsignaled "DEPOSIT FROM MOM") contribute to nothing here either.
+    const skipForCategory = flow === 'payment' || flow === 'skip';
 
     if (!skipForCategory) {
       const allocations = itemContext
