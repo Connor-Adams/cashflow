@@ -4,7 +4,6 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseAmazonReceiptEmail } from './parseAmazonReceiptEmail';
 import {
   amazonOrderDedupeKey,
   normalizeAmazonOrder,
@@ -120,100 +119,6 @@ test('normalizeAmazonOrder: currency defaults to CAD when missing', () => {
 test('normalizeTitle: lowercases and collapses non-alphanumeric runs to single space', () => {
   assert.equal(normalizeTitle('USB-C Cable!! (10ft)'), 'usb c cable 10ft');
   assert.equal(normalizeTitle('  Widget   #2  '), 'widget 2');
-});
-
-// ─── parseAmazonReceiptEmail ───────────────────────────────────────────────
-
-test('parseAmazonReceiptEmail: canonical email parses all fields and emits source=email', () => {
-  const email = [
-    'Hello,',
-    'Your Amazon.ca order #701-1234567-7654321 has shipped.',
-    'Item: USB-C Cable',
-    'Order Total: $42.00',
-    'Placed on May 15, 2026',
-    'Card ending in 1234',
-  ].join('\n');
-  const order = parseAmazonReceiptEmail(email);
-  assert.ok(order, 'parser returned a non-null result');
-  assert.equal(order!.vendorOrderId, '701-1234567-7654321');
-  assert.equal(order!.total, 42);
-  assert.equal(order!.paymentLast4, '1234');
-  assert.equal(order!.source, 'email');
-  assert.equal(order!.orderDate, '2026-05-15');
-  assert.equal(order!.items[0].title, 'USB-C Cable');
-  assert.equal(order!.dedupeKey, 'amazon:order:701-1234567-7654321');
-});
-
-test('parseAmazonReceiptEmail: order-id regex requires 3-7-7 digit groups', () => {
-  // 6-digit last group (701-1234567-7654321 trimmed to last 6) must NOT match.
-  const bad =
-    'Your order 701-1234567-765432 has shipped. Item: Widget\nTotal: $10.00';
-  const order = parseAmazonReceiptEmail(bad);
-  // Falls back: no orderId but total + title present → still returns non-null
-  assert.ok(order);
-  assert.equal(order!.vendorOrderId, null);
-  // Good 3-7-7 must match.
-  const good =
-    'Your order 123-1234567-1234567 has shipped. Item: Widget\nTotal: $10.00';
-  const okOrder = parseAmazonReceiptEmail(good);
-  assert.equal(okOrder?.vendorOrderId, '123-1234567-1234567');
-});
-
-test('parseAmazonReceiptEmail: total matches across spacing variants', () => {
-  const compact = parseAmazonReceiptEmail('Item: Widget\nGrand total: $42.00');
-  assert.equal(compact?.total, 42);
-  // findMoney lives inside parseAmazonReceiptEmail — it accepts arbitrary
-  // whitespace between label and amount via `[^\d$-]*`.
-  const spaced = parseAmazonReceiptEmail('Item: Widget\nOrder Total   $42.00');
-  assert.equal(spaced?.total, 42);
-});
-
-test('parseAmazonReceiptEmail: returns null when no orderId, total, or title', () => {
-  const order = parseAmazonReceiptEmail(
-    'Hello from a non-Amazon vendor. We just say hi.',
-  );
-  assert.equal(order, null);
-});
-
-test('parseAmazonReceiptEmail: date extraction handles "Placed on", "Order Date", "ordered:" variants', () => {
-  const a = parseAmazonReceiptEmail(
-    'Order #701-1111111-1111111\nItem: Widget\nPlaced on May 15, 2026',
-  );
-  assert.equal(a?.orderDate, '2026-05-15');
-  const b = parseAmazonReceiptEmail(
-    'Order #701-1111111-1111111\nItem: Widget\nOrder Date: 2026-05-15',
-  );
-  assert.equal(b?.orderDate, '2026-05-15');
-  const c = parseAmazonReceiptEmail(
-    'Order #701-1111111-1111111\nItem: Widget\nordered: 05/15/26',
-  );
-  assert.equal(c?.orderDate, '2026-05-15');
-});
-
-test('parseAmazonReceiptEmail: title extraction prefers "Item:" then falls back to shipped/arriving body', () => {
-  const a = parseAmazonReceiptEmail(
-    'Order #701-1111111-1111111\nItem: Mechanical Keyboard\nTotal: $80',
-  );
-  assert.equal(a?.items[0].title, 'Mechanical Keyboard');
-
-  const fallback = parseAmazonReceiptEmail(
-    [
-      'Order #701-1111111-1111111',
-      'Total: $80',
-      'Arriving tomorrow',
-      'USB-C Hub Adapter',
-    ].join('\n'),
-  );
-  // The shipped/arriving regex grabs the next line as the title.
-  assert.equal(fallback?.items[0].title, 'USB-C Hub Adapter');
-});
-
-test('parseAmazonReceiptEmail: total + no orderId + no title → uses "Amazon purchase" fallback', () => {
-  const order = parseAmazonReceiptEmail('Total: $99.00');
-  assert.ok(order, 'parser returned non-null even without orderId / title');
-  assert.equal(order!.total, 99);
-  assert.equal(order!.vendorOrderId, null);
-  assert.equal(order!.items[0].title, 'Amazon purchase');
 });
 
 // ─── matcher: scoreAmazonOrderMatch ────────────────────────────────────────

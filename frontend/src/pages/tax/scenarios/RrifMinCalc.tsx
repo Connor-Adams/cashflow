@@ -5,12 +5,9 @@
 // dollar amount. Result is informational only — the user copies it into an
 // `income.pensionIncome` override on the relevant projection year.
 //
-// The percentage table mirrors `backend/src/tax/engine/rrif.ts` (T1 commit
-// 0706355). Duplicating the table on the frontend keeps this a leaf component
-// with no extra round-trip; the table is small (24 rows + flat 95+) and the
-// CRA schedule is stable across years. If/when the table needs to live in one
-// place, lift it to a shared `@/shared/tax/rrif.ts` and import from both
-// backend and frontend.
+// This is the only copy of the CRA prescribed-minimum table; the backend tax
+// engine does not compute RRIF minimums. The table is small (24 rows + flat
+// 95+) and the CRA schedule is stable across years.
 //
 // Ages < 71 → 0 (no mandatory minimum). Ages 71–94 → fixed schedule. Ages
 // 95+ → 20% flat.
