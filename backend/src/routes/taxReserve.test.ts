@@ -368,6 +368,39 @@ test('aggregateReserveRollups: rows on an investment account are ignored', () =>
   assert.equal(rollup[0].components.deductibleExpenses, 0);
 });
 
+test('aggregateReserveRollups: net loss clips to zero before percent; HST still owed', () => {
+  // A loss period must never suggest a negative reserve.
+  const rollup = aggregateReserveRollups(
+    [
+      row({ amount: '1000', hstGstAmount: '130', txnType: 'income' }),
+      row({ amount: '-5000', txnType: 'purchase' }),
+    ],
+    'quarterly',
+    new Map(),
+    0.25,
+  );
+  assert.equal(rollup[0].netBusinessIncome, -4000);
+  assert.equal(rollup[0].netHstGst, 130);
+  // max(0, -4000) * 0.25 = 0 + 130 = 130
+  assert.equal(rollup[0].reserveTarget, 130);
+});
+
+test('aggregateReserveRollups: net negative HST/GST clips to zero', () => {
+  // ITC > HST collected → no HST remittance owed.
+  const rollup = aggregateReserveRollups(
+    [
+      row({ amount: '10000', hstGstAmount: '100', txnType: 'income' }),
+      row({ amount: '-1000', hstGstAmount: '500', txnType: 'purchase' }),
+    ],
+    'quarterly',
+    new Map(),
+    0.2,
+  );
+  assert.equal(rollup[0].netHstGst, -400);
+  // 9000 * 0.2 = 1800 + max(0, -400) = 1800
+  assert.equal(rollup[0].reserveTarget, 1800);
+});
+
 // ---- validateReservePatch ----------------------------------------------
 
 test('validateReservePatch: accepts valid percent and note', () => {

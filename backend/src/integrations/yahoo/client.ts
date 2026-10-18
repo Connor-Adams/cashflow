@@ -364,8 +364,7 @@ export async function fetchQuote(
   };
 }
 
-// Consumed via `import * as` namespace access in portfolio/backfill.ts, which fallow's static resolver can't follow.
-// fallow-ignore-next-line unused-export
+// Consumed via `import * as` namespace access in portfolio/backfill.ts.
 export async function fetchDailyHistory(
   yahooSymbol: string,
   opts: { period1: Date | string },

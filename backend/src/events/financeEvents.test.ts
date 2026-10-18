@@ -8,7 +8,6 @@
  *   - Oversized JSON payloads are truncated, not failed.
  *   - Best-effort by default: missing householdId is a no-op, not a throw.
  *   - rethrowOnError surfaces the failure (used by tests).
- *   - readEntityEvents returns the stream in replay order (createdAt ASC).
  *   - Distinct from audit_log — the two streams are independent
  *     (one can succeed and the other fail without affecting it).
  */
@@ -22,7 +21,6 @@ let FinanceEvent: typeof import('../models').FinanceEvent;
 let Household: typeof import('../models').Household;
 let User: typeof import('../models').User;
 let recordFinanceEvent: typeof import('./financeEvents').recordFinanceEvent;
-let readEntityEvents: typeof import('./financeEvents').readEntityEvents;
 let FINANCE_EVENT_TYPES: typeof import('./financeEvents').FINANCE_EVENT_TYPES;
 let FINANCE_EVENT_ENTITY_TYPES: typeof import('./financeEvents').FINANCE_EVENT_ENTITY_TYPES;
 
@@ -52,7 +50,6 @@ before(async () => {
   User = models.User;
   const events = await import('./financeEvents');
   recordFinanceEvent = events.recordFinanceEvent;
-  readEntityEvents = events.readEntityEvents;
   FINANCE_EVENT_TYPES = events.FINANCE_EVENT_TYPES;
   FINANCE_EVENT_ENTITY_TYPES = events.FINANCE_EVENT_ENTITY_TYPES;
   await sequelize.sync({ force: true });
@@ -177,96 +174,11 @@ test('recordFinanceEvent persists explicit occurredAt', async () => {
   assert.equal(row!.occurredAt.toISOString(), when.toISOString());
 });
 
-test('readEntityEvents returns stream in replay order (createdAt ASC)', async () => {
-  const hh = await Household.create({ name: 'H' });
-  const user = await User.create({
-    email: `finevt-replay-${Date.now()}@example.com`,
-    displayName: 'Replay',
-    globalRole: 'user',
-    passwordHash: 'x',
-    passwordSalt: 'y',
-    passwordParams: 'p',
-  });
-
-  // Emit three events on the same entity, asserting we keep insert order.
-  await recordFinanceEvent({
-    req: fakeReq(user.id, hh.id) as unknown as import('express').Request,
-    type: FINANCE_EVENT_TYPES.RuleCreated,
-    entityType: FINANCE_EVENT_ENTITY_TYPES.Rule,
-    entityId: 99,
-    payload: { step: 1 },
-  });
-  await recordFinanceEvent({
-    req: fakeReq(user.id, hh.id) as unknown as import('express').Request,
-    type: FINANCE_EVENT_TYPES.RuleUpdated,
-    entityType: FINANCE_EVENT_ENTITY_TYPES.Rule,
-    entityId: 99,
-    payload: { step: 2 },
-  });
-  await recordFinanceEvent({
-    req: fakeReq(user.id, hh.id) as unknown as import('express').Request,
-    type: FINANCE_EVENT_TYPES.RuleDeleted,
-    entityType: FINANCE_EVENT_ENTITY_TYPES.Rule,
-    entityId: 99,
-    payload: { step: 3 },
-  });
-
-  const stream = await readEntityEvents({
-    householdId: hh.id,
-    entityType: 'rule',
-    entityId: 99,
-  });
-  assert.equal(stream.length, 3);
-  assert.deepEqual(
-    stream.map((e) => (e.payload as { step: number }).step),
-    [1, 2, 3],
-  );
-  assert.equal(stream[0].type, 'rule.created');
-  assert.equal(stream[1].type, 'rule.updated');
-  assert.equal(stream[2].type, 'rule.deleted');
-});
-
-test('readEntityEvents respects household scope', async () => {
-  const hhA = await Household.create({ name: 'A' });
-  const hhB = await Household.create({ name: 'B' });
-
-  await recordFinanceEvent({
-    householdId: hhA.id,
-    type: 'transaction.updated',
-    entityType: 'transaction',
-    entityId: 1,
-    payload: { who: 'A' },
-  });
-  await recordFinanceEvent({
-    householdId: hhB.id,
-    type: 'transaction.updated',
-    entityType: 'transaction',
-    entityId: 1,
-    payload: { who: 'B' },
-  });
-
-  const fromA = await readEntityEvents({
-    householdId: hhA.id,
-    entityType: 'transaction',
-    entityId: 1,
-  });
-  const fromB = await readEntityEvents({
-    householdId: hhB.id,
-    entityType: 'transaction',
-    entityId: 1,
-  });
-  assert.equal(fromA.length, 1);
-  assert.equal(fromB.length, 1);
-  assert.equal((fromA[0].payload as { who: string }).who, 'A');
-  assert.equal((fromB[0].payload as { who: string }).who, 'B');
-});
-
 test('finance_events stream is append-only — no update API exposed', async () => {
-  // The helper module exports recordFinanceEvent + readEntityEvents only.
-  // It does NOT export an update or delete helper. Code-level invariant.
+  // The helper module exports a write helper (recordFinanceEvent) but NO
+  // update or delete helper. Code-level invariant.
   const mod = await import('./financeEvents');
   assert.ok('recordFinanceEvent' in mod);
-  assert.ok('readEntityEvents' in mod);
   assert.equal(
     'updateFinanceEvent' in mod,
     false,

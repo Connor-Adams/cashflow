@@ -1,18 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { D } from '../util/decimal';
+import { D, type Decimal } from '../util/decimal';
 import { ratesFor } from './brackets';
-import { computeCppEmployee, computeEiEmployee, computeCppSelfEmployed, computeCppSelfEmployedParts } from './cpp-ei';
+import { computeCppEmployeeParts, computeEiEmployee, computeCppSelfEmployedParts } from './cpp-ei';
+import type { RateTable } from './types';
+
+function cppEmployeeTotal(income: Decimal, r: RateTable): Decimal {
+  const { firstTier, cpp2 } = computeCppEmployeeParts(income, r);
+  return firstTier.plus(cpp2);
+}
 
 test('CPP employee at $0 employment income = $0', () => {
   const r = ratesFor(2024);
-  assert.equal(computeCppEmployee(D('0'), r).toFixed(2), '0.00');
+  assert.equal(cppEmployeeTotal(D('0'), r).toFixed(2), '0.00');
 });
 
 test('CPP employee at $30k: (30000-3500) * 0.0595', () => {
   const r = ratesFor(2024);
   const exp = D('30000').minus('3500').times('0.0595');
-  assert.equal(computeCppEmployee(D('30000'), r).toFixed(2), exp.toFixed(2));
+  assert.equal(cppEmployeeTotal(D('30000'), r).toFixed(2), exp.toFixed(2));
 });
 
 test('CPP employee at YMPE+ caps base contribution + adds CPP2 up to YAMPE', () => {
@@ -20,7 +26,7 @@ test('CPP employee at YMPE+ caps base contribution + adds CPP2 up to YAMPE', () 
   const base = D('68500').minus('3500').times('0.0595');
   const cpp2 = D('73200').minus('68500').times('0.04');
   const expected = base.plus(cpp2);
-  assert.equal(computeCppEmployee(D('80000'), r).toFixed(2), expected.toFixed(2));
+  assert.equal(cppEmployeeTotal(D('80000'), r).toFixed(2), expected.toFixed(2));
 });
 
 test('EI employee at $30k: 30000 * 0.0166', () => {
@@ -33,20 +39,20 @@ test('EI employee caps at maxInsurable', () => {
   assert.equal(computeEiEmployee(D('100000'), r).toFixed(2), D('63200').times('0.0166').toFixed(2));
 });
 
-test('computeCppSelfEmployed charges both halves (2× employee rate)', () => {
+test('computeCppSelfEmployedParts.total charges both halves (2× employee rate)', () => {
   const r = ratesFor(2025);
   // SE income $80,000 — above YMPE ($71,300), below YAMPE ($81,200)
   // Base CPP: (min(80000, 71300) - 3500) × 0.0595 = 67800 × 0.0595 = 4034.10
   // CPP2: (min(80000, 81200) - 71300) × 0.04 = 8700 × 0.04 = 348.00
   // Employee portion = 4034.10 + 348.00 = 4382.10
   // Self-employed = 2 × 4382.10 = 8764.20
-  const result = computeCppSelfEmployed(D('80000'), r);
+  const result = computeCppSelfEmployedParts(D('80000'), r).total;
   assert.equal(result.toFixed(2), '8764.20');
 });
 
-test('computeCppSelfEmployed below basic exemption returns 0', () => {
+test('computeCppSelfEmployedParts.total below basic exemption returns 0', () => {
   const r = ratesFor(2025);
-  const result = computeCppSelfEmployed(D('3000'), r);
+  const result = computeCppSelfEmployedParts(D('3000'), r).total;
   assert.equal(result.toFixed(2), '0.00');
 });
 

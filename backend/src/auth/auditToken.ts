@@ -15,8 +15,3 @@ export function hashAuditToken(plaintext: string): string {
 export function isAuditTokenFormat(value: string): boolean {
   return /^cfa_[A-Za-z0-9_-]{32}$/.test(value);
 }
-
-export function maskAuditToken(plaintext: string): string {
-  if (plaintext.length < 10) return plaintext;
-  return `${plaintext.slice(0, 7)}…${plaintext.slice(-3)}`;
-}

@@ -158,8 +158,6 @@ const defaultFetchers: YahooFetchers = { fetchQuote, fetchOverview, fetchDividen
 let fetchers: YahooFetchers = defaultFetchers;
 
 /** Test seam — replaces the Yahoo fetchers; call with no argument to restore. */
-// Consumed by scheduler.test.ts via dynamic import; fallow's static resolver can't follow it.
-// fallow-ignore-next-line unused-export
 export function __setYahooFetchersForTests(stub?: YahooFetchers): void {
   fetchers = stub ?? defaultFetchers;
 }

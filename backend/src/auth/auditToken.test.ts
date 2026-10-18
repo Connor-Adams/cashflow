@@ -4,7 +4,6 @@ import {
   mintAuditTokenPlaintext,
   hashAuditToken,
   isAuditTokenFormat,
-  maskAuditToken,
 } from './auditToken';
 
 test('mintAuditTokenPlaintext returns cfa_ prefix + 32 base64url chars', () => {
@@ -44,11 +43,4 @@ test('isAuditTokenFormat rejects cfr_ tokens', () => {
 test('isAuditTokenFormat rejects tokens with wrong payload length', () => {
   assert.equal(isAuditTokenFormat('cfa_' + 'a'.repeat(31)), false);
   assert.equal(isAuditTokenFormat('cfa_' + 'a'.repeat(33)), false);
-});
-
-test('maskAuditToken masks the middle', () => {
-  const token = mintAuditTokenPlaintext();
-  const masked = maskAuditToken(token);
-  assert.ok(masked.includes('…'), 'contains ellipsis');
-  assert.ok(masked.length < token.length, 'shorter than original');
 });

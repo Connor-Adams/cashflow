@@ -436,7 +436,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   // SE CPP payable L42100 — both halves owed by the SE individual (S8 Part 4 line 14)
   if (seCppContrib.greaterThan(0)) {
     push('L42100', 'CPP contributions payable on self-employment income', seCppContrib, [],
-      '2 × computeCppEmployee(seNet)');
+      'computeCppSelfEmployedParts(seNet).total (2 × employee CPP)');
   }
 
   // Totals — onTax already includes the surtax (added before the DTC above)

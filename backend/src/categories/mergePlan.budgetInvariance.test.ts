@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { categoryAndDescendantNames, computeBudgetProgress } from '../budgets/budgetSpendMath';
 import type { CategoryTree } from './rollup';
 import { normalizeCategoryName } from './normalizeName';
-import { planCategoryMerges, subtreeNames, type PlanBudget, type PlanCategory } from './mergePlan';
+import { planCategoryMerges, subtreeNames, type PlanBudget, type PlanCategory } from '../../lib/categoryMergePlan';
 import {
   FIXTURE_BUDGETS, FIXTURE_CATEGORIES, FIXTURE_REF_COUNTS, FIXTURE_SPEND, HOUSEHOLD_ID,
   type FixtureBudget, type FixtureCategory, type FixtureSpend,

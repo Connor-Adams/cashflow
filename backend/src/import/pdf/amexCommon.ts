@@ -3,8 +3,8 @@ import { normalizeMerchant } from '../normalizeMerchant';
 import { MONTHS_SHORT, toIso, monthDayToIso, type Period } from './dateHelpers';
 import { amexBillFields } from './amexSummary';
 
-// Shared parsing core for American Express statement PDFs. The personal/Cobalt
-// (`amex.ts`) and Aeroplan Reserve (`amexReserve.ts`) statements share an
+// Shared parsing core for American Express statement PDFs (`amex.ts`, which
+// handles personal/Cobalt and Aeroplan Reserve statements). They share an
 // identical line layout — header line, section markers, two-date transaction
 // rows, standalone amount lines, FX/reference continuation lines, and printed
 // section totals. The only real differences are vendor sniffing, how the

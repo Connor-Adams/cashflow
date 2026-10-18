@@ -160,9 +160,10 @@ async function resolvePreference(
  * user has no subscriptions, or VAPID is unconfigured, no push is sent and the
  * in-app behavior is unchanged.
  *
- * Does NOT touch any email queue / mailer — that's the responsibility of
- * the channel-specific follow-up issue. Until that lands, `channelEmail`
- * is recorded purely for UI / preference-table purposes.
+ * Does NOT touch any email queue / mailer, and ignores `channelEmail`. Email
+ * delivery is per-source: the weekly digest (`runWeeklyDigest.ts`) reads the
+ * digest preference's `channelEmail` itself and sends via `sendEmail`. Other
+ * types enqueued here get in-app (+ push) only.
  *
  * `pushSender` is injectable for tests; production uses the default web-push
  * sender inside `fanOutWebPush`.

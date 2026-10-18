@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { D } from '../util/decimal';
-import { getOverrideKey, getOverrideKeysForKind, validateOverrideMap } from './overrideKeys';
+import { overrideKeyRegistry, getOverrideKey, validateOverrideMap } from './overrideKeys';
 import './corpOverrideKeys'; // side-effect: registers corp keys
 import type { CorpTaxYearFacts } from '../engine/types';
 
@@ -20,7 +20,7 @@ function emptyCorpFacts(): CorpTaxYearFacts {
 }
 
 test('corp registry exposes 8 P8a keys', () => {
-  const keys = getOverrideKeysForKind('corp').map((k) => k.key);
+  const keys = overrideKeyRegistry.filter((k) => k.kind === 'corp').map((k) => k.key);
   assert.ok(keys.includes('corp.activeIncome'));
   assert.ok(keys.includes('corp.passiveInvestmentIncome'));
   assert.ok(keys.includes('corp.aaiiTrailing'));
@@ -31,8 +31,8 @@ test('corp registry exposes 8 P8a keys', () => {
   assert.ok(keys.includes('corp.openingCda'));
 });
 
-test('all corp keys have kind=corp', () => {
-  for (const entry of getOverrideKeysForKind('corp')) {
+test('all corp.* keys have kind=corp', () => {
+  for (const entry of overrideKeyRegistry.filter((k) => k.key.startsWith('corp.'))) {
     assert.equal(entry.kind, 'corp');
   }
 });

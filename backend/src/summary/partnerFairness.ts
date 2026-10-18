@@ -399,33 +399,6 @@ export function projectSettlementContribution(
 }
 
 /**
- * Per-currency direct partner transfers: money the partner sent me (`in`,
- * amount>0) vs money I sent the partner (`out`, amount<0), over rows where the
- * counterparty is a partner Contact AND partnerShare === 0 (pure transfers;
- * shared-split rows stay in the fairness path to avoid double-counting). Non-loan
- * categories are intentionally NOT excluded — cash between partners is real
- * settlement money.
- */
-export function computePartnerTransferDelta(
-  rows: SharedTxnRow[],
-  partnerContactIds: Set<number>,
-): Map<string, PartnerTransferTotals> {
-  const out = new Map<string, PartnerTransferTotals>();
-  for (const r of rows) {
-    const cid = r.counterpartyContactId;
-    if (cid == null || !partnerContactIds.has(cid)) continue;
-    if (r.partnerShare !== 0) continue;
-    const n = r.amount;
-    if (!Number.isFinite(n) || n === 0) continue;
-    const acc = out.get(r.currency) ?? { in: 0, out: 0 };
-    if (n < 0) acc.out += -n;
-    else acc.in += n;
-    out.set(r.currency, acc);
-  }
-  return out;
-}
-
-/**
  * Build the per-currency fairness summary used by `GET /api/partner/fairness`.
  *
  * @param rows           Raw shared transaction rows (already scoped to household + date filter)

@@ -302,8 +302,6 @@ export function aggregateDashboard(
       metrics.totalPayments += amtU;
       merchantSummary.totalPayments += amtU;
       accountSummary.totalPayments += amtU;
-    // NOTE: income folds into totalCredits here (headline/merchant/account).
-    // Only the per-business aggregate below splits income out — see that block.
     } else if (positiveBucket === 'credit' && row.txnType === 'income') {
       // Income (direct deposits, payroll) is positive inflow but NOT a refund
       // against spend. Peel it into its own totalIncome line — mirroring the

@@ -28,11 +28,6 @@ export function computeCppEmployeeParts(
   return { firstTier, cpp2: cpp2Base.times(r.cpp.cpp2Rate) };
 }
 
-export function computeCppEmployee(employmentIncome: Decimal, r: RateTable): Decimal {
-  const { firstTier, cpp2 } = computeCppEmployeeParts(employmentIncome, r);
-  return firstTier.plus(cpp2);
-}
-
 /**
  * Enhanced CPP on employment income (L22215): the first-additional share of the
  * first-tier contribution, plus all of CPP2. The remainder of the first tier is base
@@ -76,8 +71,4 @@ export function computeCppSelfEmployedParts(
   const total = firstTier.plus(cpp2).times(2);
   const enhanced = enhancedCppDeduction(firstTier.times(2), cpp2.times(2), r);
   return { total, base: total.minus(enhanced), enhanced };
-}
-
-export function computeCppSelfEmployed(selfEmploymentIncome: Decimal, r: RateTable): Decimal {
-  return computeCppSelfEmployedParts(selfEmploymentIncome, r).total;
 }

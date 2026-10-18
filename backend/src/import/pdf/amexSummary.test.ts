@@ -9,7 +9,6 @@ import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PdfLine, PdfParseResult } from './types';
 import { amexParser } from './amex';
-import { amexReserveParser } from './amexReserve';
 import { parseAmexStatementSummary } from './amexSummary';
 import { sequelize, Account, Household } from '../../models';
 import { captureStatementBalance } from '../captureStatementBalance';
@@ -85,7 +84,7 @@ test('Reserve: reads New/Previous Balance, minimum and due date from the summary
     ...summaryBlock('$1,111.11', '$1,111.11', '$2,345.67', '$2,345.67', 'Oct 15, 2026', '$10.00'),
     ...coupon('$2,345.67', '$10.00', 'Oct 15, 2026'),
   ]);
-  const out = amexReserveParser.parse(lines, { defaultCurrency: 'CAD' });
+  const out = amexParser.parse(lines, { defaultCurrency: 'CAD' });
   assert.deepEqual(billOf(out), { statementBalance: 2345.67, minimumPayment: 10, paymentDueDate: '2026-10-15' });
   // Liabilities carry the amount owed, positive — the Credit Limit sharing the
   // Previous Balance line is not mistaken for the opening balance.
@@ -112,7 +111,7 @@ test('coupon only: falls back to the payment coupon when the summary block is ab
     minimumPayment: 15,
     paymentDueDate: '2026-03-09',
   });
-  const out = amexReserveParser.parse(lines, { defaultCurrency: 'CAD' });
+  const out = amexParser.parse(lines, { defaultCurrency: 'CAD' });
   assert.deepEqual(out.statementBalances, { opening: null, closing: 987.65 });
 });
 
@@ -125,7 +124,7 @@ test('credit balances (leading minus or trailing CR) come out negative', () => {
   assert.equal(summary.previousBalance, -120);
   assert.equal(summary.newBalance, -45.1);
   assert.equal(summary.minimumPayment, 0);
-  const out = amexReserveParser.parse(lines, { defaultCurrency: 'CAD' });
+  const out = amexParser.parse(lines, { defaultCurrency: 'CAD' });
   assert.deepEqual(out.statementBalances, { opening: -120, closing: -45.1 });
 });
 
@@ -138,7 +137,7 @@ test('only page 1 is read: summary-like lines on later pages are ignored', () =>
 });
 
 test('balance missing: no statementBalances and no statement balance on the header', () => {
-  const out = amexReserveParser.parse(page1([...RESERVE_TOP, ...FINE_PRINT]), { defaultCurrency: 'CAD' });
+  const out = amexParser.parse(page1([...RESERVE_TOP, ...FINE_PRINT]), { defaultCurrency: 'CAD' });
   assert.equal(out.statementBalances, undefined);
   assert.deepEqual(billOf(out), { statementBalance: null, minimumPayment: null, paymentDueDate: null });
 });

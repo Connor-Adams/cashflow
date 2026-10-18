@@ -106,8 +106,7 @@ async function applyConfig(def: JobDefinition): Promise<void> {
   logger.info({ name: def.name, cron: cfg.cron }, 'job_scheduled');
 }
 
-// Consumed by registry.test.ts via dynamic import; fallow's static resolver can't follow it.
-// fallow-ignore-next-line unused-export
+// Test seam: consumed by registry.test.ts via dynamic import.
 export async function reconcileOnceForTest(): Promise<void> {
   for (const def of definitions.values()) {
     await applyConfig(def);
@@ -149,8 +148,7 @@ export function stopAllJobs(): void {
   }
 }
 
-// Consumed by registry.test.ts + jobsApi integration test via dynamic import; fallow's static resolver can't follow it.
-// fallow-ignore-next-line unused-export
+// Test seam: consumed by registry.test.ts + jobsApi integration test via dynamic import.
 export function __resetForTest(): void {
   stopAllJobs();
   definitions.clear();

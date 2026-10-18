@@ -1,7 +1,7 @@
 import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Sequelize, DataTypes } from 'sequelize';
-import { planCategoryMerges, type PlanCategory } from '../../categories/mergePlan';
+import { planCategoryMerges, type PlanCategory } from '../../../lib/categoryMergePlan';
 
 let sequelize: Sequelize;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

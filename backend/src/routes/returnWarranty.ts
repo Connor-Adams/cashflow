@@ -59,21 +59,6 @@ export function isWithinReturnWindow(
   return deadline >= today;
 }
 
-/** True iff `deadline` falls within the next `withinDays` (inclusive), counting
- *  from `today`. Past deadlines are NOT "expiring soon" — they're expired. */
-export function isExpiringSoon(
-  deadline: string | null | undefined,
-  withinDays: number,
-  today: string = todayIso(),
-): boolean {
-  if (!deadline) return false;
-  if (deadline < today) return false;
-  const cutoff = new Date(`${today}T00:00:00Z`);
-  cutoff.setUTCDate(cutoff.getUTCDate() + withinDays);
-  const cutoffIso = isoDate(cutoff);
-  return deadline <= cutoffIso;
-}
-
 /** Days remaining between `today` and `deadline`. Negative when expired. */
 export function daysUntil(
   deadline: string | null | undefined,

@@ -182,17 +182,6 @@ after(async () => {
 
 // ---------------- GET /api/summary/dashboard ----------------
 
-test(
-  '/dashboard: NULL-amount row excluded from monetary totals but counted',
-  { skip: 'amount NOT NULL at DB level — guard at summary.ts:189 is dead code' },
-  () => {
-    // Documented in PR: the `if (amount == null) continue;` guard at
-    // summary.ts:189 is unreachable because Transaction.amount has
-    // allowNull:false at the DB level. Kept here for traceability;
-    // delete in a separate cleanup PR.
-  },
-);
-
 test('/dashboard: statement payment positives credit totalPayments and skip byCategory', async () => {
   await createTxn({
     householdId: householdAId,

@@ -208,32 +208,3 @@ export async function recordFinanceEvent(
     );
   }
 }
-
-/**
- * Internal utility: read the event stream for one entity, ordered
- * oldest-first (replay order). Useful for projections, undo, and
- * agent context.
- *
- * NOT exposed via HTTP directly — the public read API is the
- * /api/finance-events route which scopes by request household.
- */
-export async function readEntityEvents(args: {
-  householdId: number;
-  entityType: FinanceEventEntityType | string;
-  entityId: number;
-  limit?: number;
-}): Promise<FinanceEvent[]> {
-  const limit = args.limit ?? 500;
-  return FinanceEvent.findAll({
-    where: {
-      householdId: args.householdId,
-      entityType: args.entityType,
-      entityId: args.entityId,
-    },
-    order: [
-      ['createdAt', 'ASC'],
-      ['id', 'ASC'],
-    ],
-    limit,
-  });
-}

@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
-import { CommandPalette, GlobalCommandPalette } from './CommandPalette'
+import { CommandPalette } from './CommandPalette'
+import { useCommandPalette } from '@/hooks/useCommandPalette'
 import type { Command } from '@/lib/commands'
 
 void React
@@ -316,11 +317,17 @@ describe('CommandPalette — dismissal', () => {
 })
 
 describe('useCommandPalette — global shortcut', () => {
+  // Mirrors how Layout.tsx wires the hook into the controlled palette.
+  function GlobalPalette() {
+    const { open, setOpen } = useCommandPalette()
+    return <CommandPalette open={open} onOpenChange={setOpen} />
+  }
+
   function GlobalHarness() {
     return (
       <MemoryRouter>
         <LocationProbe />
-        <GlobalCommandPalette />
+        <GlobalPalette />
       </MemoryRouter>
     )
   }

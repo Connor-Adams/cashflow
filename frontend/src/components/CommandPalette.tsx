@@ -8,7 +8,7 @@
  *   - `useCommandPalette()` hook (in `@/hooks/useCommandPalette`) owns
  *     open/close state and the global keyboard listener.
  *   - `<CommandPalette>` is the controlled UI: pass `open` + `onOpenChange`.
- *   - `<GlobalCommandPalette>` wires the hook into `<Layout>` so every
+ *   - `<Layout>` wires the hook into `<CommandPalette>` so every
  *     authenticated page gets the palette for free.
  *
  * Behavior contract (mirrors ReviewInbox shortcut discipline):
@@ -23,7 +23,6 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type Keyboard
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Icon } from '@connor-adams/designsystem'
-import { useCommandPalette } from '@/hooks/useCommandPalette'
 import {
   filterCommands,
   groupCommandsByCategory,
@@ -343,13 +342,4 @@ export function CommandPalette({
   )
 
   return createPortal(portalNode, document.body)
-}
-
-/**
- * Convenience wrapper for `<Layout>`: owns the hook + renders the
- * palette. Drop into the layout tree to get global ⌘K everywhere.
- */
-export function GlobalCommandPalette() {
-  const { open, setOpen } = useCommandPalette()
-  return <CommandPalette open={open} onOpenChange={setOpen} />
 }

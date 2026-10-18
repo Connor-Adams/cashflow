@@ -13,8 +13,9 @@
  * - DELETE /api/tax/reserve/settings/:currency — delete one currency's row.
  * - GET    /api/tax/reserve/summary?scope&from&to&periodicity — per-period rollup.
  *
- * The pure helpers (`composeTaxReserve`, `bucketByPeriod`, `aggregateReserveRows`)
- * are exported for unit tests in test/taxReserve.test.ts.
+ * The pure helpers (`composeTaxReserve`, `parsePeriodicity`, `periodKey`,
+ * `aggregateReserveRollups`, `validateReservePatch`) are exported; reporting.ts
+ * reuses `composeTaxReserve` and `loadReserveRollups`.
  */
 import { Router } from 'express';
 import { type WhereOptions } from 'sequelize';
@@ -255,10 +256,9 @@ function round2(n: number): number {
 }
 
 /**
- * Pure single-period reserve calc — exposed so the dashboard tile and the
- * AI summarizer can reuse the same math without re-aggregating from raw
- * transactions. Mirrors the formula used by aggregateReserveRollups but
- * takes pre-aggregated totals.
+ * Pure single-period reserve calc over pre-aggregated totals. Used by the
+ * /api/v1 reporting routes (reporting.ts) so they report the same reserve
+ * as this tab. Mirrors the formula in aggregateReserveRollups.
  */
 export function composeTaxReserve(input: {
   businessIncome: number;
