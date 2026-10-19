@@ -14,6 +14,8 @@ import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildMailerDriverFromEnv,
+  MAILER_NOT_CONFIGURED,
+  NoopMailerDriver,
   parseMailerDriver,
   PermanentMailerError,
   sendEmail,
@@ -150,4 +152,35 @@ test('sendEmail: configurable backoff and maxAttempts', async () => {
   );
   assert.equal(res.ok, false);
   assert.equal(res.attempts, 2);
+});
+
+test('sendEmail: noop driver reports not-sent (skipped), never ok', async () => {
+  // With MAILER_DRIVER/SMTP_* unset the noop driver is selected. It must NOT
+  // claim delivery — callers (the weekly digest) would otherwise count an
+  // email that never left the process as sent.
+  const drv = new NoopMailerDriver();
+  setMailerDriverForTest(drv);
+  const res = await sendEmail(
+    { to: 'a@b.com', subject: 's', html: '<p>h</p>', text: 't' },
+    { backoffMs: 1 },
+  );
+  assert.equal(res.ok, false);
+  assert.equal(res.skipped, true);
+  assert.equal(res.driver, 'noop');
+  assert.equal(res.error, MAILER_NOT_CONFIGURED);
+  assert.equal(res.attempts, 0, 'nothing was attempted against a real transport');
+  // Still recorded for dev/test visibility.
+  assert.equal(drv.sent.length, 1);
+});
+
+test('sendEmail: a real driver failure is not marked skipped', async () => {
+  const drv = new RecordingDriver();
+  drv.permanentError = true;
+  setMailerDriverForTest(drv);
+  const res = await sendEmail(
+    { to: 'bad', subject: 's', html: '<p>h</p>', text: 't' },
+    { backoffMs: 1 },
+  );
+  assert.equal(res.ok, false);
+  assert.notEqual(res.skipped, true);
 });

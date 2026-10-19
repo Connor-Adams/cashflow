@@ -1280,8 +1280,10 @@ export type ForecastResponse = {
 export type AppConfig = {
   logoDevToken: string | null;
   quoteProviderConfigured: boolean;
-  /** Web-push VAPID public key (issue #651), or null when push is unconfigured
-   *  server-side — the client then hides the "Enable browser alerts" control. */
+  /** Web-push VAPID public key (issue #651), or null unless push is fully
+   *  configured server-side (public AND private key) — the client then treats
+   *  push as unavailable (hides "Enable browser alerts", disables the
+   *  Settings push toggles). */
   vapidPublicKey: string | null;
 };
 

@@ -21,7 +21,9 @@
  *      type once it appears in either the preference table or the
  *      notifications table.
  *   3. If `channelInApp` is true, write a row into `notifications`.
- *      Otherwise skip the write entirely (the user has muted this type).
+ *      Independently, if `channelPush` is true, fan web-push out. The two
+ *      channels are separate toggles: in-app OFF does not mute push. Only
+ *      both OFF mutes the type.
  *   4. Never send email. Email channel is wired in the downstream issues
  *      that depend on this one — invoking those queues is NOT this helper's
  *      job; otherwise we'd accidentally couple every event-source feature
@@ -52,6 +54,8 @@ export type EnqueueNotificationPayload = {
 
 export type EnqueueNotificationResult =
   | { status: 'created'; notification: Notification }
+  /** In-app is off for this type but push is on: push attempted, no row. */
+  | { status: 'push_only' }
   | { status: 'muted' };
 
 /** Wire shape for a single preference row returned by the prefs API. */
@@ -149,10 +153,12 @@ async function resolvePreference(
 
 /**
  * Enqueue a notification for a user. Writes the in-app row when the user's
- * preference for `type` allows it; otherwise no-ops.
+ * `channelInApp` preference for `type` allows it, and fans out web-push when
+ * `channelPush` does. Each channel is honored on its own; only when both are
+ * off is the notification muted.
  *
- * Web-push (issue #651): after a successful in-app write, if the user's
- * `channelPush` is enabled, fan a web-push out to every active subscription
+ * Web-push (issue #651): if the user's `channelPush` is enabled (regardless
+ * of `channelInApp`), fan a web-push out to every active subscription
  * the user owns (see `fanOutWebPush`). This is the single dispatch seam, so
  * every event source (budget breach, future types) gets push for free without
  * coupling each job to the push library. Push delivery is best-effort: a send
@@ -178,18 +184,20 @@ export async function enqueueNotification(
   validatePayload(payload);
 
   const pref = await resolvePreference(userId, type);
-  if (!pref.channelInApp) {
+  if (!pref.channelInApp && !pref.channelPush) {
     return { status: 'muted' };
   }
 
-  const notification = await Notification.create({
-    userId,
-    type,
-    severity: payload.severity ?? 'info',
-    title: payload.title,
-    body: payload.body,
-    dataJson: payload.dataJson ?? null,
-  });
+  const notification = pref.channelInApp
+    ? await Notification.create({
+        userId,
+        type,
+        severity: payload.severity ?? 'info',
+        title: payload.title,
+        body: payload.body,
+        dataJson: payload.dataJson ?? null,
+      })
+    : null;
 
   if (pref.channelPush) {
     try {
@@ -208,7 +216,7 @@ export async function enqueueNotification(
     }
   }
 
-  return { status: 'created', notification };
+  return notification ? { status: 'created', notification } : { status: 'push_only' };
 }
 
 function serializeRow(

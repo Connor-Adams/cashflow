@@ -9,11 +9,22 @@ import type {
 /**
  * Notification preferences settings (issues #266 / #651 / #796).
  *
- * Lists each known notification type with per-channel toggles (in-app / email
- * / push). For the weekly spend digest it additionally exposes a send-day
- * picker (#796). Saves via `PATCH /api/users/me/notifications/preferences/:type`
- * with optimistic UI and an inline error fallback that reverts on failure.
+ * Lists each known notification type with per-channel toggles. Every toggle
+ * shown must actually do something:
+ *  - In-app and push are independent channels for every type.
+ *  - Email is shown ONLY for the weekly digest — it is the only type that
+ *    sends email (`runWeeklyDigest`); the generic dispatcher never does.
+ *  - Push is disabled, with the reason, when the server can't send push or
+ *    the browser can't receive it. Turning push on subscribes this browser
+ *    first (via `usePushSubscription`), so the toggle is never an empty
+ *    preference with no endpoint behind it.
+ * The digest additionally exposes a send-day picker (#796). Saves via
+ * `PATCH /api/users/me/notifications/preferences/:type` with optimistic UI and
+ * an inline error fallback that reverts on failure.
  */
+
+/** The only notification type that has an email channel. */
+const EMAIL_CAPABLE_TYPE = 'digest.weekly'
 
 const DAYS: { value: number; label: string }[] = [
   { value: 0, label: 'Sunday' },
@@ -31,6 +42,10 @@ const TYPE_LABELS: Record<string, { label: string; sub?: string }> = {
     sub: 'A summary of spend, insights, and what’s coming up.',
   },
   'budget.breach': { label: 'Budget alerts' },
+  'job.failed': {
+    label: 'Background job failures',
+    sub: 'When a scheduled or manual job run fails.',
+  },
 }
 
 function Toggle({
@@ -62,8 +77,16 @@ export function NotificationsTab() {
   const [prefs, setPrefs] = useState<NotificationPreference[]>([])
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading')
   const [rowError, setRowError] = useState<Record<string, string>>({})
-  const { permission } = usePushSubscription()
-  const pushBlocked = permission === 'denied'
+  const push = usePushSubscription()
+  const pushBlocked = push.permission === 'denied'
+  const pushUnavailableReason = !push.serverConfigured
+    ? 'Push notifications aren’t set up on this server.'
+    : !push.browserSupported
+      ? 'This browser doesn’t support push notifications.'
+      : pushBlocked
+        ? 'Push blocked in your browser. Enable notifications in your browser settings to receive push.'
+        : null
+  const pushDisabled = pushUnavailableReason !== null || push.busy
 
   const load = useCallback(async () => {
     setStatus('loading')
@@ -107,6 +130,25 @@ export function NotificationsTab() {
     [prefs],
   )
 
+  const togglePush = useCallback(
+    async (type: string, next: boolean) => {
+      // Turning push on is meaningless without a browser subscription for
+      // the server to send to — create one first, and only save on success.
+      if (next && !push.subscribed) {
+        const ok = await push.subscribe()
+        if (!ok) {
+          setRowError((e) => ({
+            ...e,
+            [type]: 'Couldn’t enable push in this browser. Check your notification permission and try again.',
+          }))
+          return
+        }
+      }
+      await save(type, { channelPush: next } as Partial<NotificationPreference>)
+    },
+    [push, save],
+  )
+
   if (status === 'loading') {
     return (
       <div className="space-y-2" aria-busy="true">
@@ -141,10 +183,15 @@ export function NotificationsTab() {
         </p>
       </div>
 
+      {pushUnavailableReason && (
+        <p className="text-xs text-warning">{pushUnavailableReason}</p>
+      )}
+
       <ul className="space-y-3">
         {prefs.map((p) => {
           const meta = TYPE_LABELS[p.type] ?? { label: p.type }
           const isDigest = p.type === 'digest.weekly'
+          const hasEmail = p.type === EMAIL_CAPABLE_TYPE
           return (
             <li key={p.type} className="rounded-md border border-border bg-card p-4">
               <div className="mb-2">
@@ -158,18 +205,18 @@ export function NotificationsTab() {
                   checked={p.channelInApp}
                   onChange={(v) => void save(p.type, { channelInApp: v } as Partial<NotificationPreference>)}
                 />
-                <Toggle
-                  label="Email"
-                  checked={p.channelEmail}
-                  onChange={(v) => void save(p.type, { channelEmail: v } as Partial<NotificationPreference>)}
-                />
+                {hasEmail && (
+                  <Toggle
+                    label="Email"
+                    checked={p.channelEmail}
+                    onChange={(v) => void save(p.type, { channelEmail: v } as Partial<NotificationPreference>)}
+                  />
+                )}
                 <Toggle
                   label="Push"
-                  checked={p.channelPush}
-                  disabled={pushBlocked}
-                  onChange={(v) =>
-                    void save(p.type, { channelPush: v } as Partial<NotificationPreference>)
-                  }
+                  checked={p.channelPush && pushUnavailableReason === null}
+                  disabled={pushDisabled}
+                  onChange={(v) => void togglePush(p.type, v)}
                 />
                 {isDigest && (
                   <label className="inline-flex items-center gap-1.5 text-sm">
@@ -194,12 +241,6 @@ export function NotificationsTab() {
                 )}
               </div>
 
-              {pushBlocked && (
-                <p className="mt-2 text-xs text-warning">
-                  Push blocked in your browser. Enable notifications in your browser settings to
-                  receive push.
-                </p>
-              )}
               {rowError[p.type] && (
                 <p className="mt-2 text-xs text-danger">{rowError[p.type]}</p>
               )}
