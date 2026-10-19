@@ -8,8 +8,11 @@
  * transport.
  *
  * Drivers:
- *  - 'noop'      → log + record + return success. Used in tests and as the
- *                  safe default when SMTP credentials are missing.
+ *  - 'noop'      → log + record, then report NOT sent (`ok: false,
+ *                  skipped: true`, error `MAILER_NOT_CONFIGURED`). The safe
+ *                  default when SMTP credentials are missing — it must never
+ *                  claim delivery, or callers count mail that never left the
+ *                  process as sent.
  *  - 'smtp'      → SMTP via nodemailer when configured. We lazily require()
  *                  nodemailer so a server boot without nodemailer installed
  *                  still works as long as MAILER_DRIVER !== 'smtp'.
@@ -38,7 +41,16 @@ export interface SendEmailResult {
   attempts: number;
   driver: string;
   error?: string;
+  /**
+   * True when nothing was attempted because no real transport is configured
+   * (noop driver). Distinct from a delivery failure: callers should record a
+   * skip, not page on it.
+   */
+  skipped?: boolean;
 }
+
+/** `error` value of a `skipped` result — the noop driver delivers nothing. */
+export const MAILER_NOT_CONFIGURED = 'mailer not configured';
 
 /**
  * What a driver promises to do. `send()` may throw or reject — the outer
@@ -68,8 +80,9 @@ function isPermanentError(err: unknown): boolean {
 // ---- Drivers ------------------------------------------------------------
 
 /**
- * Records every call. Used both in tests (assertion) and in dev with
- * `MAILER_DRIVER=noop` so logs show what *would* have been sent.
+ * Records every call so logs (and tests) show what *would* have been sent.
+ * Selected whenever no real transport is configured. `sendEmail` reports a
+ * noop "send" as `skipped`, never as delivered.
  */
 export class NoopMailerDriver implements MailerDriver {
   name = 'noop' as const;
@@ -225,7 +238,8 @@ async function sleep(ms: number): Promise<void> {
 /**
  * Send an email with retry + backoff. Never throws — always returns a
  * result object so callers can `if (!result.ok)` cleanly. Per-driver
- * permanent errors short-circuit retries.
+ * permanent errors short-circuit retries. With the noop driver nothing is
+ * sent: the result is `{ ok: false, skipped: true }`.
  *
  * The sleep delay between attempts is overridable for tests (default base
  * 200ms doubles each attempt: 200, 400, 800).
@@ -235,6 +249,17 @@ export async function sendEmail(
   options: { backoffMs?: number; maxAttempts?: number } = {},
 ): Promise<SendEmailResult> {
   const driver = getMailerDriver();
+  if (driver instanceof NoopMailerDriver) {
+    // No transport: record what would have gone out, then say so honestly.
+    await driver.send(opts);
+    return {
+      ok: false,
+      skipped: true,
+      attempts: 0,
+      driver: driver.name,
+      error: MAILER_NOT_CONFIGURED,
+    };
+  }
   const maxAttempts = options.maxAttempts ?? MAILER_MAX_ATTEMPTS;
   const backoffMs = options.backoffMs ?? BACKOFF_BASE_MS;
 

@@ -18,6 +18,12 @@ export interface JobRunView {
 export interface JobHandlerResult {
   /** Optional structured summary persisted as JSON (truncated to 2KB). */
   summary?: Record<string, unknown>;
+  /**
+   * Set when part of the run's work was skipped for a non-failure reason
+   * (e.g. "email not sent: mailer not configured"). The run is recorded with
+   * status `skipped` and this message; it never counts as a failure.
+   */
+  skipped?: string;
 }
 
 export type JobHandler = () => Promise<JobHandlerResult | void>;

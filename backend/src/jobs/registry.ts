@@ -100,6 +100,8 @@ async function applyConfig(def: JobDefinition): Promise<void> {
     return;
   }
   const task = cron.schedule(cfg.cron, async () => {
+    // No explicit recipients: on failure the runner notifies every household
+    // owner (`job.failed`), the same audience a manual run notifies.
     await tick(def);
   });
   scheduled.set(def.name, { task, cron: cfg.cron, enabled: cfg.enabled });
