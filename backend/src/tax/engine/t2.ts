@@ -3,6 +3,7 @@ import type { CorpTaxYearFacts, CorpTaxReturn, RateTable, TaxLine } from './type
 import { computeAaii } from './aaii';
 import { sbdEligibleIncome } from './sbd';
 import { computeIntegration, isConnectedSource } from './integration';
+import { capitalGainOf } from './capital-gains';
 
 export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   // Fact-assembly caveats ride along with the engine's own warnings so the
@@ -64,7 +65,7 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   // no 250,000 threshold. That rate is not always 66.67%: the June 2024 increase
   // was never enacted, so 2025 and 2026 carry 0.5 and only 2024 still holds
   // 0.666667. Read the field, never the era.
-  const grossGains = sumD(facts.capitalGainEvents.map(e => e.proceeds.minus(e.acb).minus(e.outlays)));
+  const grossGains = sumD(facts.capitalGainEvents.map(capitalGainOf));
   const corpInclusionRate = r.capitalGainsInclusionHigh ?? r.capitalGainsInclusion;
   const includableGains = maxZero(grossGains.times(corpInclusionRate));
   push('L445', 'Taxable capital gains', includableGains);

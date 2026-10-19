@@ -1,6 +1,20 @@
 import { D, Decimal, maxZero } from '../util/decimal';
 import type { CapGainEvent, RateTable } from './types';
 
+/**
+ * One event's capital gain (negative for a loss) after any loss-denial rule:
+ * a superficial loss (s.40(2)(g)(i), individuals) or a stop-loss suspension
+ * (s.40(3.4)(a), corporations) gives back the denied part of a loss. A gain is
+ * never adjusted. Every engine path that sums capital gains goes through this.
+ */
+export function capitalGainOf(e: CapGainEvent): Decimal {
+  const rawGain = e.proceeds.minus(e.acb).minus(e.outlays);
+  if (!rawGain.lessThan(0)) return rawGain;
+  return rawGain
+    .plus(e.superficialLossDenied ?? D('0'))
+    .plus(e.stopLossSuspended ?? D('0'));
+}
+
 export type CapGainsResult = {
   gross: Decimal;
   inclusionRate: Decimal;
@@ -19,17 +33,7 @@ export function taxableCapitalGains(
   r: RateTable,
   netCapLossCarryforward: Decimal
 ): CapGainsResult {
-  const gross = events.reduce<Decimal>(
-    (acc, e) => {
-      const rawGain = e.proceeds.minus(e.acb).minus(e.outlays);
-      const denied = e.superficialLossDenied ?? D('0');
-      const adjusted = rawGain.lessThan(0)
-        ? rawGain.plus(denied)
-        : rawGain;
-      return acc.plus(adjusted);
-    },
-    D('0')
-  );
+  const gross = events.reduce<Decimal>((acc, e) => acc.plus(capitalGainOf(e)), D('0'));
   const includable = computePersonalInclusion(gross, r);
   if (includable.lessThanOrEqualTo(0)) {
     return {
