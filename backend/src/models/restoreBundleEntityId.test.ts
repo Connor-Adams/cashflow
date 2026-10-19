@@ -61,7 +61,7 @@ test('restore re-derives entity_id to the TARGET household personal entity, igno
 
   // Restore into a DIFFERENT (empty) target household.
   const target = await Household.create({ name: 'Target' });
-  const result = await restoreBundle(sequelize, payload, { householdId: target.id, mode: 'merge' });
+  const result = await restoreBundle(sequelize, payload, { householdId: target.id });
   assert.equal(result.inserted.accounts, 1);
   assert.equal(result.inserted.transactions, 1);
 
@@ -95,7 +95,7 @@ test('restore re-derives even a legacy bundle whose rows carry NULL entity_id', 
   });
 
   const target = await Household.create({ name: 'Target2' });
-  await restoreBundle(sequelize, payload, { householdId: target.id, mode: 'merge' });
+  await restoreBundle(sequelize, payload, { householdId: target.id });
 
   const accountsNull = await Account.count({ where: { householdId: target.id, entityId: null } });
   assert.equal(accountsNull, 0, 'no restored account left with NULL entity_id');

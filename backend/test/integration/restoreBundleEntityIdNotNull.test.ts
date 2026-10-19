@@ -64,7 +64,6 @@ test('restore into a NOT NULL target succeeds and fills entity_id up front', asy
   const target = await models.Household.create({ name: 'Target' });
   const result = await restoreBundle(models.sequelize, payload, {
     householdId: target.id,
-    mode: 'merge',
   });
   assert.equal(result.inserted.accounts, 1);
   assert.equal(result.inserted.transactions, 1);
@@ -102,7 +101,7 @@ test('restore of a legacy bundle carrying NULL entity_id also succeeds under NOT
   });
 
   const target = await models.Household.create({ name: 'Target2' });
-  await restoreBundle(models.sequelize, payload, { householdId: target.id, mode: 'merge' });
+  await restoreBundle(models.sequelize, payload, { householdId: target.id });
 
   const acctNull = await models.Account.count({
     where: { householdId: target.id, entityId: null },

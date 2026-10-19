@@ -3,7 +3,7 @@
  *
  *   POST /api/sync/backup         create a passphrase-encrypted bundle
  *   POST /api/sync/restore/preview decrypt + report what WOULD restore
- *   POST /api/sync/restore         decrypt + apply (merge or replace)
+ *   POST /api/sync/restore         decrypt + apply (merge into an empty household)
  *   GET  /api/sync/history         list past backup/restore events
  *
  * Endpoints are scoped to the caller's active household. Rate-limited
@@ -23,9 +23,10 @@ import {
   bundleStats,
   decryptBundle,
   encryptBundle,
+  type BundlePayload,
 } from '../sync/bundleFormat';
 import { buildBundle } from '../sync/buildBundle';
-import { restoreBundle, type RestoreMode } from '../sync/restoreBundle';
+import { restoreBundle } from '../sync/restoreBundle';
 import { aiSuggestLimiter } from './aiRateLimit';
 
 const router = Router();
@@ -49,9 +50,9 @@ function badRequest(message: string): Error & { status: number } {
 
 /**
  * Backup and restore operate on the WHOLE household: backup exfiltrates every
- * member's data, and restore (mode=replace) wipes it. These are owner-gated by
- * the same posture household member removal already enforces — a non-owner
- * member must not be able to export or destroy the household (#836).
+ * member's data, and restore writes into it. These are owner-gated by the same
+ * posture household member removal already enforces — a non-owner member must
+ * not be able to export or overwrite the household (#836).
  *
  * Gate via the shared {@link isHouseholdOwner}, which also admits a superadmin
  * (consistent with feedback review and the rest of the owner-gated surface). A
@@ -123,6 +124,31 @@ router.post('/backup', aiSuggestLimiter, async (req, res, next) => {
 });
 
 /**
+ * Validate `{ passphrase, bundle }` on a restore/preview request and decrypt
+ * the bundle. Every failure is a 400 — a bad passphrase or tampered file is
+ * user error, not a server fault.
+ */
+function decryptRequestBundle(req: Request): { bundle: string; payload: BundlePayload } {
+  const passphrase = validatePassphrase(req.body?.passphrase);
+  const bundle = req.body?.bundle;
+  if (typeof bundle !== 'string' || bundle.length === 0) {
+    throw badRequest('bundle is required (base64 string)');
+  }
+  if (bundle.length > MAX_BUNDLE_BYTES) {
+    throw badRequest('bundle exceeds maximum allowed size');
+  }
+  try {
+    return { bundle, payload: decryptBundle(passphrase, bundle) };
+  } catch (err) {
+    const message =
+      err instanceof Error && /version|schema|too short|empty/.test(err.message)
+        ? err.message
+        : 'Unable to decrypt bundle (bad passphrase or tampered file)';
+    throw badRequest(message);
+  }
+}
+
+/**
  * POST /api/sync/restore/preview { passphrase, bundle }
  *
  * Decrypts the bundle and returns row counts + source metadata
@@ -132,25 +158,7 @@ router.post('/backup', aiSuggestLimiter, async (req, res, next) => {
 router.post('/restore/preview', aiSuggestLimiter, async (req, res, next) => {
   try {
     requireOwner(req);
-    const passphrase = validatePassphrase(req.body?.passphrase);
-    const bundle = req.body?.bundle;
-    if (typeof bundle !== 'string' || bundle.length === 0) {
-      throw badRequest('bundle is required (base64 string)');
-    }
-    if (bundle.length > MAX_BUNDLE_BYTES) {
-      throw badRequest('bundle exceeds maximum allowed size');
-    }
-
-    let payload;
-    try {
-      payload = decryptBundle(passphrase, bundle);
-    } catch (err) {
-      const message =
-        err instanceof Error && /version|schema|too short|empty/.test(err.message)
-          ? err.message
-          : 'Unable to decrypt bundle (bad passphrase or tampered file)';
-      throw badRequest(message);
-    }
+    const { bundle, payload } = decryptRequestBundle(req);
 
     const stats = bundleStats(bundle, payload);
     res.json({
@@ -168,49 +176,46 @@ router.post('/restore/preview', aiSuggestLimiter, async (req, res, next) => {
 });
 
 /**
- * POST /api/sync/restore { passphrase, bundle, mode }
+ * Restore is merge-only. Replace mode (wipe the household, then insert) was
+ * removed because the wipe ON DELETE CASCADEs into receipts, order links,
+ * labels, tax metadata, investment activity, etc. that the bundle never
+ * carries. An old client still sending mode=replace gets a 400 — never a wipe.
+ * An absent `mode` means merge; anything else is rejected rather than guessed.
+ */
+function validateRestoreMode(value: unknown): void {
+  if (value === undefined || value === null || value === 'merge') return;
+  if (value === 'replace') {
+    throw badRequest(
+      'Replace mode has been removed: it deleted data the backup cannot restore (receipts, labels, tax metadata, investment activity). Restore with mode=merge into an empty household instead.',
+    );
+  }
+  throw badRequest(`Unsupported restore mode ${JSON.stringify(value)}; only "merge" is supported`);
+}
+
+/**
+ * POST /api/sync/restore { passphrase, bundle, mode? }
  *
- * Decrypts the bundle, applies it to the active household. `mode` is
- * 'merge' (default — refuses if existing rows present) or 'replace'
- * (wipes the V1 tables for this household first). Records a row in
- * sync_backups for audit.
+ * Decrypts the bundle and merges it into the active household, which must be
+ * empty (restoreBundle refuses otherwise). `mode` is optional and may only be
+ * 'merge'. Records a row in sync_backups for audit.
  */
 router.post('/restore', aiSuggestLimiter, async (req, res, next) => {
   try {
     const auth = currentAuth(req);
     requireOwner(req);
-    const passphrase = validatePassphrase(req.body?.passphrase);
-    const bundle = req.body?.bundle;
-    if (typeof bundle !== 'string' || bundle.length === 0) {
-      throw badRequest('bundle is required (base64 string)');
-    }
-    if (bundle.length > MAX_BUNDLE_BYTES) {
-      throw badRequest('bundle exceeds maximum allowed size');
-    }
-    const mode: RestoreMode = req.body?.mode === 'replace' ? 'replace' : 'merge';
-
-    let payload;
-    try {
-      payload = decryptBundle(passphrase, bundle);
-    } catch (err) {
-      const message =
-        err instanceof Error && /version|schema|too short|empty/.test(err.message)
-          ? err.message
-          : 'Unable to decrypt bundle (bad passphrase or tampered file)';
-      throw badRequest(message);
-    }
+    validateRestoreMode(req.body?.mode);
+    const { bundle, payload } = decryptRequestBundle(req);
 
     let result;
     try {
       result = await restoreBundle(sequelize, payload, {
         householdId: auth.household.id,
         userId: auth.user.id,
-        mode,
         dryRun: false,
       });
     } catch (err) {
-      // restoreBundle's "merge with existing rows" branch is user-facing
-      // — surface as 400 so the UI can prompt for replace mode.
+      // restoreBundle's "target household is not empty" refusal is
+      // user-facing — surface it as a 400 the UI can show verbatim.
       const message = err instanceof Error ? err.message : 'restore failed';
       if (/Refusing to restore/i.test(message)) {
         throw badRequest(message);
@@ -230,7 +235,6 @@ router.post('/restore', aiSuggestLimiter, async (req, res, next) => {
     });
 
     res.json({
-      mode,
       inserted: result.inserted,
       skipped: result.skipped,
       sourceHouseholdId: payload.sourceHouseholdId,

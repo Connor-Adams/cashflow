@@ -7,7 +7,9 @@
  *   - POST /api/sync/restore/preview decrypts without writing.
  *   - POST /api/sync/restore (merge) refuses if the target household
  *     already has data.
- *   - POST /api/sync/restore (replace) wipes + re-inserts cleanly.
+ *   - POST /api/sync/restore with mode=replace is rejected (400) and wipes
+ *     nothing — replace mode was removed.
+ *   - POST /api/sync/restore (merge) restores into an empty household.
  *   - Wrong passphrase / tampered bundle / wrong size are rejected.
  *   - Cross-household isolation: a bundle from user A restored by
  *     user B lands in user B's household, never bleeding rows back.
@@ -23,12 +25,12 @@ import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestD
 
 let app: import('express').Express;
 let primaryAgent: ReturnType<typeof request.agent>;
-let otherAgent: ReturnType<typeof request.agent>;
 let memberAgent: ReturnType<typeof request.agent>;
 let superadminMemberAgent: ReturnType<typeof request.agent>;
 let primaryHouseholdId: number;
 let primaryAccountId: number;
-let otherHouseholdId: number;
+let freshAgent: ReturnType<typeof request.agent>;
+let freshHouseholdId: number;
 let testDb: PgTestDb;
 
 type Seeded = {
@@ -45,6 +47,8 @@ async function seed(
     householdId?: number;
     accountId?: number;
     globalRole?: 'user' | 'superadmin';
+    /** Seed no account, leaving the household empty (a merge-restore target). */
+    noAccount?: boolean;
   } = {},
 ): Promise<Seeded> {
   const models = await import('../../src/models');
@@ -69,7 +73,7 @@ async function seed(
     userId: user.id,
     role: opts.role ?? 'owner',
   });
-  if (opts.accountId != null) {
+  if (opts.accountId != null || opts.noAccount) {
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24);
     await models.Session.create({
@@ -81,7 +85,7 @@ async function seed(
       token,
       householdId: household.id,
       userId: user.id,
-      accountId: opts.accountId,
+      accountId: opts.accountId ?? 0,
     };
   }
   const account = await models.Account.create({
@@ -201,10 +205,11 @@ before(async () => {
     amount: '21.00',
   });
 
-  const other = await seed('Other');
-  otherHouseholdId = other.householdId;
-  otherAgent = testAgent(app);
-  otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
+  // An owner whose household is EMPTY — the only valid merge-restore target.
+  const fresh = await seed('Fresh', { noAccount: true });
+  freshHouseholdId = fresh.householdId;
+  freshAgent = testAgent(app);
+  freshAgent.jar.setCookie(`cashflow_session=${fresh.token}; Path=/`);
 
   // A non-owner *member* of the primary household — sync backup/restore
   // must be 403 for this role (#836).
@@ -305,15 +310,17 @@ test('POST /api/sync/restore in merge mode refuses when target has rows', async 
     });
   // Target (primary) already has 2 txns + 1 account, so merge refuses.
   assert.equal(restore.status, 400);
-  assert.match(restore.body.error, /Refusing to restore|existing rows|replace/i);
+  assert.match(restore.body.error, /Refusing to restore|existing rows/i);
 });
 
-test('POST /api/sync/restore in replace mode wipes + re-inserts', async () => {
+test('POST /api/sync/restore with mode=replace is rejected and wipes nothing', async () => {
   const backup = await primaryAgent
     .post('/api/sync/backup')
     .send({ passphrase: 'replace-mode-passphrase' });
   assert.equal(backup.status, 200);
-  const beforeCounts = backup.body.tableCounts as Record<string, number>;
+
+  const models = await import('../../src/models');
+  const before = await models.Transaction.count({ where: { householdId: primaryHouseholdId } });
 
   const restore = await primaryAgent
     .post('/api/sync/restore')
@@ -322,70 +329,72 @@ test('POST /api/sync/restore in replace mode wipes + re-inserts', async () => {
       bundle: backup.body.bundle,
       mode: 'replace',
     });
-  assert.equal(restore.status, 200);
-  assert.equal(restore.body.mode, 'replace');
-  // Replace mode wipes target first, then inserts every row.
-  assert.equal(restore.body.inserted.transactions, beforeCounts.transactions);
-  assert.equal(restore.body.inserted.accounts, beforeCounts.accounts);
+  assert.equal(restore.status, 400);
+  assert.match(restore.body.error, /replace/i);
+
+  const after = await models.Transaction.count({ where: { householdId: primaryHouseholdId } });
+  assert.equal(after, before, 'replace must not wipe the household');
 });
 
-test('cross-household: bundle from primary restored by other lands in OTHER household', async () => {
-  // Re-seed primary because the replace test above wiped + re-inserted.
-  // Fresh backup of the current primary state.
+test('cross-household: bundle from primary merge-restored into an empty household lands THERE', async () => {
   const backup = await primaryAgent
     .post('/api/sync/backup')
     .send({ passphrase: 'cross-household-passphrase' });
   assert.equal(backup.status, 200);
 
-  // Other has its own seeded account, so use replace mode to allow
-  // the restore. The cross-household invariant we care about is that
-  // the restored rows land in OTHER's household_id, not primary's.
-  const restore = await otherAgent
+  const models = await import('../../src/models');
+  const primaryBefore = await models.Transaction.count({
+    where: { householdId: primaryHouseholdId },
+  });
+
+  // Merge (the default) into the fresh, empty household. The invariant we
+  // care about is that the restored rows land in FRESH's household_id.
+  const restore = await freshAgent
     .post('/api/sync/restore')
     .send({
       passphrase: 'cross-household-passphrase',
       bundle: backup.body.bundle,
-      mode: 'replace',
     });
   assert.equal(restore.status, 200);
   assert.ok(restore.body.inserted.transactions > 0);
 
-  // Rows must be scoped to OTHER's household_id, not primary's.
-  const models = await import('../../src/models');
-  const otherCount = await models.Transaction.count({
-    where: { householdId: otherHouseholdId },
+  const freshCount = await models.Transaction.count({
+    where: { householdId: freshHouseholdId },
   });
-  assert.ok(otherCount > 0, 'other household has restored rows');
+  assert.equal(freshCount, restore.body.inserted.transactions, 'fresh household has restored rows');
 
-  // Primary's count must be unchanged by the restore into Other.
-  const primaryCount = await models.Transaction.count({
+  // Primary's count must be unchanged by the restore into Fresh.
+  const primaryAfter = await models.Transaction.count({
     where: { householdId: primaryHouseholdId },
   });
-  assert.ok(primaryCount > 0, 'primary household still has its rows');
+  assert.equal(primaryAfter, primaryBefore, 'primary household untouched');
 });
 
 test('GET /api/sync/history lists past backup + restore events', async () => {
-  const res = await primaryAgent.get('/api/sync/history');
-  assert.equal(res.status, 200);
-  assert.ok(Array.isArray(res.body.data));
-  // We've created several backups + at least one restore by now.
-  assert.ok(res.body.data.length >= 3);
-  const kinds = new Set(res.body.data.map((r: { kind: string }) => r.kind));
-  assert.ok(kinds.has('backup'));
-  assert.ok(kinds.has('restore'));
+  const primary = await primaryAgent.get('/api/sync/history');
+  assert.equal(primary.status, 200);
+  assert.ok(Array.isArray(primary.body.data));
+  // Primary has made several backups by now.
+  assert.ok(primary.body.data.length >= 3);
+  assert.ok(primary.body.data.some((r: { kind: string }) => r.kind === 'backup'));
+
+  // The successful restore was into the fresh household, so it is logged there.
+  const fresh = await freshAgent.get('/api/sync/history');
+  assert.equal(fresh.status, 200);
+  assert.ok(fresh.body.data.some((r: { kind: string }) => r.kind === 'restore'));
 });
 
 test('GET /api/sync/history is household-scoped', async () => {
-  // Other household has at most one restore event so far.
+  // Fresh's restore event must not appear in primary's history.
   const primary = await primaryAgent.get('/api/sync/history');
-  const other = await otherAgent.get('/api/sync/history');
-  // Different histories — primary >= other AND no overlap by id.
+  const fresh = await freshAgent.get('/api/sync/history');
+  // Different histories — no overlap by id.
   const primaryIds = new Set(primary.body.data.map((r: { id: number }) => r.id));
-  for (const row of other.body.data as Array<{ id: number }>) {
+  for (const row of fresh.body.data as Array<{ id: number }>) {
     assert.equal(
       primaryIds.has(row.id),
       false,
-      `row ${row.id} from other household leaked into primary history`,
+      `row ${row.id} from fresh household leaked into primary history`,
     );
   }
 });
@@ -424,12 +433,11 @@ test('POST /api/sync/restore is 403 for a non-owner member (#836)', async () => 
     .send({
       passphrase: 'owner-made-bundle',
       bundle: backup.body.bundle,
-      mode: 'replace',
     });
   assert.equal(res.status, 403);
   assert.match(res.body.error, /owner|forbidden/i);
 
-  // The destructive replace must NOT have run — household data is intact.
+  // The restore must NOT have run — household data is intact.
   const after = await (await import('../../src/models')).Transaction.count({
     where: { householdId: primaryHouseholdId },
   });
