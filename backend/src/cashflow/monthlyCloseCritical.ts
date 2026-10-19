@@ -12,11 +12,12 @@
  */
 
 import { Op } from 'sequelize';
-import { PartnerSettlement, Transaction, sequelize } from '../models';
+import { Contact, PartnerSettlement, Transaction, sequelize } from '../models';
 import {
   applySettlements,
+  resolveSolePartnerId,
+  summarizeSettlements,
   type RawPartnerRow,
-  type SettlementSummary,
 } from '../summary/partnerMath';
 import { num } from '../util/numbers';
 
@@ -110,7 +111,7 @@ export async function detectMonthlyCloseCritical(
   // directions: unsettled shared spend with no settlement rows would
   // never warn, and any one-directional settlement that squares a real
   // balance would warn forever after.
-  const [spendRows, settlements] = await Promise.all([
+  const [spendRows, settlements, partners] = await Promise.all([
     Transaction.findAll({
       where: {
         ...householdScope,
@@ -120,17 +121,19 @@ export async function detectMonthlyCloseCritical(
       },
       attributes: [
         'currency',
+        'ownershipType',
         'ownershipContactId',
         [
           sequelize.fn('SUM', sequelize.col('partner_share_amount')),
           'sumPartner',
         ],
       ],
-      group: ['currency', 'ownershipContactId'],
+      group: ['currency', 'ownershipType', 'ownershipContactId'],
       raw: true,
     }) as unknown as Promise<
       ReadonlyArray<{
         currency: string;
+        ownershipType: string;
         ownershipContactId: number | null;
         sumPartner: unknown;
       }>
@@ -152,37 +155,26 @@ export async function detectMonthlyCloseCritical(
         amount: string;
       }>
     >,
+    Contact.findAll({
+      where: { ...householdScope, isPartner: true },
+      attributes: ['id'],
+      raw: true,
+    }) as unknown as Promise<ReadonlyArray<{ id: number }>>,
   ]);
-
-  const settlementByKey = new Map<string, SettlementSummary>();
-  for (const row of settlements) {
-    const amount = num(row.amount) ?? 0;
-    const key = `${row.contactId}\0${row.currency}`;
-    const existing = settlementByKey.get(key) ?? {
-      contactId: row.contactId,
-      currency: row.currency,
-      iPaid: 0,
-      partnerPaid: 0,
-    };
-    if (row.direction === 'i_paid_partner') existing.iPaid += amount;
-    else existing.partnerPaid += amount;
-    settlementByKey.set(key, existing);
-  }
 
   const rawRows: RawPartnerRow[] = spendRows.map((r) => ({
     currency: r.currency,
-    // Buckets are already collapsed per (contact, currency); the ownership
-    // type does not enter the net math (see partnerMath.rawNetForRow).
-    ownershipType: 'aggregate',
+    ownershipType: r.ownershipType,
     ownershipContactId: r.ownershipContactId,
     contactName: null,
     sumMy: null,
     sumPartner: num(r.sumPartner),
   }));
 
-  const adjusted = applySettlements(
+  const { byCurrency: adjusted } = applySettlements(
     rawRows,
-    Array.from(settlementByKey.values()),
+    summarizeSettlements(settlements),
+    { solePartnerId: resolveSolePartnerId(partners.map((p) => p.id)) },
   );
   let outstandingPartnerBuckets = 0;
   for (const row of adjusted) {

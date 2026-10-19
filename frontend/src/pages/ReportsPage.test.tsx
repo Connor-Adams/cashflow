@@ -145,4 +145,49 @@ describe('ReportsPage', () => {
       vi.mocked(getJson).mockImplementation(original!)
     }
   })
+
+  it('labels a partner-attributed row by name and warns about unmatched settlements', async () => {
+    const original = vi.mocked(getJson).getMockImplementation()
+    vi.mocked(getJson).mockImplementation((url: string) => {
+      if (url.includes('/api/summary/partner'))
+        return Promise.resolve({
+          byCurrency: [
+            {
+              currency: 'CAD',
+              ownershipType: 'partner',
+              ownershipContactId: 1,
+              contactName: 'Jordan',
+              sumMy: -100,
+              sumPartner: -100,
+              rawNet: 100,
+              settledAmount: -100,
+              settlementCount: 3,
+              net: 0,
+              direction: 'even',
+            },
+          ],
+          unmatchedSettlements: [
+            {
+              contactId: 9,
+              contactName: 'Riley',
+              currency: 'CAD',
+              iPaid: 0,
+              partnerPaid: 40,
+              settledAmount: -40,
+              settlementCount: 2,
+            },
+          ],
+        })
+      return original!(url)
+    })
+    try {
+      renderPage()
+      expect(await screen.findByText('Jordan')).toBeInTheDocument()
+      expect(screen.getByText(/after 3 settlements/)).toBeInTheDocument()
+      expect(screen.getByText('2 settlements not reflected below')).toBeInTheDocument()
+      expect(screen.getByText(/Riley:/)).toBeInTheDocument()
+    } finally {
+      vi.mocked(getJson).mockImplementation(original!)
+    }
+  })
 })

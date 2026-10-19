@@ -70,6 +70,7 @@ import {
 import { isTransactionStatus } from '../transactions/types';
 import { streamCsvExport } from '../services/transactionsExport';
 import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
+import { findSolePartnerContactId, ownershipContactIdFor } from '../contacts/solePartner';
 import { isTaxTreatment } from '@cashflow/shared';
 import { assertDistributionDirection } from '../tax/util/distributionDirection';
 
@@ -613,8 +614,25 @@ export async function applyPatchBody(
       }
     }
   }
-  if (txn.get('ownershipType') !== 'contact') txn.set('ownershipContactId', null);
-  if (txn.get('ownershipType') === 'contact' && !txn.get('ownershipContactId')) {
+  const ownershipType = txn.get('ownershipType') as string;
+  if (ownershipType === 'partner' || ownershipType === 'shared') {
+    // Partner/shared splits carry the household's sole partner (as import
+    // stamps them) so settlements net against them. Re-resolve only when the
+    // ownership changed or the row is unstamped, so an unrelated edit never
+    // wipes or reshuffles an existing stamp.
+    const ownershipTouched =
+      Object.prototype.hasOwnProperty.call(b, 'ownershipType') ||
+      Object.prototype.hasOwnProperty.call(b, 'ownershipContactId');
+    if (ownershipTouched || txn.get('ownershipContactId') == null) {
+      txn.set(
+        'ownershipContactId',
+        ownershipContactIdFor(ownershipType, await findSolePartnerContactId(household.id)),
+      );
+    }
+  } else if (ownershipType !== 'contact') {
+    txn.set('ownershipContactId', null);
+  }
+  if (ownershipType === 'contact' && !txn.get('ownershipContactId')) {
     const err = new Error('ownershipContactId is required for contact ownership') as Error & { status?: number };
     err.status = 400;
     throw err;

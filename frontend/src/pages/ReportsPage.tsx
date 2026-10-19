@@ -60,11 +60,32 @@ type PartnerRow = {
    * So `net = rawNet + settledAmount`.
    */
   settledAmount: number
-  /** Number of settlement directions that contributed (0, 1, or 2). */
+  /** Number of settlements applied to this row's (contact, currency). */
   settlementCount: number
   /** Adjusted net: rawNet + settledAmount. */
   net: number
   direction: PartnerNetDirection
+}
+
+/** A settlement total that matched no partner-split row (see backend partnerMath). */
+type UnmatchedSettlement = {
+  contactId: number
+  contactName: string | null
+  currency: string
+  settledAmount: number
+  settlementCount: number
+}
+
+type PartnerSummary = {
+  byCurrency: PartnerRow[]
+  unmatchedSettlements?: UnmatchedSettlement[]
+}
+
+/** Rows attributed to a contact (incl. the sole partner) show its name. */
+function partnerRowLabel(r: PartnerRow): string {
+  if (r.contactName) return r.contactName
+  if (r.ownershipType === 'contact') return 'Contact'
+  return r.ownershipType ?? 'legacy split'
 }
 
 type BusRow = { currency: string; sumBusiness: number }
@@ -127,9 +148,7 @@ export function ReportsPage() {
   )
   const [dateFrom, setDateFrom] = useSessionState('reports.dateFrom', '')
   const [dateTo, setDateTo] = useSessionState('reports.dateTo', '')
-  const [partner, setPartner] = useState<{ byCurrency: PartnerRow[] } | null>(
-    null
-  )
+  const [partner, setPartner] = useState<PartnerSummary | null>(null)
   const [business, setBusiness] = useState<{ byCurrency: BusRow[] } | null>(
     null
   )
@@ -182,9 +201,7 @@ export function ReportsPage() {
       setErr(null)
       try {
         const [p, b, dash] = await Promise.all([
-          getJson<{ byCurrency: PartnerRow[] }>(
-            `/api/summary/partner${summaryQs}`
-          ),
+          getJson<PartnerSummary>(`/api/summary/partner${summaryQs}`),
           getJson<{ byCurrency: BusRow[] }>(
             `/api/summary/business${summaryQs}`
           ),
@@ -325,6 +342,17 @@ export function ReportsPage() {
     })
     return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b))
   }, [partner, currency])
+  const visibleUnmatchedSettlements = useMemo(
+    () =>
+      (partner?.unmatchedSettlements ?? []).filter(
+        (u) => !currency || u.currency === currency
+      ),
+    [partner, currency]
+  )
+  const unmatchedSettlementCount = visibleUnmatchedSettlements.reduce(
+    (n, u) => n + u.settlementCount,
+    0
+  )
   const showPartnerRollup =
     (partner?.byCurrency.filter((r) => !currency || r.currency === currency).length ?? 0) > 1
   const moneySummaryHint = singleCurrency
@@ -456,13 +484,9 @@ export function ReportsPage() {
       'Raw net',
     ] as const
     const rows = visiblePartnerRows.map((r) => {
-      const ownership =
-        r.ownershipType === 'contact'
-          ? r.contactName ?? 'Contact'
-          : r.ownershipType ?? 'legacy split'
       return [
         r.currency,
-        ownership,
+        partnerRowLabel(r),
         r.sumMy,
         r.sumPartner,
         r.net,
@@ -645,6 +669,24 @@ export function ReportsPage() {
             </>
           }
         >
+          {unmatchedSettlementCount > 0 && (
+            <div className="mb-3">
+              <Alert
+                variant="warning"
+                title={`${unmatchedSettlementCount} settlement${unmatchedSettlementCount === 1 ? '' : 's'} not reflected below`}
+              >
+                {visibleUnmatchedSettlements
+                  .map(
+                    (u) =>
+                      `${u.contactName ?? 'Contact'}: ${formatMoney(u.settledAmount, u.currency)}`
+                  )
+                  .join(' · ')}
+                . These could not be matched to any partner-split spend. Unlabelled
+                splits are attributed only when exactly one contact is marked as your
+                partner.
+              </Alert>
+            </div>
+          )}
           {showPartnerRollup && (
             <ul className="list-none p-0 mb-3 flex flex-col gap-1">
               {partnerNetByCurrency.map(([cur, total]) => {
@@ -730,11 +772,7 @@ export function ReportsPage() {
                   return (
                     <TableRow key={`${r.currency}-${r.ownershipType ?? 'legacy'}-${r.ownershipContactId ?? 'none'}`}>
                       <TableCell>{r.currency}</TableCell>
-                      <TableCell>
-                        {r.ownershipType === 'contact'
-                          ? r.contactName ?? 'Contact'
-                          : r.ownershipType ?? 'legacy split'}
-                      </TableCell>
+                      <TableCell>{partnerRowLabel(r)}</TableCell>
                       <TableCell>{formatMoney(r.sumMy, r.currency)}</TableCell>
                       <TableCell>{formatMoney(r.sumPartner, r.currency)}</TableCell>
                       <TableCell>{netCell}</TableCell>

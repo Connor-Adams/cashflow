@@ -10,6 +10,7 @@ import {
   Transaction,
   sequelize,
 } from '../models';
+import { findSolePartnerContactId, ownershipContactIdFor } from '../contacts/solePartner';
 import { loadAllRules } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { findExistingForDedup, nearDuplicateWarnings } from './dedupExisting';
@@ -511,6 +512,9 @@ export async function commitStatementImport(
   const amazonOrdersCache = await loadAmazonOrdersCache(account.householdId ?? null);
   const householdAccountIds = await loadHouseholdAccountIds(account.id, account.householdId ?? null);
   const ownerNames = await loadHouseholdOwnerNames(account.householdId ?? null);
+  // Partner/shared splits carry the household's sole partner so settlements
+  // against that partner net against them (null when 0 or 2+ partners).
+  const solePartnerId = await findSolePartnerContactId(account.householdId ?? null);
   const overrideBusiness = preview.overrideBusiness === true;
   let insertedTransactions = 0;
   let insertedInvestmentActivities = 0;
@@ -658,14 +662,15 @@ export async function commitStatementImport(
         _cp,
         { transaction: t },
       );
+      const ownershipType =
+        f.autoSplitType === 'partner' || f.autoSplitType === 'shared' ? f.autoSplitType : 'me';
       const txn = Transaction.build({
         accountId: account.id,
         householdId: account.householdId ?? null,
         createdByUserId: userId ?? account.ownerUserId,
         visibility: accountVisibility,
-        ownershipType:
-          f.autoSplitType === 'partner' || f.autoSplitType === 'shared' ? f.autoSplitType : 'me',
-        ownershipContactId: null,
+        ownershipType,
+        ownershipContactId: ownershipContactIdFor(ownershipType, solePartnerId),
         counterpartyRaw: _cp?.name ?? null,
         counterpartyContactId,
         importBatch: preview.importBatch,

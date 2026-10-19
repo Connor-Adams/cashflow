@@ -10,6 +10,7 @@ import {
   Transaction,
   ImportHistory,
 } from '../models';
+import { findSolePartnerContactId, ownershipContactIdFor } from '../contacts/solePartner';
 import { upsertAccountCardIdentifier } from '../models/AccountCardIdentifier';
 import {
   hashContent,
@@ -389,6 +390,9 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
 
   const householdAccountIds = await loadHouseholdAccountIds(account.id, opts.householdId ?? account.householdId ?? null);
   const ownerNames = await loadHouseholdOwnerNames(opts.householdId ?? account.householdId ?? null);
+  // Partner/shared splits carry the household's sole partner so settlements
+  // against that partner net against them (null when 0 or 2+ partners).
+  const solePartnerId = await findSolePartnerContactId(opts.householdId ?? account.householdId ?? null);
 
   let inserted = 0;
   let skippedDup = 0;
@@ -533,14 +537,15 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         amount: v.amount,
       });
 
+      const ownershipType =
+        f.autoSplitType === 'partner' || f.autoSplitType === 'shared' ? f.autoSplitType : 'me';
       const txn = Transaction.build({
         accountId: account.id,
         householdId: opts.householdId ?? account.householdId ?? null,
         createdByUserId: opts.userId ?? account.ownerUserId ?? null,
         visibility: accountVisibility,
-        ownershipType:
-          f.autoSplitType === 'partner' || f.autoSplitType === 'shared' ? f.autoSplitType : 'me',
-        ownershipContactId: null,
+        ownershipType,
+        ownershipContactId: ownershipContactIdFor(ownershipType, solePartnerId),
         importBatch,
         date: v.date,
         merchantRaw: v.merchantRaw,
