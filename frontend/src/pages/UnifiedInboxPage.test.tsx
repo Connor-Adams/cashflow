@@ -1,8 +1,8 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
-import { UnifiedInboxPage } from './UnifiedInboxPage'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { InboxIndexRoute, UnifiedInboxPage } from './UnifiedInboxPage'
 
 type ReviewItem = {
   id: string
@@ -244,6 +244,23 @@ describe('UnifiedInboxPage', () => {
     expect(urls[0]).toContain('status=resolved')
     // all-resolved view spans every source → no source param.
     expect(urls[0]).not.toContain('source=')
+    window.history.pushState({}, '', '/')
+  })
+
+  it('forwards the legacy ?view=insights deep link to the Insights tab', async () => {
+    window.history.pushState({}, '', '/inbox?view=insights')
+    const { urls } = mockReviewItems(SAMPLE)
+    render(
+      <MemoryRouter initialEntries={['/inbox?view=insights']}>
+        <Routes>
+          <Route path="/inbox" element={<InboxIndexRoute />} />
+          <Route path="/inbox/insights" element={<div>insights-tab</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('insights-tab')).toBeTruthy())
+    // Insights are not review items — no /api/review-items fetch for this view.
+    expect(urls.length).toBe(0)
     window.history.pushState({}, '', '/')
   })
 

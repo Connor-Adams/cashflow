@@ -200,7 +200,7 @@ export const COMMANDS: Command[] = [
     id: 'nav-insights',
     label: 'Go to Insights',
     category: 'Navigate',
-    destination: '/insights',
+    destination: '/inbox/insights',
   },
   {
     id: 'nav-data-quality',

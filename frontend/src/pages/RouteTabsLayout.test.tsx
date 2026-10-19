@@ -93,6 +93,21 @@ describe('Scenario + Portfolio configs', () => {
     expect(screen.getByText('review-body')).toBeInTheDocument()
   })
 
+  it('InboxLayout has an Insights tab so every open insight the badge counts is listable', () => {
+    render(
+      <MemoryRouter initialEntries={['/inbox/insights']}>
+        <Routes>
+          <Route path="/inbox" element={<InboxLayout />}>
+            <Route index element={<div>proposals-body</div>} />
+            <Route path="insights" element={<div>insights-body</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('tab', { name: 'Insights' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('insights-body')).toBeInTheDocument()
+  })
+
   it('PlannedLayout exposes the Expectation-family tabs and activates from URL (PR 2)', () => {
     render(
       <MemoryRouter initialEntries={['/planned/subscriptions']}>

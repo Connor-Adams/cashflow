@@ -3,7 +3,7 @@ import { getJson } from '@/lib/api'
 
 type CountResponse = {
   total: number
-  byKind: { transaction_audit: number; financial_insight: number; rule_proposal: number }
+  byKind: { transaction_audit: number }
 }
 
 const POLL_MS = 5 * 60 * 1000
