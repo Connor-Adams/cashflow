@@ -252,15 +252,95 @@ async function seedBusinessFixture(dates: { income: string; expense: string; pay
   const incomeId = await seedTxnReturningId(checking, dates.income, 10000, 'income');
   const expenseId = await seedTxnReturningId(checking, dates.expense, -2000, 'purchase');
   await seedTxn(checking, dates.pay, 5000, 'income');
-  await models.Transaction.update(
-    { finalBusiness: true },
-    { where: { id: [incomeId, expenseId] } },
-  );
+  await markBusiness(incomeId, expenseId);
   await models.TransactionTaxMetadata.create({
     transactionId: incomeId,
     hstGstAmount: '1300',
   } as never);
 }
+
+/** Flag txns as business the way recomputeTransactionAmounts persists it:
+ *  finalBusiness and businessAmount (= the full signed amount) together.
+ *  Setting finalBusiness alone leaves businessAmount at 0, which no real
+ *  business row looks like. */
+async function markBusiness(...ids: number[]): Promise<void> {
+  await models.Transaction.update(
+    { finalBusiness: true, businessAmount: models.sequelize.col('amount') as never },
+    { where: { id: ids } },
+  );
+}
+
+async function seedOrderItem(
+  externalOrderId: number,
+  title: string,
+  price: string,
+  businessUseOverride: string | null,
+): Promise<void> {
+  await models.ExternalOrderItem.create({
+    externalOrderId,
+    title,
+    quantity: 1,
+    unitPrice: price,
+    totalPrice: price,
+    inferredCategory: null,
+    inferredCategoryId: null,
+    categoryOverride: null,
+    categoryOverrideId: null,
+    businessUsePercent: null,
+    businessUseOverride,
+    displayName: null,
+    displayNameConfidence: null,
+    itemNumber: null,
+    confidence: null,
+    rawPayload: null,
+  } as never);
+}
+
+test('GET /tax: a partly-business itemized purchase deducts only its business items', async () => {
+  const year = new Date().getFullYear();
+  const checking = await seedAccount('Chequing', 'checking');
+  const incomeId = await seedTxnReturningId(checking, `${year}-01-10`, 10000, 'income');
+  const purchaseId = await seedTxnReturningId(checking, `${year}-01-12`, -1000, 'purchase');
+  await markBusiness(incomeId, purchaseId);
+  await models.TransactionTaxMetadata.create({ transactionId: incomeId, hstGstAmount: '1300' } as never);
+  await models.TransactionTaxMetadata.create({ transactionId: purchaseId, hstGstAmount: '130' } as never);
+  // $700 of the order is a personal item (0% business); the $300 item has no
+  // per-item pct so inherits the txn's 100% — exactly what the dashboard's
+  // business tile counts via splitTxnByItems.
+  const order = await models.ExternalOrder.create({
+    householdId: household.id,
+    createdByUserId: null,
+    vendor: 'amazon',
+    vendorOrderId: 'TEST-ORDER-BIZ',
+    dedupeKey: 'test-order-partial-business',
+    orderDate: `${year}-01-11`,
+    shipmentDate: null,
+    subtotal: '1000.0000',
+    tax: '0.0000',
+    shipping: '0.0000',
+    total: '1000.0000',
+    currency: 'CAD',
+    paymentLast4: null,
+    source: 'test',
+    rawPayload: null,
+  });
+  await seedOrderItem(order.id, 'Personal TV', '700.0000', '0');
+  await seedOrderItem(order.id, 'Office chair', '300.0000', null);
+  await models.TransactionOrderLink.create({
+    transactionId: purchaseId,
+    externalOrderId: order.id,
+    confidence: '1.00',
+    matchReason: 'test',
+    status: 'accepted',
+    linkedAmount: null,
+  });
+
+  const res = await request(app).get('/tax');
+  assert.equal(res.status, 200);
+  // Deductible $300 (not $1,000); ITC 30% of $130 = $39.
+  // max(0, 10000 - 300) x 0.25 + max(0, 1300 - 39) = 2425 + 1261 = 3686.
+  assert.equal(res.body.taxReserveTarget, 3686);
+});
 
 test('GET /tax: reserve target is the app reserve (net business income x pct + net HST); actual is null', async () => {
   const year = new Date().getFullYear();
