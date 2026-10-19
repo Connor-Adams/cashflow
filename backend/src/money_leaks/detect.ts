@@ -66,6 +66,13 @@ export interface LeakSubscription {
   annualizedCost: number;
   status: SubscriptionStatus;
   priceChangeDetected: boolean;
+  /**
+   * Per-charge price before the detected increase (same units as `amount`),
+   * from the open price-increase Insight's `previousAmountCents`. Null when
+   * unknown — the price-increase leak then claims no impact rather than
+   * counting the whole subscription as leaked money.
+   */
+  previousAmount: number | null;
   category: string | null;
   lastChargeDate: string;
   nextExpectedDate: string | null;
@@ -202,6 +209,20 @@ function annualToMonthly(annual: number): number {
 }
 
 /**
+ * Annualized cost of a price increase — only the excess over the previous
+ * price, not the subscription's full cost. The per-charge delta is scaled by
+ * charges-per-year (annualizedCost / amount) so every cadence annualizes the
+ * same way the subscription itself does: $15 -> $17/mo is $24/yr. Unknown or
+ * non-increasing baselines yield 0.
+ */
+function priceIncreaseAnnualExcess(sub: LeakSubscription): number {
+  if (sub.previousAmount == null || sub.amount <= 0) return 0;
+  const delta = sub.amount - sub.previousAmount;
+  if (delta <= 0) return 0;
+  return delta * (sub.annualizedCost / sub.amount);
+}
+
+/**
  * Human-readable per-period phrase for a subscription cadence, used in leak
  * copy like "$9.99 per month". Covers every SubscriptionCadence — the old
  * `cadence === 'monthly' ? 'month' : 'week'` binarized everything else, so a
@@ -287,13 +308,17 @@ export function detectMoneyLeaks(
       usedSubscriptionIds.add(sub.id);
       continue;
     }
-    const annual = sub.annualizedCost;
+    // Impact is the increase only — the user was already paying the old
+    // price, so only the excess is newly leaking.
+    const annual = priceIncreaseAnnualExcess(sub);
     const monthly = annualToMonthly(annual);
+    const was =
+      sub.previousAmount != null ? ` (was ${sub.previousAmount.toFixed(2)})` : '';
     items.push({
       leakType: 'subscription_price_increase',
       identityKey,
       title: `${sub.merchantName} price went up`,
-      description: `Your ${sub.merchantName} subscription is now ${sub.amount.toFixed(2)} ${sub.currency} per ${cadenceLabel(sub.cadence)}.`,
+      description: `Your ${sub.merchantName} subscription is now ${sub.amount.toFixed(2)} ${sub.currency} per ${cadenceLabel(sub.cadence)}${was}.`,
       currency: sub.currency,
       monthlyImpact: monthly,
       annualImpact: annual,
@@ -302,6 +327,7 @@ export function detectMoneyLeaks(
         subscriptionId: sub.id,
         category: sub.category,
         amount: sub.amount,
+        previousAmount: sub.previousAmount,
         cadence: sub.cadence,
       },
     });
@@ -339,14 +365,19 @@ export function detectMoneyLeaks(
       for (const s of cluster.subs) usedSubscriptionIds.add(s.id);
       continue;
     }
-    const annual = cluster.subs.reduce((s, sub) => s + sub.annualizedCost, 0);
+    // The advice is "keep one", so the leak is every sub except the one kept —
+    // never the whole cluster's cost. Count all but the cheapest: the saving
+    // from keeping just the cheapest one, which the description states.
+    const clusterTotal = cluster.subs.reduce((s, sub) => s + sub.annualizedCost, 0);
+    const cheapest = Math.min(...cluster.subs.map((sub) => sub.annualizedCost));
+    const annual = clusterTotal - cheapest;
     const monthly = annualToMonthly(annual);
     const merchants = cluster.subs.map((s) => s.merchantName).join(', ');
     items.push({
       leakType: 'duplicate_service',
       identityKey,
       title: `${cluster.subs.length} active ${cluster.category} subscriptions`,
-      description: `You have multiple active ${cluster.category} services in ${cluster.currency}: ${merchants}. Pick the one you use most.`,
+      description: `You have multiple active ${cluster.category} services in ${cluster.currency}: ${merchants}. Keeping only the cheapest saves ${annual.toFixed(2)} ${cluster.currency}/year.`,
       currency: cluster.currency,
       monthlyImpact: monthly,
       annualImpact: annual,

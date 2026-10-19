@@ -27,6 +27,7 @@ function sub(overrides: Partial<LeakSubscription> = {}): LeakSubscription {
     annualizedCost: 191.88,
     status: 'active',
     priceChangeDetected: false,
+    previousAmount: null,
     category: 'Streaming',
     lastChargeDate: '2026-05-01',
     nextExpectedDate: '2026-06-01',
@@ -77,6 +78,71 @@ test('detectMoneyLeaks surfaces small_subscription when annualized < threshold',
   const smalls = result.items.filter((i) => i.leakType === 'small_subscription');
   assert.equal(smalls.length, 2);
   assert.equal(SMALL_SUBSCRIPTION_ANNUAL_MAX, 120);
+});
+
+test('detectMoneyLeaks price_increase impact is only the excess over the previous price', () => {
+  // $15 -> $17/mo: the leak is the $2/mo increase ($24/yr), not the full
+  // $204/yr cost of the subscription.
+  const result = detectMoneyLeaks({
+    subscriptions: [
+      sub({
+        id: 5,
+        priceChangeDetected: true,
+        amount: 17,
+        previousAmount: 15,
+        annualizedCost: 204,
+      }),
+    ],
+    recurringGroups: [],
+    deliverySpend: [],
+    dismissals: new Set(),
+  });
+  const leak = result.items.find((i) => i.leakType === 'subscription_price_increase');
+  assert.ok(leak);
+  assert.equal(Number(leak!.annualImpact.toFixed(2)), 24);
+  assert.equal(Number(leak!.monthlyImpact.toFixed(2)), 2);
+  assert.match(leak!.description, /was 15\.00/);
+  const cad = result.totals.byCurrency.find((c) => c.currency === 'CAD');
+  assert.equal(Number(cad!.annualImpact.toFixed(2)), 24);
+});
+
+test('detectMoneyLeaks price_increase excess scales with non-monthly cadence', () => {
+  // Weekly $5 -> $6: +$1/charge x 52 charges = $52/yr.
+  const result = detectMoneyLeaks({
+    subscriptions: [
+      sub({
+        id: 7,
+        priceChangeDetected: true,
+        cadence: 'weekly',
+        amount: 6,
+        previousAmount: 5,
+        annualizedCost: 312,
+      }),
+    ],
+    recurringGroups: [],
+    deliverySpend: [],
+    dismissals: new Set(),
+  });
+  const leak = result.items.find((i) => i.leakType === 'subscription_price_increase');
+  assert.ok(leak);
+  assert.equal(Number(leak!.annualImpact.toFixed(2)), 52);
+});
+
+test('detectMoneyLeaks price_increase with unknown previous price claims no impact', () => {
+  // Without a baseline the excess is unknown — never fall back to counting
+  // the whole subscription as leaked money.
+  const result = detectMoneyLeaks({
+    subscriptions: [
+      sub({ id: 8, priceChangeDetected: true, amount: 17, previousAmount: null, annualizedCost: 204 }),
+    ],
+    recurringGroups: [],
+    deliverySpend: [],
+    dismissals: new Set(),
+  });
+  const leak = result.items.find((i) => i.leakType === 'subscription_price_increase');
+  assert.ok(leak);
+  assert.equal(leak!.annualImpact, 0);
+  assert.equal(leak!.monthlyImpact, 0);
 });
 
 test('detectMoneyLeaks price_increase describes annual cadence as "per year"', () => {
@@ -236,8 +302,39 @@ test('detectMoneyLeaks emits duplicate_service for 2+ active subs in same catego
   assert.equal(dups.length, 1);
   assert.equal(dups[0].currency, 'CAD');
   assert.equal(dups[0].identityKey, 'CAD|Streaming');
-  // Annual impact = total annual cost of the cluster.
-  assert.equal(dups[0].annualImpact, 191.88 + 143.88 + 119.88);
+  // The advice is "keep one", so the leak is everything EXCEPT the cheapest
+  // sub (Hulu, 119.88/yr) — not the whole cluster's cost.
+  assert.equal(
+    Number(dups[0].annualImpact.toFixed(2)),
+    Number((191.88 + 143.88).toFixed(2)),
+  );
+  assert.equal(
+    Number(dups[0].monthlyImpact.toFixed(2)),
+    Number(((191.88 + 143.88) / 12).toFixed(2)),
+  );
+  const cad = result.totals.byCurrency.find((c) => c.currency === 'CAD');
+  assert.equal(
+    Number(cad!.annualImpact.toFixed(2)),
+    Number((191.88 + 143.88).toFixed(2)),
+  );
+});
+
+test('detectMoneyLeaks duplicate_service impact for a pair is the pricier sub only', () => {
+  const result = detectMoneyLeaks({
+    subscriptions: [
+      sub({ id: 1, merchantName: 'Dropbox', normalizedName: 'dropbox', category: 'Cloud', amount: 12, annualizedCost: 144 }),
+      sub({ id: 2, merchantName: 'iCloud', normalizedName: 'icloud', category: 'Cloud', amount: 4, annualizedCost: 48 }),
+    ],
+    recurringGroups: [],
+    deliverySpend: [],
+    dismissals: new Set(),
+  });
+  const dup = result.items.find((i) => i.leakType === 'duplicate_service');
+  assert.ok(dup);
+  assert.equal(dup!.annualImpact, 144);
+  assert.equal(dup!.monthlyImpact, 12);
+  // Copy states what the number measures.
+  assert.match(dup!.description, /Keeping only the cheapest saves 144\.00 CAD\/year/);
 });
 
 test('detectMoneyLeaks skips duplicate_service when only one sub in category', () => {

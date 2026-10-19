@@ -5,9 +5,15 @@
  * the financial period. Each task carries a deep link back to the page
  * that handles its work (Import, Review inbox, Receipts, Settlements,
  * Tax reserve, Net worth, Reports). The current state of critical items
- * is shown so the user can decide whether to close or force-close.
+ * is shown so the user can decide whether to mark the month reviewed (with
+ * or without warnings).
  *
- * State machine for a period:
+ * This is a review checklist, NOT a lock: a "closed" period (shown as
+ * "Reviewed") does not block imports or edits into that month — the only
+ * reader of MonthlyClosePeriod is routes/monthlyClose.ts. The UI copy must
+ * not promise a lock/freeze the backend doesn't enforce.
+ *
+ * State machine for a period (API names; UI says "Reviewed" for closed):
  *   not-started → POST /start → open → PATCH tasks → POST /close → closed
  *                                                  ↘ POST /reopen ↗
  *
@@ -30,6 +36,12 @@ import { getJson, patchJson, postJson } from '@/lib/api'
 // ---- Shared types (mirror backend serializers) ------------------------
 
 type MonthlyCloseStatus = 'open' | 'closed'
+
+/** UI label per API status — `closed` means reviewed, never locked. */
+const STATUS_LABEL: Record<MonthlyCloseStatus, string> = {
+  open: 'In progress',
+  closed: 'Reviewed',
+}
 
 type MonthlyCloseTaskKey =
   | 'imports'
@@ -290,10 +302,10 @@ export function MonthlyClosePage() {
         )
         setDetail(r)
         await fetchHistory()
-        showToast({ title: `Closed ${monthLabel}`, variant: 'success' })
+        showToast({ title: `Marked ${monthLabel} reviewed`, variant: 'success' })
       } catch (e) {
         const msg =
-          e instanceof Error ? e.message : 'Failed to close month'
+          e instanceof Error ? e.message : 'Failed to mark month reviewed'
         setErr(msg)
         // 409 critical_items surface — the message comes through verbatim.
         showToast({ title: msg, variant: 'destructive' })
@@ -314,9 +326,9 @@ export function MonthlyClosePage() {
       )
       setDetail(r)
       await fetchHistory()
-      showToast({ title: `Reopened ${monthLabel}`, variant: 'success' })
+      showToast({ title: `Reopened review for ${monthLabel}`, variant: 'success' })
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to reopen month'
+      const msg = e instanceof Error ? e.message : 'Failed to reopen review'
       setErr(msg)
       showToast({ title: msg, variant: 'destructive' })
     } finally {
@@ -398,18 +410,18 @@ export function MonthlyClosePage() {
         </Card>
       ) : (
         <>
-          {/* Status + progress + close/reopen controls */}
+          {/* Status + progress + mark-reviewed/reopen controls */}
           <Card className="p-4">
             <div className="flex flex-wrap items-center gap-3">
               <Badge variant={isClosed ? 'secondary' : 'outline'}>
-                {isClosed ? 'Closed' : 'Open'}
+                {STATUS_LABEL[isClosed ? 'closed' : 'open']}
               </Badge>
               <span className="text-sm text-muted-foreground">
                 {completed}/{total} tasks complete
               </span>
               {isClosed && detail?.period?.closedAt ? (
                 <span className="text-sm text-muted-foreground">
-                  Closed on{' '}
+                  Reviewed on{' '}
                   {new Date(detail.period.closedAt).toLocaleDateString()}
                 </span>
               ) : null}
@@ -421,8 +433,7 @@ export function MonthlyClosePage() {
                     onClick={reopenMonth}
                     disabled={busy}
                   >
-                    <Icon name="unlock" size={16} aria-hidden="true" />
-                    <span className="ml-2">Reopen</span>
+                    Reopen review
                   </Button>
                 ) : (
                   <>
@@ -433,7 +444,7 @@ export function MonthlyClosePage() {
                         onClick={() => closeMonth(true)}
                         disabled={busy}
                       >
-                        Force-close with warnings
+                        Mark reviewed with warnings
                       </Button>
                     ) : null}
                     <Button
@@ -441,8 +452,8 @@ export function MonthlyClosePage() {
                       onClick={() => closeMonth(false)}
                       disabled={busy}
                     >
-                      <Icon name="lock" size={16} aria-hidden="true" />
-                      <span className="ml-2">Close month</span>
+                      <Icon name="check-circle" size={16} aria-hidden="true" />
+                      <span className="ml-2">Mark month reviewed</span>
                     </Button>
                   </>
                 )}
@@ -555,7 +566,7 @@ export function MonthlyClosePage() {
       {/* History */}
       {history.length > 0 ? (
         <Card className="p-4">
-          <h3 className="text-sm font-semibold mb-2">Past closes</h3>
+          <h3 className="text-sm font-semibold mb-2">Past reviews</h3>
           <ul className="space-y-2">
             {history.map((row) => (
               <li key={row.id} className="flex items-center gap-3 text-sm">
@@ -568,11 +579,11 @@ export function MonthlyClosePage() {
                   {formatMonthLabel(row.periodMonth)}
                 </Button>
                 <Badge variant={row.status === 'closed' ? 'secondary' : 'outline'}>
-                  {row.status}
+                  {STATUS_LABEL[row.status]}
                 </Badge>
                 {row.status === 'closed' && row.closedAt ? (
                   <span className="text-muted-foreground">
-                    closed {new Date(row.closedAt).toLocaleDateString()}
+                    reviewed {new Date(row.closedAt).toLocaleDateString()}
                   </span>
                 ) : null}
               </li>

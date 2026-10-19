@@ -196,19 +196,32 @@ router.get('/', async (req, res, next) => {
     // (type='subscription_price_increase', entityId=PlannedEvent.id), not the
     // retired planned_events.price_change_detected column. Build the set of
     // subscriptions with an OPEN price-increase Insight; dismissing/resolving
-    // the Insight clears the leak on the next read.
+    // the Insight clears the leak on the next read. The Insight's
+    // metadata.previousAmountCents is the pre-increase baseline the detector
+    // needs to count only the excess (not the whole subscription) as impact.
     const priceInsights = await Insight.findAll({
       where: {
         ...householdWhere(req),
         type: 'subscription_price_increase',
         status: 'open',
       },
-      attributes: ['entityId'],
+      attributes: ['entityId', 'metadata'],
       raw: true,
     });
-    const priceUp = new Set<number>(
-      priceInsights.map((i) => i.entityId).filter((x): x is number => x != null),
-    );
+    // entityId -> previous per-charge amount (null when the Insight carries no
+    // baseline). If several open Insights exist for one sub, keep the first.
+    const priceUp = new Map<number, number | null>();
+    for (const ins of priceInsights) {
+      if (ins.entityId == null || priceUp.has(ins.entityId)) continue;
+      const prevCents = (ins.metadata as { previousAmountCents?: unknown } | null)
+        ?.previousAmountCents;
+      priceUp.set(
+        ins.entityId,
+        typeof prevCents === 'number' && Number.isFinite(prevCents)
+          ? prevCents / 100
+          : null,
+      );
+    }
     const subscriptions: LeakSubscription[] = subRows
       .map(serializeSubscription)
       .map((row) => ({
@@ -221,6 +234,7 @@ router.get('/', async (req, res, next) => {
         annualizedCost: Number(row.annualizedCost),
         status: row.status,
         priceChangeDetected: priceUp.has(row.id),
+        previousAmount: priceUp.get(row.id) ?? null,
         category: row.category,
         lastChargeDate: row.lastChargeDate,
         nextExpectedDate: row.nextExpectedDate,
