@@ -196,8 +196,9 @@ function FormulaExplainer({
           {includeInvestments ? ' Counted toward your rate.' : ' Excluded from your rate (toggle above).'}
         </li>
         <li>
-          <strong>Debt principal</strong> — payments that pay down loans and
-          credit-card balances.
+          <strong>Debt principal</strong> — payments that pay down loans, lines
+          of credit, and mortgages. Credit-card payments don&apos;t count: they
+          settle purchases already counted as spending.
           {includeDebtPrincipal ? ' Counted toward your rate.' : ' Excluded from your rate (toggle above).'}
         </li>
       </ul>

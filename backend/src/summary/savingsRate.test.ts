@@ -104,8 +104,10 @@ test('txnType=investment or transferPurpose=investment counts as investments eve
   assert.equal(byPurpose.byCurrency[0].series.find((m) => m.month === '2026-02')!.investments, 400);
 });
 
-test('positive payment landing on a loan/credit_card account counts as debt principal', () => {
-  for (const accountType of ['loan', 'mortgage', 'credit_card', 'credit']) {
+test('positive payment landing on a loan / line-of-credit / mortgage account counts as debt principal', () => {
+  // Lines of credit are typed `loan` ("Loan / line of credit" in the account
+  // picker), so `loan` covers both term loans and LOCs.
+  for (const accountType of ['loan', 'mortgage']) {
     const res = savingsRate({
       months: WINDOW,
       transactions: [
@@ -118,6 +120,71 @@ test('positive payment landing on a loan/credit_card account counts as debt prin
     assert.equal(feb.spending, 0, `payment to ${accountType} must not be spending`);
     assert.equal(feb.income, 0, `payment to ${accountType} must not be income`);
   }
+});
+
+test('a payment landing on a revolving credit card is NOT debt principal', () => {
+  // Paying off a card only settles spending already counted; it is not
+  // wealth built. Both spellings of the card type are excluded.
+  for (const accountType of ['credit_card', 'credit']) {
+    const res = savingsRate({
+      months: WINDOW,
+      transactions: [row({ amount: 600, txnType: 'payment', accountType })],
+      currency: null,
+    });
+    // Skipped entirely: no bucket (principal, income or spending) is touched,
+    // so the currency never even gets a summary.
+    assert.deepEqual(res.byCurrency, [], `card payment on ${accountType} must land in no bucket`);
+  }
+});
+
+test('spending all income on a card and paying it off is a 0% savings rate', () => {
+  const res = savingsRate({
+    months: WINDOW,
+    transactions: [
+      row({ amount: 5000, txnType: 'income', accountType: 'checking' }),
+      row({ amount: -5000, txnType: 'purchase', accountType: 'credit_card' }),
+      row({ amount: -5000, txnType: 'payment', accountType: 'checking' }),
+      row({ amount: 5000, txnType: 'payment', accountType: 'credit_card' }),
+    ],
+    currency: null,
+  });
+  const feb = res.byCurrency[0].series.find((m) => m.month === '2026-02')!;
+  assert.equal(feb.income, 5000);
+  assert.equal(feb.spending, 5000);
+  assert.equal(feb.debtPrincipal, 0);
+  assert.equal(feb.savingsRatePct, 0);
+  assert.equal(res.byCurrency[0].totals.savingsRatePct, 0);
+});
+
+test('a refund on a credit card adds no debt principal and no income', () => {
+  const res = savingsRate({
+    months: WINDOW,
+    transactions: [
+      row({ amount: 4000, txnType: 'income', accountType: 'checking' }),
+      row({ amount: 500, txnType: 'refund', accountType: 'credit_card' }),
+    ],
+    currency: null,
+  });
+  const feb = res.byCurrency[0].series.find((m) => m.month === '2026-02')!;
+  assert.equal(feb.debtPrincipal, 0);
+  assert.equal(feb.income, 4000, 'a card refund is not income');
+  assert.equal(feb.savingsRatePct, 0);
+});
+
+test('a loan payment still counts toward the savings rate', () => {
+  const res = savingsRate({
+    months: WINDOW,
+    transactions: [
+      row({ amount: 5000, txnType: 'income', accountType: 'checking' }),
+      row({ amount: -1000, txnType: 'payment', accountType: 'checking' }),
+      row({ amount: 1000, txnType: 'payment', accountType: 'loan' }),
+    ],
+    currency: null,
+  });
+  const feb = res.byCurrency[0].series.find((m) => m.month === '2026-02')!;
+  assert.equal(feb.debtPrincipal, 1000);
+  assert.equal(feb.spending, 0);
+  assert.equal(feb.savingsRatePct, 20);
 });
 
 test('negative spend on a credit_card account is spending, not debt principal', () => {
@@ -135,7 +202,7 @@ test('negative spend on a credit_card account is spending, not debt principal', 
 
 // ---------------- no double counting ----------------
 
-test('a card bill payment is not double counted: checking leg skipped, card leg is principal', () => {
+test('a card bill payment is not double counted: checking leg skipped, card leg ignored', () => {
   const res = savingsRate({
     months: WINDOW,
     transactions: [
@@ -144,7 +211,7 @@ test('a card bill payment is not double counted: checking leg skipped, card leg 
       // Checking-side leg of the bill payment — money movement, NOT spending
       // again ("amex bill pymt" rows are typed 'payment', not 'transfer').
       row({ amount: -3000, txnType: 'payment', accountType: 'checking' }),
-      // Card-side leg — the principal paid down.
+      // Card-side leg — settles spending already counted; not principal.
       row({ amount: 3000, txnType: 'payment', accountType: 'credit_card' }),
       // Genuine income so the rate is computable.
       row({ amount: 10000, txnType: 'income', accountType: 'checking' }),
@@ -153,7 +220,7 @@ test('a card bill payment is not double counted: checking leg skipped, card leg 
   });
   const feb = res.byCurrency[0].series.find((m) => m.month === '2026-02')!;
   assert.equal(feb.spending, 3000, 'payment leg on checking must not double count card purchases');
-  assert.equal(feb.debtPrincipal, 3000);
+  assert.equal(feb.debtPrincipal, 0, 'paying off a revolving card is not debt principal');
   assert.equal(feb.income, 10000);
 });
 
