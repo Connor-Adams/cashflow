@@ -21,6 +21,12 @@ import { detectRecurring } from './recurring';
 import { num } from '../util/numbers';
 import { isNonSpend } from '../summary/classifyTransactionFlow';
 import { summarizeReportingCashflow } from '../reporting/cashflowTotals';
+import {
+  coveredMonths,
+  perMonth,
+  householdTxnSpan,
+  DAYS_PER_MONTH,
+} from '../reporting/dataCoverage';
 import { loadCategoryTree, buildRollupRows, rollupByCategoryId } from '../categories/rollup';
 import { loadItemAllocationContext } from '../summary/loadItemAllocations';
 import { aggregateSpendByCategoryDecomposed } from './spendByCategoryDecompose';
@@ -132,12 +138,19 @@ router.get('/summary', async (req, res, next) => {
     }));
     const { totalSpend, totalIncome } = summarizeReportingCashflow(summaryTxns);
 
-    const months = 3;
-    const monthlyBurn = round2(totalSpend / months);
-    const monthlyIncome = round2(totalIncome / months);
+    // Averaged over the days the household's data actually covers inside the
+    // window (null when none), not a flat ÷ 3 that a stale import understates.
+    const months = coveredMonths(fromDate, await householdTxnSpan(household.id, today));
+    const monthlyBurn = perMonth(totalSpend, months);
+    const monthlyIncome = perMonth(totalIncome, months);
     const monthlySavingsRate =
-      monthlyIncome > 0 ? round4((monthlyIncome - monthlyBurn) / monthlyIncome) : 0;
-    const runwayMonths = monthlyBurn > 0 ? round2(liquidCash / monthlyBurn) : null;
+      monthlyIncome == null || monthlyBurn == null
+        ? null
+        : monthlyIncome > 0
+          ? round4((monthlyIncome - monthlyBurn) / monthlyIncome)
+          : 0;
+    const runwayMonths =
+      monthlyBurn != null && monthlyBurn > 0 ? round2(liquidCash / monthlyBurn) : null;
 
     // Same reserve the app computes (routes/taxReserve), over the same 90-day
     // window: max(0, net business income) x pct + max(0, net HST/GST). It used
@@ -434,9 +447,9 @@ router.get('/projections', async (req, res, next) => {
       accountType: (t['account.accountType'] ?? null) as string | null,
     }));
     const { totalSpend, totalIncome } = summarizeReportingCashflow(projTxns);
-    const months = 3;
-    const monthlyIncome = round2(totalIncome / months);
-    const monthlyExpenses = round2(totalSpend / months);
+    const months = coveredMonths(fromDate, await householdTxnSpan(household.id, today));
+    const monthlyIncome = perMonth(totalIncome, months);
+    const monthlyExpenses = perMonth(totalSpend, months);
 
     // Tax rate from TaxReserveSetting.
     const reserveSetting = await TaxReserveSetting.findOne({
@@ -473,12 +486,13 @@ router.get('/projections', async (req, res, next) => {
       if (row.currency === currency) investmentValue += row.marketValue;
     }
 
-    const netMonthlyCashflow = monthlyIncome - monthlyExpenses;
+    // No data in the window → no rate to extrapolate: project flat.
+    const netMonthlyCashflow = (monthlyIncome ?? 0) - (monthlyExpenses ?? 0);
     const projectedInvestments = round2(investmentValue);
 
     // Project 90 days forward, daily.
     const projections: { date: string; projectedNetWorth: number; projectedCash: number; projectedInvestments: number }[] = [];
-    const dailyCashflow = netMonthlyCashflow / 30;
+    const dailyCashflow = netMonthlyCashflow / DAYS_PER_MONTH;
     let currentCash = liquidCash;
     const cursor = new Date(`${today}T00:00:00Z`);
     const endDate = new Date(cursor);
@@ -542,10 +556,13 @@ router.get('/runway', async (req, res, next) => {
       ESSENTIAL_CATEGORIES,
     );
 
-    const months = 3;
-    const averageMonthlyBurn = round2(totalSpend / months);
-    const essentialMonthlyBurn = round2(essentialSpend / months);
-    const lifestyleMonthlyBurn = round2(averageMonthlyBurn - essentialMonthlyBurn);
+    const months = coveredMonths(fromDate, await householdTxnSpan(household.id, today));
+    const averageMonthlyBurn = perMonth(totalSpend, months);
+    const essentialMonthlyBurn = perMonth(essentialSpend, months);
+    const lifestyleMonthlyBurn =
+      averageMonthlyBurn == null || essentialMonthlyBurn == null
+        ? null
+        : round2(averageMonthlyBurn - essentialMonthlyBurn);
 
     const accounts = await Account.findAll({
       where: { householdId: household.id, closedAt: { [Op.is]: null } },
@@ -562,8 +579,14 @@ router.get('/runway', async (req, res, next) => {
     );
     liquidCash = round2(liquidCash);
 
-    const runwayMonths = averageMonthlyBurn > 0 ? round2(liquidCash / averageMonthlyBurn) : null;
-    const conservativeRunwayMonths = essentialMonthlyBurn > 0 ? round2(liquidCash / essentialMonthlyBurn) : null;
+    const runwayMonths =
+      averageMonthlyBurn != null && averageMonthlyBurn > 0
+        ? round2(liquidCash / averageMonthlyBurn)
+        : null;
+    const conservativeRunwayMonths =
+      essentialMonthlyBurn != null && essentialMonthlyBurn > 0
+        ? round2(liquidCash / essentialMonthlyBurn)
+        : null;
 
     res.json({
       liquidCash,

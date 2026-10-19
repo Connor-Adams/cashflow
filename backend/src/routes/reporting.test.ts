@@ -373,6 +373,76 @@ test('GET /summary: taxReserveRequired is the app reserve over the 90d window; a
   assert.equal(res.body.taxReserveActual, null);
 });
 
+// ---- burn normalization ----------------------------------------------------
+
+/** Data that starts 75 days ago and stops 45 days ago (a stale import):
+ *  31 covered days, $3,100 of spend and $6,200 of income. */
+async function seedStaleImportFixture(): Promise<void> {
+  const checking = await seedAccount('Chequing', 'checking');
+  await seedTxn(checking, isoDaysAgo(75), -2000, 'purchase', 'groceries');
+  await seedTxn(checking, isoDaysAgo(60), 6200, 'income');
+  await seedTxn(checking, isoDaysAgo(45), -1100, 'purchase');
+}
+
+test('GET /summary: burn and income divide by the days actually covered, not a flat 3 months', async () => {
+  await seedStaleImportFixture();
+  const res = await request(app).get('/summary');
+  assert.equal(res.status, 200);
+  // 3100 x 30.44 / 31 = 3044 (old: 3100 / 3 = 1033.33).
+  assert.equal(res.body.monthlyBurn, 3044);
+  assert.equal(res.body.monthlyIncome, 6088);
+  assert.equal(res.body.monthlySavingsRate, 0.5);
+});
+
+test('GET /summary: no transactions → burn, income, savings rate and runway are null', async () => {
+  await seedAccount('Chequing', 'checking');
+  const res = await request(app).get('/summary');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.monthlyBurn, null);
+  assert.equal(res.body.monthlyIncome, null);
+  assert.equal(res.body.monthlySavingsRate, null);
+  assert.equal(res.body.runwayMonths, null);
+});
+
+test('GET /runway: burn divides by the days actually covered', async () => {
+  await seedStaleImportFixture();
+  const res = await request(app).get('/runway');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.averageMonthlyBurn, 3044);
+  // groceries $2,000 is essential: 2000 x 30.44 / 31 = 1963.87.
+  assert.equal(res.body.essentialMonthlyBurn, 1963.87);
+  assert.equal(res.body.lifestyleMonthlyBurn, 1080.13);
+});
+
+test('GET /runway: no transactions → burns and runway are null', async () => {
+  await seedAccount('Chequing', 'checking');
+  const res = await request(app).get('/runway');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.averageMonthlyBurn, null);
+  assert.equal(res.body.essentialMonthlyBurn, null);
+  assert.equal(res.body.lifestyleMonthlyBurn, null);
+  assert.equal(res.body.runwayMonths, null);
+  assert.equal(res.body.conservativeRunwayMonths, null);
+});
+
+test('GET /projections: assumptions divide by the days actually covered', async () => {
+  await seedStaleImportFixture();
+  const res = await request(app).get('/projections');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.assumptions.monthlyIncome, 6088);
+  assert.equal(res.body.assumptions.monthlyExpenses, 3044);
+});
+
+test('GET /projections: no transactions → null assumptions and a flat projection', async () => {
+  await seedAccount('Chequing', 'checking');
+  const res = await request(app).get('/projections');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.assumptions.monthlyIncome, null);
+  assert.equal(res.body.assumptions.monthlyExpenses, null);
+  const cash = res.body.projections.map((p: { projectedCash: number }) => p.projectedCash);
+  assert.ok(cash.every((c: number) => c === cash[0]));
+});
+
 // ---- GET /summary ----------------------------------------------------------
 
 test('GET /summary: netWorth uses holdings market value for investment accounts', async () => {
