@@ -96,7 +96,87 @@ test('owedBalance: a foreign-currency leg on a CAD card is FX-converted, not dro
   await seedTxn(card.id, -100, 'USD');
   // Pre-fix: find(defCcy) ?? balances[0] only looked at the CAD bucket → 300.
   const owed = await mod.owedBalance(card, null, AS_OF, stubFx);
-  assert.equal(owed, 440);
+  assert.equal(owed.balance, 440);
+  assert.equal(owed.balanceSource, 'live');
+});
+
+// ---- statement vs live balance ------------------------------------------
+
+test('chooseBalanceSource: no statement balance → live', () => {
+  assert.equal(mod.chooseBalanceSource(false, '2026-01-31', '2026-01-10'), 'live');
+});
+
+test('chooseBalanceSource: statement on/after the last transaction → statement', () => {
+  assert.equal(mod.chooseBalanceSource(true, '2026-01-31', '2026-01-10'), 'statement');
+  assert.equal(mod.chooseBalanceSource(true, '2026-01-10', '2026-01-10'), 'statement');
+});
+
+test('chooseBalanceSource: transactions imported after the statement → live', () => {
+  assert.equal(mod.chooseBalanceSource(true, '2026-01-10', '2026-01-11'), 'live');
+});
+
+test('chooseBalanceSource: no transactions → statement', () => {
+  assert.equal(mod.chooseBalanceSource(true, '2026-01-10', null), 'statement');
+});
+
+async function seedStatementProfile(
+  accountId: number,
+  statementBalance: number,
+  statementDate: string | null,
+) {
+  await models.LiabilityAccount.create({
+    accountId,
+    householdId: household.id,
+    interestRate: '20.0000',
+    minimumPayment: '25.0000',
+    statementBalance: statementBalance.toFixed(4),
+    statementDate,
+    dueDay: null,
+  } as never);
+}
+
+test('loadLiabilities: a statement newer than the last import is used', async () => {
+  const card = await seedAccount({ name: 'Visa', accountType: 'credit_card', defaultCurrency: 'CAD' });
+  await seedTxn(card.id, -300, 'CAD', '2026-01-10');
+  await seedStatementProfile(card.id, 500, '2026-01-15');
+  const [row] = await mod.loadLiabilities(household.id, AS_OF, stubFx);
+  assert.equal(row.balance, 500);
+  assert.equal(row.balanceSource, 'statement');
+});
+
+test('loadLiabilities: a statement older than the last import falls back to the live balance', async () => {
+  const card = await seedAccount({ name: 'Visa', accountType: 'credit_card', defaultCurrency: 'CAD' });
+  await seedTxn(card.id, -300, 'CAD', '2026-01-10');
+  await seedTxn(card.id, -900, 'CAD', '2026-01-25');
+  await seedStatementProfile(card.id, 300, '2026-01-12');
+  const [row] = await mod.loadLiabilities(household.id, AS_OF, stubFx);
+  assert.equal(row.balance, 1200);
+  assert.equal(row.balanceSource, 'live');
+  assert.equal(row.balanceCad, 1200);
+  // The stale statement figure is still reported as-is for display.
+  assert.equal(row.statementBalance, 300);
+});
+
+test('loadLiabilities: transactions after asOf do not make the statement stale', async () => {
+  const card = await seedAccount({ name: 'Visa', accountType: 'credit_card', defaultCurrency: 'CAD' });
+  await seedTxn(card.id, -300, 'CAD', '2026-01-10');
+  await seedTxn(card.id, -900, 'CAD', '2026-03-01'); // after AS_OF
+  await seedStatementProfile(card.id, 450, '2026-01-15');
+  const [row] = await mod.loadLiabilities(household.id, AS_OF, stubFx);
+  assert.equal(row.balance, 450);
+  assert.equal(row.balanceSource, 'statement');
+});
+
+test('loadLiabilities: a manual statement balance with no statement date is dated by when it was saved', async () => {
+  const card = await seedAccount({ name: 'Visa', accountType: 'credit_card', defaultCurrency: 'CAD' });
+  await seedTxn(card.id, -300, 'CAD', '2026-01-10');
+  // Saved "now" (well after the 2026-01-10 import) via the Debt page, which
+  // never sets statementDate.
+  await seedStatementProfile(card.id, 650, null);
+  const today = new Date().toISOString().slice(0, 10);
+  const [row] = await mod.loadLiabilities(household.id, today, stubFx);
+  assert.equal(row.balance, 650);
+  assert.equal(row.balanceSource, 'statement');
 });
 
 test('loadLiabilities: closed accounts are excluded', async () => {

@@ -30,6 +30,7 @@ const populatedOverview: DebtOverview = {
       accountType: 'credit_card',
       currency: 'CAD',
       balance: 12000,
+      balanceSource: 'live',
       interestRate: 19.99,
       minimumPayment: 350,
       statementBalance: null,
@@ -110,6 +111,26 @@ describe('DebtPage', () => {
       await screen.findByRole('columnheader', { name: /^account$/i }),
     ).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: /balance owed/i })).toBeInTheDocument()
+  })
+
+  it('labels each balance with the source it came from', async () => {
+    getJsonMock.mockResolvedValue({
+      ...populatedOverview,
+      liabilities: [
+        populatedOverview.liabilities[0],
+        {
+          ...populatedOverview.liabilities[0],
+          accountId: 2,
+          name: 'Amex',
+          balanceSource: 'statement',
+          statementBalance: 900,
+          balance: 900,
+        },
+      ],
+    })
+    renderPage()
+    expect(await screen.findByText('Live balance')).toBeInTheDocument()
+    expect(screen.getByText('Statement balance')).toBeInTheDocument()
   })
 
   it('renders the empty state when there are no liabilities', async () => {
