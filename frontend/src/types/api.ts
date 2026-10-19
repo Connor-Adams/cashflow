@@ -1811,8 +1811,6 @@ export type SyncRestorePreviewResponse = {
   tableCounts: Record<string, number>;
 };
 
-export type SyncRestoreMode = 'merge' | 'replace';
-
 // ---- Data exports (issue #302) -------------------------------------------
 
 export type DataExportStatus = 'queued' | 'running' | 'ready' | 'failed';
@@ -1845,7 +1843,6 @@ export type RequestDataExportError = {
 };
 
 export type SyncRestoreResponse = {
-  mode: SyncRestoreMode;
   inserted: Record<string, number>;
   skipped: Record<string, number>;
   sourceHouseholdId: number | null;

@@ -7,7 +7,8 @@
  *     `cashflow-backup-YYYY-MM-DD.cfbak.json`.
  *   - Restore from backup → user uploads the .cfbak.json, enters the
  *     passphrase, optionally previews counts before committing the
- *     restore. Replace mode lets them overwrite existing rows.
+ *     restore. Restore is merge-only: it applies only to a household
+ *     with no existing data (there is no destructive replace mode).
  *
  * The page is intentionally low-chrome — power-user safety surface.
  * Future cloud-sync work plugs into the same endpoints (see
@@ -23,7 +24,6 @@ import { getJson, postJson } from '../lib/api'
 import type {
   SyncBackupResponse,
   SyncHistoryResponse,
-  SyncRestoreMode,
   SyncRestorePreviewResponse,
   SyncRestoreResponse,
 } from '../types/api'
@@ -254,7 +254,6 @@ function RestoreSection({ onComplete }: { onComplete: () => void }) {
   const [passphrase, setPassphrase] = useState('')
   const [parsedFile, setParsedFile] = useState<ParsedFile | null>(null)
   const [fileName, setFileName] = useState<string | null>(null)
-  const [mode, setMode] = useState<SyncRestoreMode>('merge')
   const [preview, setPreview] = useState<SyncRestorePreviewResponse | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [restoreLoading, setRestoreLoading] = useState(false)
@@ -303,7 +302,6 @@ function RestoreSection({ onComplete }: { onComplete: () => void }) {
       const res = await postJson<SyncRestoreResponse>('/api/sync/restore', {
         passphrase,
         bundle: parsedFile.bundle,
-        mode,
       })
       setResult(res)
       onComplete()
@@ -314,7 +312,7 @@ function RestoreSection({ onComplete }: { onComplete: () => void }) {
     } finally {
       setRestoreLoading(false)
     }
-  }, [parsedFile, passphrase, mode, onComplete])
+  }, [parsedFile, passphrase, onComplete])
 
   const canSubmit =
     parsedFile != null &&
@@ -331,6 +329,11 @@ function RestoreSection({ onComplete }: { onComplete: () => void }) {
             <p className="text-sm text-muted-foreground m-0 mt-1">
               Upload a .cfbak.json file and supply the passphrase used at
               backup time. Preview the contents before applying.
+            </p>
+            <p className="text-sm text-muted-foreground m-0 mt-1">
+              Restore only works into a household with no existing data
+              (for example a fresh install) and refuses otherwise. It never
+              deletes anything.
             </p>
           </div>
           <label className="flex flex-col gap-1 text-sm">
@@ -360,38 +363,6 @@ function RestoreSection({ onComplete }: { onComplete: () => void }) {
               placeholder="Passphrase used at backup time"
             />
           </label>
-          <fieldset className="flex flex-col gap-1 text-sm">
-            <legend className="font-medium">Restore mode</legend>
-            <label className="flex items-start gap-2">
-              <input
-                type="radio"
-                name="mode"
-                checked={mode === 'merge'}
-                onChange={() => setMode('merge')}
-                className="mt-1"
-              />
-              <span>
-                <strong>Merge (safe)</strong> — only restore when your
-                current household has no existing data. Refuses if it
-                does. Pick this for a fresh install.
-              </span>
-            </label>
-            <label className="flex items-start gap-2">
-              <input
-                type="radio"
-                name="mode"
-                checked={mode === 'replace'}
-                onChange={() => setMode('replace')}
-                className="mt-1"
-              />
-              <span>
-                <strong>Replace (destructive)</strong> — delete the
-                current household's accounts, categories, contacts,
-                rules, and transactions before inserting the bundle.
-                There's no undo.
-              </span>
-            </label>
-          </fieldset>
           <div className="flex flex-row gap-2">
             <Button
               type="button"
@@ -406,7 +377,7 @@ function RestoreSection({ onComplete }: { onComplete: () => void }) {
               onClick={() => void runRestore()}
               disabled={!canSubmit}
             >
-              {restoreLoading ? 'Restoring…' : `Restore (${mode})`}
+              {restoreLoading ? 'Restoring…' : 'Restore'}
             </Button>
           </div>
           {preview && (
@@ -428,7 +399,6 @@ function RestoreSection({ onComplete }: { onComplete: () => void }) {
           {result && (
             <Alert variant="success" title="Restore complete">
               <ul className="m-0 pl-4 list-disc text-sm">
-                <li>Mode: {result.mode}</li>
                 {Object.entries(result.inserted).map(([t, n]) => (
                   <li key={t}>
                     {t}: {n} rows restored

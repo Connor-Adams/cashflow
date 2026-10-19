@@ -2,15 +2,16 @@
  * restoreBundle — apply a decrypted bundle payload to a target
  * household (Cashflow #239).
  *
- * V1 supports two modes:
- *   - 'merge' (default): refuse if any of the V1 tables in the
- *     target household contain rows. Forces a "restore-into-empty"
- *     story; safe by default. Use this when restoring on a fresh
- *     install.
- *   - 'replace': wipe the V1 tables for the target household first,
- *     then insert. The destructive option behind an explicit opt-in
- *     so a user can't accidentally clobber live data with a stale
- *     bundle.
+ * Restore is merge-only: it refuses if any of the V1 tables in the
+ * target household contain rows, so a bundle can only be restored into
+ * an empty household (e.g. a fresh install).
+ *
+ * There is deliberately no "replace" (wipe-then-insert) mode. Deleting
+ * the household's transactions/accounts/categories ON DELETE CASCADEs
+ * into receipts, order links, labels, reimbursements, tax metadata,
+ * investment activity and more — none of which the bundle carries (see
+ * tables.ts) — so a replace would silently destroy data it can never
+ * restore. The /api/sync/restore route rejects mode=replace with a 400.
  *
  * Primary-key collisions are handled by a per-table id-remap. The
  * incoming row's id is replaced by the autoincrement value picked by
@@ -26,8 +27,6 @@ import type { BundlePayload } from './bundleFormat';
 import { TABLES, TABLE_NAMES, type BundleTableSpec } from './tables';
 import { getOrCreatePersonalEntity } from '../tax/services/getOrCreatePersonalEntity';
 
-export type RestoreMode = 'merge' | 'replace';
-
 export interface RestoreOptions {
   /** Target household id rows should land in. */
   householdId: number;
@@ -36,8 +35,6 @@ export interface RestoreOptions {
    *  crafted bundle can't plant a foreign user id (#837). When omitted, those
    *  columns are nulled rather than trusted. */
   userId?: number;
-  /** Restore strategy — defaults to 'merge'. */
-  mode?: RestoreMode;
   /** Dry-run: validate + count, do not write. */
   dryRun?: boolean;
 }
@@ -112,22 +109,6 @@ function targetIsEmpty(
     .then((rows) => Number(rows[0]?.n ?? 0) === 0);
 }
 
-async function wipeTable(
-  sequelize: Sequelize,
-  table: string,
-  householdId: number,
-  transaction: Transaction,
-): Promise<void> {
-  await sequelize.query(
-    `DELETE FROM "${table}" WHERE "household_id" = :hid`,
-    {
-      replacements: { hid: householdId },
-      type: QueryTypes.DELETE,
-      transaction,
-    },
-  );
-}
-
 function pickColumnValues(
   row: Record<string, unknown>,
   columns: string[],
@@ -178,7 +159,7 @@ export async function restoreBundle(
   payload: BundlePayload,
   options: RestoreOptions,
 ): Promise<RestoreResult> {
-  const { householdId, userId, mode = 'merge', dryRun = false } = options;
+  const { householdId, userId, dryRun = false } = options;
   if (!Number.isInteger(householdId) || householdId < 1) {
     throw new Error('restoreBundle requires a positive integer householdId');
   }
@@ -207,19 +188,12 @@ export async function restoreBundle(
   // One transaction across all tables — restore is all-or-nothing.
   const t = await sequelize.transaction();
   try {
-    // Step 1: ensure the target household is in the expected state.
-    if (mode === 'merge') {
-      for (const spec of TABLES) {
-        if (!(await targetIsEmpty(sequelize, spec.table, householdId, t))) {
-          throw new Error(
-            `Refusing to restore in merge mode: target household has existing rows in "${spec.table}". Use mode=replace to overwrite.`,
-          );
-        }
-      }
-    } else if (mode === 'replace') {
-      // Wipe in REVERSE order (children first) to respect FK constraints.
-      for (let i = TABLES.length - 1; i >= 0; i--) {
-        await wipeTable(sequelize, TABLES[i].table, householdId, t);
+    // Step 1: merge-only — the target household must be empty.
+    for (const spec of TABLES) {
+      if (!(await targetIsEmpty(sequelize, spec.table, householdId, t))) {
+        throw new Error(
+          `Refusing to restore: target household has existing rows in "${spec.table}". A backup can only be restored into an empty household.`,
+        );
       }
     }
 
