@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { Button } from '@connor-adams/designsystem'
 import { Input } from '@connor-adams/designsystem'
 import { NativeSelect } from '@connor-adams/designsystem'
@@ -415,6 +415,19 @@ function sourceFromView(view: SavedView | null): SourceFilter {
 }
 function statusFromView(view: SavedView | null): StatusFilter {
   return view && view.statuses.length === 1 ? view.statuses[0] : 'all'
+}
+
+/**
+ * `?view=insights` is the deep link the legacy `/insights` route used to send
+ * people to. Insights are not review items (they live on /api/insights with
+ * their own status machine), so they get their own Inbox tab rather than a
+ * saved view here — forward the deep link to it.
+ */
+const INSIGHTS_VIEW_PARAM = 'insights'
+
+export function InboxIndexRoute() {
+  if (readViewParam() === INSIGHTS_VIEW_PARAM) return <Navigate to="/inbox/insights" replace />
+  return <UnifiedInboxPage />
 }
 
 export function UnifiedInboxPage() {

@@ -59,14 +59,16 @@ export const PortfolioLayout = () => (
   />
 )
 
-// Groups the two inbox-y surfaces under /inbox WITHOUT merging their data
-// (different machines: proposals on /api/review-items vs transaction review on
-// /api/transactions). Nav-only fold — PR 5.
+// Groups the inbox-y surfaces under /inbox WITHOUT merging their data
+// (different machines: proposals on /api/review-items, transaction review on
+// /api/transactions, detector findings on /api/insights). Nav-only fold — PR 5.
+// The sidebar Inbox badge counts open insights, so they need a tab here.
 export const InboxLayout = () => (
   <RouteTabsLayout
     tabs={[
       { value: 'proposals', label: 'Proposals', path: '/inbox' },
       { value: 'review', label: 'Transaction review', path: '/inbox/review' },
+      { value: 'insights', label: 'Insights', path: '/inbox/insights' },
     ]}
   />
 )

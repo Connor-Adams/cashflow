@@ -393,10 +393,9 @@ router.get('/import-cleanup', async (req, res, next) => {
  * (e.g. the frontend's `${kind}:${id}` composite key below) rather than
  * acting on a bare `id` from this list.
  *
- * `financial_insight` stays in the union (and as a `byKind` key, always 0)
- * for response-shape compatibility, but this endpoint no longer emits it:
- * open `Insight` rows have their own page, endpoint and sidebar badge, and
- * counting them here double-badged the very same rows.
+ * `financial_insight` stays in the union for response-shape compatibility,
+ * but this endpoint no longer emits it: open `Insight` rows have their own
+ * Inbox tab (/inbox/insights) and endpoint (GET /api/insights).
  */
 type InboxItem = {
   id: number;
@@ -518,34 +517,29 @@ router.get('/inbox', async (req, res, next) => {
   }
 });
 
+/**
+ * GET /api/ai/inbox/count — the review-item half of the sidebar Inbox badge
+ * (open insights are the other half, counted via GET /api/insights?status=open).
+ *
+ * The badge must only count things the Inbox can actually show and act on.
+ * Pending `transaction_audit` suggestions with at least one issue are listed
+ * by GET /api/review-items (source ai-suggestion), so they count. Two kinds
+ * deliberately do NOT:
+ *   - rule_proposal: synthesized on read, never stored as pending rows, so the
+ *     Inbox cannot list them — they live on the Rules page instead.
+ *   - counterparty_promotion: same, and no UI lists them at all yet.
+ * Counting either badged items no one could find.
+ */
 router.get('/inbox/count', async (req, res, next) => {
   try {
-    const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
-    const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
-    const [auditRows, ruleProposals, counterpartyPromotions] = await Promise.all([
-      AiSuggestion.findAll({
-        where: { ...where, kind: 'transaction_audit' },
-        attributes: ['id', 'output'],
-      }),
-      findRuleProposals(householdId),
-      findCounterpartyPromotions(householdId),
-    ]);
+    const auditRows = await AiSuggestion.findAll({
+      where: { ...aiSuggestionWhere(req), status: 'suggested' as const, kind: 'transaction_audit' },
+      attributes: ['id', 'output'],
+    });
     const auditCount = auditRows.filter((r) => auditIssueCount(r.output) > 0).length;
-    const ruleProposalCount = ruleProposals.length;
-    const counterpartyPromotionCount = counterpartyPromotions.length;
     res.json({
-      total: auditCount + ruleProposalCount + counterpartyPromotionCount,
-      byKind: {
-        transaction_audit: auditCount,
-        // Always 0: open Insight rows are counted by the insights surface
-        // itself (GET /api/insights?status=open, via useInsightsCount) and
-        // badged there. Counting them here too badged the same rows twice
-        // (sidebar AI inbox + sidebar Insights, and again on the dashboard
-        // inbox tile). Key kept so the frontend response contract holds.
-        financial_insight: 0,
-        rule_proposal: ruleProposalCount,
-        counterparty_promotion: counterpartyPromotionCount,
-      },
+      total: auditCount,
+      byKind: { transaction_audit: auditCount },
     });
   } catch (e) {
     next(e);

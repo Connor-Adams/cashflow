@@ -67,12 +67,7 @@ test('GET /api/ai/inbox/count returns zeros when nothing pending', async () => {
   assert.equal(r.status, 200);
   assert.deepEqual(r.body, {
     total: 0,
-    byKind: {
-      transaction_audit: 0,
-      financial_insight: 0,
-      rule_proposal: 0,
-      counterparty_promotion: 0,
-    },
+    byKind: { transaction_audit: 0 },
   });
 });
 
@@ -106,10 +101,8 @@ test('GET /api/ai/inbox/count counts audit rows but never open insights', async 
   // The open Insight is NOT counted here: it is already counted and badged by
   // the insights surface itself (GET /api/insights?status=open). Counting it
   // in both places double-badged the same rows.
-  assert.equal(r.body.total, 1);
-  assert.equal(r.body.byKind.financial_insight, 0, 'insights never inflate the AI inbox count');
+  assert.equal(r.body.total, 1, 'insights never inflate the AI inbox count');
   assert.equal(r.body.byKind.transaction_audit, 1);
-  assert.equal(r.body.byKind.rule_proposal, 0);
 });
 
 test('GET /api/ai/inbox/count scopes by household', async () => {
@@ -124,10 +117,8 @@ test('GET /api/ai/inbox/count scopes by household', async () => {
   });
   const r = await regularAgent.get('/api/ai/inbox/count');
   assert.equal(r.status, 200);
-  assert.equal(r.body.byKind.financial_insight, 0, 'insights are counted by their own endpoint');
   assert.equal(r.body.byKind.transaction_audit, 0);
-  assert.equal(r.body.byKind.rule_proposal, 0);
-  assert.equal(r.body.total, 0);
+  assert.equal(r.body.total, 0, 'insights are counted by their own endpoint');
 });
 
 test('GET /api/ai/inbox returns audit rows and leaves open insights to the insights page', async () => {
@@ -292,7 +283,7 @@ test('GET /api/ai/inbox excludes dismissed rule proposals', async () => {
   assert.ok(!ruleItems.some((i) => i.summary.includes('INBOX SHOP')));
 });
 
-test('GET /api/ai/inbox/count includes non-dismissed rule proposals', async () => {
+test('GET /api/ai/inbox/count does NOT count rule proposals (the Inbox cannot list them)', async () => {
   const { Transaction, Account } = await import('../../src/models/index.js');
   const crypto = await import('crypto');
   const account = await Account.create({
@@ -311,8 +302,13 @@ test('GET /api/ai/inbox/count includes non-dismissed rule proposals', async () =
       reviewedAt: new Date(),
     } as never);
   }
+  // The proposal exists (the Rules page lists it)...
+  const proposals = await authed.get('/api/ai/rule-proposals');
+  assert.ok((proposals.body.proposals as unknown[]).length >= 1);
+  // ...but the badge only counts what the Inbox can show: audit rows.
   const r = await authed.get('/api/ai/inbox/count');
-  assert.ok(r.body.byKind.rule_proposal >= 1);
+  assert.equal(r.body.byKind.rule_proposal, undefined);
+  assert.equal(r.body.total, r.body.byKind.transaction_audit);
 });
 
 test('POST /api/ai/rule-proposals dismiss normalizes multi-space patterns', async () => {
@@ -406,9 +402,10 @@ test('GET /api/ai/inbox never lists open Insight rows (they have their own surfa
   assert.ok(!keys.includes(`financial_insight:${critical.id}`));
   assert.ok(!keys.includes(`financial_insight:${warning.id}`));
 
-  // ...and the count endpoint agrees.
+  // ...and the count endpoint agrees: only audit rows reach the total.
   const c = await authed.get('/api/ai/inbox/count');
-  assert.equal(c.body.byKind.financial_insight, 0);
+  assert.equal(c.body.byKind.financial_insight, undefined);
+  assert.equal(c.body.total, c.body.byKind.transaction_audit);
 });
 
 test('GET /api/transactions?ids=1,2 filters to listed ids', async () => {

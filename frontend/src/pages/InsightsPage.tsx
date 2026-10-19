@@ -1,13 +1,12 @@
 /**
- * Insights inbox — surfaces deterministic detector findings from the
- * `insights` table (issue #204). Each row carries a severity badge, a
- * short title, supporting detail, and dismiss / resolve actions.
+ * Insights view of the Inbox (`/inbox/insights`) — surfaces deterministic
+ * detector findings from the `insights` table (issue #204). Each row carries a
+ * severity badge, a short title, supporting detail, and dismiss / resolve
+ * actions. Every open row here is one the sidebar Inbox badge counts (via
+ * `useInsightsCount`, which reads the same GET /api/insights?status=open).
  *
  * Severity ordering matches the backend `SEVERITY_RANK` (critical > warning
  * > info). Within a severity we sort by detectedAt desc.
- *
- * Future #210 layers an AI review pass on top of this same table — the row
- * shape is shared with that future endpoint.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -15,6 +14,8 @@ import { Button } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { Alert } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
+import { ToggleGroup } from '@connor-adams/designsystem'
+import { PageHeader } from '@/components/ui/page-header'
 import { getJson, patchJson, postJson } from '@/lib/api'
 import { InsightEvidence } from './InsightEvidence'
 
@@ -146,42 +147,42 @@ export function InsightsPage() {
   }
 
   return (
-    <main className="p-6 max-w-5xl mx-auto">
-      <header className="flex items-baseline justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Insights</h1>
-          <p className="text-sm text-muted-foreground">
-            {rows.length} total · {counts.open} open
-          </p>
-        </div>
-        <Button type="button" onClick={() => void runDetectors()} disabled={running}>
-          {running ? 'Running…' : 'Run detectors'}
-        </Button>
-      </header>
-
-      <nav
-        className="flex gap-2 border-b border-border mb-4"
-        aria-label="Filter by status"
-      >
-        {TAB_ORDER.map((t) => (
-          <Button
-            key={t}
-            type="button"
-            variant="ghost"
-            onClick={() => setTab(t)}
-            aria-pressed={tab === t}
-            className={
-              tab === t
-                ? 'px-3 py-2 border-b-2 border-primary font-semibold rounded-none'
-                : 'px-3 py-2 border-b-2 border-transparent text-muted-foreground rounded-none'
-            }
-          >
-            {TAB_LABEL[t]} <span className="text-xs">({counts[t]})</span>
+    <div>
+      <PageHeader
+        title="Insights"
+        description={`${rows.length} total · ${counts.open} open`}
+        actions={
+          <Button type="button" onClick={() => void runDetectors()} disabled={running}>
+            {running ? 'Running…' : 'Run detectors'}
           </Button>
-        ))}
-      </nav>
+        }
+      />
 
-      {err ? <Alert variant="error" className="mb-2">{err}</Alert> : null}
+      <div className="mb-4">
+        <ToggleGroup
+          type="single"
+          size="sm"
+          aria-label="Filter by status"
+          value={tab}
+          onValueChange={(v) => {
+            if (typeof v === 'string' && (TAB_ORDER as string[]).includes(v)) setTab(v as Tab)
+          }}
+          items={TAB_ORDER.map((t) => ({
+            value: t,
+            label: (
+              <>
+                {TAB_LABEL[t]} <span className="text-xs">({counts[t]})</span>
+              </>
+            ),
+          }))}
+        />
+      </div>
+
+      {err ? (
+        <div className="mb-2">
+          <Alert variant="error">{err}</Alert>
+        </div>
+      ) : null}
       {loading ? <p className="text-sm leading-6 text-muted-foreground">Loading…</p> : null}
       {!loading && visible.length === 0 ? (
         rows.length === 0 ? (
@@ -274,11 +275,15 @@ export function InsightsPage() {
                   )}
                 </div>
               </div>
-              {itemErr ? <Alert variant="error" className="mt-2">{itemErr}</Alert> : null}
+              {itemErr ? (
+                <div className="mt-2">
+                  <Alert variant="error">{itemErr}</Alert>
+                </div>
+              ) : null}
             </li>
           )
         })}
       </ul>
-    </main>
+    </div>
   )
 }
