@@ -20,7 +20,8 @@ import type {
   SlipFact,
   TaxYearFacts,
 } from '../engine/types';
-import { computeAcb, type AcbActivity, type AcbRealizedEvent } from '../../portfolio/acb';
+import { computeAcb, type AcbActivity } from '../../portfolio/acb';
+import { computeDeniedPortion, daysBetween, isLossEvent, loadAcbFeed } from './acbFeed';
 import { resolveTaxTreatment } from './resolveTaxTreatment';
 import { createCadConverter } from '../completeness/cadConverter';
 import { createFxFallbackCollector } from '../../fx/fxFallbackWarnings';
@@ -29,52 +30,6 @@ import { resolveDeductiblePercent } from '../util/deductiblePercent';
 import { parseSlipAmount } from '../util/parseSlipAmount';
 import { hasSingleCorp, isOwnerPaidCorpExpense } from './ownerPaidCorpExpense';
 import { resolveEntityPerson } from '../services/personalEntityOwner';
-
-/**
- * CRA superficial-loss denial for one loss disposition: 30 days BEFORE through
- * 30 days after the disposition (61 days, same-day included), AND identical
- * property must still be held at the end of the window. Denial is proportional
- * per CRA's administrative formula min(S, P, B) / S × loss, where S = units
- * sold, P = units acquired in the window, B = units held at window end.
- * Returns undefined when the event is not a loss or no denial applies.
- */
-function computeDeniedPortion(
-  realized: AcbRealizedEvent,
-  acts: InvestmentActivity[],
-  timeline: { asOf: string; quantity: number }[],
-): Decimal | undefined {
-  const rawGain = D(realized.proceeds).minus(D(realized.costRemoved));
-  if (!rawGain.lessThan(0) || realized.qtySold <= 0) return undefined;
-  const sellDate = new Date(`${realized.tradeDate}T00:00:00.000Z`);
-  const windowStartStr = new Date(sellDate.getTime() - 30 * 86_400_000).toISOString().slice(0, 10);
-  const windowEndStr = new Date(sellDate.getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
-  const acquiredInWindow = acts
-    .filter(a =>
-      (a.activityType === 'buy' || a.activityType === 'reinvestment')
-      && (a.tradeDate as unknown as string) >= windowStartStr
-      && (a.tradeDate as unknown as string) <= windowEndStr)
-    .reduce((sum, a) => sum + (a.quantity != null ? Number(a.quantity) : 0), 0);
-  // Units held at window end: last ACB timeline state at-or-before the window
-  // end (timeline is chronological; the feed extends 30 days past year-end so
-  // December windows are fully covered).
-  let heldAtWindowEnd = 0;
-  for (const st of timeline) {
-    if (st.asOf > windowEndStr) break;
-    heldAtWindowEnd = st.quantity;
-  }
-  if (acquiredInWindow > 0 && heldAtWindowEnd > 0) {
-    const deniedUnits = Math.min(realized.qtySold, acquiredInWindow, heldAtWindowEnd);
-    return rawGain.negated().times(deniedUnits).dividedBy(realized.qtySold);
-  }
-  return undefined;
-}
-
-/** Whole-day difference (a − b) between two 'YYYY-MM-DD' dates at UTC midnight. */
-function daysBetween(a: string, b: string): number {
-  const da = new Date(`${a}T00:00:00.000Z`).getTime();
-  const db = new Date(`${b}T00:00:00.000Z`).getTime();
-  return Math.round((da - db) / 86_400_000);
-}
 
 /**
  * Collapse the two legs of one internal contribution transfer into one.
@@ -427,57 +382,18 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
    */
   const acbWarnings: string[] = [];
 
-  // ACB is a weighted-average running balance, so computeAcb needs the FULL
-  // per-security history up to year-end — NOT just this tax year's rows. A
-  // year-windowed feed makes prior-year buys (and return_of_capital) invisible,
-  // collapsing ACB to ~0 and grossly overstating realized gains as near-$0-cost
-  // dispositions. We walk all activity through 30 days past year-end (so the
+  // ACB walk over the FULL history through 30 days past year-end (so the
   // superficial-loss check can see January repurchases for late-December
-  // dispositions), then keep only the dispositions that actually settled
-  // DURING the tax year.
-  const acbFeedEnd = `${year + 1}-01-30`;
-  const acbActivity = accountIds.length
-    ? await InvestmentActivity.findAll({
-        where: {
-          accountId: accountIds,
-          tradeDate: { [Op.lte]: acbFeedEnd },
-        },
-      })
-    : [];
+  // dispositions); only dispositions that settled DURING the tax year are kept.
+  // Shared with buildCorpFacts — see acbFeed.ts.
+  const acbFeed = await loadAcbFeed(
+    accountIds,
+    yearEnd,
+    async (amount, currency, date) => (await toCad(amount, currency, date)).cad,
+  );
 
   const capitalGainEvents: CapGainEvent[] = [];
-  const securityIds = Array.from(new Set(acbActivity.map((a) => a.securityId).filter((x): x is number => x != null)));
-  for (const sid of securityIds) {
-    const acts = acbActivity.filter((a) => a.securityId === sid);
-    // CRA requires per-leg FX conversion: each buy/sell/fee leg converts at its
-    // own trade-date rate, so the ACB walk — and the CapGainEvent the T1 engine
-    // treats as CAD — is genuinely in CAD (proceeds at the sale-date rate, cost
-    // base accumulated at acquisition-date rates).
-    const acbInput = [];
-    for (const a of acts) {
-      const currency = (a.currency as string | null) ?? 'CAD';
-      const tradeDate = a.tradeDate as unknown as string;
-      let amount = a.amount != null ? Number(a.amount) : null;
-      let fees = a.fees != null ? Number(a.fees) : null;
-      if (currency !== 'CAD') {
-        if (amount != null) amount = (await toCad(D(amount), currency, tradeDate)).cad.toNumber();
-        if (fees != null) fees = (await toCad(D(fees), currency, tradeDate)).cad.toNumber();
-      }
-      acbInput.push({
-        id: a.id as number,
-        activityType: a.activityType as string,
-        tradeDate,
-        quantity: a.quantity != null ? Number(a.quantity) : null,
-        amount,
-        currency: 'CAD',
-        fees,
-        splitRatio: a.splitRatio != null ? Number(a.splitRatio) : null,
-        costBasisAllocationPct:
-          a.costBasisAllocationPct != null ? Number(a.costBasisAllocationPct) : null,
-        cashComponent: a.cashComponent != null ? Number(a.cashComponent) : null,
-        recipientSecurityId: a.recipientSecurityId ?? null,
-      });
-    }
+  for (const { securityId: sid, acts, acbInput } of acbFeed) {
     // s.53(1)(f): a denied superficial loss is added back to the ACB of the
     // substituted (repurchased) shares — deferred, not extinguished. Process
     // loss dispositions chronologically: each denial injects a synthetic
@@ -495,8 +411,7 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     acbWarnings.push(...acb.warnings);
     for (;;) {
       const next = acb.realizedEvents.find(
-        ev => !processed.has(ev.activityId) && ev.qtySold > 0
-          && D(ev.proceeds).minus(D(ev.costRemoved)).lessThan(0),
+        ev => !processed.has(ev.activityId) && isLossEvent(ev),
       );
       if (!next) break;
       processed.add(next.activityId);

@@ -1,5 +1,6 @@
 import { D, Decimal, maxZero, sumD } from '../util/decimal';
 import type { CorpTaxYearFacts, IncomeItem, RateTable } from './types';
+import { capitalGainOf } from './capital-gains';
 
 export type IntegrationResult = {
   gripAddition: Decimal;
@@ -102,7 +103,7 @@ export function computeIntegration(
 ): IntegrationResult {
   const gripAddition = maxZero(postLossGeneralRateIncome).times(GRIP_GENERAL_RATE_FACTOR);
 
-  const grossGains = sumD(facts.capitalGainEvents.map(e => e.proceeds.minus(e.acb).minus(e.outlays)));
+  const grossGains = sumD(facts.capitalGainEvents.map(capitalGainOf));
   const corpInclusionRate = r.capitalGainsInclusionHigh ?? r.capitalGainsInclusion;
   const cdaAddition = maxZero(grossGains).times(D('1').minus(corpInclusionRate));
 
