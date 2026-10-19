@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import request from 'supertest';
 import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
-import { hashCaptureToken, mintCaptureTokenPlaintext } from '../../src/auth/captureToken.js';
+import { hashScopedToken, mintTokenPlaintext } from '../../src/auth/scopedToken.js';
 
 let app: import('express').Express;
 let authed: ReturnType<typeof request.agent>;
@@ -175,12 +175,13 @@ test('accepts an order at exactly the items cap (issue #829)', async () => {
 });
 
 test('rejects POST /capture/orders with an expired token (issue #829)', async () => {
-  const expiredPlaintext = mintCaptureTokenPlaintext();
+  const expiredPlaintext = mintTokenPlaintext('capture');
   const owner = await models.User.findOne();
   assert.ok(owner);
-  await models.UserCaptureToken.create({
+  await models.UserToken.create({
     userId: owner.id,
-    tokenHash: hashCaptureToken(expiredPlaintext),
+    scope: 'capture',
+    tokenHash: hashScopedToken(expiredPlaintext),
     label: 'Expired',
     lastUsedAt: null,
     revokedAt: null,

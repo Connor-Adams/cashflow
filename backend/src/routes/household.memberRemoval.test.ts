@@ -18,9 +18,7 @@ import {
   HouseholdMember,
   Session,
   User,
-  UserCaptureToken,
-  UserReportingToken,
-  UserAuditToken,
+  UserToken,
 } from '../models';
 import { hashPassword, hashToken } from '../auth/password';
 
@@ -76,28 +74,16 @@ before(async () => {
   } as never);
 
   // Live (non-revoked) household-scoped tokens held by the member.
-  await UserCaptureToken.create({
-    userId: member.id,
-    tokenHash: crypto.randomBytes(32).toString('hex'),
-    label: 'phone capture',
-    lastUsedAt: null,
-    revokedAt: null,
-    expiresAt: null,
-  } as never);
-  await UserReportingToken.create({
-    userId: member.id,
-    tokenHash: crypto.randomBytes(32).toString('hex'),
-    label: 'reporting',
-    lastUsedAt: null,
-    revokedAt: null,
-  } as never);
-  await UserAuditToken.create({
-    userId: member.id,
-    tokenHash: crypto.randomBytes(32).toString('hex'),
-    label: 'audit',
-    lastUsedAt: null,
-    revokedAt: null,
-  } as never);
+  for (const scope of ['capture', 'reporting', 'audit'] as const) {
+    await UserToken.create({
+      userId: member.id,
+      scope,
+      tokenHash: crypto.randomBytes(32).toString('hex'),
+      label: scope,
+      lastUsedAt: null,
+      revokedAt: null,
+    });
+  }
 
   const mod = await import('../app.js');
   app = mod.default;
@@ -130,12 +116,11 @@ test("removed member's session no longer grants access to the household", async 
 });
 
 test("removed member's capture/reporting/audit tokens are revoked", async () => {
-  const capture = await UserCaptureToken.findOne({ where: { userId: memberUserId } });
-  const reporting = await UserReportingToken.findOne({ where: { userId: memberUserId } });
-  const audit = await UserAuditToken.findOne({ where: { userId: memberUserId } });
-  assert.ok(capture?.revokedAt instanceof Date, 'capture token should be revoked');
-  assert.ok(reporting?.revokedAt instanceof Date, 'reporting token should be revoked');
-  assert.ok(audit?.revokedAt instanceof Date, 'audit token should be revoked');
+  const rows = await UserToken.findAll({ where: { userId: memberUserId } });
+  assert.deepEqual(rows.map((r) => r.scope).sort(), ['audit', 'capture', 'reporting']);
+  for (const r of rows) {
+    assert.ok(r.revokedAt instanceof Date, `${r.scope} token should be revoked`);
+  }
 });
 
 test("the owner's own session and tokens are untouched", async () => {
