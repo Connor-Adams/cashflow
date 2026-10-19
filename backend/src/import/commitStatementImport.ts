@@ -7,30 +7,20 @@ import {
   ImportHistory,
   InvestmentActivity,
   Security,
-  Transaction,
   sequelize,
 } from '../models';
 import { loadAllRules } from './applyRules';
-import { recomputeTransactionAmounts } from './calculateShares';
 import { findExistingForDedup, nearDuplicateWarnings } from './dedupExisting';
 import { normalizeSourceRef } from './normalizeSourceRef';
 import { findExistingInvestmentByFuzzyMatch } from './fuzzyDedupInvestmentActivity';
 import { stableIdentityFingerprint } from './fingerprint';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import { enrichTransaction } from './enrich';
-import { applyRuleSideEffects, findRuleActionsSignal } from '../rules/applyRuleSideEffects';
 import { convertIncomeActivityToAccountCurrency } from './convertActivityCurrency';
 import { ensureFxRate } from '../fx/bankOfCanada';
-import {
-  computeImportConfidence,
-  serializeFlags,
-} from './computeImportConfidence';
-import { extractCounterparty } from './extractCounterparty';
 import { assertStatementReconciles } from './reconciliationGate';
 import { captureStatementBalance } from './captureStatementBalance';
-import { resolveCounterpartyContact } from '../contacts/findOrCreateContact';
 import { markInterestAllocationPending } from '../contacts/interestAllocationCoordinator';
-import type { AccountType } from '@cashflow/shared';
 import {
   enrichmentRecurringMinSupport,
   enrichmentAmazonLinkThreshold,
@@ -42,7 +32,11 @@ import {
   type ColdRow,
 } from './enrichment/aiBatchOverColdRows';
 import { maybeRunEmbeddingMatchOverColdRows } from './enrichment/embeddingMatchOverColdRows';
-import { persistTransactionSignals } from './enrichment/persistSignals';
+import {
+  buildImportedTransaction,
+  coldRowFor,
+  persistImportedTransaction,
+} from './importedTransaction';
 import { coldRowFallbackWarnings } from './enrichment/coldRowFallbackWarnings';
 import type { ChatMessage } from './enrichment/aiBatchStage';
 import type { Embedder } from '../ai/merchantEmbeddings';
@@ -60,29 +54,6 @@ import type {
   NormalizedSecurity,
   StatementPreview,
 } from './statementTypes';
-import type { Signal, TxnType } from './enrichment/types';
-
-/**
- * The txnType the narrative detector actually recognized, or null when it was
- * only guessing. `runDetectTypeStage` emits 'high' confidence exactly when one
- * of its patterns matched the merchant text, and drops to 'medium' (negative
- * amount, no cue → purchase) or 'low' (positive, no cue → unknown) otherwise.
- * That confidence is what lets a source's weak `txnTypeHint` yield to real
- * evidence without yielding to a coin flip.
- */
-function narrativeTxnType(signals: Signal[]): TxnType | null {
-  const detected = signals.find((s) => s.source === 'type-detect' && s.fields.txnType);
-  return detected && detected.confidence === 'high'
-    ? (detected.fields.txnType as TxnType)
-    : null;
-}
-
-/**
- * Types the classifier falls back to when the narrative told it nothing: a
- * negative amount defaults to `purchase`, a positive one to `unknown`. Only
- * these may be overwritten when a link reveals the row was internal movement.
- */
-const GUESSED_TXN_TYPES = ['purchase', 'unknown'];
 
 function isUniqueLike(e: unknown): boolean {
   return (
@@ -615,101 +586,34 @@ export async function commitStatementImport(
         amazonLinkThreshold: enrichmentAmazonLinkThreshold,
       });
 
-      const f = enriched.fields;
-
       // Wealthsimple bundle imports stamp an authoritative `overrideTxnType`
       // from the WS TX code (BUY → 'investment', AFT_OUT → 'transfer', etc).
-      // When present, it wins over the enrichment-pipeline output so the
-      // dashboard's spend math correctly excludes these flows. See
-      // wealthsimpleTxnType.ts for the mapping and root-cause analysis in
-      // backend/scripts/backfill-ws-txn-types.ts.
-      // Precedence: a source that KNOWS the type wins outright; a source that
-      // only guessed (`txnTypeHint`) loses to a narrative the detector actually
-      // recognized, and beats the detector's sign-based fallback. Without the
-      // middle tier a WS `WD`/`AFT_OUT` hint of 'transfer' suppressed
-      // detectTypeStage's "AMEX BILL PYMT" → payment rule, which is why prod
-      // holds 38 credit-card bill payments typed `transfer` against 24 typed
-      // `payment` — the same event, split by which importer wrote it.
-      const effectiveTxnType =
-        row.overrideTxnType ?? narrativeTxnType(enriched.signals) ?? row.txnTypeHint ?? f.txnType;
-      const accountVisibility: 'private' | 'shared' =
-        account.visibility === 'shared' ? 'shared' : 'private';
-      const confidence = computeImportConfidence({
-        reviewFlag: f.reviewFlag,
-        finalCategory: f.autoCategory,
-        autoCategory: f.autoCategory,
-        autoSplitType: f.autoSplitType,
-        finalSplitType:
-          f.autoSplitType === 'partner' || f.autoSplitType === 'shared'
-            ? f.autoSplitType
-            : 'me',
-        txnType: effectiveTxnType,
-        accountVisibility,
-        linkedTransactionId: f.linkedTransactionId,
-        amount: row.amount,
-      });
-
-      const _cp = extractCounterparty(
-        row.merchantRaw,
-        account.accountType as AccountType,
-      );
-      const counterpartyContactId = await resolveCounterpartyContact(
-        account.householdId ?? null,
-        _cp,
-        { transaction: t },
-      );
-      const txn = Transaction.build({
-        accountId: account.id,
-        householdId: account.householdId ?? null,
-        createdByUserId: userId ?? account.ownerUserId,
-        visibility: accountVisibility,
-        ownershipType:
-          f.autoSplitType === 'partner' || f.autoSplitType === 'shared' ? f.autoSplitType : 'me',
-        ownershipContactId: null,
-        counterpartyRaw: _cp?.name ?? null,
-        counterpartyContactId,
-        importBatch: preview.importBatch,
+      // How it ranks against rules, the narrative and `txnTypeHint` is
+      // resolveImportedTxnType's job, shared with the CSV importer.
+      const cashRow = {
         date: row.date,
         merchantRaw: row.merchantRaw,
-        merchantClean: f.merchantClean,
-        merchantCanonical: f.merchantCanonical,
-        txnType: effectiveTxnType,
-        amount: String(row.amount),
+        amount: row.amount,
         currency: row.currency,
-        notes: f.notes,
-        sourceReference: normalizeSourceRef(row.sourceReference),
+        sourceReference: row.sourceReference,
         sourceRowFingerprint: row.sourceRowFingerprint,
         sourceIdentityFingerprint: identityFp,
-        status: 'posted',
-        appliedRuleId: f.appliedRuleId,
-        autoCategory: f.autoCategory,
-        autoBusiness: overrideBusiness ? true : f.autoBusiness,
-        autoSplitType: f.autoSplitType,
-        autoPctMe: f.autoPctMe,
-        autoPctPartner: f.autoPctPartner,
-        categoryOverride: null,
-        businessOverride: null,
-        splitOverride: null,
-        pctMeOverride: null,
-        pctPartnerOverride: null,
-        autoSource: f.autoSource,
-        autoConfidence: f.autoConfidence,
-        linkedTransactionId: f.linkedTransactionId,
-        // transferLinkedAt stamps the forward pointer at the same moment the
-        // reverse pointer is written onto the sibling (Fix 2). Without this,
-        // the new txn shows as unlinked on the Transfers page even though
-        // linkedTransactionId is populated.
-        transferLinkedAt: f.linkedTransactionId != null ? new Date() : null,
-        isRecurring: f.isRecurring,
-        reviewFlag: f.reviewFlag,
-        reviewedAt: null,
-        importConfidence: confidence.state,
-        importConfidenceFlags: serializeFlags(confidence.flags),
-        // Absent means authoritative: a statement is the source's own closed
-        // record. Only the SimpleFIN feed declares itself provisional.
-        sourceTier: preview.sourceTier ?? 'authoritative',
-      });
-      recomputeTransactionAmounts(txn);
+        overrideTxnType: row.overrideTxnType ?? null,
+        txnTypeHint: row.txnTypeHint ?? null,
+      };
+      const built = await buildImportedTransaction(
+        cashRow,
+        enriched,
+        {
+          account,
+          householdId: account.householdId ?? null,
+          createdByUserId: userId ?? account.ownerUserId,
+          importBatch: preview.importBatch,
+          overrideBusiness,
+          sourceTier: preview.sourceTier,
+        },
+        t,
+      );
       // SAVEPOINT around the per-row insert + its signal sidecar. On
       // Postgres, any unique-violation here would otherwise abort the
       // outer transaction and every subsequent SELECT in this loop
@@ -719,88 +623,13 @@ export async function commitStatementImport(
       // so the unique-violation rolls back only this row and the loop
       // continues.
       try {
-        await sequelize.transaction({ transaction: t }, async (sp) => {
-          await txn.save({ transaction: sp });
-          await persistTransactionSignals(txn.id, enriched.signals, sp);
-          // Fix 2: write the reverse pointer back onto the already-persisted
-          // sibling. Without this, the link is one-directional — the new txn
-          // points at the sibling but the sibling's linked_transaction_id is
-          // still NULL, so the Transfers-page unmatched queue keeps showing
-          // both legs even after import.
-          if (f.linkedTransactionId != null) {
-            await Transaction.update(
-              {
-                linkedTransactionId: txn.id,
-                transferLinkedAt: new Date(),
-              },
-              {
-                where: {
-                  id: f.linkedTransactionId,
-                  // Guard: only back-fill if the sibling is not already
-                  // linked to a different txn (prevents clobbering a prior
-                  // manual or auto-link on a second re-import).
-                  linkedTransactionId: null,
-                },
-                transaction: sp,
-              },
-            );
-            // Re-typing the sibling is a SEPARATE, narrower write. Linking is
-            // real evidence that a row the classifier could only guess at
-            // (a bare outflow defaults to `purchase`) was internal movement,
-            // and without this those rows inflate dashboard spend. But it is
-            // NOT evidence against a type the narrative established: the card
-            // leg of a bill payment reads "PAYMENT RECEIVED - THANK YOU" and
-            // is a `payment`. Stamping 'transfer' on it demoted four Amex rows
-            // in prod, two of them when the deposit-activity cleanup imported
-            // their counterparts.
-            await Transaction.update(
-              { txnType: 'transfer' },
-              {
-                where: {
-                  id: f.linkedTransactionId,
-                  txnType: { [Op.in]: GUESSED_TXN_TYPES },
-                },
-                transaction: sp,
-              },
-            );
-          }
-
-          // Rule actions side-effects (issue #795): set_label / set_alert.
-          const ruleActions = findRuleActionsSignal(enriched.signals);
-          if (ruleActions) {
-            await applyRuleSideEffects({
-              ruleActions,
-              transactionId: txn.id,
-              householdId: account.householdId ?? null,
-              transaction: sp,
-            });
-          }
-        });
+        await sequelize.transaction({ transaction: t }, (sp) =>
+          persistImportedTransaction(built.txn, enriched, account.householdId ?? null, sp),
+        );
         insertedTransactions += 1;
-        consumedExistingIds.add(txn.id);
-        if (f.reviewFlag) {
-          const merchantKey = (f.merchantCanonical ?? '').trim() || f.merchantClean.trim();
-          if (merchantKey.length > 0) {
-            coldRows.push({
-              txnId: txn.id,
-              signals: enriched.signals,
-              merchantKey,
-              merchantRaw: row.merchantRaw,
-              merchantClean: f.merchantClean,
-              merchantCanonical: f.merchantCanonical,
-              amount: row.amount,
-              date: row.date,
-              currency: row.currency,
-              memory,
-              accountVisibility,
-              // The type actually persisted, not the pipeline's guess — the
-              // fallbacks recompute import confidence from it.
-              txnType: effectiveTxnType,
-              // Brand-new row: it cannot carry a user override yet.
-              categoryOverride: null,
-            });
-          }
-        }
+        consumedExistingIds.add(built.txn.id);
+        const cold = coldRowFor(built, enriched, cashRow, memory);
+        if (cold) coldRows.push(cold);
       } catch (e) {
         if (isUniqueLike(e)) skippedDuplicates += 1;
         else throw e;

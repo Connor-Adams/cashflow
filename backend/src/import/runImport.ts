@@ -7,7 +7,6 @@ import {
   Account,
   Entity,
   HoldingSnapshot,
-  Transaction,
   ImportHistory,
 } from '../models';
 import { upsertAccountCardIdentifier } from '../models/AccountCardIdentifier';
@@ -19,7 +18,6 @@ import {
 } from './fingerprint';
 import { findExistingForDedup, nearDuplicateWarnings } from './dedupExisting';
 import { loadAllRules } from './applyRules';
-import { recomputeTransactionAmounts } from './calculateShares';
 import { resolveProfileIdForImport } from './inferProfile';
 import { parseCsvRecords } from './csvParse';
 import { inferCsvDateOrdering, mapCsvRow } from './mapRow';
@@ -42,14 +40,11 @@ import { findMerchantMemory } from '../ai/merchantMemory';
 import * as env from '../config/env';
 import { enrichTransaction } from './enrich';
 import {
-  persistTransactionSignals,
-  persistSuggestedOrderLink,
-} from './enrichment/persistSignals';
-import { applyRuleSideEffects, findRuleActionsSignal } from '../rules/applyRuleSideEffects';
-import {
-  computeImportConfidence,
-  serializeFlags,
-} from './computeImportConfidence';
+  buildImportedTransaction,
+  coldRowFor,
+  persistImportedTransaction,
+} from './importedTransaction';
+import { normalizeSourceRef } from './normalizeSourceRef';
 import {
   enrichmentRecurringMinSupport,
   enrichmentAmazonLinkThreshold,
@@ -445,7 +440,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
       const dedup = await findExistingForDedup({
         accountId: account.id,
         sourceIdentityFingerprint: identityFp,
-        sourceReference: v.sourceReference ?? null,
+        sourceReference: normalizeSourceRef(v.sourceReference),
         t,
         // CSV-imported rows default to status 'posted' (see Transaction model).
         // Threading the posted-row context lets the cross-parser merchant-drift
@@ -497,7 +492,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
           merchantRaw: v.merchantRaw,
           date: v.date,
           amount: v.amount,
-          sourceReference: v.sourceReference,
+          sourceReference: normalizeSourceRef(v.sourceReference),
           notes: null,
         },
         accountId: account.id,
@@ -515,66 +510,26 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         amazonLinkThreshold: enrichmentAmazonLinkThreshold,
       });
 
-      const f = enriched.fields;
-      const accountVisibility: 'private' | 'shared' =
-        account.visibility === 'shared' ? 'shared' : 'private';
-      const confidence = computeImportConfidence({
-        reviewFlag: f.reviewFlag,
-        finalCategory: f.autoCategory,
-        autoCategory: f.autoCategory,
-        autoSplitType: f.autoSplitType,
-        finalSplitType:
-          f.autoSplitType === 'partner' || f.autoSplitType === 'shared'
-            ? f.autoSplitType
-            : 'me',
-        txnType: f.txnType,
-        accountVisibility,
-        linkedTransactionId: f.linkedTransactionId,
-        amount: v.amount,
-      });
-
-      const txn = Transaction.build({
-        accountId: account.id,
-        householdId: opts.householdId ?? account.householdId ?? null,
-        createdByUserId: opts.userId ?? account.ownerUserId ?? null,
-        visibility: accountVisibility,
-        ownershipType:
-          f.autoSplitType === 'partner' || f.autoSplitType === 'shared' ? f.autoSplitType : 'me',
-        ownershipContactId: null,
-        importBatch,
+      const cashRow = {
         date: v.date,
         merchantRaw: v.merchantRaw,
-        merchantClean: f.merchantClean,
-        merchantCanonical: f.merchantCanonical,
-        txnType: f.txnType,
-        amount: String(v.amount),
+        amount: v.amount,
         currency: v.currency,
-        notes: f.notes,
         sourceReference: v.sourceReference,
         sourceRowFingerprint: fp,
         sourceIdentityFingerprint: identityFp,
-        appliedRuleId: f.appliedRuleId,
-        autoCategory: f.autoCategory,
-        autoBusiness: f.autoBusiness,
-        autoSplitType: f.autoSplitType,
-        autoPctMe: f.autoPctMe,
-        autoPctPartner: f.autoPctPartner,
-        categoryOverride: null,
-        businessOverride: null,
-        splitOverride: null,
-        pctMeOverride: null,
-        pctPartnerOverride: null,
-        autoSource: f.autoSource,
-        autoConfidence: f.autoConfidence,
-        linkedTransactionId: f.linkedTransactionId,
-        isRecurring: f.isRecurring,
-        reviewFlag: f.reviewFlag,
-        reviewedAt: null,
-        importConfidence: confidence.state,
-        importConfidenceFlags: serializeFlags(confidence.flags),
-      });
-
-      recomputeTransactionAmounts(txn);
+      };
+      const built = await buildImportedTransaction(
+        cashRow,
+        enriched,
+        {
+          account,
+          householdId: opts.householdId ?? account.householdId ?? null,
+          createdByUserId: opts.userId ?? account.ownerUserId ?? null,
+          importBatch,
+        },
+        t,
+      );
 
       try {
         // SAVEPOINT around the per-row insert + its signal sidecar. On
@@ -584,47 +539,18 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         // end of transaction block" and escape this catch. Nesting via
         // sequelize.transaction({ transaction: t }, …) emits a SAVEPOINT
         // so the unique-violation rolls back only this row.
-        await sequelize.transaction({ transaction: t }, async (sp) => {
-          await txn.save({ transaction: sp });
-          await persistTransactionSignals(txn.id, enriched.signals, sp);
-
-          // Surfaces the item-link match as a suggested TransactionOrderLink.
-          await persistSuggestedOrderLink(txn.id, enriched.signals, sp);
-
-          // Rule actions side-effects (issue #795): set_label / set_alert.
-          const ruleActions = findRuleActionsSignal(enriched.signals);
-          if (ruleActions) {
-            await applyRuleSideEffects({
-              ruleActions,
-              transactionId: txn.id,
-              householdId: opts.householdId ?? account.householdId ?? null,
-              transaction: sp,
-            });
-          }
-        });
+        await sequelize.transaction({ transaction: t }, (sp) =>
+          persistImportedTransaction(
+            built.txn,
+            enriched,
+            opts.householdId ?? account.householdId ?? null,
+            sp,
+          ),
+        );
         inserted += 1;
-        consumedExistingIds.add(txn.id);
-        if (enriched.fields.reviewFlag) {
-          const key = (f.merchantCanonical ?? '').trim() || f.merchantClean.trim();
-          if (key.length > 0) {
-            coldRows.push({
-              txnId: txn.id,
-              signals: enriched.signals,
-              merchantKey: key,
-              merchantRaw: v.merchantRaw,
-              merchantClean: f.merchantClean,
-              merchantCanonical: f.merchantCanonical,
-              amount: v.amount,
-              date: v.date,
-              currency: v.currency,
-              memory,
-              accountVisibility,
-              txnType: f.txnType,
-              // Brand-new row: it cannot carry a user override yet.
-              categoryOverride: null,
-            });
-          }
-        }
+        consumedExistingIds.add(built.txn.id);
+        const cold = coldRowFor(built, enriched, cashRow, memory);
+        if (cold) coldRows.push(cold);
       } catch (e) {
         if (isSequelizeUniqueLike(e)) {
           skippedDup += 1;
