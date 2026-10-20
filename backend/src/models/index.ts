@@ -696,7 +696,9 @@ PdfImportBatch.hasMany(PdfImportItem, { foreignKey: 'batch_id', as: 'items', onD
 PdfImportItem.belongsTo(PdfImportBatch, { foreignKey: 'batch_id', as: 'batch' });
 
 // CFO briefings (issue #236). Cascades with household; user FK for the
-// actor that requested the briefing.
+// actor that requested the briefing. The feature is retired (as is
+// AiReviewRun above); these associations stay only so household erasure keeps
+// cascading over the still-existing rows until the tables are dropped.
 Household.hasMany(CfoBriefing, {
   foreignKey: 'household_id',
   as: 'cfoBriefings',

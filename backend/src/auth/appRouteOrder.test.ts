@@ -383,27 +383,6 @@ test('structure: specific /api/summary/sankey is ordered before broader /api/sum
   );
 });
 
-test('structure: aiReview is ordered before aiRouter on shared /api/ai', () => {
-  // Both share the /api/ai prefix; aiReviewRouter must mount first so its
-  // /review and /reviews/* paths win against any future overlap in aiRouter.
-  const aiEntries = gatedRoutes
-    .map((e: RouteEntry, i: number) => ({ e, i }))
-    .filter(({ e }) => entryHasPath(e, '/api/ai'));
-  assert.ok(
-    aiEntries.length >= 2,
-    'expected at least two /api/ai entries (aiReview, aiRouter, aiQuery)',
-  );
-  // The 410-irrelevant detail we lock: the FIRST /api/ai mount is aiReview.
-  // We assert structurally that the specific-first ordering is preserved by
-  // checking the first /api/ai entry carries the documented rationale.
-  const first = aiEntries[0];
-  assert.match(
-    String(first.e.why ?? ''),
-    /aiReview|review/i,
-    'the first /api/ai mount must be the aiReview router (mounted before aiRouter)',
-  );
-});
-
 test('structure: bare-/api catch-all routers keep their documented order', () => {
   // businessTax, returnWarranty, receipts, items, purchases, reimbursements,
   // largePurchaseReview, feedback all mount on bare '/api'. Their relative

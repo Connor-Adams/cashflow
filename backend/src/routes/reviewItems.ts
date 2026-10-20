@@ -4,21 +4,20 @@
  *   GET /api/review-items
  *     ?status  csv of common statuses (pending|resolved|dismissed|expired),
  *              default "pending"
- *     ?source  csv of sources (ai-suggestion|ai-review|cfo-briefing|chat-proposal),
- *              default all
+ *     ?source  csv of sources (ai-suggestion|chat-proposal), default all;
+ *              unknown values are ignored (all-unknown falls back to all)
  *     ?limit   1..200, default 50
  *     ?cursor  opaque pagination cursor
  *
- * Read-only. Fans out across the four source tables in parallel, normalizes
+ * Read-only. Fans out across the source tables in parallel, normalizes
  * each into the common {@link ReviewItem} shape, merges + sorts by created_at
  * desc, then applies cursor pagination. Write paths (apply/reject/accept/
  * dismiss/resolve) stay on their per-source routers — nothing here mutates.
  */
 import { Router } from 'express';
 import { Op } from 'sequelize';
-import { AiSuggestion, AiReviewRun, CfoBriefing, ChatProposal, ChatThread } from '../models';
+import { AiSuggestion, ChatProposal, ChatThread } from '../models';
 import { currentAuth } from '../auth/middleware';
-import { householdWhere } from '../auth/scope';
 import { aiSuggestionWhere } from '../ai/suggestionStore';
 import { isSuperadmin } from '../auth/scope';
 import {
@@ -28,8 +27,6 @@ import {
   type ReviewItemCommonStatus,
   normalizeAiSuggestion,
   normalizeChatProposal,
-  normalizeReviewRunItems,
-  normalizeCfoBriefingItems,
   mergeAndSort,
   encodeCursor,
   decodeCursor,
@@ -111,47 +108,6 @@ async function readAiSuggestions(
   );
 }
 
-async function readReviewRuns(
-  req: import('express').Request,
-  cap: number,
-): Promise<ReviewItem[]> {
-  // A run holds many action items; read enough runs to cover the cap of items.
-  const rows = await AiReviewRun.findAll({
-    where: householdWhere(req),
-    order: [['createdAt', 'DESC']],
-    limit: cap,
-  });
-  return rows.flatMap((row) =>
-    normalizeReviewRunItems({
-      id: row.id,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      actionItems: row.actionItems,
-      summary: row.summary,
-    }),
-  );
-}
-
-async function readCfoBriefings(
-  req: import('express').Request,
-  cap: number,
-): Promise<ReviewItem[]> {
-  const rows = await CfoBriefing.findAll({
-    where: householdWhere(req),
-    order: [['createdAt', 'DESC']],
-    limit: cap,
-  });
-  return rows.flatMap((row) =>
-    normalizeCfoBriefingItems({
-      id: row.id,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      actionItems: row.actionItems,
-      summary: row.summary,
-    }),
-  );
-}
-
 async function readChatProposals(
   req: import('express').Request,
   cap: number,
@@ -194,8 +150,6 @@ const READERS: Record<
   (req: import('express').Request, cap: number) => Promise<ReviewItem[]>
 > = {
   'ai-suggestion': readAiSuggestions,
-  'ai-review': readReviewRuns,
-  'cfo-briefing': readCfoBriefings,
   'chat-proposal': readChatProposals,
 };
 

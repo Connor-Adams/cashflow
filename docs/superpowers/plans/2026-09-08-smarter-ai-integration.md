@@ -1,5 +1,7 @@
 # Smarter AI Integration Implementation Plan
 
+> **2026-10 update:** the CFO briefing and AI review features were removed end to end (routes, builders, runner, the `cfo-briefing` / `ai-review` inbox sources). The `cfo_briefings` / `ai_review_runs` tables remain pending a drop migration. Briefing/review content below is historical.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the CFO briefing, the insights page, and transaction categorization actually intelligent by scheduling the detectors that already exist, folding a duplicate insight engine into them, adding a narrative synthesis pass to the briefing, and feeding past user corrections back into categorization prompts.

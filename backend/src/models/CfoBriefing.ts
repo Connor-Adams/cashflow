@@ -11,6 +11,10 @@ import {
 /**
  * CFO briefing (issue #236).
  *
+ * RETIRED: the CFO briefing feature (routes, builder, inbox source) was
+ * removed. The model stays registered only because the `cfo_briefings` table
+ * still exists; nothing reads or writes it. Drop the model with the table.
+ *
  * A daily/weekly finance assistant snapshot that combines deterministic
  * action items from across the app (forecast, safe-to-spend, subscriptions,
  * receipts, imports, rules, review backlog) into one self-contained record.
@@ -48,12 +52,6 @@ export type CfoBriefingActionItemRefType =
 
 export type CfoBriefingActionItemStatus = 'open' | 'resolved' | 'dismissed';
 
-export const CFO_BRIEFING_ACTION_ITEM_STATUSES: readonly CfoBriefingActionItemStatus[] = [
-  'open',
-  'resolved',
-  'dismissed',
-] as const;
-
 export type CfoBriefingActionItemSeverity = 'info' | 'watch' | 'action';
 
 /**
@@ -74,12 +72,7 @@ export interface CfoBriefingActionItem {
   title: string;
   summary: string;
   status: CfoBriefingActionItemStatus;
-  /**
-   * Optional supporting transaction ids. Populated from `Insight.metadata`
-   * (e.g. `metadata.transactionIds`) via `insightToActionItem` in
-   * `backend/src/insights/toActionItems.ts`, which owns the mapping from
-   * detector `Insight` rows onto this shape.
-   */
+  /** Optional supporting transaction ids (from `Insight.metadata.transactionIds`). */
   supportingTransactionIds?: number[];
   /** Optional rationale string for transparency / "no invented facts" AC. */
   rationale?: string;

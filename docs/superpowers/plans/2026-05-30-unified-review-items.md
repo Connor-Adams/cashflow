@@ -1,5 +1,7 @@
 # Unified /review-items Read Endpoint + Inbox UI Implementation Plan
 
+> **2026-10 update:** the CFO briefing and AI review features were removed end to end (routes, builders, runner, the `cfo-briefing` / `ai-review` inbox sources). The `cfo_briefings` / `ai_review_runs` tables remain pending a drop migration. Briefing/review content below is historical.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:test-driven-development to implement this plan task-by-task.
 
 **Goal:** Add one `GET /api/review-items` read endpoint that fans out across AiSuggestion, AiReviewRun (action items), CfoBriefing (action items), ChatProposal and normalizes them into a common shape with a typed status-mapping table, plus a single filterable inbox UI replacing the AI inbox / AI reviews / CFO briefings / chat-proposals list surfaces.

@@ -1,30 +1,20 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, Navigate } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Navigate } from 'react-router-dom'
 import { Button } from '@connor-adams/designsystem'
 import { Input } from '@connor-adams/designsystem'
 import { NativeSelect } from '@connor-adams/designsystem'
 import { Badge } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
 import { EmptyState } from '@connor-adams/designsystem'
-import { Alert } from '@connor-adams/designsystem'
-import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
 import { getJson, postJson } from '@/lib/api'
 
 // ---------------------------------------------------------------------------
 // Types — mirror backend/src/reviewItems/normalize.ts
 // ---------------------------------------------------------------------------
 
-type ReviewItemSource = 'ai-suggestion' | 'ai-review' | 'cfo-briefing' | 'chat-proposal'
+type ReviewItemSource = 'ai-suggestion' | 'chat-proposal'
 type ReviewItemCommonStatus = 'pending' | 'resolved' | 'dismissed' | 'expired'
-type ReviewItemSubjectType =
-  | 'transaction'
-  | 'receipt'
-  | 'rule'
-  | 'event'
-  | 'subscription'
-  | 'import'
-  | 'chat-message'
-  | null
+type ReviewItemSubjectType = 'transaction' | 'receipt' | 'chat-message' | null
 
 type ReviewItem = {
   id: string
@@ -40,17 +30,10 @@ type ReviewItem = {
 
 type ListResponse = { data: ReviewItem[]; nextCursor: string | null }
 
-const ALL_SOURCES: ReviewItemSource[] = [
-  'ai-suggestion',
-  'ai-review',
-  'cfo-briefing',
-  'chat-proposal',
-]
+const ALL_SOURCES: ReviewItemSource[] = ['ai-suggestion', 'chat-proposal']
 
 const SOURCE_LABEL: Record<ReviewItemSource, string> = {
   'ai-suggestion': 'AI suggestions',
-  'ai-review': 'AI review',
-  'cfo-briefing': 'CFO briefings',
   'chat-proposal': 'Chat proposals',
 }
 
@@ -76,8 +59,6 @@ type SavedView = {
 
 const SAVED_VIEWS: SavedView[] = [
   { key: 'ai-suggestions-pending', label: 'AI suggestions (pending)', sources: ['ai-suggestion'], statuses: ['pending'] },
-  { key: 'review-queue-pending', label: 'Review queue (pending)', sources: ['ai-review'], statuses: ['pending'] },
-  { key: 'cfo-briefings-pending', label: 'CFO briefings (pending)', sources: ['cfo-briefing'], statuses: ['pending'] },
   { key: 'chat-proposals-pending', label: 'Chat proposals (pending)', sources: ['chat-proposal'], statuses: ['pending'] },
   {
     key: 'all-resolved-30d',
@@ -97,14 +78,12 @@ function savedViewFromParam(param: string | null): SavedView | null {
 // Composite-id parsing → per-source write endpoints (writes stay per-source)
 // ---------------------------------------------------------------------------
 
-type ActionKind = 'accept' | 'dismiss' | 'apply' | 'reject' | 'resolve'
+type ActionKind = 'apply' | 'reject'
 
 type SourceAction = { label: string; kind: ActionKind; variant: 'primary' | 'secondary' }
 
 const DISMISS_KIND: Record<ReviewItemSource, ActionKind> = {
   'ai-suggestion': 'reject',
-  'ai-review': 'dismiss',
-  'cfo-briefing': 'dismiss',
   'chat-proposal': 'reject',
 }
 
@@ -112,14 +91,6 @@ const ACTIONS_BY_SOURCE: Record<ReviewItemSource, SourceAction[]> = {
   'ai-suggestion': [
     { label: 'Apply', kind: 'apply', variant: 'primary' },
     { label: 'Reject', kind: 'reject', variant: 'secondary' },
-  ],
-  'ai-review': [
-    { label: 'Accept', kind: 'accept', variant: 'primary' },
-    { label: 'Dismiss', kind: 'dismiss', variant: 'secondary' },
-  ],
-  'cfo-briefing': [
-    { label: 'Resolve', kind: 'resolve', variant: 'primary' },
-    { label: 'Dismiss', kind: 'dismiss', variant: 'secondary' },
   ],
   'chat-proposal': [
     { label: 'Apply', kind: 'apply', variant: 'primary' },
@@ -132,8 +103,6 @@ const ACTIONS_BY_SOURCE: Record<ReviewItemSource, SourceAction[]> = {
  * The composite id encodes the native key(s):
  *   ai-suggestion:{id}            → /api/ai/suggestions/{id}/{apply|reject}
  *   chat-proposal:{id}            → /api/chat/proposals/{id}/{apply|reject}
- *   ai-review:{runId}:{itemId}    → /api/ai/reviews/{runId}/items/{itemId}/{accept|dismiss}
- *   cfo-briefing:{bId}:{itemId}   → /api/cfo/briefings/{bId}/items/{itemId}/{resolve|dismiss}
  *
  * counterparty_email_match items use a custom endpoint — see writeEmailMatchEndpoint.
  */
@@ -149,18 +118,6 @@ function writeEndpoint(item: ReviewItem, kind: ActionKind): string | null {
       const id = parts[1]
       if (!id) return null
       return `/api/chat/proposals/${encodeURIComponent(id)}/${kind}`
-    }
-    case 'ai-review': {
-      const runId = parts[1]
-      const itemId = parts.slice(2).join(':')
-      if (!runId || !itemId) return null
-      return `/api/ai/reviews/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/${kind}`
-    }
-    case 'cfo-briefing': {
-      const briefingId = parts[1]
-      const itemId = parts.slice(2).join(':')
-      if (!briefingId || !itemId) return null
-      return `/api/cfo/briefings/${encodeURIComponent(briefingId)}/items/${encodeURIComponent(itemId)}/${kind}`
     }
     default:
       return null
@@ -178,83 +135,8 @@ function matchesSearch(item: ReviewItem, q: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// CFO briefing narrative header
-//
-// backend/src/reviewItems/normalize.ts stamps `payload.runSummary` (the
-// briefing run's LLM narrative) and `payload.runId` onto every item nested
-// in a cfo-briefing run. The list itself stays a flat, sorted array of
-// items — so to show the narrative once above a run's items (not repeated
-// per card), the render pass below groups by (source, runId) and surfaces
-// the narrative only the first time a given run is encountered.
-// ---------------------------------------------------------------------------
-
-function cfoBriefingRunKey(item: ReviewItem): string | null {
-  if (item.source !== 'cfo-briefing') return null
-  const runId = item.payload.runId
-  if (runId == null) return null
-  return String(runId)
-}
-
-function cfoBriefingNarrative(item: ReviewItem): string | null {
-  const v = item.payload.runSummary
-  return typeof v === 'string' && v.trim() ? v : null
-}
-
-/**
- * Pairs each item with the narrative to render above it, if any. A run
- * without a summary (null/blank) contributes no narrative — no empty
- * header renders — even though its items still get a run key.
- */
-function withRunNarratives(
-  items: ReviewItem[],
-): Array<{ item: ReviewItem; narrative: string | null }> {
-  const seenRunKeys = new Set<string>()
-  return items.map((item) => {
-    const runKey = cfoBriefingRunKey(item)
-    let narrative: string | null = null
-    if (runKey && !seenRunKeys.has(runKey)) {
-      seenRunKeys.add(runKey)
-      narrative = cfoBriefingNarrative(item)
-    }
-    return { item, narrative }
-  })
-}
-
-// ---------------------------------------------------------------------------
 // Per-source card rendering
 // ---------------------------------------------------------------------------
-
-function severityOf(payload: Record<string, unknown>): InsightSeverity | null {
-  const s = payload.severity
-  if (s === 'action' || s === 'watch' || s === 'info') return s
-  return null
-}
-
-function ActionItemCardBody({ item }: { item: ReviewItem }) {
-  const p = item.payload
-  const title = typeof p.title === 'string' ? p.title : item.source
-  const summary = typeof p.summary === 'string' ? p.summary : ''
-  const severity = severityOf(p)
-  const link = typeof p.link === 'string' ? p.link : null
-  return (
-    <div className="min-w-0">
-      <div className="flex flex-wrap items-center gap-2">
-        <strong>{title}</strong>
-        {severity ? <SeverityBadge severity={severity} /> : null}
-      </div>
-      {summary ? <p className="mb-0 text-sm leading-6 text-muted-foreground">{summary}</p> : null}
-      {link ? (
-        <Link to={link} className="text-sm underline">
-          Open
-        </Link>
-      ) : item.subject_type && item.subject_id ? (
-        <p className="mb-0 text-xs text-muted-foreground">
-          {item.subject_type} #{item.subject_id}
-        </p>
-      ) : null}
-    </div>
-  )
-}
 
 function CounterpartyEmailMatchCardBody({ item }: { item: ReviewItem }) {
   const p = item.payload
@@ -344,9 +226,6 @@ function CardBody({ item }: { item: ReviewItem }) {
       return <AiSuggestionCardBody item={item} />
     case 'chat-proposal':
       return <ChatProposalCardBody item={item} />
-    case 'ai-review':
-    case 'cfo-briefing':
-      return <ActionItemCardBody item={item} />
     default:
       return (
         <div>
@@ -543,13 +422,11 @@ export function UnifiedInboxPage() {
     [visible],
   )
 
-  const withNarratives = useMemo(() => withRunNarratives(visible), [visible])
-
   return (
     <div>
       <PageHeader
         title="Inbox"
-        description="AI suggestions, reviews, CFO briefings, and chat proposals in one queue."
+        description="AI suggestions and chat proposals in one queue."
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -616,21 +493,13 @@ export function UnifiedInboxPage() {
         />
       ) : (
         <ul className="grid list-none gap-2 p-0">
-          {withNarratives.map(({ item, narrative }) => (
-            <Fragment key={item.id}>
-              {narrative ? (
-                <li className="list-none">
-                  <Alert variant="info" title="CFO briefing">
-                    {narrative}
-                  </Alert>
-                </li>
-              ) : null}
-              <ReviewItemCard
-                item={item}
-                busy={bulkBusy || busyId === item.id}
-                onAction={(it, kind) => void onAction(it, kind)}
-              />
-            </Fragment>
+          {visible.map((item) => (
+            <ReviewItemCard
+              key={item.id}
+              item={item}
+              busy={bulkBusy || busyId === item.id}
+              onAction={(it, kind) => void onAction(it, kind)}
+            />
           ))}
         </ul>
       )}

@@ -76,7 +76,7 @@ not. That difference is load-bearing; the shared columns are not.
 | **Budget** | standing (no terminal) | BudgetTarget + BudgetExclusion + BudgetAlertState | spend constraint |
 | **Goal** | active → paused → completed | FinancialGoal | savings target |
 | **Proposal** | pending → applied → rejected / expired | AiSuggestion + ChatProposal | system asks to write |
-| **Observation** | open → dismissed → resolved | Insight + CfoBriefing action items + AiReviewRun items | system flags, no write |
+| **Observation** | open → dismissed → resolved | Insight (CfoBriefing / AiReviewRun action items folded here too until both features were removed, 2026-10) | system flags, no write |
 | **Document** | captured → linked | Receipt + VaultDocument + ExternalOrder/Item/Tender + ProcessedEmailMessage (source = field) | captured artifact |
 | **Period** | open → closed | MonthlyClosePeriod + MonthlyCloseTask + TaxReturn + TaxSlip | time-boxed close cycle |
 
@@ -87,8 +87,7 @@ separates them: *does accepting it mutate another primitive?*
 
 - **Proposal** — yes. Applying an `AiSuggestion` or `ChatProposal` writes to a
   Transaction/Budget/etc. Machine: `pending → applied → rejected`.
-- **Observation** — no. An `Insight` or a `CfoBriefing` action item is flagged,
-  then acknowledged. Machine: `open → dismissed → resolved`.
+- **Observation** — no. An `Insight` is flagged, then acknowledged. Machine: `open → dismissed → resolved`.
 
 **Expectation** (was: recurring-spend ×3). `PlannedEvent` (one-shot future) and
 `Subscription` (recurring) are the same noun — *money I expect to move* — with a
