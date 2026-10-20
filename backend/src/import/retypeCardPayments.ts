@@ -27,12 +27,21 @@ export type RetypeCandidate = {
   txnType: TxnType | string | null;
 };
 
-export function shouldRetypeAsPayment(row: RetypeCandidate): boolean {
-  if (row.txnType === 'payment') return false;
+/**
+ * The type the detector assigns this row's narrative, or null unless it is
+ * `high` confidence (a narrative pattern matched, not a sign-based fallback).
+ * Shared with the other historical re-types so they all defer to the detector.
+ */
+export function confidentNarrativeType(row: RetypeCandidate): TxnType | null {
   const signal = runDetectTypeStage({
     merchantRaw: row.merchantRaw,
     merchantClean: row.merchantClean,
     amount: row.amount,
   }).find((s) => s.fields.txnType);
-  return signal?.confidence === 'high' && signal.fields.txnType === 'payment';
+  return signal?.confidence === 'high' ? (signal.fields.txnType ?? null) : null;
+}
+
+export function shouldRetypeAsPayment(row: RetypeCandidate): boolean {
+  if (row.txnType === 'payment') return false;
+  return confidentNarrativeType(row) === 'payment';
 }
