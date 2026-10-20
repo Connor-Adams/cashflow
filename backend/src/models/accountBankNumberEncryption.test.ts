@@ -8,6 +8,7 @@ import {
   decryptSecret,
   __resetKeyCacheForTests,
 } from '../util/symmetricEncryption';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 // A valid 64-hex (32-byte) key so encryptSecret/decryptSecret work in unit tests.
 const TEST_KEY =
@@ -19,7 +20,7 @@ before(() => {
 });
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 function sha256Hex(value: string): string {

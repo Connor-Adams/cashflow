@@ -4,10 +4,11 @@ import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { Category, Household, Account, Transaction, Rule, BudgetTarget, ExternalOrder, ExternalOrderItem } from '../models';
 import { syncCategoryLeafNameMirrors } from './syncMirrors';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let householdId: number, accountId: number, catId: number;
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   householdId = (await Household.create({ name: 'T' })).id;
   accountId = (await Account.create({ householdId, name: 'A', type: 'chequing', currency: 'CAD' })).id;
   catId = (await Category.create({ householdId, name: 'Internet', icon: null, parentId: null })).id;

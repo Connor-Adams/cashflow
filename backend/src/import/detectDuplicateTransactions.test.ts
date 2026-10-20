@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { Account, Category, Entity, Household, Receipt, Transaction } from '../models';
 import { detectDuplicateTransactions } from './detectDuplicateTransactions';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let householdId: number;
 let entityId: number;
@@ -22,7 +23,7 @@ let accountId: number;
 let otherAccountId: number;
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const household = await Household.create({ name: 'Dup HH' });
   householdId = household.id;
   const entity = await Entity.create({

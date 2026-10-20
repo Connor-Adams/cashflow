@@ -4,11 +4,12 @@ import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { Category, Household } from '../models';
 import { loadCategoryTree, rollupByCategoryId, buildRollupRows, buildRollupRowsByCurrency } from './rollup';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let householdId: number;
 let work: number, expenses: number, internet: number;
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   householdId = (await Household.create({ name: 'T' })).id;
   work = (await Category.create({ householdId, name: 'Work', icon: null, parentId: null })).id;
   expenses = (await Category.create({ householdId, name: 'Expenses', icon: null, parentId: work })).id;

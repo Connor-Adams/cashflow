@@ -3,11 +3,12 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { Transaction, Household, Category, Account } from '../models';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let householdId: number;
 let accountId: number;
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   householdId = (await Household.create({ name: 'T' })).id;
   accountId = (await Account.create({ householdId, name: 'A' })).id;
 });

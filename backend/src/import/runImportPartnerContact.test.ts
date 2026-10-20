@@ -7,9 +7,10 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize, Account, Contact, Household, Rule, Transaction } from '../models';
 import { importCsvFile } from './runImport';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 async function seed(partnerNames: string[]): Promise<{ householdId: number; accountId: number; partnerIds: number[] }> {

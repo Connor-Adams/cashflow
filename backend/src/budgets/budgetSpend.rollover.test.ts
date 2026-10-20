@@ -18,6 +18,7 @@ import { sequelize } from '../db';
 import * as models from '../models';
 import { loadBudgetSpend, toBudgetSpendInput } from './budgetSpend';
 import { loadCategoryTree } from '../categories/rollup';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 const CURRENCY = 'CAD';
 const CATEGORY = 'Dining';
@@ -28,7 +29,7 @@ let householdId: number;
 let accountId: number;
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const hh = await models.Household.create({ name: 'Rollover' });
   const account = await models.Account.create({
     householdId: hh.id,

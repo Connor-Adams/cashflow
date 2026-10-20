@@ -4,11 +4,12 @@ import { sequelize } from '../db';
 import { Account } from '../models';
 import { importCsvFile } from './runImport';
 import { findOrCreateAccount, profileIdToBankCode } from './accountLookup';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 const testHouseholdId = 999;
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 // profileIdToBankCode tests

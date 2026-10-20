@@ -4,6 +4,7 @@ import { sequelize } from '../db';
 import { FxRate } from '../models';
 import { D } from '../tax/util/decimal';
 import { toCad } from './toCad';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 // Stub fetch to simulate no network — keeps tests deterministic regardless of
 // whether the runner has real BoC API access. Tests that need network can
@@ -11,7 +12,7 @@ import { toCad } from './toCad';
 const originalFetch = globalThis.fetch;
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   globalThis.fetch = (async () => {
     throw new Error('network disabled in toCad.test.ts');
   }) as unknown as typeof fetch;

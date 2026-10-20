@@ -8,6 +8,7 @@ import { drainPendingChunk } from '../import/pdfImportProcessor';
 import { skipUnlessPrivateFixtures } from '../../test/helpers/privateFixtures';
 import { synthPdf } from '../../test/helpers/syntheticPdf';
 import { SYN_UNRECOGNIZED } from '../../test/helpers/syntheticStatements';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 // Connor's real yearly-performance PDF: LOCAL-ONLY (loud skip in CI). The
 // synthetic twin renders a made-up non-statement PDF at test time.
@@ -20,7 +21,7 @@ async function hhUser() {
 }
 
 test('batch has skipped + startedAt; item has reason; skipped status persists', async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const { hh, u } = await hhUser();
   const b = await PdfImportBatch.create({ id: crypto.randomUUID(), householdId: hh.id, userId: u.id, status: 'pending', total: 1, processed: 0, succeeded: 0, failed: 0, skipped: 0, startedAt: null });
   const i = await PdfImportItem.create({ id: crypto.randomUUID(), batchId: b.id, fileName: 'x.pdf', storedFilename: 'k.pdf', storageKind: 'local', encryptionAlgorithm: 'none', status: 'skipped', reason: 'No parser matched this statement layout' });
@@ -30,7 +31,7 @@ test('batch has skipped + startedAt; item has reason; skipped status persists', 
 });
 
 test('drain reports pendingRemaining and respects maxItems', async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const { hh, u } = await hhUser();
   const b = await PdfImportBatch.create({ id: crypto.randomUUID(), householdId: hh.id, userId: u.id, status: 'pending', total: 3, processed: 0, succeeded: 0, failed: 0, skipped: 0, startedAt: null });
   for (let k = 0; k < 3; k++) {
@@ -43,7 +44,7 @@ test('drain reports pendingRemaining and respects maxItems', async () => {
 });
 
 async function assertNoParserFileIsSkipped(buffer: Buffer) {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const { hh, u } = await hhUser();
   const put = await saveVaultObject(`${crypto.randomUUID()}.pdf`, {
     buffer,

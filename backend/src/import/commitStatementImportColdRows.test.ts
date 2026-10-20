@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 
 import type { NormalizedCashTransaction, StatementPreview } from './statementTypes';
 import type { Embedder } from '../ai/merchantEmbeddings';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let models: typeof import('../models');
 let commitStatementImport: typeof import('./commitStatementImport').commitStatementImport;
@@ -25,7 +26,7 @@ let commitStatementImport: typeof import('./commitStatementImport').commitStatem
 before(async () => {
   delete process.env.OPENAI_API_KEY;
   models = await import('../models');
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
   commitStatementImport = (await import('./commitStatementImport')).commitStatementImport;
 });
 
@@ -35,7 +36,7 @@ after(async () => {
 
 beforeEach(async () => {
   delete process.env.OPENAI_API_KEY;
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
 });
 
 async function seedAccount(): Promise<{ householdId: number; accountId: number }> {

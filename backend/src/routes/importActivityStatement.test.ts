@@ -11,6 +11,7 @@ import { before, after, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import request from 'supertest';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let models: typeof import('../models');
 let app: express.Express;
@@ -18,7 +19,7 @@ let household: { id: number };
 
 before(async () => {
   models = await import('../models');
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
 
   const importRouter = (await import('./import')).default;
   app = express();
@@ -39,7 +40,7 @@ before(async () => {
 });
 
 beforeEach(async () => {
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
   const created = await models.Household.create({ name: 'Activity HH' });
   household = { id: created.id };
   await models.Account.create({

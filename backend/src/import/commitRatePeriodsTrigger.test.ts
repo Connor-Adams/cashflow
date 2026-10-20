@@ -23,6 +23,7 @@ import {
   _resetInterestAllocationCoordinatorForTest,
   _setInterestAllocationCoordinatorForTest,
 } from '../contacts/interestAllocationCoordinator';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 process.env.DATABASE_PATH = ':memory:';
 
@@ -56,13 +57,13 @@ function parkQueue(): void {
 
 before(async () => {
   models = await import('../models/index.js');
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
   commitStatementImport = (await import('./commitStatementImport.js')).commitStatementImport;
 });
 
 beforeEach(async () => {
   mock.restoreAll();
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
   parkQueue();
 });
 

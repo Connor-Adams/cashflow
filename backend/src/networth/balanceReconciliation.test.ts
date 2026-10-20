@@ -13,9 +13,10 @@ import assert from 'node:assert/strict';
 
 import * as models from '../models';
 import { checkBalanceIntegrity } from './balanceReconciliation';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 // A fresh schema per test; closed once at the end.
-beforeEach(() => models.sequelize.sync({ force: true }));
+beforeEach(() => resetTestDb(models.sequelize));
 after(() => models.sequelize.close());
 
 let householdId = 0;

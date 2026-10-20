@@ -1,17 +1,18 @@
 import { before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let models: typeof import('../models/index.js');
 let importWsHoldingsReport: typeof import('./importWsHoldingsReport.js').importWsHoldingsReport;
 
 before(async () => {
   models = await import('../models/index.js');
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
   importWsHoldingsReport = (await import('./importWsHoldingsReport.js')).importWsHoldingsReport;
 });
 
 beforeEach(async () => {
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
 });
 
 const HEADER = [

@@ -9,11 +9,12 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize, Account, Household, HouseholdMember, Transaction, User } from '../models';
 import { importCsvFile } from './runImport';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let HH: number;
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 async function seedOwnerAndAccount(): Promise<number> {

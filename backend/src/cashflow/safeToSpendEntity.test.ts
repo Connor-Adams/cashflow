@@ -14,6 +14,7 @@ import {
   computeSafeToSpend,
   getIncomeLegs,
 } from './safeToSpend';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let HH = 0;
 let USER = 0;
@@ -21,7 +22,7 @@ let PERSONAL = 0;
 let CORP = 0;
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const user = await User.create({
     email: 'sts@example.com',
     displayName: 'STS',

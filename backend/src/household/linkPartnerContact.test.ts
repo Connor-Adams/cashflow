@@ -2,9 +2,10 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize, Contact, Household, User } from '../models';
 import { resolveOrCreatePartnerContact } from './linkPartnerContact';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 test('adopts an existing unlinked isPartner contact', async () => {

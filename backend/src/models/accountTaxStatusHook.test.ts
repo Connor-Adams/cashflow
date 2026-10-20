@@ -2,9 +2,10 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { Account, Household } from './';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 test('investment account gets tax_status inferred from name on create', async () => {

@@ -28,6 +28,7 @@ import {
   toBudgetSpendInput,
 } from './budgetSpend';
 import { loadCategoryTree } from '../categories/rollup';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 const CURRENCY = 'CAD';
 const CATEGORY = 'Dining';
@@ -59,7 +60,7 @@ async function makeHousehold(name: string): Promise<Fixture> {
 }
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   own = await makeHousehold('Own');
   other = await makeHousehold('Other');
 });
