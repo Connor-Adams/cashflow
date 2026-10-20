@@ -1289,6 +1289,9 @@ export type AppConfig = {
    *  A boolean only — SMTP settings are never sent to the client. When false
    *  the Settings digest Email toggle is disabled. */
   emailConfigured?: boolean;
+  /** The household's money unit (server DEFAULT_CURRENCY, e.g. "CAD"). Used
+   *  to label money settings. Optional so the fail-open fallback omits it. */
+  defaultCurrency?: string;
 };
 
 export type BackfillStatus = {
@@ -1556,6 +1559,12 @@ export type CashflowSettings = {
    * Optional so older clients/responses without it still type-check.
    */
   assumedAnnualReturnRate?: string;
+  /**
+   * #244 — DECIMAL(14,4) string. Debits at or above this absolute amount are
+   * flagged for large-purchase review; 0 flags every debit. Optional so older
+   * fixtures without it still type-check.
+   */
+  largePurchaseThreshold?: string;
   /**
    * #259 — ISO8601 timestamp the user dismissed/completed first-run
    * onboarding, or null if they never did. The onboarding gate reads this

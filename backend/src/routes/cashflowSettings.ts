@@ -2,12 +2,15 @@
  * GET / PATCH /api/settings/cashflow — per-user safe-to-spend knobs
  * (issue #199). Row is created on the first PATCH; the GET responds with
  * the user's row (or the bundled defaults) without writing anything.
+ *
+ * Edited from Settings → Cashflow (and the Partner Fairness toggle).
  */
 import { Router } from 'express';
 import { currentAuth } from '../auth/middleware';
 import { CashflowSettings } from '../models';
 import {
   CASHFLOW_SETTINGS_DEFAULTS,
+  MAX_MINIMUM_CASH_BUFFER,
   MIN_SAFE_TO_SPEND_WINDOW_DAYS,
   MAX_SAFE_TO_SPEND_WINDOW_DAYS,
   MIN_COUNTERPARTY_PROMOTION_THRESHOLD,
@@ -71,113 +74,119 @@ function defaults(): Serialized {
   };
 }
 
+type DecimalField = 'minimumCashBuffer' | 'largePurchaseThreshold' | 'assumedAnnualReturnRate';
+type IntegerField = 'safeToSpendWindowDays' | 'counterpartyPromotionThreshold';
+type BooleanField =
+  | 'includeCreditCardBalance'
+  | 'includeGoalContributions'
+  | 'excludeNonPartnerInflows';
+
+/** The writable subset of the settings row. */
+type CashflowSettingsPatch = Partial<
+  Pick<Serialized, DecimalField | IntegerField | BooleanField>
+>;
+
+type Range = { min: number; max: number; error: string };
+
+/** Decimal columns — normalised to a 4dp string for DECIMAL(14,4)/(5,4). */
+const DECIMAL_FIELDS: Record<DecimalField, Range> = {
+  minimumCashBuffer: {
+    min: 0,
+    max: MAX_MINIMUM_CASH_BUFFER,
+    error: `minimumCashBuffer must be a non-negative number no greater than ${MAX_MINIMUM_CASH_BUFFER}`,
+  },
+  largePurchaseThreshold: {
+    min: MIN_LARGE_PURCHASE_THRESHOLD,
+    max: MAX_LARGE_PURCHASE_THRESHOLD,
+    error: `largePurchaseThreshold must be a number between ${MIN_LARGE_PURCHASE_THRESHOLD} and ${MAX_LARGE_PURCHASE_THRESHOLD}`,
+  },
+  assumedAnnualReturnRate: {
+    min: MIN_ASSUMED_ANNUAL_RETURN_RATE,
+    max: MAX_ASSUMED_ANNUAL_RETURN_RATE,
+    error: `assumedAnnualReturnRate must be a decimal between ${MIN_ASSUMED_ANNUAL_RETURN_RATE} and ${MAX_ASSUMED_ANNUAL_RETURN_RATE} (e.g. 0.05 for 5%)`,
+  },
+};
+
+const INTEGER_FIELDS: Record<IntegerField, Range> = {
+  safeToSpendWindowDays: {
+    min: MIN_SAFE_TO_SPEND_WINDOW_DAYS,
+    max: MAX_SAFE_TO_SPEND_WINDOW_DAYS,
+    error: `safeToSpendWindowDays must be an integer between ${MIN_SAFE_TO_SPEND_WINDOW_DAYS} and ${MAX_SAFE_TO_SPEND_WINDOW_DAYS}`,
+  },
+  counterpartyPromotionThreshold: {
+    min: MIN_COUNTERPARTY_PROMOTION_THRESHOLD,
+    max: MAX_COUNTERPARTY_PROMOTION_THRESHOLD,
+    error: `counterpartyPromotionThreshold must be an integer between ${MIN_COUNTERPARTY_PROMOTION_THRESHOLD} and ${MAX_COUNTERPARTY_PROMOTION_THRESHOLD}`,
+  },
+};
+
+const BOOLEAN_FIELDS: readonly BooleanField[] = [
+  'includeCreditCardBalance',
+  'includeGoalContributions',
+  'excludeNonPartnerInflows',
+];
+
+/**
+ * Strict numeric parse: a finite number, or a non-blank numeric string.
+ * `Number()` alone would turn '', null, true and [] into 0/1, silently
+ * writing a zero buffer or disabling large-purchase review.
+ */
+function toNumber(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw !== 'string' || raw.trim() === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function inRange(n: number | null, range: Range): n is number {
+  return n !== null && n >= range.min && n <= range.max;
+}
+
 /**
  * Pure validator — exported so unit tests can poke at it without booting
  * the auth + DB stack. Validates each optional field in the patch body,
  * normalises the values for the model layer (money strings fixed at 4
- * decimal places, booleans coerced from common string forms).
+ * decimal places, booleans coerced from common string forms). Unknown
+ * fields are ignored.
  */
 export function validateCashflowSettingsPatch(raw: Record<string, unknown>):
-  | { ok: true; patch: Partial<Serialized> }
+  | { ok: true; patch: CashflowSettingsPatch }
   | { ok: false; error: string } {
-  const out: Partial<Serialized> = {};
+  const out: CashflowSettingsPatch = {};
+  const error =
+    applyDecimals(raw, out) ?? applyIntegers(raw, out) ?? applyBooleans(raw, out);
+  return error ? { ok: false, error } : { ok: true, patch: out };
+}
 
-  if (raw.minimumCashBuffer !== undefined) {
-    const n = Number(raw.minimumCashBuffer);
-    if (!Number.isFinite(n) || n < 0) {
-      return {
-        ok: false,
-        error: 'minimumCashBuffer must be a non-negative number',
-      };
-    }
-    out.minimumCashBuffer = n.toFixed(4);
+/** Each `apply*` writes its valid fields into `out`; returns the first error. */
+function applyDecimals(raw: Record<string, unknown>, out: CashflowSettingsPatch): string | null {
+  for (const [field, range] of Object.entries(DECIMAL_FIELDS) as [DecimalField, Range][]) {
+    if (raw[field] === undefined) continue;
+    const n = toNumber(raw[field]);
+    if (!inRange(n, range)) return range.error;
+    out[field] = n.toFixed(4);
   }
+  return null;
+}
 
-  if (raw.safeToSpendWindowDays !== undefined) {
-    const n = Number(raw.safeToSpendWindowDays);
-    if (
-      !Number.isInteger(n) ||
-      n < MIN_SAFE_TO_SPEND_WINDOW_DAYS ||
-      n > MAX_SAFE_TO_SPEND_WINDOW_DAYS
-    ) {
-      return {
-        ok: false,
-        error: `safeToSpendWindowDays must be an integer between ${MIN_SAFE_TO_SPEND_WINDOW_DAYS} and ${MAX_SAFE_TO_SPEND_WINDOW_DAYS}`,
-      };
-    }
-    out.safeToSpendWindowDays = n;
+function applyIntegers(raw: Record<string, unknown>, out: CashflowSettingsPatch): string | null {
+  for (const [field, range] of Object.entries(INTEGER_FIELDS) as [IntegerField, Range][]) {
+    if (raw[field] === undefined) continue;
+    const n = toNumber(raw[field]);
+    if (!inRange(n, range) || !Number.isInteger(n)) return range.error;
+    out[field] = n;
   }
+  return null;
+}
 
-  if (raw.includeCreditCardBalance !== undefined) {
-    const b = coerceBool(raw.includeCreditCardBalance);
-    if (b === null) {
-      return { ok: false, error: 'includeCreditCardBalance must be boolean' };
-    }
-    out.includeCreditCardBalance = b;
+function applyBooleans(raw: Record<string, unknown>, out: CashflowSettingsPatch): string | null {
+  for (const field of BOOLEAN_FIELDS) {
+    if (raw[field] === undefined) continue;
+    const b = coerceBool(raw[field]);
+    if (b === null) return `${field} must be boolean`;
+    out[field] = b;
   }
-
-  if (raw.includeGoalContributions !== undefined) {
-    const b = coerceBool(raw.includeGoalContributions);
-    if (b === null) {
-      return { ok: false, error: 'includeGoalContributions must be boolean' };
-    }
-    out.includeGoalContributions = b;
-  }
-
-  if (raw.counterpartyPromotionThreshold !== undefined) {
-    const n = Number(raw.counterpartyPromotionThreshold);
-    if (
-      !Number.isInteger(n) ||
-      n < MIN_COUNTERPARTY_PROMOTION_THRESHOLD ||
-      n > MAX_COUNTERPARTY_PROMOTION_THRESHOLD
-    ) {
-      return {
-        ok: false,
-        error: `counterpartyPromotionThreshold must be an integer between ${MIN_COUNTERPARTY_PROMOTION_THRESHOLD} and ${MAX_COUNTERPARTY_PROMOTION_THRESHOLD}`,
-      };
-    }
-    out.counterpartyPromotionThreshold = n;
-  }
-
-  if (raw.excludeNonPartnerInflows !== undefined) {
-    const b = coerceBool(raw.excludeNonPartnerInflows);
-    if (b === null) {
-      return { ok: false, error: 'excludeNonPartnerInflows must be boolean' };
-    }
-    out.excludeNonPartnerInflows = b;
-  }
-
-  if (raw.largePurchaseThreshold !== undefined) {
-    const n = Number(raw.largePurchaseThreshold);
-    if (
-      !Number.isFinite(n) ||
-      n < MIN_LARGE_PURCHASE_THRESHOLD ||
-      n > MAX_LARGE_PURCHASE_THRESHOLD
-    ) {
-      return {
-        ok: false,
-        error: `largePurchaseThreshold must be a number between ${MIN_LARGE_PURCHASE_THRESHOLD} and ${MAX_LARGE_PURCHASE_THRESHOLD}`,
-      };
-    }
-    out.largePurchaseThreshold = n.toFixed(4);
-  }
-
-  if (raw.assumedAnnualReturnRate !== undefined) {
-    const n = Number(raw.assumedAnnualReturnRate);
-    if (
-      !Number.isFinite(n) ||
-      n < MIN_ASSUMED_ANNUAL_RETURN_RATE ||
-      n > MAX_ASSUMED_ANNUAL_RETURN_RATE
-    ) {
-      return {
-        ok: false,
-        error: `assumedAnnualReturnRate must be a decimal between ${MIN_ASSUMED_ANNUAL_RETURN_RATE} and ${MAX_ASSUMED_ANNUAL_RETURN_RATE} (e.g. 0.05 for 5%)`,
-      };
-    }
-    out.assumedAnnualReturnRate = n.toFixed(4);
-  }
-
-  return { ok: true, patch: out };
+  return null;
 }
 
 function coerceBool(raw: unknown): boolean | null {
@@ -210,33 +219,8 @@ router.patch('/', async (req, res, next) => {
       where: { userId: user.id },
       defaults: { userId: user.id },
     });
-    if (result.patch.minimumCashBuffer !== undefined) {
-      row.set('minimumCashBuffer', result.patch.minimumCashBuffer);
-    }
-    if (result.patch.safeToSpendWindowDays !== undefined) {
-      row.set('safeToSpendWindowDays', result.patch.safeToSpendWindowDays);
-    }
-    if (result.patch.includeCreditCardBalance !== undefined) {
-      row.set('includeCreditCardBalance', result.patch.includeCreditCardBalance);
-    }
-    if (result.patch.includeGoalContributions !== undefined) {
-      row.set('includeGoalContributions', result.patch.includeGoalContributions);
-    }
-    if (result.patch.counterpartyPromotionThreshold !== undefined) {
-      row.set(
-        'counterpartyPromotionThreshold',
-        result.patch.counterpartyPromotionThreshold,
-      );
-    }
-    if (result.patch.excludeNonPartnerInflows !== undefined) {
-      row.set('excludeNonPartnerInflows', result.patch.excludeNonPartnerInflows);
-    }
-    if (result.patch.largePurchaseThreshold !== undefined) {
-      row.set('largePurchaseThreshold', result.patch.largePurchaseThreshold);
-    }
-    if (result.patch.assumedAnnualReturnRate !== undefined) {
-      row.set('assumedAnnualReturnRate', result.patch.assumedAnnualReturnRate);
-    }
+    // The validator only emits known, normalised fields.
+    row.set(result.patch);
     await row.save();
     res.json(serialize(row));
   } catch (e) {

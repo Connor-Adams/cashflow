@@ -84,6 +84,12 @@ export const CASHFLOW_SETTINGS_DEFAULTS = {
   assumedAnnualReturnRate: '0.0500',
 } as const;
 
+/**
+ * Upper bound on the minimum cash buffer. DECIMAL(14,4) holds at most 10
+ * integer digits, so anything past ~9.99e9 overflows on Postgres and 500s;
+ * cap well inside that.
+ */
+export const MAX_MINIMUM_CASH_BUFFER = 1_000_000_000;
 export const MIN_SAFE_TO_SPEND_WINDOW_DAYS = 1;
 export const MAX_SAFE_TO_SPEND_WINDOW_DAYS = 365;
 export const MIN_COUNTERPARTY_PROMOTION_THRESHOLD = 2;

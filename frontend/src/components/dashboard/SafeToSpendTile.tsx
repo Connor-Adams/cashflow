@@ -23,6 +23,12 @@ type BreakdownRow = {
   sign: '+' | '-'
   note?: string
   /**
+   * Turns the note into a link to the setting that controls it, so a
+   * "disabled" flag says where to switch it back on. `label` is the link's
+   * accessible name (the visible note alone, "disabled", isn't enough).
+   */
+  noteLink?: { to: string; label: string }
+  /**
    * Renders indented under the line above it. Sub-rows explain where a parent
    * figure came from — they are already counted in it, so they never add to
    * the total themselves.
@@ -84,13 +90,19 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
           label: 'Required savings contributions',
           amount: data.breakdown.requiredSavingsContributions,
           sign: '-',
-          note: data.settings.includeGoalContributions ? undefined : 'disabled',
+          ...(data.settings.includeGoalContributions
+            ? {}
+            : disabledNote('Goal contributions are turned off. Change this in Cashflow settings.')),
         },
         {
           label: 'Expected credit-card payments',
           amount: data.breakdown.expectedCreditCardPayments,
           sign: '-',
-          note: creditCardNote(data),
+          ...(data.settings.includeCreditCardBalance
+            ? { note: staleCardNote(data) }
+            : disabledNote(
+                'Credit-card payments are turned off. Change this in Cashflow settings.',
+              )),
         },
         {
           label: 'Minimum cash buffer',
@@ -114,7 +126,7 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
       }
       actions={
         <Link
-          to="/settings"
+          to={CASHFLOW_SETTINGS_PATH}
           className={
             onGradient
               ? 'text-xs font-semibold text-white/85 hover:text-white hover:underline'
@@ -195,7 +207,20 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
                     {row.label}
                     {row.note ? (
                       <span className="ml-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
-                        ({row.note})
+                        (
+                        {row.noteLink ? (
+                          <Link
+                            to={row.noteLink.to}
+                            aria-label={row.noteLink.label}
+                            title={row.noteLink.label}
+                            className="underline hover:text-foreground"
+                          >
+                            {row.note}
+                          </Link>
+                        ) : (
+                          row.note
+                        )}
+                        )
                       </span>
                     ) : null}
                   </span>
@@ -225,19 +250,26 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
   )
 }
 
+/** Where the reservation toggles behind the "disabled" notes live. */
+const CASHFLOW_SETTINGS_PATH = '/settings/cashflow'
+
+/** A "disabled" note that links to the setting which turns it back on. */
+function disabledNote(label: string): Pick<BreakdownRow, 'note' | 'noteLink'> {
+  return { note: 'disabled', noteLink: { to: CASHFLOW_SETTINGS_PATH, label } }
+}
+
+/** Names any card whose reserved statement is out of date. */
+function staleCardNote(data: SafeToSpendResponse): string | undefined {
+  const stale = data.breakdown.staleCreditCardStatements ?? []
+  return stale.length > 0 ? `statement is stale: ${stale.join(', ')}` : undefined
+}
+
 /**
  * Sub-lines attributing expected income to its two detectors: recurring
  * paychecks (#970) and owner draws (#990). Only non-zero legs render — a
  * salaried user never sees a draw line and an owner-operator never sees a
  * paycheck line. Both zero means no attribution is worth showing.
  */
-/** Disabled, or naming any card whose reserved statement is out of date. */
-function creditCardNote(data: SafeToSpendResponse): string | undefined {
-  if (!data.settings.includeCreditCardBalance) return 'disabled'
-  const stale = data.breakdown.staleCreditCardStatements ?? []
-  return stale.length > 0 ? `statement is stale: ${stale.join(', ')}` : undefined
-}
-
 function incomeSubRows(breakdown: SafeToSpendBreakdown): BreakdownRow[] {
   const legs: BreakdownRow[] = [
     { label: 'Recurring income', amount: breakdown.recurringIncome, sign: '+', sub: true },

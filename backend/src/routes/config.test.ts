@@ -59,3 +59,11 @@ test('an SMTP mailer reports emailConfigured: true and never exposes SMTP settin
     setMailerDriverForTest(null);
   }
 });
+
+test('advertises the household default currency so money settings can label their inputs', async () => {
+  const { defaultCurrency } = await import('../config/env');
+  const res = await request(app).get('/api/config');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.defaultCurrency, defaultCurrency);
+  assert.match(res.body.defaultCurrency, /^[A-Z]{3}$/);
+});

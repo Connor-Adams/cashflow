@@ -26,6 +26,7 @@ function mockSafe(
   surplus?: SurplusOverride,
   income?: IncomeOverride,
   staleCreditCardStatements: string[] = [],
+  settings: { includeCreditCardBalance?: boolean; includeGoalContributions?: boolean } = {},
 ) {
   const recurringIncome = income?.recurringIncome ?? 0
   const ownerDrawIncome = income?.ownerDrawIncome ?? 0
@@ -51,8 +52,8 @@ function mockSafe(
       settings: {
         minimumCashBuffer: '100.0000',
         safeToSpendWindowDays: 14,
-        includeCreditCardBalance: true,
-        includeGoalContributions: true,
+        includeCreditCardBalance: settings.includeCreditCardBalance ?? true,
+        includeGoalContributions: settings.includeGoalContributions ?? true,
       },
       // Default to a no-surplus block so the legacy tests stay regression-safe.
       surplus: {
@@ -83,10 +84,10 @@ describe('SafeToSpendTile', () => {
       // "Safe to spend" appears in both the tile label and the breakdown
       // footer when expanded — assert at least one (it's collapsed here).
       expect(screen.getAllByText(/Safe to spend/i).length).toBeGreaterThan(0)
-      // Settings link present.
+      // Settings link goes straight to the knobs that drive this tile.
       expect(screen.getByRole('link', { name: /settings/i })).toHaveAttribute(
         'href',
-        '/settings',
+        '/settings/cashflow',
       )
     })
   })
@@ -382,6 +383,47 @@ describe('SafeToSpendTile', () => {
       fireEvent.click(screen.getByText('Show breakdown'))
       expect(screen.getByText('Owner draws')).toBeInTheDocument()
       expect(screen.queryByText('Recurring income')).not.toBeInTheDocument()
+    })
+  })
+
+  it('links each "disabled" breakdown note to Settings → Cashflow', () => {
+    vi.resetModules()
+    vi.doMock('@/hooks/useSafeToSpend', () => ({
+      useSafeToSpend: () =>
+        mockSafe(1600, false, undefined, undefined, [], {
+          includeCreditCardBalance: false,
+          includeGoalContributions: false,
+        }),
+    }))
+    return import('./SafeToSpendTile').then(({ SafeToSpendTile: T }) => {
+      render(
+        <MemoryRouter>
+          <T />
+        </MemoryRouter>,
+      )
+      fireEvent.click(screen.getByText('Show breakdown'))
+      const goals = screen.getByRole('link', { name: /goal contributions are turned off/i })
+      const cards = screen.getByRole('link', { name: /credit-card payments are turned off/i })
+      expect(goals).toHaveAttribute('href', '/settings/cashflow')
+      expect(cards).toHaveAttribute('href', '/settings/cashflow')
+      expect(goals).toHaveTextContent('disabled')
+      expect(cards).toHaveTextContent('disabled')
+    })
+  })
+
+  it('shows no disabled links when both reservations are on', () => {
+    vi.resetModules()
+    vi.doMock('@/hooks/useSafeToSpend', () => ({
+      useSafeToSpend: () => mockSafe(1600),
+    }))
+    return import('./SafeToSpendTile').then(({ SafeToSpendTile: T }) => {
+      render(
+        <MemoryRouter>
+          <T />
+        </MemoryRouter>,
+      )
+      fireEvent.click(screen.getByText('Show breakdown'))
+      expect(screen.queryByRole('link', { name: /turned off/i })).not.toBeInTheDocument()
     })
   })
 

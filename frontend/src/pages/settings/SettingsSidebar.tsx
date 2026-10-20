@@ -14,6 +14,7 @@ const GROUPS: SettingsNavGroup[] = [
       { to: '/settings/display', label: 'Display' },
       { to: '/settings/appearance', label: 'Appearance' },
       { to: '/settings/notifications', label: 'Notifications' },
+      { to: '/settings/cashflow', label: 'Cashflow' },
       { to: '/settings/gmail', label: 'Gmail' },
       { to: '/settings/partner-invite', label: 'Partner invite' },
       { to: '/settings/members', label: 'Members' },
