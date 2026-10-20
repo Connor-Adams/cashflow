@@ -10,6 +10,10 @@
  * `payment`. The card side of each of those payments has always been `payment`,
  * so the two legs of one event disagreed.
  *
+ * Second use (2026-10-20): the detector learned "PAYMENT - THANK YOU" with
+ * dashes (the card-side line of a bill payment). Prod then held 4 such rows not
+ * typed `payment`: 12189, 12203, 12387 (`transfer`) and 12383 (`unknown`).
+ *
  * The decision comes from the detector itself (see retypeCardPayments.ts), not
  * a regex of its own, so this cannot drift from the import path. It only ever
  * promotes TO `payment`, and only on a high-confidence narrative match.
@@ -93,7 +97,8 @@ async function main(): Promise<void> {
 
   const [updated] = await Transaction.update(
     { txnType: 'payment' },
-    { where: { id: candidates.map((c) => c.id) }, fields: ['txnType'] },
+    // Instance hooks, so each re-typed row gets a TransactionRevision.
+    { where: { id: candidates.map((c) => c.id) }, fields: ['txnType'], individualHooks: true },
   );
   console.log(`\nApplied: ${updated} row(s) re-typed to 'payment'.`);
 }

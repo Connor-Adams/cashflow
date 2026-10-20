@@ -905,6 +905,7 @@ test('GUARD: card bill payments stay payments next to the brokerage rule', () =>
     'MISC PAYMENT WISE',
     'PAYMENT RECEIVED - THANK YOU',
     'PAYMENT THANK YOU/PAIEMENT MERCI',
+    'PAYMENT - THANK YOU / PAIEMENT - MERCI',
   ]) {
     const out = runDetectTypeStage({ merchantRaw, merchantClean: merchantRaw, amount: -500 });
     assert.equal(out[0].fields.txnType, 'payment', merchantRaw);
@@ -922,4 +923,35 @@ test('GUARD: an online banking payment to Wealthsimple is not assumed to be fund
     amount: -500,
   });
   assert.equal(out[0].fields.txnType, 'payment');
+});
+
+// The card-side line of a bill payment printed with dashes, sometimes followed
+// by statement-footer text the PDF parser glued onto the row (prod 12189,
+// 12203, 12383, 12387). Without the dash allowance it read as `unknown`.
+test('card payment: "PAYMENT - THANK YOU" with dashes and footer text is a payment', () => {
+  for (const merchantRaw of [
+    'PAYMENT - THANK YOU',
+    'PAYMENT \u2013 THANK YOU',
+    'PAYMENT - THANK YOU / PAIEMENT - MERCI',
+    'PAYMENT - THANK YOU / PAIEMENT - MERCI PAYMENTS & INTEREST RATES',
+    'PAYMENT - THANK YOU / PAIEMENT - MERCI CONTACT US Customer Service / Lost & Stolen 1-800-000-0000',
+  ]) {
+    const out = runDetectTypeStage({ merchantRaw, merchantClean: merchantRaw, amount: 250 });
+    assert.equal(out[0].fields.txnType, 'payment', merchantRaw);
+    assert.equal(out[0].confidence, 'high', merchantRaw);
+  }
+});
+
+test('GUARD: the Questrade brokerage rule still wins over the dash-tolerant payment rule', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'ONLINE BANKING PAYMENT - 4503 QUESTRADE',
+    merchantClean: 'ONLINE BANKING PAYMENT - 4503 QUESTRADE',
+    amount: -250,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('GUARD: "thank you" without "payment" is not a card payment', () => {
+  const out = runDetectTypeStage({ merchantRaw: 'THANK YOU FOR SHOPPING', merchantClean: 'THANK YOU FOR SHOPPING', amount: -12 });
+  assert.notEqual(out[0].fields.txnType, 'payment');
 });

@@ -33,7 +33,10 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
   // ("Investment WS Investments", "E-TRANSFER SENT WEALTHSIMPLE CASH") are
   // matched by their own transfer rules below.
   { type: 'transfer', re: BROKERAGE_PAYMENT_RE },
-  { type: 'payment', re: /\b(online payment|payment received|payment thank you|autopay|statement credit)\b/i },
+  // "payment thank you" allows a dash between the words: the card-side line of a
+  // bill payment is also printed "PAYMENT - THANK YOU / PAIEMENT - MERCI", and
+  // without the dash that form fell through to `unknown`.
+  { type: 'payment', re: /\b(online payment|payment received|payment\s*[-\u2013\u2014]?\s*thank you|autopay|statement credit)\b/i },
   // Dividend: cash dividend distributions from holdings. Sign-agnostic — the
   // WS bundle imports these with negative amount on the position leg, so a
   // positive-only rule loses ~20 rows to 'purchase' default.
