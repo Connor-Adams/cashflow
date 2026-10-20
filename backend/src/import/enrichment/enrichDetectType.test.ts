@@ -866,3 +866,60 @@ test('interest: bank account interest received', () => {
   });
   assert.equal(out[0].fields.txnType, 'interest');
 });
+
+// Brokerage funding. RBC words a contribution to a Questrade account as a bill
+// payment, "ONLINE BANKING PAYMENT - 4503 QUESTRADE", and the generic
+// online-banking-payment rule typed all six prod rows `payment`. The other leg
+// of four of them is a "Contribution" on the Questrade FHSA, typed `transfer`:
+// one event, two types. Questrade is a brokerage with no card to pay off, so a
+// payment to it is funding an investment account. Prod stores the cleaned
+// merchant truncated to "ONLINE BANKING PAYMENT -", so the payee only appears
+// in merchantRaw.
+test('transfer: "ONLINE BANKING PAYMENT - 4503 QUESTRADE" funds a brokerage account', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'ONLINE BANKING PAYMENT - 4503 QUESTRADE',
+    merchantClean: 'ONLINE BANKING PAYMENT -',
+    amount: -250,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+  assert.equal(out[0].confidence, 'high');
+});
+
+// The reverse direction: money withdrawn from Questrade lands in RBC chequing
+// as "MISC PAYMENT QUESTRADE" (prod #5321, +1,819.40). It was a payment only
+// because the misc-payment card rule listed questrade beside the card issuers.
+test('transfer: "MISC PAYMENT QUESTRADE" inflow is a brokerage withdrawal', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'MISC PAYMENT QUESTRADE',
+    merchantClean: 'MISC PAYMENT QUESTRADE',
+    amount: 1819.4,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('GUARD: card bill payments stay payments next to the brokerage rule', () => {
+  for (const merchantRaw of [
+    'ONLINE BANKING PAYMENT - 1234 CIBC MASTERCARD',
+    'ONLINE BANKING PAYMENT - 5678 CAPITAL ONE M/C',
+    'MISC PAYMENT AMEX BILL PYMT',
+    'MISC PAYMENT WISE',
+    'PAYMENT RECEIVED - THANK YOU',
+    'PAYMENT THANK YOU/PAIEMENT MERCI',
+  ]) {
+    const out = runDetectTypeStage({ merchantRaw, merchantClean: merchantRaw, amount: -500 });
+    assert.equal(out[0].fields.txnType, 'payment', merchantRaw);
+  }
+});
+
+// Wealthsimple is deliberately NOT a brokerage payee here: it also issues a
+// credit card, so "ONLINE BANKING PAYMENT - WEALTHSIMPLE" could be a card bill.
+// Wealthsimple funding has its own unambiguous narratives ("Investment WS
+// Investments", "E-TRANSFER SENT WEALTHSIMPLE CASH"), already typed transfer.
+test('GUARD: an online banking payment to Wealthsimple is not assumed to be funding', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'ONLINE BANKING PAYMENT - 9999 WEALTHSIMPLE',
+    merchantClean: 'ONLINE BANKING PAYMENT -',
+    amount: -500,
+  });
+  assert.equal(out[0].fields.txnType, 'payment');
+});

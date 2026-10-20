@@ -1,5 +1,13 @@
 import type { Signal, TxnType } from './types';
 
+/**
+ * A bill-payment-worded narrative naming a brokerage (see the PATTERNS entry
+ * that uses it). Exported so the historical re-type
+ * (retypeBrokerageFunding.ts) can scope itself to exactly this rule.
+ */
+export const BROKERAGE_PAYMENT_RE =
+  /\b(?:online banking|online|misc|bill|web)\s+payment\b[^.]{0,40}\bquestrade\b/i;
+
 // Order matters: patterns are tried top-down and the first match wins.
 // `dividend` and `investment` must come BEFORE the generic positive/negative
 // fallbacks below; `transfer` and `fee` come before the broader
@@ -10,6 +18,21 @@ import type { Signal, TxnType } from './types';
 // row would default to 'purchase' and bloat the dashboard totalSpend metric.
 const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'negative' }> = [
   { type: 'refund', re: /\b(refund|return(?:ed)?|reversal|chargeback)\b/i, requireSign: 'positive' },
+  // Brokerage funding/withdrawal worded as a bill payment. RBC renders a
+  // contribution to a Questrade account as "ONLINE BANKING PAYMENT - 4503
+  // QUESTRADE" and money coming back as "MISC PAYMENT QUESTRADE". A brokerage
+  // has no balance owing to pay off, so this is money moving between the
+  // household's own accounts: a transfer, not a card payment. In prod the
+  // other leg is a "Contribution" on the Questrade FHSA, already `transfer`.
+  // It sits above every payment rule because each of them would otherwise
+  // claim the narrative first.
+  //
+  // Payee list = brokerages seen in prod payment narratives, nothing more.
+  // Wealthsimple is deliberately absent: it also issues a credit card, so a
+  // bill payment to it may be a genuine card payment; its funding narratives
+  // ("Investment WS Investments", "E-TRANSFER SENT WEALTHSIMPLE CASH") are
+  // matched by their own transfer rules below.
+  { type: 'transfer', re: BROKERAGE_PAYMENT_RE },
   { type: 'payment', re: /\b(online payment|payment received|payment thank you|autopay|statement credit)\b/i },
   // Dividend: cash dividend distributions from holdings. Sign-agnostic — the
   // WS bundle imports these with negative amount on the position leg, so a
@@ -92,7 +115,7 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
   { type: 'payment', re: /\bonline banking (?:\(?loan\)? )?payment\b/i },
   { type: 'payment', re: /\bonline bill payment for\b/i },
   { type: 'payment', re: /\bamex bill pymt\b/i },
-  { type: 'payment', re: /\bmisc payment\b.*\b(amex|visa|mastercard|wise|questrade|bmo)\b/i },
+  { type: 'payment', re: /\bmisc payment\b.*\b(amex|visa|mastercard|wise|bmo)\b/i },
   // Card-statement bill payments where a card network is named in the narrative
   // (#558). "BILL PAYMENT CIBC VISA", "WEB PAYMENT TD MASTERCARD", "PRE-AUTHORIZED
   // PAYMENT AMEX" are payments OUT to clear a card balance, never consumption.
