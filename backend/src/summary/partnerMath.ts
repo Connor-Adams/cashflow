@@ -130,7 +130,7 @@ export type PartnerAttribution = {
  *   sumPartner = +50  (refund/inflow partly theirs)   → net = -50  (I owe partner)
  *
  * sumMy is my own portion (not a debt to anyone) and does NOT enter the net.
- * This mirrors `queryBuilders.executePartnerBalance`, which already negates and is correct.
+ * The AI `partner_balance` answer reaches this through `partnerBalance.loadPartnerBalance`.
  *
  * If multi-payer is ever added (partner uploads from their own account, true joint pool),
  * this is the single place to branch on a real `paid_by` field. `ownershipType` today is
@@ -140,7 +140,7 @@ export function rawNetForRow(r: RawPartnerRow): number {
   // What the partner owes me = the NEGATION of their signed share-sum. Spend is
   // stored negative, so a partner share of a purchase I paid (negative) means the
   // partner owes me that amount (positive); a positive partner share (refund/inflow
-  // partly theirs) means I owe them. Mirrors queryBuilders.executePartnerBalance.
+  // partly theirs) means I owe them.
   const partner = r.sumPartner ?? 0;
   return partner === 0 ? 0 : -partner;
 }

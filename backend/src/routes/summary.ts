@@ -4,7 +4,6 @@ import { Op } from 'sequelize';
 import {
   Account,
   Contact,
-  PartnerSettlement,
   Reimbursement,
   Transaction,
   sequelize,
@@ -23,13 +22,7 @@ import {
   aggregateMonthly,
   type MonthlyTxnRow,
 } from '../summary/aggregateMonthly';
-import {
-  applySettlements,
-  resolveSolePartnerId,
-  summarizeSettlements,
-  type RawPartnerRow,
-  type RawSettlementRow,
-} from '../summary/partnerMath';
+import { loadPartnerBalance } from '../summary/partnerBalance';
 import {
   computeOwedBack,
   realCostOf,
@@ -376,76 +369,13 @@ router.get('/period-insight', async (req, res, next) => {
 
 router.get('/partner', async (req, res, next) => {
   try {
-    const where = dateWhere(req);
-    // Filter settlements by the same date range and currency. The `from`/`to`
-    // (settledDate) constraints mirror the transaction date filter so closing
-    // out an old debt outside the window doesn't leak into a narrow report.
-    const settlementWhere: Record<string, unknown> = { ...householdWhere(req) };
-    if (req.query.dateFrom || req.query.dateTo) {
-      const dateCond: { [Op.gte]?: string; [Op.lte]?: string } = {};
-      if (req.query.dateFrom) dateCond[Op.gte] = String(req.query.dateFrom);
-      if (req.query.dateTo) dateCond[Op.lte] = String(req.query.dateTo);
-      settlementWhere.settledDate = dateCond;
-    }
-    if (req.query.currency) {
-      settlementWhere.currency = String(req.query.currency).toUpperCase().slice(0, 3);
-    }
-
-    const [rows, contacts, settlementRows] = await Promise.all([
-      Transaction.findAll({
-        where,
-        attributes: [
-          'currency',
-          'ownershipType',
-          'ownershipContactId',
-          [sequelize.fn('SUM', sequelize.col('my_share_amount')), 'sumMy'],
-          [
-            sequelize.fn('SUM', sequelize.col('partner_share_amount')),
-            'sumPartner',
-          ],
-        ],
-        group: ['currency', 'ownershipType', 'ownershipContactId'],
-        raw: true,
-      }),
-      Contact.findAll({ where: householdWhere(req), raw: true }),
-      PartnerSettlement.findAll({
-        where: settlementWhere,
-        attributes: ['contactId', 'currency', 'direction', 'amount'],
-        raw: true,
-      }),
-    ]);
-    type PartnerRow = {
-      currency: string;
-      ownershipType: string;
-      ownershipContactId: number | null;
-      sumMy: unknown;
-      sumPartner: unknown;
-    };
-    type ContactRow = { id: number; name: string; isPartner: boolean | number };
-    const typedContacts = contacts as unknown as ContactRow[];
-    const contactsById = new Map(typedContacts.map((c) => [c.id, c.name]));
-    // Same attribution as Partner Fairness: unstamped splits belong to the
-    // household's sole partner (none when it has 0 or 2+ partners).
-    const solePartnerId = resolveSolePartnerId(
-      typedContacts.filter((c) => Boolean(c.isPartner)).map((c) => c.id),
-    );
-
-    const rawRows: RawPartnerRow[] = (rows as unknown as PartnerRow[]).map((r) => ({
-      currency: r.currency,
-      ownershipType: r.ownershipType,
-      ownershipContactId: r.ownershipContactId,
-      contactName:
-        r.ownershipContactId != null ? contactsById.get(r.ownershipContactId) ?? null : null,
-      sumMy: num(r.sumMy),
-      sumPartner: num(r.sumPartner),
-    }));
-
+    // Shared with the AI partner_balance answer so the two always agree.
     res.json(
-      applySettlements(
-        rawRows,
-        summarizeSettlements(settlementRows as unknown as RawSettlementRow[]),
-        { solePartnerId, contactNames: contactsById },
-      ),
+      await loadPartnerBalance(req, {
+        dateFrom: req.query.dateFrom ? String(req.query.dateFrom) : undefined,
+        dateTo: req.query.dateTo ? String(req.query.dateTo) : undefined,
+        currency: req.query.currency ? String(req.query.currency) : undefined,
+      }),
     );
   } catch (e) {
     next(e);
