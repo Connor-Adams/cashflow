@@ -18,8 +18,8 @@
  * diagnostics — for erasure we must purge it too: it can carry user_id and a
  * snapshot of household data.)
  *
- * Member-user personal data (sessions, email/SimpleFIN integrations, capture/
- * reporting/audit tokens, push subscriptions, notifications, saved searches,
+ * Member-user personal data (sessions, email/SimpleFIN integrations, API
+ * tokens (`user_tokens`), push subscriptions, notifications, saved searches,
  * cashflow settings, data exports …) cascade off `users.id`, so destroying the
  * member `User` rows removes them.
  *
