@@ -82,13 +82,15 @@ export interface HalfLinkedPair {
   bRetype: boolean;
 }
 
-export type SkipReason =
+/** Reasons a half-link cannot be closed mechanically, whatever its source. */
+export type GuardReason =
   | 'sibling_missing'
   | 'sibling_claimed_twice'
   | 'same_account'
   | 'cross_household'
-  | 'amount_mismatch'
-  | 'not_csv_direct';
+  | 'amount_mismatch';
+
+export type SkipReason = GuardReason | 'not_csv_direct';
 
 export interface HalfLinkScan {
   pairs: HalfLinkedPair[];
@@ -104,18 +106,57 @@ export function oppositeAmounts(a: string, b: string): boolean {
   return Math.sign(x) === -Math.sign(y) && Math.abs(Math.abs(x) - Math.abs(y)) <= 0.01;
 }
 
-/** Why a direct-CSV half-link cannot be closed mechanically, or null when it can. */
-function skipReason(
+/**
+ * Why a half-link cannot be closed mechanically, or null when it can. Shared with
+ * the all-importer classifier (backfillHalfLinkedTransfers.ts).
+ */
+export function skipReason(
   a: Transaction,
   b: Transaction | undefined,
   claims: Map<number, number>,
-): SkipReason | null {
+): GuardReason | null {
   if (b == null) return 'sibling_missing';
   if ((claims.get(b.id) ?? 0) > 1) return 'sibling_claimed_twice';
   if (a.accountId === b.accountId) return 'same_account';
   if (a.householdId !== b.householdId) return 'cross_household';
   if (!oppositeAmounts(a.amount, b.amount)) return 'amount_mismatch';
   return null;
+}
+
+export interface HalfLinks {
+  /** Transfer/payment rows A whose sibling B does not point back (or is gone). */
+  halfLinked: Transaction[];
+  siblings: Map<number, Transaction>;
+  /** How many rows point at each sibling. */
+  claims: Map<number, number>;
+}
+
+export async function loadHalfLinks(t?: DbTransaction): Promise<HalfLinks> {
+  const forward = await Transaction.findAll({
+    where: { linkedTransactionId: { [Op.ne]: null }, txnType: { [Op.in]: TRANSFER_TYPES } },
+    order: [['id', 'ASC']],
+    transaction: t,
+  });
+  const siblingIds = [...new Set(forward.map((a) => a.linkedTransactionId as number))];
+  const siblings = new Map(
+    (await Transaction.findAll({ where: { id: siblingIds }, transaction: t })).map((b) => [b.id, b]),
+  );
+  // A sibling claimed by two rows has no single right answer for its reverse pointer.
+  const claims = new Map<number, number>();
+  for (const r of await Transaction.findAll({
+    attributes: ['linkedTransactionId'],
+    where: { linkedTransactionId: siblingIds },
+    transaction: t,
+  })) {
+    const id = r.linkedTransactionId as number;
+    claims.set(id, (claims.get(id) ?? 0) + 1);
+  }
+  // B does not point back. A B that points at a third row is a different
+  // problem (a contested link), not a half-link.
+  const halfLinked = forward.filter(
+    (a) => siblings.get(a.linkedTransactionId as number)?.linkedTransactionId == null,
+  );
+  return { halfLinked, siblings, claims };
 }
 
 export async function scanHalfLinkedCsvTransfers(t?: DbTransaction): Promise<HalfLinkScan> {
@@ -127,32 +168,7 @@ export async function scanHalfLinkedCsvTransfers(t?: DbTransaction): Promise<Hal
     amount_mismatch: 0,
     not_csv_direct: 0,
   };
-  const forward = await Transaction.findAll({
-    where: { linkedTransactionId: { [Op.ne]: null }, txnType: { [Op.in]: TRANSFER_TYPES } },
-    order: [['id', 'ASC']],
-    transaction: t,
-  });
-  const siblingIds = [...new Set(forward.map((a) => a.linkedTransactionId as number))];
-  const siblings = new Map(
-    (await Transaction.findAll({ where: { id: siblingIds }, transaction: t })).map((b) => [b.id, b]),
-  );
-  // How many rows point at each sibling. A sibling claimed by two rows has no
-  // single right answer for its reverse pointer.
-  const claims = new Map<number, number>();
-  for (const r of await Transaction.findAll({
-    attributes: ['linkedTransactionId'],
-    where: { linkedTransactionId: siblingIds },
-    transaction: t,
-  })) {
-    const id = r.linkedTransactionId as number;
-    claims.set(id, (claims.get(id) ?? 0) + 1);
-  }
-
-  // B does not point back. A B that points at a third row is a different
-  // problem (a contested link), not a half-link.
-  const halfLinked = forward.filter(
-    (a) => siblings.get(a.linkedTransactionId as number)?.linkedTransactionId == null,
-  );
+  const { halfLinked, siblings, claims } = await loadHalfLinks(t);
 
   const batches = [...new Set(halfLinked.map((a) => a.importBatch))];
   const historiesByBatch = new Map<string, ImportHistory[]>();
@@ -256,15 +272,26 @@ export async function closeHalfLinkedPairs(
 export async function applyHalfLinkedCsvTransferBackfill(
   opts: { expectPairs?: number | null; now?: Date } = {},
 ): Promise<{ fixed: number }> {
+  return closeInOneTransaction(async (t) => (await scanHalfLinkedCsvTransfers(t)).pairs, opts);
+}
+
+/**
+ * Scan, close and re-scan inside one SQL transaction: abort on an `expectPairs`
+ * mismatch, roll back unless the post-write scan comes back empty.
+ */
+export async function closeInOneTransaction(
+  scan: (t: DbTransaction) => Promise<HalfLinkedPair[]>,
+  opts: { expectPairs?: number | null; now?: Date },
+): Promise<{ fixed: number }> {
   return sequelize.transaction(async (t) => {
-    const { pairs } = await scanHalfLinkedCsvTransfers(t);
+    const pairs = await scan(t);
     if (opts.expectPairs != null && pairs.length !== opts.expectPairs) {
       throw new BackfillAborted(`expected ${opts.expectPairs} pair(s), found ${pairs.length}; nothing written`);
     }
     await closeHalfLinkedPairs(pairs, opts.now ?? new Date(), t);
-    const after = await scanHalfLinkedCsvTransfers(t);
-    if (after.pairs.length !== 0) {
-      throw new BackfillAborted(`${after.pairs.length} pair(s) still half-linked after the writes; rolled back`);
+    const left = await scan(t);
+    if (left.length !== 0) {
+      throw new BackfillAborted(`${left.length} pair(s) still half-linked after the writes; rolled back`);
     }
     return { fixed: pairs.length };
   });

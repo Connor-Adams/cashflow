@@ -21,14 +21,12 @@
  *
  * Output is ids and counts only.
  */
-import { sequelize } from '../src/models';
 import {
-  BackfillAborted,
   applyHalfLinkedCsvTransferBackfill,
   scanHalfLinkedCsvTransfers,
   summarizeByHousehold,
 } from '../src/transfers/backfillHalfLinkedCsvTransfers';
-import { withRevisionContext } from '../src/util/transactionRevisions';
+import { asSystem, runBackfillCli } from './lib/backfillCli';
 import { guardWriteTarget, hasFlag, numFlag } from './lib/opsFlags';
 
 async function main(): Promise<void> {
@@ -55,15 +53,8 @@ async function main(): Promise<void> {
   }
   if (pairs.length === 0) return;
 
-  const { fixed } = await withRevisionContext({ source: 'system', changedByUserId: null }, () =>
-    applyHalfLinkedCsvTransferBackfill({ expectPairs }),
-  );
+  const { fixed } = await asSystem(() => applyHalfLinkedCsvTransferBackfill({ expectPairs }));
   console.log(`\nApplied: ${fixed} pair(s) linked both ways.`);
 }
 
-main()
-  .catch((err) => {
-    console.error(err instanceof BackfillAborted ? `Aborted: ${err.message}` : err);
-    process.exitCode = 1;
-  })
-  .finally(() => sequelize.close());
+runBackfillCli(main);

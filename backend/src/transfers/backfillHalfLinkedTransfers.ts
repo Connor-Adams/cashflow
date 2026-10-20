@@ -21,25 +21,19 @@
  */
 import { Op } from 'sequelize';
 import type { Transaction as DbTransaction } from 'sequelize';
-import { Transaction, TransactionRevision, sequelize } from '../models';
+import { Transaction, TransactionRevision } from '../models';
 import { GUESSED_TXN_TYPES } from '../import/importedTransaction';
 import {
-  BackfillAborted,
-  closeHalfLinkedPairs,
-  oppositeAmounts,
+  closeInOneTransaction,
+  loadHalfLinks,
+  skipReason,
+  type GuardReason,
   type HalfLinkedPair,
 } from './backfillHalfLinkedCsvTransfers';
 
 export type HalfLinkClass = 'safe' | 'cleared_by_job' | 'ambiguous';
 
-export type AmbiguousReason =
-  | 'sibling_missing'
-  | 'sibling_claimed_twice'
-  | 'same_account'
-  | 'cross_household'
-  | 'amount_mismatch'
-  | 'sibling_reviewed'
-  | 'sibling_type_conflict';
+export type AmbiguousReason = GuardReason | 'sibling_reviewed' | 'sibling_type_conflict';
 
 export interface ClassifiedHalfLink extends HalfLinkedPair {
   cls: HalfLinkClass;
@@ -87,41 +81,15 @@ function ambiguousReason(
   b: Transaction | undefined,
   claims: Map<number, number>,
 ): AmbiguousReason | null {
-  if (b == null) return 'sibling_missing';
-  if ((claims.get(b.id) ?? 0) > 1) return 'sibling_claimed_twice';
-  if (a.accountId === b.accountId) return 'same_account';
-  if (a.householdId !== b.householdId) return 'cross_household';
-  if (!oppositeAmounts(a.amount, b.amount)) return 'amount_mismatch';
+  const mechanical = skipReason(a, b, claims);
+  if (mechanical != null || b == null) return mechanical ?? 'sibling_missing';
   if (b.reviewedAt != null) return 'sibling_reviewed';
   if (!LINKABLE_TYPES.includes(b.txnType)) return 'sibling_type_conflict';
   return null;
 }
 
 export async function classifyHalfLinkedTransfers(t?: DbTransaction): Promise<ClassifiedHalfLink[]> {
-  const forward = await Transaction.findAll({
-    where: { linkedTransactionId: { [Op.ne]: null }, txnType: { [Op.in]: ['transfer', 'payment'] } },
-    order: [['id', 'ASC']],
-    transaction: t,
-  });
-  const siblingIds = [...new Set(forward.map((a) => a.linkedTransactionId as number))];
-  const siblings = new Map(
-    (await Transaction.findAll({ where: { id: siblingIds }, transaction: t })).map((b) => [b.id, b]),
-  );
-  const claims = new Map<number, number>();
-  for (const r of await Transaction.findAll({
-    attributes: ['linkedTransactionId'],
-    where: { linkedTransactionId: siblingIds },
-    transaction: t,
-  })) {
-    const id = r.linkedTransactionId as number;
-    claims.set(id, (claims.get(id) ?? 0) + 1);
-  }
-
-  // B does not point back. A B pointing at a third row is a contested link, not
-  // a half-link, and is out of scope here.
-  const halfLinked = forward.filter(
-    (a) => siblings.get(a.linkedTransactionId as number)?.linkedTransactionId == null,
-  );
+  const { halfLinked, siblings, claims } = await loadHalfLinks(t);
   const cleared = await siblingsClearedByJob(
     halfLinked.map((a) => ({ aId: a.id, bId: a.linkedTransactionId as number })),
     t,
@@ -192,16 +160,5 @@ export async function applyHalfLinkedTransferBackfill(opts: {
 }): Promise<{ fixed: number }> {
   const chosen = (rows: ClassifiedHalfLink[]) =>
     rows.filter((r) => (opts.classes as HalfLinkClass[]).includes(r.cls));
-  return sequelize.transaction(async (t) => {
-    const pairs = chosen(await classifyHalfLinkedTransfers(t));
-    if (opts.expectPairs != null && pairs.length !== opts.expectPairs) {
-      throw new BackfillAborted(`expected ${opts.expectPairs} pair(s), found ${pairs.length}; nothing written`);
-    }
-    await closeHalfLinkedPairs(pairs, opts.now ?? new Date(), t);
-    const left = chosen(await classifyHalfLinkedTransfers(t));
-    if (left.length !== 0) {
-      throw new BackfillAborted(`${left.length} pair(s) still half-linked after the writes; rolled back`);
-    }
-    return { fixed: pairs.length };
-  });
+  return closeInOneTransaction(async (t) => chosen(await classifyHalfLinkedTransfers(t)), opts);
 }

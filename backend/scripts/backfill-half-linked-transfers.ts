@@ -19,15 +19,13 @@
  *
  * Output is ids and counts only.
  */
-import { sequelize } from '../src/models';
-import { BackfillAborted } from '../src/transfers/backfillHalfLinkedCsvTransfers';
 import {
   applyHalfLinkedTransferBackfill,
   classifyHalfLinkedTransfers,
   summarizeByClass,
   type HalfLinkClass,
 } from '../src/transfers/backfillHalfLinkedTransfers';
-import { withRevisionContext } from '../src/util/transactionRevisions';
+import { asSystem, runBackfillCli } from './lib/backfillCli';
 import { guardWriteTarget, hasFlag, numFlag, strFlag } from './lib/opsFlags';
 
 type Closable = Exclude<HalfLinkClass, 'ambiguous'>;
@@ -65,15 +63,8 @@ async function main(): Promise<void> {
   }
   if (classes.length === 0) throw new Error('--apply needs --classes (safe, cleared_by_job)');
 
-  const { fixed } = await withRevisionContext({ source: 'system', changedByUserId: null }, () =>
-    applyHalfLinkedTransferBackfill({ classes, expectPairs }),
-  );
+  const { fixed } = await asSystem(() => applyHalfLinkedTransferBackfill({ classes, expectPairs }));
   console.log(`\nApplied: ${fixed} pair(s) linked both ways (${classes.join(', ')}).`);
 }
 
-main()
-  .catch((err) => {
-    console.error(err instanceof BackfillAborted ? `Aborted: ${err.message}` : err);
-    process.exitCode = 1;
-  })
-  .finally(() => sequelize.close());
+runBackfillCli(main);
