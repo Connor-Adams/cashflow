@@ -47,6 +47,15 @@ describe('SettingsSidebar', () => {
     )
   })
 
+  it('renders the Cashflow link (safe-to-spend and planning knobs)', () => {
+    mockUseAuth.mockReturnValue({ user: { household: { role: 'member' }, globalRole: null } })
+    renderSidebar()
+    expect(screen.getByRole('link', { name: 'Cashflow' })).toHaveAttribute(
+      'href',
+      '/settings/cashflow',
+    )
+  })
+
   it('renders Feedback as a real link for owners', () => {
     mockUseAuth.mockReturnValue({ user: { household: { role: 'owner' }, globalRole: null } })
     renderSidebar()

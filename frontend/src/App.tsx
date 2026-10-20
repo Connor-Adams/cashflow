@@ -64,6 +64,7 @@ import { FeedbackInboxTab } from './pages/settings/tabs/FeedbackInboxTab'
 import { AccountTab } from './pages/settings/tabs/AccountTab'
 import { ApiTokensTab } from './pages/settings/tabs/ApiTokensTab'
 import { NotificationsTab } from './pages/settings/tabs/NotificationsTab'
+import { CashflowTab } from './pages/settings/tabs/CashflowTab'
 import { IncomePage } from './pages/IncomePage'
 import { TaxPage } from './pages/TaxPage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
@@ -181,6 +182,7 @@ function AppRoutes() {
             <Route path="display" element={<DisplaySection />} />
             <Route path="appearance" element={<AppearanceSection />} />
             <Route path="notifications" element={<NotificationsTab />} />
+            <Route path="cashflow" element={<CashflowTab />} />
             <Route path="gmail" element={<GmailSection />} />
             <Route path="partner-invite" element={<PartnerInviteSection />} />
             <Route path="members" element={<MembersTab />} />
