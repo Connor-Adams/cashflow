@@ -30,6 +30,7 @@ import { Card } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
 import { Label } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
+import { LoadErrorAlert } from '@/components/LoadErrorAlert'
 import { useToast } from '@/components/ui/toast'
 import { getJson, patchJson, postJson } from '@/lib/api'
 
@@ -203,6 +204,7 @@ export function MonthlyClosePage() {
   )
   const [detail, setDetail] = useState<PeriodDetailResponse | null>(null)
   const [history, setHistory] = useState<PeriodResponse[]>([])
+  const [historyFailed, setHistoryFailed] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -228,9 +230,11 @@ export function MonthlyClosePage() {
     try {
       const r = await getJson<PeriodListResponse>('/api/monthly-close')
       setHistory(r.data)
+      setHistoryFailed(false)
     } catch {
-      // Non-fatal — empty list is the worst-case render.
-      setHistory([])
+      // Non-fatal for the checklist, but say so — a hidden section would
+      // read as "no past reviews".
+      setHistoryFailed(true)
     }
   }, [])
 
@@ -564,7 +568,12 @@ export function MonthlyClosePage() {
       )}
 
       {/* History */}
-      {history.length > 0 ? (
+      {historyFailed ? (
+        <LoadErrorAlert
+          title="Couldn't load past reviews"
+          onRetry={() => void fetchHistory()}
+        />
+      ) : history.length > 0 ? (
         <Card className="p-4">
           <h3 className="text-sm font-semibold mb-2">Past reviews</h3>
           <ul className="space-y-2">

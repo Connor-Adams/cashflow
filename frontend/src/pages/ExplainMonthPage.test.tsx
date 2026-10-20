@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ToastProvider } from '@/components/ui/toast'
 import { ExplainMonthPage } from './ExplainMonthPage'
@@ -120,5 +120,43 @@ describe('ExplainMonthPage', () => {
     ).toBeInTheDocument()
     const cta = screen.getByRole('link', { name: /view transactions/i })
     expect(cta).toHaveAttribute('href', '/transactions')
+  })
+
+  async function optIntoAi(status: 'failed' | 'not_configured') {
+    const original = vi.mocked(getJson).getMockImplementation()!
+    vi.mocked(getJson).mockImplementation((async (url: string) => {
+      const base = (await original(url)) as Record<string, unknown>
+      return url.includes('ai=true')
+        ? { ...base, aiSummary: null, aiSummaryStatus: status }
+        : base
+    }) as typeof getJson)
+    renderPage()
+    await screen.findByText('Dining up $200 vs last month')
+    fireEvent.click(screen.getByRole('checkbox', { name: /add ai summary/i }))
+    return () => vi.mocked(getJson).mockImplementation(original)
+  }
+
+  it('says the AI call failed (with Retry), not "key not configured", when the key is set but OpenAI fails', async () => {
+    const restore = await optIntoAi('failed')
+    try {
+      const title = await screen.findByText("Couldn't generate the AI summary")
+      expect(title.closest('[role="alert"]')).not.toBeNull()
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+      expect(screen.queryByText(/OPENAI_API_KEY is not configured/)).toBeNull()
+    } finally {
+      restore()
+    }
+  })
+
+  it('says OPENAI_API_KEY is not configured only when the server reports not_configured', async () => {
+    const restore = await optIntoAi('not_configured')
+    try {
+      expect(
+        await screen.findByText(/OPENAI_API_KEY is not configured/),
+      ).toBeInTheDocument()
+      expect(screen.queryByText("Couldn't generate the AI summary")).toBeNull()
+    } finally {
+      restore()
+    }
   })
 })

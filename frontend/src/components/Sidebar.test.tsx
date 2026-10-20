@@ -12,8 +12,10 @@ vi.mock('../lib/useAuth', () => ({
 vi.mock('../hooks/useTheme', () => ({
   useTheme: () => ({ theme: 'light', toggleTheme: vi.fn() }),
 }))
-vi.mock('@/hooks/useAiInboxCount', () => ({ useAiInboxCount: () => ({ count: 0 }) }))
-vi.mock('@/hooks/useInsightsCount', () => ({ useInsightsCount: () => ({ count: 0 }) }))
+const mockInboxCount = vi.fn<() => { count: number | null }>(() => ({ count: 0 }))
+const mockInsightsCount = vi.fn<() => { count: number | null }>(() => ({ count: 0 }))
+vi.mock('@/hooks/useAiInboxCount', () => ({ useAiInboxCount: () => mockInboxCount() }))
+vi.mock('@/hooks/useInsightsCount', () => ({ useInsightsCount: () => mockInsightsCount() }))
 vi.mock('@/hooks/useAiStatus', () => ({ useAiStatus: () => ({ openai: true }) }))
 const mockNavVisibility = vi.fn(() => ({
   income: true, planned: true, goals: true, scenarios: true, vault: true, budgets: true,
@@ -107,6 +109,20 @@ describe('Sidebar rail (PR 0)', () => {
     const insightsSection = insightsHeader.closest('.sidebar__section') as HTMLElement
     const link = within(insightsSection).getByRole('link', { name: 'Cashflow' })
     expect(link).toHaveAttribute('href', '/reports/cashflow')
+  })
+
+  it('badges Inbox with the combined pending count', () => {
+    mockInboxCount.mockReturnValueOnce({ count: 2 })
+    mockInsightsCount.mockReturnValueOnce({ count: 3 })
+    renderSidebar()
+    expect(screen.getByRole('link', { name: /Inbox/ })).toHaveTextContent('5')
+  })
+
+  it('shows no Inbox badge (not a partial or 0 count) when a count failed to load', () => {
+    mockInboxCount.mockReturnValueOnce({ count: null })
+    mockInsightsCount.mockReturnValueOnce({ count: 3 })
+    renderSidebar()
+    expect(screen.getByRole('link', { name: /Inbox/ })).not.toHaveTextContent(/\d/)
   })
 
   it('folds Review into the Inbox tabs (PR 5)', () => {

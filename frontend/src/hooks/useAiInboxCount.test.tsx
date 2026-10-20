@@ -51,7 +51,7 @@ describe('useAiInboxCount', () => {
     expect(captured!.loading).toBe(false)
   })
 
-  it('returns 0 on fetch failure (silent)', async () => {
+  it('reports an unknown count (null, never 0) and error on first-fetch failure', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('boom'))
     let captured: HookValue | null = null
     act(() => {
@@ -59,7 +59,33 @@ describe('useAiInboxCount', () => {
     })
     await flush()
     await flush()
-    expect(captured!.count).toBe(0)
+    expect(captured!.count).toBeNull()
+    expect(captured!.error).toBe(true)
     expect(captured!.loading).toBe(false)
+  })
+
+  it('keeps the last good count when a later refetch fails', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ total: 7, byKind: {} }), { status: 200 }),
+      )
+      .mockRejectedValue(new Error('boom'))
+    let captured: HookValue | null = null
+    act(() => {
+      root.render(<Probe onUpdate={(v) => { captured = v }} />)
+    })
+    await flush()
+    await flush()
+    expect(captured!.count).toBe(7)
+
+    act(() => {
+      window.dispatchEvent(new Event('focus'))
+    })
+    await flush()
+    await flush()
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(captured!.count).toBe(7)
+    expect(captured!.error).toBe(true)
   })
 })

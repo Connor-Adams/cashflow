@@ -19,16 +19,22 @@ export function EmailedReceiptsTile() {
   useEffect(() => {
     let cancelled = false
     void (async () => {
+      let s: GmailStatus
       try {
-        const s = await getJson<GmailStatus>('/api/email/status')
-        if (cancelled) return
-        setStatus(s)
-        if (s.featureEnabled && s.connected) {
-          const orders = await getJson<ReceiptOrder[]>('/api/external-orders?group=gmail&limit=100')
-          if (!cancelled) setGmailCount(orders.length)
-        }
+        s = await getJson<GmailStatus>('/api/email/status')
       } catch {
-        if (!cancelled) setStatus({ featureEnabled: false, connected: false })
+        // Status unknown — render nothing rather than a wrong state.
+        return
+      }
+      if (cancelled) return
+      setStatus(s)
+      if (!s.featureEnabled || !s.connected) return
+      try {
+        const orders = await getJson<ReceiptOrder[]>('/api/external-orders?group=gmail&limit=100')
+        if (!cancelled) setGmailCount(orders.length)
+      } catch {
+        // A failed count must not flip a connected integration to "not
+        // configured" — keep the tile and just omit the count.
       }
     })()
     return () => {

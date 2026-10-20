@@ -9,6 +9,7 @@ import { Icon, type IconName } from '@connor-adams/designsystem'
 import { Grid } from '@/lib/ds-extras'
 import { NativeSelect } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
+import { LoadErrorAlert } from '@/components/LoadErrorAlert'
 import { SectionHeader } from '@/components/ui/section-header'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
@@ -27,9 +28,11 @@ import type {
  * user pivot into the TransactionsPage with the same filters applied.
  *
  * The AI summary is opt-in via a checkbox. When opted-in the backend will
- * try to fetch a narrative from OpenAI; when OPENAI_API_KEY is unset the
- * route returns aiSummary=null and we render a static "AI summary
- * unavailable" hint. The deterministic report is always present.
+ * try to fetch a narrative from OpenAI. When it can't, it returns
+ * aiSummary=null plus aiSummaryStatus: 'not_configured' (no
+ * OPENAI_API_KEY → static hint) or 'failed' (key set but the call errored
+ * or timed out → error with Retry). The deterministic report is always
+ * present.
  */
 
 /** Card classes expanded onto <section> when the semantic element needs
@@ -93,6 +96,37 @@ function buildTransactionsHref(filter: ExplainMonthTransactionFilter): string {
   if (filter.reviewFlag) params.set('reviewFlag', 'true')
   const query = params.toString()
   return query ? `/transactions?${query}` : '/transactions'
+}
+
+/** Why the opted-in AI summary is missing — never claim "not configured"
+ *  when the key is set and the call merely failed. */
+function AiSummaryUnavailable({
+  status,
+  onRetry,
+}: {
+  status: ExplainMonthResponse['aiSummaryStatus'] | undefined
+  onRetry: () => void
+}) {
+  if (status === 'failed') {
+    return (
+      <div className="mb-4">
+        <LoadErrorAlert title="Couldn't generate the AI summary" onRetry={onRetry}>
+          The AI request failed or timed out. The rest of the report below is
+          deterministic and does not require AI.
+        </LoadErrorAlert>
+      </div>
+    )
+  }
+  return (
+    <Card className="mb-4">
+      <p className="text-sm leading-6 text-muted-foreground mb-0">
+        {status === 'not_configured'
+          ? 'AI summary unavailable — OPENAI_API_KEY is not configured on the server.'
+          : 'AI summary unavailable.'}{' '}
+        The rest of the report below is deterministic and does not require AI.
+      </p>
+    </Card>
+  )
 }
 
 export function ExplainMonthPage() {
@@ -230,13 +264,10 @@ export function ExplainMonthPage() {
             </section>
           )}
           {aiOptIn && data.aiSummary == null && (
-            <Card className="mb-4">
-              <p className="text-sm leading-6 text-muted-foreground mb-0">
-                AI summary unavailable — OPENAI_API_KEY is not configured on the
-                server. The rest of the report below is deterministic and does
-                not require AI.
-              </p>
-            </Card>
+            <AiSummaryUnavailable
+              status={data.aiSummaryStatus}
+              onRetry={() => void load()}
+            />
           )}
 
           <MonthOverMonthSection data={data} />

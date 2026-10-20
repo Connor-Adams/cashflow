@@ -37,6 +37,8 @@ import { rankByNetSpend } from '../lib/rankByNetSpend'
 import { businessIncomeSpend } from '../lib/businessIncomeSpend'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
+import { useFetch } from '../hooks/useFetch'
+import { LoadErrorAlert } from '../components/LoadErrorAlert'
 import {
   fromDateInputValue,
   getCalendarMonthRange,
@@ -218,20 +220,8 @@ function getYearToDateRange(): { from: string; to: string } {
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
-/**
- * Fetch /api/recurring with the given currency filter. Returns the items
- * on success or an empty list on failure — never throws. Pulled out so
- * the useEffect that uses it stays small enough for the complexity gate.
- */
-async function fetchRecurringSafely(currency: string): Promise<RecurringItem[]> {
-  const qs = currency ? `?currency=${encodeURIComponent(currency)}` : ''
-  try {
-    const resp = await getJson<RecurringResponse>(`/api/recurring${qs}`)
-    return resp.items
-  } catch {
-    return []
-  }
-}
+const NO_RECURRING: RecurringItem[] = []
+const NO_BUDGET_PROGRESS: BudgetProgress[] = []
 
 /**
  * Build a `/transactions?…` URL with the dashboard's current
@@ -278,12 +268,6 @@ export function DashboardPage() {
   >([])
   const [monthly, setMonthly] = useState<MonthlyResp | null>(null)
   const [insight, setInsight] = useState<PeriodInsightResp | null>(null)
-  const [budgetProgress, setBudgetProgress] = useState<BudgetProgress[]>([])
-  // Recurring charges, fetched separately so a /api/recurring failure
-  // never tanks the rest of the dashboard. Empty list on failure or
-  // initial load.
-  const [recurringItems, setRecurringItems] = useState<RecurringItem[]>([])
-  const [recurringLoading, setRecurringLoading] = useState(true)
   const [priceChangeCount, setPriceChangeCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -356,29 +340,18 @@ export function DashboardPage() {
     }
   }, [summaryQs, previousRange, currency, dateFrom, dateTo])
 
-  // Budget progress is scoped to the active currency filter only — periods
-  // are always "current calendar month" on the backend, so date filters
-  // don't apply. Kept in its own effect so a failing /budgets/progress
-  // request doesn't tank the main dashboard rendering.
-  useEffect(() => {
-    let cancelled = false
-    const qs = currency
-      ? `?currency=${encodeURIComponent(currency)}`
-      : ''
-    ;(async () => {
-      try {
-        const resp = await getJson<BudgetProgressResponse>(
-          `/api/budgets/progress${qs}`
-        )
-        if (!cancelled) setBudgetProgress(resp.items)
-      } catch {
-        if (!cancelled) setBudgetProgress([])
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [currency])
+  // Budget progress and recurring charges are scoped to the active currency
+  // filter only — budget periods are always "current calendar month" on the
+  // backend, so date filters don't apply. Each is its own fetch so a failure
+  // doesn't tank the main dashboard; a failure renders an inline error with
+  // Retry in its tile, never the "no budgets" / "no recurring" empty state.
+  const currencyQs = currency ? `?currency=${encodeURIComponent(currency)}` : ''
+  const budgetProgressFetch = useFetch<BudgetProgressResponse>(
+    `/api/budgets/progress${currencyQs}`
+  )
+  const budgetProgress = budgetProgressFetch.data?.items ?? NO_BUDGET_PROGRESS
+  const recurringFetch = useFetch<RecurringResponse>(`/api/recurring${currencyQs}`)
+  const recurringItems = recurringFetch.data?.items ?? NO_RECURRING
 
   // Sort most-at-risk first; ties broken by category label so layout is
   // deterministic between renders. Overall budgets ("null" category) get a
@@ -390,22 +363,6 @@ export function DashboardPage() {
     })
   }, [budgetProgress])
 
-  // Recurring charges, fetched separately on currency change. Wrapped in
-  // try/catch so a failed fetch falls back to empty (same pattern as
-  // budgets above) — the Recurring tile self-handles empty/error states.
-  useEffect(() => {
-    let cancelled = false
-    setRecurringLoading(true)
-    void fetchRecurringSafely(currency).then((items) => {
-      if (cancelled) return
-      setRecurringItems(items)
-      setRecurringLoading(false)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [currency])
-
   useEffect(() => {
     // Price increases are now subscription_price_increase Insights; count the
     // open ones. GET /api/insights returns { data: [...] }.
@@ -413,7 +370,9 @@ export function DashboardPage() {
       '/api/insights?type=subscription_price_increase&status=open',
     )
       .then((res) => setPriceChangeCount(res.data.length))
-      .catch(() => setPriceChangeCount(0))
+      // Keep the last good count on failure (the banner simply doesn't
+      // appear); never overwrite it with a fabricated 0.
+      .catch(() => {})
   }, [])
 
   const currencies = useMemo(() => {
@@ -872,6 +831,14 @@ export function DashboardPage() {
             onDismiss={() => setPriceDismissedAt(priceChangeCount)}
             dismissLabel="Dismiss subscription price alert"
           />
+        )}
+        {budgetProgressFetch.error && (
+          <BentoTile span={12} rows={1} label="Budget progress + pacing">
+            <LoadErrorAlert
+              title="Couldn't load budget progress"
+              onRetry={budgetProgressFetch.refresh}
+            />
+          </BentoTile>
         )}
         {budgetProgressSorted.length > 0 && (
           <BentoTile
@@ -1375,7 +1342,9 @@ export function DashboardPage() {
 
         <RecurringThisMonthTile
           items={recurringItems}
-          loading={recurringLoading}
+          loading={recurringFetch.loading}
+          error={recurringFetch.error != null}
+          onRetry={recurringFetch.refresh}
         />
 
         <TableTile

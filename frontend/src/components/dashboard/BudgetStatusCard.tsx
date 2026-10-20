@@ -4,6 +4,7 @@ import { Skeleton } from '@connor-adams/designsystem'
 import { Button } from '@connor-adams/designsystem'
 import { getJson } from '@/lib/api'
 import { CategoryIcon } from '../CategoryIcon'
+import { LoadErrorAlert } from '../LoadErrorAlert'
 import { BentoTile } from './BentoTile'
 import type { BudgetProgress, BudgetStatusResponse } from '@/types/api'
 import { safePct, safeNum } from '@/lib/num'
@@ -39,10 +40,14 @@ type Props = {
 export function BudgetStatusCard({ currency = 'CAD' }: Props) {
   const [items, setItems] = useState<BudgetProgress[] | null>(null)
   const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
+  // Bumped by Retry to re-run the fetch effect.
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
+    setFailed(false)
     const qs = currency ? `?currency=${encodeURIComponent(currency)}` : ''
     ;(async () => {
       try {
@@ -51,7 +56,9 @@ export function BudgetStatusCard({ currency = 'CAD' }: Props) {
         )
         if (!cancelled) setItems(resp.items)
       } catch {
-        if (!cancelled) setItems([])
+        // A failed fetch is NOT "no budgets" — surface it instead of the
+        // "Set a budget" empty state.
+        if (!cancelled) setFailed(true)
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -59,7 +66,7 @@ export function BudgetStatusCard({ currency = 'CAD' }: Props) {
     return () => {
       cancelled = true
     }
-  }, [currency])
+  }, [currency, attempt])
 
   // Empty / loading skeleton state.
   if (loading) {
@@ -70,6 +77,16 @@ export function BudgetStatusCard({ currency = 'CAD' }: Props) {
           <Skeleton className="h-6 w-full" />
           <Skeleton className="h-6 w-full" />
         </div>
+      </BentoTile>
+    )
+  }
+  if (failed) {
+    return (
+      <BentoTile span={6} rows={1} label="Budget status">
+        <LoadErrorAlert
+          title="Couldn't load budget status"
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
       </BentoTile>
     )
   }

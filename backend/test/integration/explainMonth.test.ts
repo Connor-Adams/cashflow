@@ -274,6 +274,7 @@ test('GET /api/reports/explain-month returns empty result for empty period', asy
   assert.deepEqual(res.body.monthOverMonth, []);
   assert.deepEqual(res.body.findings, []);
   assert.equal(res.body.aiSummary, null);
+  assert.equal(res.body.aiSummaryStatus, 'not_requested');
 });
 
 test('GET /api/reports/explain-month returns spend_change and missing_receipt findings', async () => {
@@ -423,6 +424,7 @@ test('GET /api/reports/explain-month?ai=true degrades to null when no OPENAI_API
     const res = await primaryAgent.get('/api/reports/explain-month?month=2024-09&currency=CAD&ai=true');
     assert.equal(res.status, 200);
     assert.equal(res.body.aiSummary, null);
+    assert.equal(res.body.aiSummaryStatus, 'not_configured');
   } finally {
     if (oldKey != null) process.env.OPENAI_API_KEY = oldKey;
   }
