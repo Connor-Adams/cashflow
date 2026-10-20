@@ -17,7 +17,10 @@ import { findExistingInvestmentByFuzzyMatch } from './fuzzyDedupInvestmentActivi
 import { stableIdentityFingerprint } from './fingerprint';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import { enrichTransaction } from './enrich';
-import { convertIncomeActivityToAccountCurrency } from './convertActivityCurrency';
+import {
+  convertIncomeActivityToAccountCurrency,
+  type ConvertedActivityCurrency,
+} from './convertActivityCurrency';
 import { ensureFxRate } from '../fx/bankOfCanada';
 import { assertStatementReconciles } from './reconciliationGate';
 import { captureStatementBalance } from './captureStatementBalance';
@@ -99,8 +102,48 @@ export async function findOrCreateSecurity(
   return row;
 }
 
+/**
+ * Re-express each foreign-currency income inflow (e.g. a WS crypto staking
+ * reward the activities-export reports in USD) in the account's currency.
+ * Trades keep their native currency — see convertActivityCurrency.ts.
+ *
+ * Resolved BEFORE the import transaction opens, deliberately. A cache miss in
+ * `ensureFxRate` is a Bank of Canada HTTP call followed by an FxRate INSERT on
+ * the global connection. Inside the transaction that meant holding the import
+ * open across a network round-trip, and — on SQLite — an FxRate write that
+ * waited on the import's own write lock until busy_timeout x retries expired
+ * and the cache write was dropped. FX rates are global reference data, not part
+ * of this statement: caching one is correct whether or not the import commits,
+ * so it has no business being atomic with it.
+ */
+async function resolveActivityCurrencies(
+  rows: NormalizedInvestmentActivity[],
+  accountCurrency: string,
+): Promise<Map<NormalizedInvestmentActivity, ConvertedActivityCurrency>> {
+  const out = new Map<NormalizedInvestmentActivity, ConvertedActivityCurrency>();
+  for (const row of rows) {
+    out.set(
+      row,
+      await convertIncomeActivityToAccountCurrency(
+        {
+          activityType: row.activityType,
+          currency: row.currency,
+          amount: row.amount ?? null,
+          price: row.price ?? null,
+          fees: row.fees ?? null,
+          tradeDate: row.tradeDate,
+        },
+        accountCurrency,
+        (from, to, date) => ensureFxRate(from, to, date),
+      ),
+    );
+  }
+  return out;
+}
+
 async function createInvestmentActivity(
   row: NormalizedInvestmentActivity,
+  conv: ConvertedActivityCurrency,
   account: Account,
   preview: StatementPreview,
   t: SequelizeTransaction
@@ -108,21 +151,6 @@ async function createInvestmentActivity(
   const security = row.security
     ? await findOrCreateSecurity(row.security, account.householdId, t)
     : null;
-  // Re-express a foreign-currency income inflow (e.g. a WS crypto staking
-  // reward the activities-export reports in USD) in the account's currency.
-  // Trades keep their native currency — see convertActivityCurrency.ts.
-  const conv = await convertIncomeActivityToAccountCurrency(
-    {
-      activityType: row.activityType,
-      currency: row.currency,
-      amount: row.amount ?? null,
-      price: row.price ?? null,
-      fees: row.fees ?? null,
-      tradeDate: row.tradeDate,
-    },
-    account.defaultCurrency || 'CAD',
-    (from, to, date) => ensureFxRate(from, to, date),
-  );
   // SAVEPOINT around the INSERT: on Postgres, any query error inside an
   // open transaction aborts the whole transaction and every subsequent
   // query returns "current transaction is aborted". By nesting through
@@ -513,6 +541,12 @@ export async function commitStatementImport(
    * fallbacks see.
    */
   const coldRows: ColdRow[] = [];
+  // Network + FxRate cache writes happen here, outside the transaction — see
+  // resolveActivityCurrencies.
+  const activityCurrencies = await resolveActivityCurrencies(
+    preview.investmentActivities,
+    account.defaultCurrency || 'CAD',
+  );
 
   await sequelize.transaction(async (t) => {
     for (const row of preview.transactions) {
@@ -695,7 +729,9 @@ export async function commitStatementImport(
         }
         // no-match → fall through to the standard insert path.
       }
-      const created = await createInvestmentActivity(row, account, preview, t);
+      const conv = activityCurrencies.get(row);
+      if (!conv) throw new Error('activity currency not resolved before the import transaction');
+      const created = await createInvestmentActivity(row, conv, account, preview, t);
       if (created === 'duplicate') {
         skippedDuplicates += 1;
       } else {

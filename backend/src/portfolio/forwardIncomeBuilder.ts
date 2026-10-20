@@ -1,4 +1,4 @@
-import { Op } from 'sequelize';
+import { Op, type Transaction } from 'sequelize';
 import { Account } from '../models/Account';
 import { Household } from '../models/Household';
 import { HoldingSnapshot } from '../models/HoldingSnapshot';
@@ -172,12 +172,29 @@ export async function rebuildForwardProjectionsForAllHouseholds(
   return { households: households.length, rebuilt, deleted };
 }
 
-export async function markStaleForHousehold(householdId: number, securityId?: number): Promise<void> {
+/**
+ * Both stale-markers take the transaction that changed the ledger, so the mark
+ * commits or rolls back with it (see forwardIncomeStaleHooks).
+ */
+export async function markStaleForHousehold(
+  householdId: number,
+  securityId?: number,
+  transaction?: Transaction,
+): Promise<void> {
   const where: { householdId: number; securityId?: number } = { householdId };
   if (securityId !== undefined) where.securityId = securityId;
-  await PortfolioForwardProjection.update({ staleAt: new Date() }, { where });
+  await PortfolioForwardProjection.update(
+    { staleAt: new Date() },
+    { where, ...(transaction ? { transaction } : {}) },
+  );
 }
 
-export async function markStaleForAllHoldersOfSecurity(securityId: number): Promise<void> {
-  await PortfolioForwardProjection.update({ staleAt: new Date() }, { where: { securityId } });
+export async function markStaleForAllHoldersOfSecurity(
+  securityId: number,
+  transaction?: Transaction,
+): Promise<void> {
+  await PortfolioForwardProjection.update(
+    { staleAt: new Date() },
+    { where: { securityId }, ...(transaction ? { transaction } : {}) },
+  );
 }

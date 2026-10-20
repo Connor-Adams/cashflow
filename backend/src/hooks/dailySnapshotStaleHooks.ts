@@ -1,21 +1,18 @@
-import type { Sequelize, Transaction } from 'sequelize';
-import { Account } from '../models/Account';
+import type { Sequelize } from 'sequelize';
 import { InvestmentActivity } from '../models/InvestmentActivity';
 import { markDailySnapshotsStaleForHousehold } from '../portfolio/dailySnapshotBuilder';
+import { hookTransaction, householdIdForRow } from './hookTransaction';
 
-type HookOpts = { transaction?: Transaction };
-
-async function householdIdForAccount(accountId: number): Promise<number | null> {
-  const acct = await Account.findByPk(accountId, { attributes: ['householdId'] });
-  return acct?.householdId ?? null;
-}
-
-function deferOrRun(opts: HookOpts | undefined, work: () => Promise<void>): void | Promise<void> {
-  if (opts?.transaction) {
-    opts.transaction.afterCommit(() => new Promise<void>((resolve) => setImmediate(() => work().then(resolve, resolve))));
-    return;
-  }
-  return work();
+/**
+ * Drop the household's cached daily snapshots from `fromDate` forward, inside
+ * the hooked write's own transaction — see hookTransaction.ts for why it is not
+ * deferred to afterCommit.
+ */
+async function dropSnapshotsFrom(inv: InvestmentActivity, opts: unknown, fromDate: string): Promise<void> {
+  const t = hookTransaction(opts);
+  const hhId = await householdIdForRow(inv, t);
+  if (hhId == null) return;
+  await markDailySnapshotsStaleForHousehold(hhId, fromDate, t);
 }
 
 let registered = false;
@@ -26,25 +23,18 @@ export function registerDailySnapshotStaleHooks(_sequelize: Sequelize): void {
 
   InvestmentActivity.addHook('afterCreate', 'daily_snapshot_stale_create', async (instance, opts) => {
     const inv = instance as InvestmentActivity;
-    const hhId = inv.householdId ?? (await householdIdForAccount(inv.accountId));
-    if (hhId == null) return;
-    await deferOrRun(opts as HookOpts, () => markDailySnapshotsStaleForHousehold(hhId, inv.tradeDate));
+    await dropSnapshotsFrom(inv, opts, inv.tradeDate);
   });
 
   InvestmentActivity.addHook('afterUpdate', 'daily_snapshot_stale_update', async (instance, opts) => {
     const inv = instance as InvestmentActivity;
-    const hhId = inv.householdId ?? (await householdIdForAccount(inv.accountId));
-    if (hhId == null) return;
     const newDate = inv.tradeDate;
     const prev = (inv.previous as (key: string) => string | undefined)('tradeDate');
-    const fromDate = prev && prev < newDate ? prev : newDate;
-    await deferOrRun(opts as HookOpts, () => markDailySnapshotsStaleForHousehold(hhId, fromDate));
+    await dropSnapshotsFrom(inv, opts, prev && prev < newDate ? prev : newDate);
   });
 
   InvestmentActivity.addHook('afterDestroy', 'daily_snapshot_stale_destroy', async (instance, opts) => {
     const inv = instance as InvestmentActivity;
-    const hhId = inv.householdId ?? (await householdIdForAccount(inv.accountId));
-    if (hhId == null) return;
-    await deferOrRun(opts as HookOpts, () => markDailySnapshotsStaleForHousehold(hhId, inv.tradeDate));
+    await dropSnapshotsFrom(inv, opts, inv.tradeDate);
   });
 }
