@@ -165,6 +165,29 @@ test('spend and settlements after period_end are excluded from the running balan
   assert.equal(result.hasCritical, false);
 });
 
+test('an unstamped split squared by a settlement to the sole partner does not flag', async () => {
+  // Import historically wrote partner splits with no contact; the settlement
+  // carries the partner's contact. With one partner they must match.
+  const { householdId, contactId } = await createHousehold('UnstampedSquared');
+  await createSharedTxn({
+    householdId,
+    contactId: null,
+    date: '2026-03-05',
+    amount: -1000,
+    partnerShare: -500,
+  });
+  await PartnerSettlement.create({
+    householdId,
+    contactId,
+    direction: 'partner_paid_me',
+    currency: 'CAD',
+    amount: '500.0000',
+    settledDate: '2026-03-20',
+  } as never);
+  const result = await detectMonthlyCloseCritical({ householdId }, '2026-03');
+  assert.equal(result.counts.outstandingPartnerBuckets, 0);
+});
+
 test('clean household reports zero buckets', async () => {
   const { householdId } = await createHousehold('Clean');
   const result = await detectMonthlyCloseCritical({ householdId }, '2026-03');

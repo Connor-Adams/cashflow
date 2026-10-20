@@ -46,6 +46,11 @@ test('contactForSharedRow: unlabeled split falls to sole partner', () => {
   assert.equal(contactForSharedRow(r, 7), 7);
 });
 
+test('contactForSharedRow: partner split stamped with a contact keeps it (survives a second partner)', () => {
+  const r = row({ ownershipType: 'partner', ownershipContactId: 7, partnerShare: -50 });
+  assert.equal(contactForSharedRow(r, null), 7);
+});
+
 test('contactForSharedRow: unlabeled split with no sole partner is null (Unassigned)', () => {
   const r = row({ ownershipType: 'me', ownershipContactId: null, partnerShare: -50 });
   assert.equal(contactForSharedRow(r, null), null);

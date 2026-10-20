@@ -25,8 +25,10 @@ import {
 } from '../summary/aggregateMonthly';
 import {
   applySettlements,
+  resolveSolePartnerId,
+  summarizeSettlements,
   type RawPartnerRow,
-  type SettlementSummary,
+  type RawSettlementRow,
 } from '../summary/partnerMath';
 import {
   computeOwedBack,
@@ -419,30 +421,14 @@ router.get('/partner', async (req, res, next) => {
       sumMy: unknown;
       sumPartner: unknown;
     };
-    type ContactRow = { id: number; name: string };
-    type SettlementRow = {
-      contactId: number;
-      currency: string;
-      direction: 'i_paid_partner' | 'partner_paid_me';
-      amount: unknown;
-    };
-    const contactsById = new Map((contacts as ContactRow[]).map((c) => [c.id, c.name]));
-
-    // Aggregate raw settlement rows into per-(contact, currency) summaries.
-    const settlementByKey = new Map<string, SettlementSummary>();
-    for (const s of settlementRows as unknown as SettlementRow[]) {
-      const amount = num(s.amount) ?? 0;
-      const key = `${s.contactId}\0${s.currency}`;
-      const existing = settlementByKey.get(key) ?? {
-        contactId: s.contactId,
-        currency: s.currency,
-        iPaid: 0,
-        partnerPaid: 0,
-      };
-      if (s.direction === 'i_paid_partner') existing.iPaid += amount;
-      else existing.partnerPaid += amount;
-      settlementByKey.set(key, existing);
-    }
+    type ContactRow = { id: number; name: string; isPartner: boolean | number };
+    const typedContacts = contacts as unknown as ContactRow[];
+    const contactsById = new Map(typedContacts.map((c) => [c.id, c.name]));
+    // Same attribution as Partner Fairness: unstamped splits belong to the
+    // household's sole partner (none when it has 0 or 2+ partners).
+    const solePartnerId = resolveSolePartnerId(
+      typedContacts.filter((c) => Boolean(c.isPartner)).map((c) => c.id),
+    );
 
     const rawRows: RawPartnerRow[] = (rows as unknown as PartnerRow[]).map((r) => ({
       currency: r.currency,
@@ -454,9 +440,13 @@ router.get('/partner', async (req, res, next) => {
       sumPartner: num(r.sumPartner),
     }));
 
-    res.json({
-      byCurrency: applySettlements(rawRows, Array.from(settlementByKey.values())),
-    });
+    res.json(
+      applySettlements(
+        rawRows,
+        summarizeSettlements(settlementRows as unknown as RawSettlementRow[]),
+        { solePartnerId, contactNames: contactsById },
+      ),
+    );
   } catch (e) {
     next(e);
   }

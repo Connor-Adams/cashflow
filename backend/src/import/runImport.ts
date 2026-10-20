@@ -9,6 +9,7 @@ import {
   HoldingSnapshot,
   ImportHistory,
 } from '../models';
+import { findSolePartnerContactId } from '../contacts/solePartner';
 import { upsertAccountCardIdentifier } from '../models/AccountCardIdentifier';
 import {
   hashContent,
@@ -384,6 +385,9 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
 
   const householdAccountIds = await loadHouseholdAccountIds(account.id, opts.householdId ?? account.householdId ?? null);
   const ownerNames = await loadHouseholdOwnerNames(opts.householdId ?? account.householdId ?? null);
+  // Partner/shared splits carry the household's sole partner so settlements
+  // against that partner net against them (null when 0 or 2+ partners).
+  const solePartnerId = await findSolePartnerContactId(opts.householdId ?? account.householdId ?? null);
 
   let inserted = 0;
   let skippedDup = 0;
@@ -527,6 +531,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
           householdId: opts.householdId ?? account.householdId ?? null,
           createdByUserId: opts.userId ?? account.ownerUserId ?? null,
           importBatch,
+          solePartnerContactId: solePartnerId,
         },
         t,
       );

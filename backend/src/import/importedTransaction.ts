@@ -22,6 +22,7 @@ import { Transaction } from '../models';
 import type { Account } from '../models/Account';
 import type { MerchantMemoryMatch } from '../ai/merchantMemory';
 import { resolveCounterpartyContact } from '../contacts/findOrCreateContact';
+import { ownershipContactIdFor } from '../contacts/solePartner';
 import { applyRuleSideEffects, findRuleActionsSignal } from '../rules/applyRuleSideEffects';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { computeImportConfidence, serializeFlags } from './computeImportConfidence';
@@ -57,6 +58,8 @@ export interface ImportedTransactionContext {
   overrideBusiness?: boolean;
   /** Absent means authoritative; only the SimpleFIN feed declares itself provisional. */
   sourceTier?: string;
+  /** The household's only partner contact, stamped onto partner/shared splits. */
+  solePartnerContactId?: number | null;
 }
 
 /**
@@ -159,7 +162,7 @@ export async function buildImportedTransaction(
     createdByUserId: ctx.createdByUserId,
     visibility: accountVisibility,
     ownershipType: splitType,
-    ownershipContactId: null,
+    ownershipContactId: ownershipContactIdFor(splitType, ctx.solePartnerContactId ?? null),
     counterpartyRaw: counterparty?.name ?? null,
     counterpartyContactId,
     importBatch: ctx.importBatch,

@@ -411,8 +411,8 @@ test('/partner: two settlements for the same (contact,currency) accumulate iPaid
   assert.ok(ours, `expected a partner row for contact ${contactAId}: ${JSON.stringify(rows)}`);
   // iPaid (10+15) - partnerPaid (0) = 25.
   assert.equal(ours.settledAmount, 25, 'two i_paid_partner rows must accumulate');
-  // settlementCount counts which sides were non-zero (iPaid yes, partnerPaid no) → 1.
-  assert.equal(ours.settlementCount, 1, 'only iPaid side had non-zero contributions');
+  // settlementCount counts settlements, not directions: two rows → 2.
+  assert.equal(ours.settlementCount, 2, 'both settlement rows are counted');
 });
 
 test('/partner: settlement outside the date filter is excluded from net', async () => {
