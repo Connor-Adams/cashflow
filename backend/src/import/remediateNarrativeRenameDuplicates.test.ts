@@ -168,6 +168,40 @@ test('a one-day-apart pair is remediated at windowDays 1 and untouched at 0', as
   assert.equal(loose.pairs[0].dateShiftDays, 1);
 });
 
+test('dropBatches takes one re-import at windowDays 1 and leaves other batches alone', async () => {
+  const accountId = await makeAccount();
+  // A PDF re-import shifted a day (prod 3314 / 3288 / 3293)...
+  const pdfKeep = await seedTxn({
+    accountId, date: '2026-03-02', amount: -45, merchantRaw: 'Pre-authorized Debit to ROGERS',
+    importBatch: '2026-05 WK3DD9X35CAD',
+  });
+  const pdfDrop = await seedTxn({
+    accountId, date: '2026-03-03', amount: -45, merchantRaw: 'Withdrawal (executed at 2026-03-03)',
+    importBatch: '2026-06 WK3DD9X35CAD',
+  });
+  // ...and a ledger-cleanup pair of the same shape, which is a separate decision.
+  await seedTxn({
+    accountId, date: '2026-07-09', amount: 3000,
+    merchantRaw: 'Interac e-Transfer® Received', importBatch: '2026-05 WK3DD9X35CAD',
+  });
+  await seedTxn({
+    accountId, date: '2026-07-10', amount: 3000,
+    merchantRaw: 'Contribution (executed at 2026-07-10)', importBatch: 'WS deposit ledger cleanup',
+  });
+
+  const all = await classifyNarrativeRenameDuplicates({ windowDays: 1 });
+  assert.equal(all.pairs.length, 2);
+
+  const scoped = await classifyNarrativeRenameDuplicates({
+    windowDays: 1,
+    dropBatches: ['2026-06 WK3DD9X35CAD'],
+  });
+  assert.deepEqual(
+    scoped.pairs.map((p) => [p.keepId, p.dropId]),
+    [[pdfKeep, pdfDrop]],
+  );
+});
+
 test('two rows from the SAME batch are one file, never a re-import pair', async () => {
   const accountId = await makeAccount();
   await seedTxn({

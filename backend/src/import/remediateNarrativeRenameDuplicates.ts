@@ -114,6 +114,12 @@ export type ClassifyOptions = {
   /** Restrict to these accounts; omit for all. */
   accountIds?: number[];
   /**
+   * Only pair rows whose DROP side came from one of these import batches. Lets a
+   * run take one proven re-import (a PDF batch that duplicates a CSV batch) at
+   * `windowDays` 1 without also sweeping a different batch's probable pairs.
+   */
+  dropBatches?: string[];
+  /**
    * Run inside an existing SQL transaction. `apply` threads its own so the
    * classification a delete acts on is the one taken under the same lock — a
    * racing edit cannot land between the report a human approved and the delete.
@@ -253,6 +259,7 @@ export async function classifyNarrativeRenameDuplicates(
           (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0) || a.id - b.id,
       );
       if (keep.importBatch === drop.importBatch) continue; // one file; not a re-import
+      if (opts.dropBatches && !opts.dropBatches.includes(drop.importBatch ?? '')) continue;
       const matchReason = matchReasonFor(keep, drop);
       if (matchReason == null) continue;
 
