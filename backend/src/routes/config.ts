@@ -18,6 +18,9 @@ router.get('/', (_req, res) => {
     // Whether the mailer driver can deliver (false on the noop driver). A
     // boolean only — SMTP host/user/credentials never leave the server.
     emailConfigured: isEmailConfigured(),
+    // The household's money unit (DEFAULT_CURRENCY). Settings → Cashflow
+    // labels its money thresholds with it.
+    defaultCurrency: env.defaultCurrency,
   });
 });
 

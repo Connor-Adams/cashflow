@@ -237,3 +237,55 @@ test('assumedAnnualReturnRate rejects non-numeric', () => {
   const r = validateCashflowSettingsPatch({ assumedAnnualReturnRate: 'high' });
   assert.equal(r.ok, false);
 });
+
+// ---------------------------------------------------------------------------
+// Settings UI hardening — the Settings → Cashflow tab writes every field, so
+// the validator must reject values `Number()` would silently coerce (empty
+// string → 0, null → 0, true → 1) and money that would overflow DECIMAL(14,4).
+// ---------------------------------------------------------------------------
+
+test('largePurchaseThreshold accepts a number within range, normalises to 4dp', () => {
+  const r = validateCashflowSettingsPatch({ largePurchaseThreshold: 750 });
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(r.patch.largePurchaseThreshold, '750.0000');
+});
+
+test('largePurchaseThreshold accepts 0 (flags every debit)', () => {
+  const r = validateCashflowSettingsPatch({ largePurchaseThreshold: '0' });
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(r.patch.largePurchaseThreshold, '0.0000');
+});
+
+test('largePurchaseThreshold rejects negative and above the 1,000,000 cap', () => {
+  assert.equal(validateCashflowSettingsPatch({ largePurchaseThreshold: -1 }).ok, false);
+  assert.equal(
+    validateCashflowSettingsPatch({ largePurchaseThreshold: 1_000_001 }).ok,
+    false,
+  );
+});
+
+test('minimumCashBuffer rejects a value that would overflow DECIMAL(14,4)', () => {
+  const r = validateCashflowSettingsPatch({ minimumCashBuffer: 1e12 });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.error, /minimumCashBuffer/);
+});
+
+test('minimumCashBuffer accepts the 1,000,000,000 cap', () => {
+  const r = validateCashflowSettingsPatch({ minimumCashBuffer: 1_000_000_000 });
+  assert.equal(r.ok, true);
+});
+
+for (const field of [
+  'minimumCashBuffer',
+  'largePurchaseThreshold',
+  'assumedAnnualReturnRate',
+  'safeToSpendWindowDays',
+  'counterpartyPromotionThreshold',
+] as const) {
+  for (const bad of ['', '   ', null, true, false, [], {}]) {
+    test(`${field} rejects ${JSON.stringify(bad)} instead of coercing it to a number`, () => {
+      const r = validateCashflowSettingsPatch({ [field]: bad });
+      assert.equal(r.ok, false);
+    });
+  }
+}
