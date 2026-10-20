@@ -231,7 +231,12 @@ function SidebarNavSections({
   const { count: insightsCount } = useInsightsCount()
 
   function badgeFor(to: string): number {
-    if (to === '/inbox') return aiInboxCount + insightsCount
+    // A count is null until its fetch has succeeded (failures keep the last
+    // good value). With either half unknown, show no badge rather than an
+    // understated total.
+    if (to === '/inbox' && aiInboxCount != null && insightsCount != null) {
+      return aiInboxCount + insightsCount
+    }
     return 0
   }
 

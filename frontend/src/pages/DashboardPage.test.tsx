@@ -314,3 +314,40 @@ describe('DashboardPage with "All currencies" selected', () => {
     expect(screen.queryByText(/pick a currency to see/i)).toBeNull()
   })
 })
+
+describe('DashboardPage fetch failures render errors, not empty states', () => {
+  let restore: () => void = () => {}
+  beforeEach(() => {
+    window.sessionStorage.clear()
+  })
+  afterEach(() => {
+    restore()
+  })
+
+  function failing(prefix: string) {
+    const original = vi.mocked(getJson).getMockImplementation()!
+    vi.mocked(getJson).mockImplementation(((path: string) => {
+      if (path.startsWith(prefix)) return Promise.reject(new Error('HTTP 500'))
+      return original(path)
+    }) as typeof getJson)
+    restore = () => vi.mocked(getJson).mockImplementation(original)
+  }
+
+  it('shows a recurring-charges error with Retry instead of "No recurring charges"', async () => {
+    failing('/api/recurring')
+    await renderPage()
+    const title = await screen.findByText("Couldn't load recurring charges")
+    expect(title.closest('[role="alert"]')).not.toBeNull()
+    expect(
+      screen.queryByText('No recurring charges expected this month.'),
+    ).toBeNull()
+  })
+
+  it('shows a budget-progress error instead of silently hiding the tile', async () => {
+    failing('/api/budgets/progress')
+    await renderPage()
+    expect(
+      await screen.findByText("Couldn't load budget progress"),
+    ).toBeInTheDocument()
+  })
+})

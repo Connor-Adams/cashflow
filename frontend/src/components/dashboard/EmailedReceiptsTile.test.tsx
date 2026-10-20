@@ -17,7 +17,11 @@ function mockStatus(status: Record<string, unknown>) {
 }
 
 describe('EmailedReceiptsTile', () => {
-  beforeEach(() => vi.mocked(getJson).mockReset())
+  // Block body on purpose: a function returned from beforeEach is run as a
+  // cleanup hook, and mockReset() returns the mock itself.
+  beforeEach(() => {
+    vi.mocked(getJson).mockReset()
+  })
 
   it('shows a loud connect prompt when the feature is enabled but not connected', async () => {
     mockStatus({ featureEnabled: true, connected: false })
@@ -52,5 +56,24 @@ describe('EmailedReceiptsTile', () => {
     await waitFor(() =>
       expect(screen.getByRole('link', { name: /view receipts/i })).toHaveAttribute('href', '/receipts'),
     )
+  })
+
+  it('keeps the connected tile (no count) when only the receipt-count fetch fails', async () => {
+    vi.mocked(getJson).mockImplementation((path: string) => {
+      if (path === '/api/email/status') {
+        return Promise.resolve({ featureEnabled: true, connected: true, accountEmail: 'me@gmail.com' })
+      }
+      return Promise.reject(new Error('HTTP 500'))
+    })
+    render(
+      <MemoryRouter>
+        <EmailedReceiptsTile />
+      </MemoryRouter>,
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: /view receipts/i })).toBeInTheDocument(),
+    )
+    expect(screen.getByText(/Connected as me@gmail.com\./)).toBeInTheDocument()
+    expect(screen.queryByText(/receipts? imported/)).toBeNull()
   })
 })

@@ -299,7 +299,8 @@ export type MoneyLeakDismissedResponse = {
 // produces a month-over-month breakdown by currency plus a flat list of
 // findings (spend changes, missing receipts, subscription changes, review
 // backlog, business summary). The aiSummary field is filled in by the
-// route when `ai=true` and OpenAI is configured; otherwise it stays null.
+// route when `ai=true` and OpenAI is configured; otherwise it stays null and
+// aiSummaryStatus says why (not requested, not configured, or the call failed).
 
 export type ExplainMonthFindingKind =
   | 'spend_change'
@@ -363,7 +364,10 @@ export type ExplainMonthResponse = {
   monthOverMonth: ExplainMonthMonthOverMonth[]
   findings: ExplainMonthFinding[]
   aiSummary: string | null
+  aiSummaryStatus: ExplainMonthAiSummaryStatus
 }
+
+export type ExplainMonthAiSummaryStatus = 'not_requested' | 'ok' | 'not_configured' | 'failed'
 
 // --- Lifestyle inflation tracker (GET /api/reports/lifestyle-inflation) ---
 // Tracks whether spending growth is outpacing income growth over a rolling

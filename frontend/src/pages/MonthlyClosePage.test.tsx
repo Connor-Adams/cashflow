@@ -11,9 +11,10 @@ import { MonthlyClosePage } from './MonthlyClosePage'
 
 type Status = 'open' | 'closed'
 
-const state: { status: Status; hasCritical: boolean } = {
+const state: { status: Status; hasCritical: boolean; historyFails: boolean } = {
   status: 'open',
   hasCritical: false,
+  historyFails: false,
 }
 
 function period(status: Status) {
@@ -34,6 +35,7 @@ function period(status: Status) {
 vi.mock('../lib/api', () => ({
   getJson: vi.fn((url: string) => {
     if (url === '/api/monthly-close') {
+      if (state.historyFails) return Promise.reject(new Error('HTTP 500'))
       return Promise.resolve({ data: [period(state.status)] })
     }
     return Promise.resolve({
@@ -88,6 +90,7 @@ describe('MonthlyClosePage (review checklist, not a lock)', () => {
   beforeEach(() => {
     state.status = 'open'
     state.hasCritical = false
+    state.historyFails = false
   })
 
   it('offers "Mark month reviewed" on an in-progress month', async () => {
@@ -118,5 +121,13 @@ describe('MonthlyClosePage (review checklist, not a lock)', () => {
     expect(screen.getAllByText('Reviewed').length).toBeGreaterThan(0)
     expect(screen.queryByText(/^closed$/i)).toBeNull()
     expectNoLockLanguage(container)
+  })
+
+  it('shows a "Past reviews" load error with Retry instead of silently hiding history', async () => {
+    state.historyFails = true
+    renderPage()
+    const title = await screen.findByText("Couldn't load past reviews")
+    expect(title.closest('[role="alert"]')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
   })
 })

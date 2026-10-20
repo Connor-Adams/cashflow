@@ -7,7 +7,8 @@
  * summary can be requested via `?ai=true` — when OpenAI is configured the
  * route calls openaiJson() with the deterministic findings as context and
  * stores the returned summary on the response; when not, the route returns
- * `aiSummary: null` so the UI degrades gracefully.
+ * `aiSummary: null` plus an `aiSummaryStatus` ('not_configured' | 'failed')
+ * so the UI can say *why* the summary is missing.
  *
  * The route is mounted at /api/reports; the rate limiter (aiSuggestLimiter)
  * is applied across the board because the AI variant is the more expensive
@@ -30,7 +31,6 @@ import {
   previousMonth,
   type ExplainMonthSubRow,
   type ExplainMonthTxnRow,
-  type ExplainMonthResult,
 } from '../summary/explainMonth';
 import {
   buildMonthWindow,
@@ -42,9 +42,7 @@ import {
   type SavingsRateTxnRow,
 } from '../summary/savingsRate';
 import { scopeWhereClause } from '../budgets/budgetSpendMath';
-import { getOpenAiConfig } from '../config/openai';
-import { openaiJson } from '../ai/openaiJson';
-import { logger } from '../observability/logger';
+import { buildExplainMonthAiSummary } from '../summary/explainMonthAiSummary';
 
 const router = Router();
 
@@ -283,81 +281,6 @@ async function fetchSubscriptions(
   }));
 }
 
-/**
- * Build a short JSON payload representing the report findings + monthOverMonth
- * deltas for the AI summarizer. We strip ids and verbose meta to keep the
- * prompt short — the AI sees the structured signal, not the raw txn rows.
- */
-function buildAiPayload(result: ExplainMonthResult): Record<string, unknown> {
-  return {
-    month: result.month,
-    previousMonth: result.previousMonth,
-    monthOverMonth: result.monthOverMonth.map((m) => ({
-      currency: m.currency,
-      currentSpend: Number(m.currentSpend.toFixed(2)),
-      previousSpend: Number(m.previousSpend.toFixed(2)),
-      spendDelta: Number(m.spendDelta.toFixed(2)),
-      currentIncome: Number(m.currentIncome.toFixed(2)),
-      previousIncome: Number(m.previousIncome.toFixed(2)),
-      netCurrent: Number(m.netCurrent.toFixed(2)),
-      netPrevious: Number(m.netPrevious.toFixed(2)),
-      topCategoryMovers: m.byCategory
-        .filter((c) => Math.abs(c.delta) >= 1)
-        .slice(0, 5)
-        .map((c) => ({
-          category: c.category,
-          previous: Number(c.previous.toFixed(2)),
-          current: Number(c.current.toFixed(2)),
-          delta: Number(c.delta.toFixed(2)),
-        })),
-    })),
-    findings: result.findings.map((f) => ({
-      kind: f.kind,
-      title: f.title,
-      summary: f.summary,
-      currency: f.currency,
-      monthlyImpact: Number(f.monthlyImpact.toFixed(2)),
-      severity: f.severity,
-    })),
-  };
-}
-
-/**
- * Ask the LLM for a tight 3-5 sentence narrative of the month. The prompt
- * forces JSON output via the existing `openaiJson` helper, then we extract
- * the `summary` string. Failures and missing keys degrade gracefully.
- */
-async function maybeBuildAiSummary(
-  result: ExplainMonthResult,
-): Promise<string | null> {
-  const cfg = getOpenAiConfig();
-  if (!cfg) return null;
-  try {
-    const payload = buildAiPayload(result);
-    const response = await openaiJson([
-      {
-        role: 'system',
-        content:
-          'You write short monthly money narratives. Take the structured month-over-month signal and findings and write a 3-5 sentence summary in plain English. Return strict JSON: { "summary": "..." }. Do not invent numbers; only refer to figures present in the input.',
-      },
-      {
-        role: 'user',
-        content: JSON.stringify(payload),
-      },
-    ]);
-    const summary = response.summary;
-    return typeof summary === 'string' && summary.trim() ? summary.trim() : null;
-  } catch (e) {
-    // Degrade gracefully: log it but return null so the deterministic report
-    // is still served.
-    logger.warn(
-      { err: e instanceof Error ? e.message : String(e) },
-      'explain_month_ai_summary_failed',
-    );
-    return null;
-  }
-}
-
 router.get('/explain-month', aiSuggestLimiter, async (req, res, next) => {
   try {
     const auth = currentAuth(req);
@@ -392,7 +315,7 @@ router.get('/explain-month', aiSuggestLimiter, async (req, res, next) => {
     });
 
     if (includeAi) {
-      result.aiSummary = await maybeBuildAiSummary(result);
+      Object.assign(result, await buildExplainMonthAiSummary(result));
     }
 
     res.json(result);

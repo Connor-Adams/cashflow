@@ -20,9 +20,9 @@ import { Grid } from '@/lib/ds-extras'
 import { StatCard } from '@connor-adams/designsystem'
 import { Dialog } from '@connor-adams/designsystem'
 import { useConfirm } from '@/lib/ds-extras'
-import { Alert } from '@connor-adams/designsystem'
 import { EmptyState } from '@connor-adams/designsystem'
 import { PageHeader } from '@/components/ui/page-header'
+import { LoadErrorAlert } from '@/components/LoadErrorAlert'
 import { SectionHeader } from '@/components/ui/section-header'
 import { Tabs } from '@connor-adams/designsystem'
 import { useToast } from '@/components/ui/toast'
@@ -156,6 +156,7 @@ export function CalendarPage() {
 
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [upcoming, setUpcoming] = useState<CalendarEvent[]>([])
+  const [upcomingFailed, setUpcomingFailed] = useState(false)
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -194,6 +195,7 @@ export function CalendarPage() {
   }, [monthRange.from, monthRange.to])
 
   const loadUpcoming = useCallback(async () => {
+    setUpcomingFailed(false)
     try {
       const params = new URLSearchParams({
         from: upcoming14.from,
@@ -204,7 +206,8 @@ export function CalendarPage() {
       )
       setUpcoming(resp.events)
     } catch {
-      setUpcoming([])
+      // Don't let a failure read as "Nothing planned" / $0 — flag it.
+      setUpcomingFailed(true)
     }
   }, [upcoming14.from, upcoming14.to])
 
@@ -426,12 +429,18 @@ export function CalendarPage() {
         </div>
       </div>
 
-      <UpcomingSummaryCard summary={summary} />
+      <UpcomingSummaryCard
+        summary={summary}
+        failed={upcomingFailed}
+        onRetry={() => void loadUpcoming()}
+      />
 
       {error ? (
-        <Alert variant="error" className="mb-3">
-          Failed to load calendar: {error}
-        </Alert>
+        <div className="mb-3">
+          <LoadErrorAlert title="Failed to load calendar" onRetry={() => void loadEvents()}>
+            {error}
+          </LoadErrorAlert>
+        </div>
       ) : null}
 
       {view === 'month' ? (
@@ -647,17 +656,35 @@ type UpcomingSummary = {
   byType: Map<PlannedEventType, number>
 }
 
-function UpcomingSummaryCard({ summary }: { summary: UpcomingSummary }) {
+const UPCOMING_TITLE = (
+  <span className="flex items-center gap-2">
+    <Icon name="calendar" aria-hidden="true" className="h-5 w-5" />
+    Next 14 days
+  </span>
+)
+
+function UpcomingSummaryCard({
+  summary,
+  failed,
+  onRetry,
+}: {
+  summary: UpcomingSummary
+  failed: boolean
+  onRetry: () => void
+}) {
+  if (failed) {
+    return (
+      <Card className="mb-4">
+        <SectionHeader title={UPCOMING_TITLE} />
+        <LoadErrorAlert title="Couldn't load the next 14 days" onRetry={onRetry} />
+      </Card>
+    )
+  }
   const netColor = summary.net >= 0 ? 'text-positive' : 'text-negative'
   return (
     <Card className="mb-4">
       <SectionHeader
-        title={
-          <span className="flex items-center gap-2">
-            <Icon name="calendar" aria-hidden="true" className="h-5 w-5" />
-            Next 14 days
-          </span>
-        }
+        title={UPCOMING_TITLE}
         description={
           summary.count === 0
             ? 'Nothing planned in the next two weeks.'

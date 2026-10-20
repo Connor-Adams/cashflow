@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ToastProvider } from '@/components/ui/toast'
+import { getJson } from '../lib/api'
+import { upcomingRange } from '../lib/calendarMonth'
 import { CalendarPage } from './CalendarPage'
 
 // Mock the data layer at the api module level (same pattern as LifestyleInflationPage.test.tsx).
@@ -109,5 +111,26 @@ describe('CalendarPage', () => {
     expect(await screen.findByText('Expected in')).toBeInTheDocument()
     expect(screen.getByText('Expected out')).toBeInTheDocument()
     expect(screen.getByText('Net')).toBeInTheDocument()
+  })
+
+  it('shows an error with Retry (not "Nothing planned" / $0 stats) when the 14-day fetch fails', async () => {
+    const { from, to } = upcomingRange()
+    const original = vi.mocked(getJson).getMockImplementation()!
+    vi.mocked(getJson).mockImplementation(((url: string) => {
+      if (url.includes(`from=${from}&to=${to}`)) {
+        return Promise.reject(new Error('HTTP 500'))
+      }
+      return original(url)
+    }) as typeof getJson)
+    try {
+      renderPage()
+      const title = await screen.findByText("Couldn't load the next 14 days")
+      expect(title.closest('[role="alert"]')).not.toBeNull()
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+      expect(screen.queryByText('Nothing planned in the next two weeks.')).toBeNull()
+      expect(screen.queryByText('Expected in')).toBeNull()
+    } finally {
+      vi.mocked(getJson).mockImplementation(original)
+    }
   })
 })

@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { BentoTile } from './BentoTile'
+import { LoadErrorAlert } from '../LoadErrorAlert'
 import { formatMoney } from '../../lib/formatMoney'
 import type { RecurringItem } from '../../types/api'
 
@@ -9,6 +10,9 @@ const MAX_ROWS = 5
 type RecurringThisMonthTileProps = {
   items: RecurringItem[]
   loading?: boolean
+  /** The recurring fetch failed — show an error, not "no recurring charges". */
+  error?: boolean
+  onRetry?: () => void
 }
 
 /**
@@ -19,6 +23,8 @@ type RecurringThisMonthTileProps = {
 export function RecurringThisMonthTile({
   items,
   loading,
+  error,
+  onRetry,
 }: RecurringThisMonthTileProps) {
   const thisMonthKey = useMemo(() => {
     const now = new Date()
@@ -48,7 +54,9 @@ export function RecurringThisMonthTile({
       label="Recurring this month"
       description="Subscriptions and recurring charges expected this calendar month."
     >
-      {dueThisMonth.length === 0 ? (
+      {error ? (
+        <LoadErrorAlert title="Couldn't load recurring charges" onRetry={onRetry} />
+      ) : dueThisMonth.length === 0 ? (
         <p className="m-0 text-muted-foreground">
           {loading
             ? 'Loading recurring charges…'

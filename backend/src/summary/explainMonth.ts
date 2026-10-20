@@ -120,6 +120,17 @@ export interface MonthOverMonth {
   byCategory: CategoryDelta[];
 }
 
+/**
+ * Why `aiSummary` is (or isn't) populated, so the UI can tell "AI is not set
+ * up" apart from "AI is set up but the call failed or timed out":
+ *   - not_requested:  ai=true was not passed
+ *   - ok:             a summary was generated
+ *   - not_configured: ai=true but OPENAI_API_KEY is unset
+ *   - failed:         ai=true, key set, but the call errored, timed out, or
+ *                     returned no usable summary
+ */
+export type ExplainMonthAiSummaryStatus = 'not_requested' | 'ok' | 'not_configured' | 'failed';
+
 export interface ExplainMonthResult {
   month: string;
   previousMonth: string;
@@ -129,6 +140,7 @@ export interface ExplainMonthResult {
    *  or when ai=false was passed. The aggregator itself never calls AI;
    *  the route layer fills this in. */
   aiSummary: string | null;
+  aiSummaryStatus: ExplainMonthAiSummaryStatus;
 }
 
 export interface ExplainMonthInput {
@@ -621,5 +633,6 @@ export function explainMonth(input: ExplainMonthInput): ExplainMonthResult {
     monthOverMonth,
     findings,
     aiSummary: null,
+    aiSummaryStatus: 'not_requested',
   };
 }

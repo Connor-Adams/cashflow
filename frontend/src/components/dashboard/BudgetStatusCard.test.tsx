@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { BudgetProgress } from '@/types/api'
 
@@ -113,5 +113,36 @@ describe('BudgetStatusCard', () => {
       ).not.toBeInTheDocument()
     })
     expect(container.querySelector('[aria-busy]')).toBeNull()
+  })
+
+  it('renders an error state with Retry (not the "Set a budget" empty state) when the fetch fails', async () => {
+    vi.resetModules()
+    let statusCalls = 0
+    vi.doMock('@/lib/api', () => ({
+      getJson: vi.fn((path: string) => {
+        if (path.startsWith('/api/budgets/status')) {
+          statusCalls += 1
+          if (statusCalls === 1) return Promise.reject(new Error('HTTP 500'))
+          return Promise.resolve({
+            items: [progressRow({ budgetId: 9, category: 'Groceries', percentUsed: 10 })],
+          })
+        }
+        return Promise.resolve([])
+      }),
+    }))
+    const { BudgetStatusCard } = await import('./BudgetStatusCard')
+    render(
+      <MemoryRouter>
+        <BudgetStatusCard />
+      </MemoryRouter>,
+    )
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent("Couldn't load budget status")
+    expect(screen.queryByTestId('budget-status-empty')).not.toBeInTheDocument()
+    expect(screen.queryByText('Set a budget')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByTestId('budget-status-pill-9')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
