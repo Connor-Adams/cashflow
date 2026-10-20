@@ -93,7 +93,7 @@ This is the single most important thing to understand before contributing.
 
 **AI (optional)**
 - OpenAI-backed category/split/note suggestions, vision-based receipt
-  extraction, and a CFO chat assistant over your own data. Set `OPENAI_API_KEY`
+  extraction, and a chat assistant (`/chat`) over your own data. Set `OPENAI_API_KEY`
   to enable it; leave it unset and everything else works unchanged.
 
 ## Architecture
@@ -134,7 +134,7 @@ session. The routers group into families:
 | Import & capture | `/import` `/capture` `/amazon` `/sync` `/v1` | CSV/PDF import, bookmarklet capture, reporting export |
 | Split & settle | `/contacts` `/settlements` `/partner` | Splits and settlement balances |
 | Summaries | `/summary` `/reports` `/insights` `/recurring` `/money-leaks` | Aggregates, Sankey, recurring/leak detection |
-| Planning | `/budgets` `/forecast` `/goals` `/debt` `/financial-scenarios` `/cfo` | Budgets, forecasts, scenarios, CFO chat |
+| Planning | `/budgets` `/forecast` `/goals` `/debt` `/financial-scenarios` | Budgets, forecasts, goals, debt, scenarios |
 | Investments | `/portfolio` `/dividends` `/net-worth` `/fx` | Holdings, prices, dividends, net worth, FX |
 | Tax | `/tax` `/tax/scenarios` `/income` | Tax scenarios, household plans, reserve |
 | Receipts & docs | `/transactions/:id/receipts` `/vault` | Receipts, vision analysis, document vault |

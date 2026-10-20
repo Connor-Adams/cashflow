@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getJson, patchJson } from '@/lib/api'
 import { usePushSubscription } from '@/hooks/usePushSubscription'
+import { getAppConfig } from '@/lib/appConfig'
 import type {
   NotificationPreference,
   NotificationPreferencesListResponse,
@@ -13,7 +14,9 @@ import type {
  * shown must actually do something:
  *  - In-app and push are independent channels for every type.
  *  - Email is shown ONLY for the weekly digest — it is the only type that
- *    sends email (`runWeeklyDigest`); the generic dispatcher never does.
+ *    sends email (`runWeeklyDigest`); the generic dispatcher never does. It is
+ *    disabled, with a hint, when the server has no mailer configured
+ *    (`/api/config` → `emailConfigured: false`).
  *  - Push is disabled, with the reason, when the server can't send push or
  *    the browser can't receive it. Turning push on subscribes this browser
  *    first (via `usePushSubscription`), so the toggle is never an empty
@@ -87,6 +90,8 @@ export function NotificationsTab() {
         ? 'Push blocked in your browser. Enable notifications in your browser settings to receive push.'
         : null
   const pushDisabled = pushUnavailableReason !== null || push.busy
+  // Missing config (failed /api/config load) reads as "not configured".
+  const emailConfigured = getAppConfig()?.emailConfigured === true
 
   const load = useCallback(async () => {
     setStatus('loading')
@@ -206,11 +211,19 @@ export function NotificationsTab() {
                   onChange={(v) => void save(p.type, { channelInApp: v } as Partial<NotificationPreference>)}
                 />
                 {hasEmail && (
-                  <Toggle
-                    label="Email"
-                    checked={p.channelEmail}
-                    onChange={(v) => void save(p.type, { channelEmail: v } as Partial<NotificationPreference>)}
-                  />
+                  <>
+                    <Toggle
+                      label="Email"
+                      checked={p.channelEmail && emailConfigured}
+                      disabled={!emailConfigured}
+                      onChange={(v) => void save(p.type, { channelEmail: v } as Partial<NotificationPreference>)}
+                    />
+                    {!emailConfigured && (
+                      <span className="text-xs text-muted-foreground">
+                        Email isn’t set up on this server.
+                      </span>
+                    )}
+                  </>
                 )}
                 <Toggle
                   label="Push"

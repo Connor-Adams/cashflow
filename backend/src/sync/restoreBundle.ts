@@ -128,30 +128,30 @@ async function insertRow(
   const colList = insertCols.map((c) => `"${c}"`).join(', ');
 
   const values = pickColumnValues(row, insertCols);
-  const sql = `INSERT INTO "${spec.table}" (${colList}) VALUES (${placeholders}) RETURNING id`;
-  // SQLite (test) doesn't support RETURNING in older drivers but sqlite3 5.x
-  // does. If RETURNING fails we fall back to lastInsertRowid via Sequelize.
-  try {
-    const out = (await sequelize.query<{ id: number }>(sql, {
-      bind: values,
-      type: QueryTypes.SELECT,
-      transaction,
-    })) as unknown as Array<{ id: number }>;
-    return Number(out[0]?.id ?? null);
-  } catch {
-    // Fall back: INSERT without RETURNING, then SELECT last_insert_rowid().
-    const fallbackSql = `INSERT INTO "${spec.table}" (${colList}) VALUES (${placeholders})`;
-    await sequelize.query(fallbackSql, {
+  const insertSql = `INSERT INTO "${spec.table}" (${colList}) VALUES (${placeholders})`;
+
+  // One statement per row on both dialects, and no catch-and-retry: a retry
+  // after a half-failed insert is exactly how rows used to land twice.
+  if (sequelize.getDialect() === 'sqlite') {
+    // Sequelize's SQLite dialect runs every INSERT through sqlite3's `run()`
+    // regardless of `type`, so `RETURNING id` rows are discarded (and with
+    // `type: SELECT` it throws *after* the row is written). With
+    // `type: INSERT` it hands back `[lastID, changes]`.
+    const [lastId] = (await sequelize.query(insertSql, {
       bind: values,
       type: QueryTypes.INSERT,
       transaction,
-    });
-    const lastRow = (await sequelize.query<{ id: number }>(
-      `SELECT last_insert_rowid() as id`,
-      { type: QueryTypes.SELECT, transaction },
-    )) as unknown as Array<{ id: number }>;
-    return Number(lastRow[0]?.id ?? null);
+    })) as unknown as [number, number];
+    return lastId == null ? null : Number(lastId);
   }
+
+  const out = (await sequelize.query<{ id: number }>(`${insertSql} RETURNING id`, {
+    bind: values,
+    type: QueryTypes.SELECT,
+    transaction,
+  })) as unknown as Array<{ id: number }>;
+  const id = out[0]?.id;
+  return id == null ? null : Number(id);
 }
 
 export async function restoreBundle(

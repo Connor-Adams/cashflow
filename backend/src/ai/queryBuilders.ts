@@ -14,12 +14,14 @@ import type { Request } from 'express';
 import { Op } from 'sequelize';
 import type { WhereOptions } from 'sequelize';
 
-import {
-  Contact,
-  PartnerSettlement,
-  Transaction,
-} from '../models/index.js';
+import { Contact, Transaction } from '../models/index.js';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope.js';
+import { loadPartnerBalance } from '../summary/partnerBalance.js';
+import {
+  attributeSplitContact,
+  resolveSolePartnerId,
+  type AdjustedPartnerRow,
+} from '../summary/partnerMath.js';
 import { num } from '../util/numbers.js';
 import { caseInsensitiveLikeOp } from './chat/_common.js';
 import { resolveDateRange } from './queryDateRanges.js';
@@ -533,121 +535,80 @@ async function executeSubscriptionIncreaseCheck(
 }
 
 /**
- * Partner-balance executor. Sums the partner share of every shared
- * transaction with an `ownershipContactId`, then nets out PartnerSettlement
- * rows. A positive netBalance means the partner owes the user; a negative
- * means the user owes the partner.
+ * Partner-balance executor. Delegates to `loadPartnerBalance`, the same loader
+ * behind the Reports partner card, so the AI answer and Reports agree: splits
+ * are attributed with `partnerMath.attributeSplitContact` (stamped contact
+ * wins, an unstamped split goes to the sole partner) and settlements are
+ * matched per (contact, currency). A positive netBalance means the partner
+ * owes the user; a negative means the user owes the partner. Settlements that
+ * match no split spend are named in the headline, never folded into a balance.
  */
 async function executePartnerBalance(
   req: Request,
   intent: Extract<QueryIntent, { intent: 'partner_balance' }>,
 ): Promise<ExecuteResult> {
-  const [txnRows, contacts, settlementRows] = await Promise.all([
+  const [balance, txnRows, solePartnerId] = await Promise.all([
+    loadPartnerBalance(req),
     Transaction.findAll({
+      // Op.and: visibleTransactionWhere already carries its own Op.or
+      // (shared-or-mine), which a sibling Op.or key would overwrite.
       where: {
-        ...visibleTransactionWhere(req),
-        ownershipContactId: { [Op.ne]: null },
+        [Op.and]: [
+          visibleTransactionWhere(req),
+          {
+            [Op.or]: [
+              { ownershipContactId: { [Op.ne]: null } },
+              { ownershipType: { [Op.ne]: 'me' } },
+            ],
+          },
+        ],
       },
       attributes: [
         'id',
         'date',
         'currency',
         'amount',
-        'partnerShareAmount',
-        'myShareAmount',
+        'ownershipType',
         'ownershipContactId',
         'merchantClean',
         'merchantRaw',
         'finalCategory',
-        'finalBusiness',
-        'finalSplitType',
       ],
       order: [['date', 'DESC']],
       raw: true,
     }),
-    Contact.findAll({ where: householdWhere(req), attributes: ['id', 'name'], raw: true }),
-    PartnerSettlement.findAll({
-      where: householdWhere(req),
-      attributes: ['contactId', 'currency', 'direction', 'amount'],
-      raw: true,
-    }),
+    loadSolePartnerId(req),
   ]);
 
-  type ContactRow = { id: number; name: string };
-  type SettlementRow = {
-    contactId: number;
-    currency: string;
-    direction: 'i_paid_partner' | 'partner_paid_me';
-    amount: unknown;
-  };
-  type PartnerTxn = {
-    id: number;
-    date: string;
-    currency: string;
-    amount: unknown;
-    partnerShareAmount: unknown;
-    myShareAmount: unknown;
-    ownershipContactId: number | null;
-    merchantClean: string | null;
-    merchantRaw: string | null;
-    finalCategory: string | null;
-    finalBusiness: boolean;
-    finalSplitType: string;
-  };
-
-  const contactsById = new Map(
-    (contacts as ContactRow[]).map((c) => [c.id, c.name]),
-  );
-
-  type Acc = { net: number; currency: string; contactId: number };
-  const balances = new Map<string, Acc>();
-
-  for (const row of txnRows as unknown as PartnerTxn[]) {
-    const cid = row.ownershipContactId;
-    if (cid == null) continue;
-    const cur = row.currency;
-    const key = `${cid}\0${cur}`;
-    const acc = balances.get(key) ?? { net: 0, currency: cur, contactId: cid };
-    // partnerShareAmount is the contact's slice of the spend. A negative
-    // number means the user paid for spend belonging to the contact, so the
-    // contact owes the user that much.
-    acc.net += -(num(row.partnerShareAmount) ?? 0);
-    balances.set(key, acc);
-  }
-
-  for (const s of settlementRows as unknown as SettlementRow[]) {
-    const key = `${s.contactId}\0${s.currency}`;
-    const acc = balances.get(key) ?? {
-      net: 0,
-      currency: s.currency,
-      contactId: s.contactId,
-    };
-    const amount = num(s.amount) ?? 0;
-    if (s.direction === 'partner_paid_me') {
-      // Partner paid down what they owed, so reduce their balance.
-      acc.net -= amount;
-    } else {
-      // User paid partner — increase what partner owes user (or reverse).
-      acc.net += amount;
-    }
-    balances.set(key, acc);
-  }
-
-  const partnerBalances = Array.from(balances.values())
-    .map((b) => {
-      const net = round2(b.net);
+  const partnerBalances = balance.byCurrency
+    .filter((r) => r.ownershipContactId != null || Math.abs(r.net) >= 0.005)
+    .map((r) => {
+      const net = round2(r.net);
       const direction: 'partner_owes_me' | 'i_owe_partner' | 'settled' =
         net > 0 ? 'partner_owes_me' : net < 0 ? 'i_owe_partner' : 'settled';
       return {
-        contactName: contactsById.get(b.contactId) ?? `Contact ${b.contactId}`,
-        currency: b.currency,
+        contactName: partnerRowName(r),
+        currency: r.currency,
         netBalance: net,
         direction,
       };
     })
     .sort((a, b) => Math.abs(b.netBalance) - Math.abs(a.netBalance));
 
+  type PartnerTxn = {
+    id: number;
+    date: string;
+    currency: string;
+    amount: unknown;
+    ownershipType: string;
+    ownershipContactId: number | null;
+    merchantClean: string | null;
+    merchantRaw: string | null;
+    finalCategory: string | null;
+  };
+  // Sources are the split transactions that feed an attributed balance.
   const sources = (txnRows as unknown as PartnerTxn[])
+    .filter((r) => attributeSplitContact(r, solePartnerId) != null)
     .slice(0, MAX_SOURCE_TRANSACTIONS)
     .map((r) => ({
       id: r.id,
@@ -659,7 +620,7 @@ async function executePartnerBalance(
       category: r.finalCategory,
     }));
 
-  const headline =
+  const balanceText =
     partnerBalances.length === 0
       ? 'No partner balances to report.'
       : partnerBalances
@@ -671,12 +632,36 @@ async function executePartnerBalance(
               : `You owe ${b.contactName} ${amt} ${b.currency}`;
           })
           .join('; ');
+  const unmatched = balance.unmatchedSettlements.reduce(
+    (n, u) => n + u.settlementCount,
+    0,
+  );
+  const headline =
+    unmatched === 0
+      ? balanceText
+      : `${balanceText} (${unmatched} settlement${unmatched === 1 ? '' : 's'} could not be matched to shared spend and ${unmatched === 1 ? 'is' : 'are'} not included.)`;
 
   return {
     intent,
     answer: { headline, totalsByCurrency: [], partnerBalances },
     sources,
   };
+}
+
+/** Same label rule as the Reports partner table (`partnerRowLabel`). */
+function partnerRowName(r: AdjustedPartnerRow): string {
+  if (r.contactName) return r.contactName;
+  if (r.ownershipContactId != null) return `Contact ${r.ownershipContactId}`;
+  return `Unassigned ${r.ownershipType} split`;
+}
+
+async function loadSolePartnerId(req: Request): Promise<number | null> {
+  const partners = await Contact.findAll({
+    where: { ...householdWhere(req), isPartner: true },
+    attributes: ['id'],
+    raw: true,
+  });
+  return resolveSolePartnerId((partners as unknown as Array<{ id: number }>).map((p) => p.id));
 }
 
 /**

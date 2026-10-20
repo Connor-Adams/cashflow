@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
 import { NotificationsTab } from './NotificationsTab'
 import * as api from '@/lib/api'
+import { _resetAppConfigForTest } from '@/lib/appConfig'
 
 let pushPermission: NotificationPermission = 'default'
 let pushServerConfigured = true
@@ -54,6 +55,13 @@ describe('NotificationsTab (#796)', () => {
     pushSubscribed = false
     subscribe.mockReset()
     subscribe.mockResolvedValue(true)
+    _resetAppConfigForTest()
+    window.__APP_CONFIG__ = {
+      logoDevToken: null,
+      quoteProviderConfigured: true,
+      vapidPublicKey: 'vapid',
+      emailConfigured: true,
+    }
   })
 
   it('renders the digest preference with channel toggles and a day picker', async () => {
@@ -209,5 +217,28 @@ describe('NotificationsTab (#796)', () => {
 
     await waitFor(() => expect(screen.getByLabelText('Push')).not.toBeChecked())
     expect(subscribe).not.toHaveBeenCalled()
+  })
+
+  it('disables the digest Email toggle with a hint when the server has no mailer configured', async () => {
+    window.__APP_CONFIG__ = { ...window.__APP_CONFIG__!, emailConfigured: false }
+    mockList([{ ...DIGEST_PREF, channelEmail: true }])
+    const patch = vi.spyOn(api, 'patchJson')
+    render(<NotificationsTab />)
+    await screen.findByText('Weekly spend digest')
+    const email = screen.getByLabelText('Email')
+    expect(email).toBeDisabled()
+    // A stored preference must not read as "on" when nothing can be sent.
+    expect(email).not.toBeChecked()
+    expect(screen.getByText(/Email isn’t set up on this server/)).toBeInTheDocument()
+    await userEvent.setup().click(email)
+    expect(patch).not.toHaveBeenCalled()
+  })
+
+  it('keeps the digest Email toggle enabled when a mailer is configured', async () => {
+    mockList()
+    render(<NotificationsTab />)
+    await screen.findByText('Weekly spend digest')
+    expect(screen.getByLabelText('Email')).toBeEnabled()
+    expect(screen.queryByText(/Email isn’t set up on this server/)).not.toBeInTheDocument()
   })
 })
