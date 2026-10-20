@@ -1,6 +1,6 @@
 # Smarter AI Integration Implementation Plan
 
-> **2026-10 update:** the CFO briefing and AI review features were removed end to end (routes, builders, runner, the `cfo-briefing` / `ai-review` inbox sources). The `cfo_briefings` / `ai_review_runs` tables remain pending a drop migration. Briefing/review content below is historical.
+> **2026-10 update:** the CFO briefing and AI review features were removed end to end (routes, builders, runner, the `cfo-briefing` / `ai-review` inbox sources). The `cfo_briefings` / `ai_review_runs` tables were dropped by migration `20261020000001-drop-retired-tables`. Briefing/review content below is historical.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

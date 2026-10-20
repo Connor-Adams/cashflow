@@ -84,9 +84,7 @@ import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
 import { Insight, initInsight } from './Insight';
 import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
-import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
-import { CfoBriefing, initCfoBriefing } from './CfoBriefing';
 import { TaxReserveSetting, initTaxReserveSetting } from './TaxReserveSetting';
 import {
   MonthlyClosePeriod,
@@ -195,8 +193,6 @@ initHouseholdPlan(sequelize);
 initInsight(sequelize);
 initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
-initAiReviewRun(sequelize);
-initCfoBriefing(sequelize);
 initTaxReserveSetting(sequelize);
 initMonthlyClosePeriod(sequelize);
 initMonthlyCloseTask(sequelize);
@@ -669,50 +665,8 @@ FinancialGoal.belongsTo(Account, {
   as: 'linkedAccount',
 });
 
-Household.hasMany(AiReviewRun, {
-  foreignKey: 'household_id',
-  as: 'aiReviewRuns',
-  onDelete: 'CASCADE',
-  hooks: true,
-});
-AiReviewRun.belongsTo(Household, {
-  foreignKey: 'household_id',
-  as: 'household',
-});
-User.hasMany(AiReviewRun, {
-  foreignKey: 'user_id',
-  as: 'aiReviewRuns',
-});
-AiReviewRun.belongsTo(User, {
-  foreignKey: 'user_id',
-  as: 'user',
-});
-
 PdfImportBatch.hasMany(PdfImportItem, { foreignKey: 'batch_id', as: 'items', onDelete: 'CASCADE', hooks: true });
 PdfImportItem.belongsTo(PdfImportBatch, { foreignKey: 'batch_id', as: 'batch' });
-
-// CFO briefings (issue #236). Cascades with household; user FK for the
-// actor that requested the briefing. The feature is retired (as is
-// AiReviewRun above); these associations stay only so household erasure keeps
-// cascading over the still-existing rows until the tables are dropped.
-Household.hasMany(CfoBriefing, {
-  foreignKey: 'household_id',
-  as: 'cfoBriefings',
-  onDelete: 'CASCADE',
-  hooks: true,
-});
-CfoBriefing.belongsTo(Household, {
-  foreignKey: 'household_id',
-  as: 'household',
-});
-User.hasMany(CfoBriefing, {
-  foreignKey: 'user_id',
-  as: 'cfoBriefings',
-});
-CfoBriefing.belongsTo(User, {
-  foreignKey: 'user_id',
-  as: 'user',
-});
 
 Household.hasMany(TaxReserveSetting, {
   foreignKey: 'household_id',
@@ -1208,8 +1162,6 @@ export {
   Insight,
   PlannedEvent,
   FinancialGoal,
-  AiReviewRun,
-  CfoBriefing,
   TaxReserveSetting,
   MonthlyClosePeriod,
   MonthlyCloseTask,
