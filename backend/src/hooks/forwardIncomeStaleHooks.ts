@@ -1,5 +1,4 @@
-import type { Sequelize, Transaction } from 'sequelize';
-import { Account } from '../models/Account';
+import type { Sequelize } from 'sequelize';
 import { InvestmentActivity } from '../models/InvestmentActivity';
 import { SecurityDividend } from '../models/SecurityDividend';
 import { HoldingSnapshot } from '../models/HoldingSnapshot';
@@ -7,25 +6,26 @@ import {
   markStaleForHousehold,
   markStaleForAllHoldersOfSecurity,
 } from '../portfolio/forwardIncomeBuilder';
+import { hookTransaction, householdIdForRow } from './hookTransaction';
 
-async function householdIdForAccount(accountId: number): Promise<number | null> {
-  const acct = await Account.findByPk(accountId, { attributes: ['householdId'] });
-  return acct?.householdId ?? null;
-}
+// Every stale-mark runs in the hooked write's own transaction — see
+// hookTransaction.ts for why it is not deferred to afterCommit.
 
 const ACTIVITY_TYPES_OF_INTEREST = new Set(['interest', 'buy', 'sell', 'dividend', 'transfer']);
 
-let registered = false;
-
-type HookOpts = { transaction?: Transaction };
-
-function deferOrRun(opts: HookOpts | undefined, work: () => Promise<void>): void | Promise<void> {
-  if (opts?.transaction) {
-    opts.transaction.afterCommit(() => new Promise<void>((resolve) => setImmediate(() => work().then(resolve, resolve))));
-    return;
-  }
-  return work();
+/** Mark the household's projection for `row.securityId` stale. */
+async function markRowSecurityStale(
+  row: { householdId: number | null; accountId: number; securityId: number | null },
+  opts: unknown,
+): Promise<void> {
+  if (row.securityId == null) return;
+  const t = hookTransaction(opts);
+  const hhId = await householdIdForRow(row, t);
+  if (hhId == null) return;
+  await markStaleForHousehold(hhId, row.securityId, t);
 }
+
+let registered = false;
 
 export function registerForwardIncomeStaleHooks(_sequelize: Sequelize): void {
   if (registered) return;
@@ -34,46 +34,33 @@ export function registerForwardIncomeStaleHooks(_sequelize: Sequelize): void {
   InvestmentActivity.addHook('afterCreate', 'fwd_income_stale_inv_create', async (instance, opts) => {
     const inv = instance as InvestmentActivity;
     if (!ACTIVITY_TYPES_OF_INTEREST.has(inv.activityType)) return;
-    if (inv.securityId == null) return;
-    const hhId = inv.householdId ?? (await householdIdForAccount(inv.accountId));
-    if (hhId == null) return;
-    await deferOrRun(opts as HookOpts, () => markStaleForHousehold(hhId, inv.securityId!));
+    await markRowSecurityStale(inv, opts);
   });
 
   InvestmentActivity.addHook('afterUpdate', 'fwd_income_stale_inv_update', async (instance, opts) => {
     const inv = instance as InvestmentActivity;
     if (!ACTIVITY_TYPES_OF_INTEREST.has(inv.activityType)) return;
-    if (inv.securityId == null) return;
-    const hhId = inv.householdId ?? (await householdIdForAccount(inv.accountId));
-    if (hhId == null) return;
-    await deferOrRun(opts as HookOpts, () => markStaleForHousehold(hhId, inv.securityId!));
+    await markRowSecurityStale(inv, opts);
   });
 
   InvestmentActivity.addHook('afterDestroy', 'fwd_income_stale_inv_destroy', async (instance, opts) => {
-    const inv = instance as InvestmentActivity;
-    if (inv.securityId == null) return;
-    const hhId = inv.householdId ?? (await householdIdForAccount(inv.accountId));
-    if (hhId == null) return;
-    await deferOrRun(opts as HookOpts, () => markStaleForHousehold(hhId, inv.securityId!));
+    await markRowSecurityStale(instance as InvestmentActivity, opts);
   });
 
   SecurityDividend.addHook('afterCreate', 'fwd_income_stale_div_create', async (instance, opts) => {
     const div = instance as SecurityDividend;
-    await deferOrRun(opts as HookOpts, () => markStaleForAllHoldersOfSecurity(div.securityId));
+    await markStaleForAllHoldersOfSecurity(div.securityId, hookTransaction(opts));
   });
   SecurityDividend.addHook('afterUpdate', 'fwd_income_stale_div_update', async (instance, opts) => {
     const div = instance as SecurityDividend;
-    await deferOrRun(opts as HookOpts, () => markStaleForAllHoldersOfSecurity(div.securityId));
+    await markStaleForAllHoldersOfSecurity(div.securityId, hookTransaction(opts));
   });
   SecurityDividend.addHook('afterDestroy', 'fwd_income_stale_div_destroy', async (instance, opts) => {
     const div = instance as SecurityDividend;
-    await deferOrRun(opts as HookOpts, () => markStaleForAllHoldersOfSecurity(div.securityId));
+    await markStaleForAllHoldersOfSecurity(div.securityId, hookTransaction(opts));
   });
 
   HoldingSnapshot.addHook('afterCreate', 'fwd_income_stale_snap_create', async (instance, opts) => {
-    const snap = instance as HoldingSnapshot;
-    const hhId = snap.householdId ?? (await householdIdForAccount(snap.accountId));
-    if (hhId == null) return;
-    await deferOrRun(opts as HookOpts, () => markStaleForHousehold(hhId, snap.securityId));
+    await markRowSecurityStale(instance as HoldingSnapshot, opts);
   });
 }

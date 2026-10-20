@@ -1,4 +1,4 @@
-import { Op } from 'sequelize';
+import { Op, type Transaction } from 'sequelize';
 import { Account } from '../models/Account';
 import { Household } from '../models/Household';
 import { InvestmentActivity } from '../models/InvestmentActivity';
@@ -349,8 +349,18 @@ export async function buildDailySnapshotsForAllHouseholds(args?: { toDate?: stri
   return { households: households.length, daysBuilt, daysSkipped, partialDays };
 }
 
-export async function markDailySnapshotsStaleForHousehold(householdId: number, fromDate: string): Promise<void> {
+/**
+ * Drop the household's cached daily snapshots from `fromDate` forward so the
+ * next read rebuilds them. Pass the transaction that changed the ledger: the
+ * invalidation then commits or rolls back with it (see dailySnapshotStaleHooks).
+ */
+export async function markDailySnapshotsStaleForHousehold(
+  householdId: number,
+  fromDate: string,
+  transaction?: Transaction,
+): Promise<void> {
   await PortfolioDailySnapshot.destroy({
     where: { householdId, date: { [Op.gte]: fromDate } },
+    ...(transaction ? { transaction } : {}),
   });
 }
