@@ -206,3 +206,21 @@ for (const importer of ['csv', 'statement'] as const) {
     assert.equal(purchase.txnType, 'purchase', 'purchase not re-typed transfer');
   });
 }
+
+test('linkTransferSibling: never clobbers a sibling already linked elsewhere', async () => {
+  const ctx = await seed();
+  await importRows('statement', ctx, ctx.wsId, 'ws-may', WS_ROWS);
+  await importRows('statement', ctx, ctx.chequingId, 'chq-may', CHEQUING_ROWS);
+  const rows = await snapshot();
+  const received = byMerchant(rows, 'Online transfer received - 6113 Connor Adams', 500);
+  const sent = byMerchant(rows, 'Online transfer sent - 6113 Connor Adams', -500);
+  const interac = byMerchant(rows, 'INTERAC E-TFR FROM JANE DOE', 250);
+
+  const { linkTransferSibling } = await import('./importedTransaction');
+  const landed = await sequelize.transaction((t) =>
+    linkTransferSibling(interac.id as number, received.id as number, new Date(), t),
+  );
+
+  assert.equal(landed, false);
+  assert.equal((await Transaction.findByPk(received.id as number))!.linkedTransactionId, sent.id);
+});

@@ -208,6 +208,56 @@ export async function buildImportedTransaction(
 }
 
 /**
+ * Write the reverse pointer that makes a transfer link two-way: the sibling
+ * points back at `txnId`, stamped `linkedAt`. Without it the link is
+ * one-directional: `txnId` points at the sibling but the sibling's
+ * linked_transaction_id is still NULL, so the Transfers-page unmatched queue
+ * keeps showing both legs.
+ *
+ * Returns false, and writes nothing, when the sibling is linked to a different
+ * row: a prior manual or auto link is never clobbered. Callers that
+ * may only hold two-way links (the enrichment backfill) drop their own pointer
+ * on false.
+ *
+ * Instance hooks run (`individualHooks`), so the sibling's change is recorded
+ * as a TransactionRevision.
+ */
+export async function linkTransferSibling(
+  txnId: number,
+  siblingId: number,
+  linkedAt: Date,
+  t: DbTransaction,
+): Promise<boolean> {
+  const [linked] = await Transaction.update(
+    { linkedTransactionId: txnId, transferLinkedAt: linkedAt },
+    {
+      // Unlinked, or already pointing back at us (the other leg was linked first
+      // by an older, one-sided write): both complete the pair.
+      where: { id: siblingId, linkedTransactionId: { [Op.or]: [null, txnId] } },
+      transaction: t,
+      individualHooks: true,
+    },
+  );
+  if (linked === 0) return false;
+  // Re-typing the sibling is a SEPARATE, narrower write. Linking is real
+  // evidence that a row the classifier could only guess at (a bare outflow
+  // defaults to `purchase`) was internal movement, and without this those rows
+  // inflate dashboard spend. But it is NOT evidence against a type the
+  // narrative established: the card leg of a bill payment reads "PAYMENT
+  // RECEIVED - THANK YOU" and is a `payment`. Stamping 'transfer' on it demoted
+  // four Amex rows in prod.
+  await Transaction.update(
+    { txnType: 'transfer' },
+    {
+      where: { id: siblingId, txnType: { [Op.in]: GUESSED_TXN_TYPES } },
+      transaction: t,
+      individualHooks: true,
+    },
+  );
+  return true;
+}
+
+/**
  * Insert the built row and everything that hangs off it. Run inside the caller's
  * per-row SAVEPOINT so a unique-violation rolls back only this row.
  */
@@ -223,33 +273,8 @@ export async function persistImportedTransaction(
   await persistSuggestedOrderLink(txn.id, enriched.signals, sp);
 
   const siblingId = transferSiblingId(enriched);
-  if (siblingId != null) {
-    // The reverse pointer. Without it the link is one-directional: the new txn
-    // points at the sibling but the sibling's linked_transaction_id is still
-    // NULL, so the Transfers-page unmatched queue keeps showing both legs.
-    await Transaction.update(
-      { linkedTransactionId: txn.id, transferLinkedAt: txn.transferLinkedAt },
-      {
-        // Only back-fill if the sibling is not already linked to a different
-        // txn (prevents clobbering a prior manual or auto-link on a re-import).
-        where: { id: siblingId, linkedTransactionId: null },
-        transaction: sp,
-      },
-    );
-    // Re-typing the sibling is a SEPARATE, narrower write. Linking is real
-    // evidence that a row the classifier could only guess at (a bare outflow
-    // defaults to `purchase`) was internal movement, and without this those rows
-    // inflate dashboard spend. But it is NOT evidence against a type the
-    // narrative established: the card leg of a bill payment reads "PAYMENT
-    // RECEIVED - THANK YOU" and is a `payment`. Stamping 'transfer' on it demoted
-    // four Amex rows in prod.
-    await Transaction.update(
-      { txnType: 'transfer' },
-      {
-        where: { id: siblingId, txnType: { [Op.in]: GUESSED_TXN_TYPES } },
-        transaction: sp,
-      },
-    );
+  if (siblingId != null && txn.transferLinkedAt != null) {
+    await linkTransferSibling(txn.id, siblingId, txn.transferLinkedAt, sp);
   }
 
   // Rule actions side-effects (issue #795): set_label / set_alert.

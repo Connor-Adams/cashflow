@@ -96,3 +96,107 @@ test('an unlinked pair is still linked by the backfill', async () => {
 
   assert.equal(await linkOf(x.id), y.id);
 });
+
+// ─── every link the backfill writes is two-way ──────────────────────────────
+
+async function row(id: number): Promise<Transaction> {
+  return (await Transaction.findByPk(id))!;
+}
+
+test('a link the backfill creates is two-way, with transfer_linked_at on both legs', async () => {
+  const x = await leg(out, '2026-03-12', '-75.00');
+  const y = await leg(into, '2026-03-12', '75.00');
+
+  await runBackfill(flags());
+
+  const [xa, ya] = [await row(x.id), await row(y.id)];
+  assert.equal(xa.linkedTransactionId, y.id);
+  assert.equal(ya.linkedTransactionId, x.id, 'the sibling points back');
+  assert.ok(xa.transferLinkedAt, 'forward leg stamped');
+  assert.ok(ya.transferLinkedAt, 'sibling stamped');
+  assert.equal(xa.transferLinkedAt!.getTime(), ya.transferLinkedAt!.getTime(), 'one link, one moment');
+});
+
+test('a guessed sibling is re-typed transfer when the backfill links it', async () => {
+  const x = await leg(out, '2026-03-13', '-80.00');
+  fp += 1;
+  const y = await Transaction.create({
+    accountId: into, householdId: HH, importBatch: 'links', date: '2026-03-13',
+    merchantRaw: 'Contribution', merchantClean: 'Contribution', amount: '80.00', currency: 'CAD',
+    txnType: 'unknown',
+    sourceRowFingerprint: `fp-links-${fp}`, sourceIdentityFingerprint: `sif-links-${fp}`,
+  } as never);
+
+  await runBackfill(flags());
+
+  const ya = await row(y.id);
+  assert.equal(ya.linkedTransactionId, x.id);
+  assert.equal(ya.txnType, 'transfer');
+});
+
+test('a half-link the matcher only re-derives is left for an explicit repair', async () => {
+  const x = await leg(out, '2026-03-14', '-90.00');
+  fp += 1;
+  // The far leg reads as a guess, so its own pass never hunts for a sibling.
+  const y = await Transaction.create({
+    accountId: into, householdId: HH, importBatch: 'links', date: '2026-03-14',
+    merchantRaw: 'Contribution', merchantClean: 'Contribution', amount: '90.00', currency: 'CAD',
+    txnType: 'unknown',
+    sourceRowFingerprint: `fp-links-${fp}`, sourceIdentityFingerprint: `sif-links-${fp}`,
+  } as never);
+  await x.update({ linkedTransactionId: y.id }); // one-sided, unstamped: an older run's output
+
+  await runBackfill(flags());
+
+  assert.equal(await linkOf(x.id), y.id);
+  assert.equal(await linkOf(y.id), null, 'no reverse pointer written for a pre-existing half-link');
+  assert.equal((await row(y.id)).transferLinkedAt, null);
+});
+
+test('a leg that already points at the matched row is completed two-way', async () => {
+  const x = await leg(out, '2026-03-15', '-95.00');
+  const y = await leg(into, '2026-03-15', '95.00');
+  await x.update({ linkedTransactionId: y.id }); // one-sided; y's own pass re-finds x
+
+  await runBackfill(flags());
+
+  const [xa, ya] = [await row(x.id), await row(y.id)];
+  assert.equal(xa.linkedTransactionId, y.id);
+  assert.equal(ya.linkedTransactionId, x.id, 'the pair is whole, as it was before this change');
+  assert.ok(xa.transferLinkedAt && ya.transferLinkedAt, 'and now stamped');
+});
+
+test('a two-way linked row keeps transfer/payment when re-enrichment can only guess', async () => {
+  for (const kept of ['transfer', 'payment'] as const) {
+    await Transaction.destroy({ where: {} });
+    const x = await leg(out, '2026-03-16', '-120.00');
+    fp += 1;
+    const y = await Transaction.create({
+      accountId: into, householdId: HH, importBatch: 'links', date: '2026-03-16',
+      merchantRaw: 'Contribution', merchantClean: 'Contribution', amount: '120.00', currency: 'CAD',
+      txnType: kept,
+      sourceRowFingerprint: `fp-links-${fp}`, sourceIdentityFingerprint: `sif-links-${fp}`,
+    } as never);
+    const linkedAt = new Date();
+    await x.update({ linkedTransactionId: y.id, transferLinkedAt: linkedAt });
+    await y.update({ linkedTransactionId: x.id, transferLinkedAt: linkedAt });
+
+    await runBackfill(flags());
+
+    assert.equal((await row(y.id)).txnType, kept, `'Contribution' reads as unknown, but the link says ${kept}`);
+  }
+});
+
+test('an unlinked row still gets its re-derived guess', async () => {
+  fp += 1;
+  const y = await Transaction.create({
+    accountId: into, householdId: HH, importBatch: 'links', date: '2026-03-17',
+    merchantRaw: 'Contribution', merchantClean: 'Contribution', amount: '33.00', currency: 'CAD',
+    txnType: 'transfer',
+    sourceRowFingerprint: `fp-links-${fp}`, sourceIdentityFingerprint: `sif-links-${fp}`,
+  } as never);
+
+  await runBackfill(flags());
+
+  assert.equal((await row(y.id)).txnType, 'unknown', 'no link, so nothing vouches for transfer');
+});
