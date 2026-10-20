@@ -101,6 +101,9 @@ async function createTransaction(
     autoBusiness: null,
     businessOverride: options.business ?? null,
     finalBusiness: options.business ?? false,
+    // Import and the edit routes always set businessAmount (calculateShares);
+    // the reserve reads it, so a business row must carry its full amount.
+    businessAmount: options.business ? amount.toFixed(4) : '0',
     autoSplitType: null,
     splitOverride: null,
     finalSplitType: options.split ?? 'me',
