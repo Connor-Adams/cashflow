@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
+import { resetTestDb } from '../../../test/helpers/resetTestDb';
 import { D } from '../util/decimal';
 import {
   Account, Entity, Household, Scenario, Transaction,
@@ -9,7 +10,7 @@ import {
 import { projectPersonalFactsFromPrevYear } from './projectPersonalFactsFromPrevYear';
 import { ensureBaselineScenario } from './resolveScenario';
 
-beforeEach(async () => { await sequelize.sync({ force: true }); });
+beforeEach(async () => { await resetTestDb(sequelize); });
 
 async function seedPersonalWithEmployment() {
   const household = await Household.create({ name: 'T' });

@@ -14,13 +14,14 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
+import { resetTestDb } from '../../../test/helpers/resetTestDb';
 import { Entity, Household, TaxReturn } from '../../models';
 import { computeEntityReturn, factsDigest } from './computeEntityReturn';
 import { D } from '../util/decimal';
 import type { EngineReturn } from '../scenarios/computeScenarioReturn';
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 async function seedEntity() {

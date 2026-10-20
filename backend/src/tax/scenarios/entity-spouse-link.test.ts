@@ -1,9 +1,10 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
+import { resetTestDb } from '../../../test/helpers/resetTestDb';
 import { Entity, Household } from '../../models';
 
-beforeEach(async () => { await sequelize.sync({ force: true }); });
+beforeEach(async () => { await resetTestDb(sequelize); });
 
 test('creates two personal entities and links them as spouses', async () => {
   const h = await Household.create({ name: 'H' });

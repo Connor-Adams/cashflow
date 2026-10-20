@@ -19,6 +19,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
+import { resetTestDb } from '../../../test/helpers/resetTestDb';
 import { Account, Carryforward, Entity, Household, TaxSlip, Transaction } from '../../models';
 import { D } from '../util/decimal';
 import { ratesFor } from '../engine/brackets';
@@ -31,7 +32,7 @@ const ROWS = 2000;
 let personalId: number;
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const household = await Household.create({ name: 'Volume HH' });
   const personal = await Entity.create({
     householdId: household.id, kind: 'personal', legalName: 'P',

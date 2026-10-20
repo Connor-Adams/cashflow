@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../db';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 import { Account, Entity, Household, Transaction } from '../models';
 import { buildPersonalFacts } from './builders/buildPersonalFacts';
 
@@ -17,7 +18,7 @@ async function seedPersonal() {
   return { household, entity, account };
 }
 
-beforeEach(async () => { await sequelize.sync({ force: true }); });
+beforeEach(async () => { await resetTestDb(sequelize); });
 
 test('taxTreatmentOverride persists on a Transaction', async () => {
   const { household, entity, account } = await seedPersonal();

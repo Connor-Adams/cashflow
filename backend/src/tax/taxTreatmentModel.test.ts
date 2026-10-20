@@ -1,10 +1,11 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../db';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 import { Category, Household } from '../models';
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 test('Category.taxTreatment defaults to "none" and is settable', async () => {

@@ -1,13 +1,14 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
+import { resetTestDb } from '../../../test/helpers/resetTestDb';
 import {
   Account, Entity, Household, Scenario, Transaction,
 } from '../../models';
 import { projectCorpFactsFromPrevYear } from './projectCorpFactsFromPrevYear';
 import { ensureCorpBaselineScenario } from './resolveCorpScenario';
 
-beforeEach(async () => { await sequelize.sync({ force: true }); });
+beforeEach(async () => { await resetTestDb(sequelize); });
 
 async function seedCorpWithRevenue() {
   const household = await Household.create({ name: 'T' });

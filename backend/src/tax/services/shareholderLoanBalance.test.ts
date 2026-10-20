@@ -1,10 +1,11 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
+import { resetTestDb } from '../../../test/helpers/resetTestDb';
 import { Account, Entity, Household, ShareholderLoan, Transaction } from '../../models';
 import { computeShareholderLoanBalance } from './shareholderLoanBalance';
 
-beforeEach(async () => { await sequelize.sync({ force: true }); });
+beforeEach(async () => { await resetTestDb(sequelize); });
 
 test('balance = manual ledger + classified loan transfers', async () => {
   const household = await Household.create({ name: 'L' });

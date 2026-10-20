@@ -1,13 +1,14 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
+import { resetTestDb } from '../../../test/helpers/resetTestDb';
 import {
   Account, Entity, Household, InvestmentActivity, Security, Transaction,
 } from '../../models';
 import { buildReconciliationReport } from './buildReport';
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 test('aggregates findings from all detectors and produces counts', async () => {
