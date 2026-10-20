@@ -2,14 +2,23 @@ import { mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { sequelize, PdfImportBatch, PdfImportItem, Household, User } from '../models';
+import {
+  sequelize, PdfImportBatch, PdfImportItem, Household, User,
+  Account, Transaction,
+} from '../models';
 import { saveVaultObject } from '../storage/vaultStorage';
 import { drainPendingChunk, healEntityIdsAfterDrain } from './pdfImportProcessor';
 import { ENTITY_SYNC_FAILED_WARNING } from '../tax/services/syncTransactionEntityIds';
+import { skipUnlessPrivateFixtures } from '../../test/helpers/privateFixtures';
+import { synthPdf } from '../../test/helpers/syntheticPdf';
+import { SYN_CIBC_C, SYN_CIBC_LAST4 } from '../../test/helpers/syntheticStatements';
 
+// Connor's real Wealthsimple credit-card statement: LOCAL-ONLY (loud skip in
+// CI). The synthetic twins render made-up statements to PDFs at test time.
 const CC_PDF = '/Users/connoradams/Downloads/monthly_pdf_statements/C13BRX957CAD_2026-05_CREDIT_CARD.pdf';
 
-test('drainPendingChunk parses a pending item and marks the batch done', { skip: !fs.existsSync(CC_PDF) }, async () => {
+/** Store one PDF as a pending item in a fresh batch, drain, and return the reloaded item. */
+async function drainOnePdf(buffer: Buffer, fileName: string) {
   await sequelize.sync({ force: true });
   const hh = await Household.create({ name: 'H' } as never);
   const u = await User.create({
@@ -21,27 +30,40 @@ test('drainPendingChunk parses a pending item and marks the batch done', { skip:
   } as never);
   const stored = `${crypto.randomUUID()}.pdf`;
   const put = await saveVaultObject(stored, {
-    buffer: fs.readFileSync(CC_PDF), contentType: 'application/pdf', originalName: 'cc.pdf',
+    buffer, contentType: 'application/pdf', originalName: fileName,
   });
   const batch = await PdfImportBatch.create({
     id: crypto.randomUUID(), householdId: hh.id, userId: u.id, status: 'pending', total: 1, processed: 0, succeeded: 0, failed: 0,
   });
   await PdfImportItem.create({
-    id: crypto.randomUUID(), batchId: batch.id, fileName: 'cc.pdf',
+    id: crypto.randomUUID(), batchId: batch.id, fileName,
     storedFilename: put.storedFilename, storageKind: put.storageKind,
     encryptionAlgorithm: put.encryptionAlgorithm, status: 'pending',
   });
 
   const summary = await drainPendingChunk({ maxItems: 12 });
+  const item = await PdfImportItem.findOne({ where: { batchId: batch.id } });
   assert.equal(summary.processed, 1);
-  assert.equal(summary.succeeded, 1);
+  assert.equal(summary.succeeded, 1, `drain did not succeed: ${item?.error ?? item?.reason}`);
 
   const reloaded = await PdfImportBatch.findByPk(batch.id);
   assert.equal(reloaded?.status, 'done');
   assert.equal(reloaded?.succeeded, 1);
-  const item = await PdfImportItem.findOne({ where: { batchId: batch.id } });
   assert.equal(item?.status, 'done');
   assert.ok(item?.accountId);
+  return item!;
+}
+
+test('drainPendingChunk parses a pending item and marks the batch done', { skip: skipUnlessPrivateFixtures(CC_PDF) }, async () => {
+  await drainOnePdf(fs.readFileSync(CC_PDF), 'cc.pdf');
+});
+
+test('drainPendingChunk parses a pending item and marks the batch done — synthetic credit-card PDF', async () => {
+  const item = await drainOnePdf(synthPdf(SYN_CIBC_C), 'cibc-costco-synthetic.pdf');
+  const account = await Account.findByPk(item.accountId!);
+  assert.equal(account?.shortCode, SYN_CIBC_LAST4);
+  assert.equal(account?.accountType, 'credit_card');
+  assert.equal(await Transaction.count({ where: { accountId: item.accountId! } }), 6);
 });
 
 test('a failing item marks failed without aborting the chunk', async () => {
