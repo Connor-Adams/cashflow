@@ -11,6 +11,7 @@
 import { before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PdfLine } from './pdf/types';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let models: typeof import('../models/index.js');
 let importWsActivityStatement: typeof import('./importWsActivityStatement.js').importWsActivityStatement;
@@ -42,12 +43,12 @@ function statementLines(): PdfLine[] {
 
 before(async () => {
   models = await import('../models/index.js');
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
   importWsActivityStatement = (await import('./importWsActivityStatement.js')).importWsActivityStatement;
 });
 
 beforeEach(async () => {
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
   const created = await models.Household.create({ name: 'Activity HH' });
   household = { id: created.id };
   const tfsa = await models.Account.create({

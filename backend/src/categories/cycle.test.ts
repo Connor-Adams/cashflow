@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { Category, Household } from '../models';
 import { wouldCreateCycle } from './cycle';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let householdId: number;
 let work: Category, expenses: Category, internet: Category, home: Category;
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   householdId = (await Household.create({ name: 'T' })).id;
   work = await Category.create({ householdId, name: 'Work', icon: null, parentId: null });
   expenses = await Category.create({ householdId, name: 'Expenses', icon: null, parentId: work.id });

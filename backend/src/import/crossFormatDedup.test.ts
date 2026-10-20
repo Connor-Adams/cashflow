@@ -27,6 +27,7 @@ import type {
   NormalizedInvestmentActivity,
   StatementPreview,
 } from './statementTypes';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let models: typeof import('../models/index.js');
 let findExistingForDedup: typeof import('./dedupExisting.js').findExistingForDedup;
@@ -35,14 +36,14 @@ let stableIdentityFingerprint: typeof import('./fingerprint.js').stableIdentityF
 
 before(async () => {
   models = await import('../models/index.js');
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
   findExistingForDedup = (await import('./dedupExisting.js')).findExistingForDedup;
   commitStatementImport = (await import('./commitStatementImport.js')).commitStatementImport;
   stableIdentityFingerprint = (await import('./fingerprint.js')).stableIdentityFingerprint;
 });
 
 beforeEach(async () => {
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
 });
 
 after(async () => {

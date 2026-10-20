@@ -11,10 +11,11 @@ import {
   Account,
 } from '../models';
 import { loadItemAllocationContext } from './loadItemAllocations';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let householdId: number;
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   householdId = (await Household.create({ name: 'T' })).id;
 });
 

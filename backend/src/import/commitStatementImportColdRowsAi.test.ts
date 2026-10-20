@@ -15,13 +15,14 @@ process.env.OPENAI_API_KEY = 'test-key-not-used-no-network';
 import type { NormalizedCashTransaction, StatementPreview } from './statementTypes';
 import type { Embedder } from '../ai/merchantEmbeddings';
 import type { ChatMessage } from './enrichment/aiBatchStage';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let models: typeof import('../models');
 let commitStatementImport: typeof import('./commitStatementImport').commitStatementImport;
 
 before(async () => {
   models = await import('../models');
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
   commitStatementImport = (await import('./commitStatementImport')).commitStatementImport;
 });
 
@@ -30,7 +31,7 @@ after(async () => {
 });
 
 beforeEach(async () => {
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
 });
 
 async function seedAccount(): Promise<{ householdId: number; accountId: number }> {

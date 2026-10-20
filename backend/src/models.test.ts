@@ -8,9 +8,10 @@ import {
   Scenario,
   ScenarioReturn,
 } from './models';
+import { resetTestDb } from '../test/helpers/resetTestDb';
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 test('creates and reads back a Scenario with overrides + assumptions JSON', async () => {

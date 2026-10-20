@@ -11,13 +11,14 @@ import assert from 'node:assert/strict';
 process.env.ENRICHMENT_BACKFILL_AI_ENABLED = 'false';
 
 import type { BackfillFlags, BackfillResult } from './runEnrichmentBackfill';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let models: typeof import('../models');
 let scheduler: typeof import('./enrichmentBackfillScheduler');
 
 before(async () => {
   models = await import('../models');
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
   scheduler = await import('./enrichmentBackfillScheduler');
 });
 
@@ -26,7 +27,7 @@ after(async () => {
 });
 
 beforeEach(async () => {
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
 });
 
 test('ENRICHMENT_BACKFILL_AI_ENABLED=false stops the nightly cron asking for AI', async () => {

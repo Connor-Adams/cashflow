@@ -4,11 +4,12 @@ import { sequelize } from '../db';
 import { Category, Household } from '../models';
 import { deleteCategory } from './deleteCategory';
 import { CategoryError } from './errors';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let householdId: number;
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   householdId = (await Household.create({ name: 'T' })).id;
 });
 

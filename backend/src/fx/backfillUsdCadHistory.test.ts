@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { FxRate } from '../models';
 import { backfillUsdCadHistory } from './backfillUsdCadHistory';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 test('inserts rows for each observation returned from a stub fetcher', async () => {

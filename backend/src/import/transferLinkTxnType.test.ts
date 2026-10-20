@@ -16,18 +16,19 @@
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { NormalizedCashTransaction, StatementPreview } from './statementTypes';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let models: typeof import('../models/index.js');
 let commitStatementImport: typeof import('./commitStatementImport.js').commitStatementImport;
 
 before(async () => {
   models = await import('../models/index.js');
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
   commitStatementImport = (await import('./commitStatementImport.js')).commitStatementImport;
 });
 
 beforeEach(async () => {
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
 });
 
 after(async () => {

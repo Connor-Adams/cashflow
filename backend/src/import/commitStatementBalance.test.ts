@@ -14,9 +14,10 @@ import type { NormalizedCashTransaction, StatementPreview, StatementSummary } fr
 import * as models from '../models';
 import { commitStatementImport } from './commitStatementImport';
 import { captureStatementBalance } from './captureStatementBalance';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 beforeEach(async () => {
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
 });
 
 after(async () => {

@@ -17,12 +17,13 @@ import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { Account, Household, User } from '../models';
 import { resolveHouseholdCurrency } from './financialScenarios';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let HH = 0;
 let USER = 0;
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const user = await User.create({
     email: 'scenario-ccy@example.com',
     displayName: 'ScenarioCcy',

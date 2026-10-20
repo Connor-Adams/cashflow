@@ -5,12 +5,13 @@ import { sequelize } from '../db';
 import { Category, Household } from '../models';
 import { createCategory } from './createCategory';
 import { CategoryError } from './errors';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let householdId: number;
 let otherHouseholdId: number;
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   householdId = (await Household.create({ name: 'H1' })).id;
   otherHouseholdId = (await Household.create({ name: 'H2' })).id;
 });

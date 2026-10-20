@@ -21,14 +21,15 @@ import {
 } from '../models';
 import { eraseHousehold } from './eraseHousehold';
 import { hashPassword, hashToken } from '../auth/password';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 before(async () => {
   process.env.NODE_ENV = 'test';
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 async function seedOwnerHousehold(name: string) {

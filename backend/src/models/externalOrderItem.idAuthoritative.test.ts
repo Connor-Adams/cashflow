@@ -2,10 +2,11 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { ExternalOrder, ExternalOrderItem, Household, Category } from '../models';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let householdId: number, orderId: number, child: number;
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   householdId = (await Household.create({ name: 'T' })).id;
   orderId = (await ExternalOrder.create({ householdId, vendor: 'amazon', source: 'amazon', dedupeKey: 'o1' } as never)).id;
   const work = await Category.create({ householdId, name: 'Work', icon: null, parentId: null });

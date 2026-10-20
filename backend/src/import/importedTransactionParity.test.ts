@@ -24,6 +24,7 @@ import { commitStatementImport } from './commitStatementImport';
 import { rowFingerprint } from './fingerprint';
 import type { StatementPreview } from './statementTypes';
 import { normalizeMerchant } from './normalizeMerchant';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 type Row = { date: string; merchantRaw: string; amount: number; reference?: string };
 type Importer = 'csv' | 'statement';
@@ -40,7 +41,7 @@ const CHEQUING_ROWS: Row[] = [
 ];
 
 async function seed(): Promise<{ householdId: number; userId: number; wsId: number; chequingId: number }> {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const household = await Household.create({ name: 'Parity' });
   const user = await User.create({
     email: 'owner@example.com',

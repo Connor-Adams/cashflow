@@ -12,18 +12,19 @@
  */
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let models: typeof import('../models/index.js');
 let rollback: typeof import('./rollbackImportBatch.js');
 
 before(async () => {
   models = await import('../models/index.js');
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
   rollback = await import('./rollbackImportBatch.js');
 });
 
 beforeEach(async () => {
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
 });
 
 after(async () => {

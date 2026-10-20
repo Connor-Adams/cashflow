@@ -17,12 +17,13 @@ import {
   gatherPlannedOccurrences,
   pickCurrencyByLargestAbsBalance,
 } from './gatherOccurrences';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let HH = 0;
 let USER = 0;
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const user = await User.create({
     email: 'gather@example.com',
     displayName: 'Gather',

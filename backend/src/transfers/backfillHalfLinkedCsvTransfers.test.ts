@@ -16,6 +16,7 @@ import {
   scanHalfLinkedCsvTransfers,
   summarizeByHousehold,
 } from './backfillHalfLinkedCsvTransfers';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 const HOUR = 3600_000;
 
@@ -60,7 +61,7 @@ let chequing: number;
 let amex: number;
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   HH = (await Household.create({ name: 'T' })).id;
   chequing = (await Account.create({ name: 'RBC', householdId: HH, accountType: 'checking' } as never)).id;
   amex = (await Account.create({ name: 'Amex', householdId: HH, accountType: 'credit_card' } as never)).id;

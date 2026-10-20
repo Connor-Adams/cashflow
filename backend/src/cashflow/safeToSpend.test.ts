@@ -17,12 +17,13 @@ import { sequelize } from '../db';
 import { Household, User, Account, Transaction } from '../models';
 import { PlannedEvent } from '../models/PlannedEvent';
 import { getUpcomingRequiredExpenses } from './safeToSpend';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let HH = 0;
 let USER = 0;
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const user = await User.create({
     email: 'sts@example.com',
     displayName: 'STS',

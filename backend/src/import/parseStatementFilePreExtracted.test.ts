@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize, Account, Household } from '../models';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 // When preExtractedLines is supplied, parseStatementFile must NOT call extractPdfLines.
 // We prove it by passing a non-PDF buffer (extractPdfLines would throw on it) plus
@@ -22,7 +23,7 @@ test('parseStatementFile uses preExtractedLines and skips extraction', async () 
 // how the 2026-07 chequing statement's cash flow (AMEX pre-authorized debits,
 // e-transfers, withdrawals) never reached the ledger.
 test('parseStatementFile tells the PDF parser the account type', async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const hh = await Household.create({ name: 'H' } as never);
   const account = await Account.create({
     householdId: hh.id, name: 'WS Chequing', accountType: 'checking', owner: 'me',
@@ -60,7 +61,7 @@ test('parseStatementFile tells the PDF parser the account type', async () => {
 // A WS credit-card statement parsed from pre-extracted lines. The buffer is not
 // a PDF, so a successful parse also proves extractPdfLines was skipped.
 async function wsCcPreview(extra: Array<{ page: number; y: number; text: string }>) {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const hh = await Household.create({ name: 'H' } as never);
   const account = await Account.create({
     householdId: hh.id, name: 'WS CC', accountType: 'credit_card', owner: 'me',

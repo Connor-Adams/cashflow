@@ -4,10 +4,11 @@ import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { Household, Category } from '../models';
 import { loadCategoryHints } from './suggestTransaction';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let householdId: number;
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   householdId = (await Household.create({ name: 'T' })).id;
   const work = await Category.create({ householdId, name: 'Work', icon: null, parentId: null });
   const expenses = await Category.create({ householdId, name: 'Expenses', icon: null, parentId: work.id });

@@ -7,6 +7,7 @@ import { sequelize, Account, Transaction, Receipt, Household } from '../models';
 import { saveReceiptObject, isS3ReceiptStorageEnabled } from './receiptStorage';
 import { getReceiptsUploadDir } from '../config/receipts';
 import { deleteReceiptFilesForTransactions } from './receiptCleanup';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 async function seed() {
   const household = await Household.create({ name: 'H' } as never);
@@ -57,7 +58,7 @@ function localPath(storedFilename: string): string {
 test('deleteReceiptFilesForTransactions removes on-disk receipt files for the given transaction ids', async () => {
   // Local-disk storage path only (no S3 configured in unit tests).
   assert.equal(isS3ReceiptStorageEnabled(), false);
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const { household, account } = await seed();
   const txnA = await makeTxn(household.id, account.id, 'A');
   const txnB = await makeTxn(household.id, account.id, 'B');
@@ -75,7 +76,7 @@ test('deleteReceiptFilesForTransactions removes on-disk receipt files for the gi
 });
 
 test('deleteReceiptFilesForTransactions only touches the requested transactions', async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const { household, account } = await seed();
   const txnKeep = await makeTxn(household.id, account.id, 'keep');
   const txnDrop = await makeTxn(household.id, account.id, 'drop');
@@ -90,7 +91,7 @@ test('deleteReceiptFilesForTransactions only touches the requested transactions'
 });
 
 test('deleteReceiptFilesForTransactions tolerates a missing file (already gone)', async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const { household, account } = await seed();
   const txn = await makeTxn(household.id, account.id, 'missing');
   const key = await attachReceipt(txn.id, 'missing');
@@ -103,7 +104,7 @@ test('deleteReceiptFilesForTransactions tolerates a missing file (already gone)'
 });
 
 test('deleteReceiptFilesForTransactions is a no-op for an empty id list', async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const deleted = await deleteReceiptFilesForTransactions([]);
   assert.equal(deleted, 0);
 });

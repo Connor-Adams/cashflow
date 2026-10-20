@@ -4,11 +4,12 @@ import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { Category, Household } from '../models';
 import { reconcileCategoryField } from './reconcileCategoryField';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let householdId: number;
 let root: number, child: number;
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   householdId = (await Household.create({ name: 'T' })).id;
   const work = await Category.create({ householdId, name: 'Work', icon: null, parentId: null });
   root = work.id;

@@ -13,13 +13,14 @@ import { before, beforeEach, after, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { BackfillFlags, BackfillResult } from './runEnrichmentBackfill';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let models: typeof import('../models');
 let scheduler: typeof import('./enrichmentBackfillScheduler');
 
 before(async () => {
   models = await import('../models');
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
   scheduler = await import('./enrichmentBackfillScheduler');
 });
 
@@ -28,7 +29,7 @@ after(async () => {
 });
 
 beforeEach(async () => {
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
 });
 
 const EMPTY: BackfillResult = {

@@ -19,6 +19,7 @@
  */
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 let models: typeof import('./index.js');
 let findExistingForDedup: typeof import('../import/dedupExisting.js').findExistingForDedup;
@@ -27,7 +28,7 @@ let rowFingerprint: typeof import('../import/fingerprint.js').rowFingerprint;
 
 before(async () => {
   models = await import('./index.js');
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
   findExistingForDedup = (await import('../import/dedupExisting.js')).findExistingForDedup;
   const fp = await import('../import/fingerprint.js');
   stableIdentityFingerprint = fp.stableIdentityFingerprint;
@@ -35,7 +36,7 @@ before(async () => {
 });
 
 beforeEach(async () => {
-  await models.sequelize.sync({ force: true });
+  await resetTestDb(models.sequelize);
 });
 
 after(async () => {

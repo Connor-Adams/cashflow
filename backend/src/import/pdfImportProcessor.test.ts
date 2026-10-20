@@ -12,6 +12,7 @@ import { ENTITY_SYNC_FAILED_WARNING } from '../tax/services/syncTransactionEntit
 import { skipUnlessPrivateFixtures } from '../../test/helpers/privateFixtures';
 import { synthPdf } from '../../test/helpers/syntheticPdf';
 import { SYN_CIBC_C, SYN_CIBC_LAST4 } from '../../test/helpers/syntheticStatements';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 
 // Connor's real Wealthsimple credit-card statement: LOCAL-ONLY (loud skip in
 // CI). The synthetic twins render made-up statements to PDFs at test time.
@@ -19,7 +20,7 @@ const CC_PDF = '/Users/connoradams/Downloads/monthly_pdf_statements/C13BRX957CAD
 
 /** Store one PDF as a pending item in a fresh batch, drain, and return the reloaded item. */
 async function drainOnePdf(buffer: Buffer, fileName: string) {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const hh = await Household.create({ name: 'H' } as never);
   const u = await User.create({
     email: 'a@b.c',
@@ -67,7 +68,7 @@ test('drainPendingChunk parses a pending item and marks the batch done — synth
 });
 
 test('a failing item marks failed without aborting the chunk', async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const hh = await Household.create({ name: 'H' } as never);
   const u = await User.create({
     email: 'a@b.c',
@@ -99,7 +100,7 @@ test('a failing item marks failed without aborting the chunk', async () => {
 });
 
 test('pdf_import_process job is registered and runnable', async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   await import('../jobs/definitions/pdfImportProcess');
   const { runJobByName } = await import('../jobs/registry');
   const outcome = await runJobByName('pdf_import_process');
@@ -112,7 +113,7 @@ test('pdf_import_process job is registered and runnable', async () => {
 });
 
 test('a failed entity-id heal after a drain is recorded on the done items (visible in batch detail)', async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const hh = await Household.create({ name: 'H' } as never);
   const u = await User.create({
     email: 'heal@b.c',
@@ -152,7 +153,7 @@ test('a failed entity-id heal after a drain is recorded on the done items (visib
 });
 
 test('a successful entity-id heal leaves done items untouched', async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const hh = await Household.create({ name: 'H' } as never);
   const u = await User.create({
     email: 'heal2@b.c',
