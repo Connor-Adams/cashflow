@@ -7,9 +7,7 @@ import { HouseholdMember } from '../models/HouseholdMember';
 import { Security } from '../models/Security';
 import { Session } from '../models/Session';
 import { User } from '../models/User';
-import { UserAuditToken } from '../models/UserAuditToken';
-import { UserCaptureToken } from '../models/UserCaptureToken';
-import { UserReportingToken } from '../models/UserReportingToken';
+import { revokeAllTokensForUser } from '../auth/scopedToken';
 import { ensureDailyPrices } from '../portfolio/backfill';
 import { DEFAULT_TIMEZONE } from '../time/householdToday';
 import { apiReadLimiter, apiWriteLimiter } from './apiRateLimit';
@@ -101,22 +99,11 @@ router.delete('/members/:userId', async (req, res, next) => {
     // (registration grants one; there is no multi-household join path), so
     // dropping all of the removed user's sessions and revoking all of their
     // tokens is the correct, unambiguous scope. Sessions have no revokedAt —
-    // delete the rows; the token tables carry revokedAt — stamp it.
+    // delete the rows; user_tokens carries revokedAt — stamp it (every scope).
     const now = new Date();
     await Promise.all([
       Session.destroy({ where: { userId: targetUserId } }),
-      UserCaptureToken.update(
-        { revokedAt: now },
-        { where: { userId: targetUserId, revokedAt: null } }
-      ),
-      UserReportingToken.update(
-        { revokedAt: now },
-        { where: { userId: targetUserId, revokedAt: null } }
-      ),
-      UserAuditToken.update(
-        { revokedAt: now },
-        { where: { userId: targetUserId, revokedAt: null } }
-      ),
+      revokeAllTokensForUser(targetUserId, now),
     ]);
 
     res.status(204).send();

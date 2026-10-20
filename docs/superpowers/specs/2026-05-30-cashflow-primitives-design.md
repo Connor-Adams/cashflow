@@ -106,7 +106,7 @@ duplicated because *leaks was never a thing* — it's a lens.
   for a future single `Label` primitive (scope = field); revisit only if a fourth
   taxonomy appears.
 - **FxRate / SecurityPrice** — reference data.
-- **CashflowSettings / Session / UserCaptureToken / UserEmailIntegration /
+- **CashflowSettings / Session / UserToken (scope: audit | reporting | capture) / UserEmailIntegration /
   SyncBackup / ImportHistory** — infra, auth, state.
 
 ## The Build Rule

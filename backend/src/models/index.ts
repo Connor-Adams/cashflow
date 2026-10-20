@@ -49,9 +49,7 @@ import {
 } from './SimplefinAccountLink';
 import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSenderAllowlist';
 import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEmailMessage';
-import { UserCaptureToken, initUserCaptureToken } from './UserCaptureToken';
-import { UserReportingToken, initUserReportingToken } from './UserReportingToken';
-import { UserAuditToken, initUserAuditToken } from './UserAuditToken';
+import { UserToken, initUserToken } from './UserToken';
 import { Entity, initEntity } from './Entity';
 import { TaxCategory, initTaxCategory } from './TaxCategory';
 import { TaxTag, initTaxTag } from './TaxTag';
@@ -171,9 +169,7 @@ initUserSimplefinIntegration(sequelize);
 initSimplefinAccountLink(sequelize);
 initReceiptSenderAllowlist(sequelize);
 initProcessedEmailMessage(sequelize);
-initUserCaptureToken(sequelize);
-initUserReportingToken(sequelize);
-initUserAuditToken(sequelize);
+initUserToken(sequelize);
 initEntity(sequelize);
 initTaxCategory(sequelize);
 initTaxTag(sequelize);
@@ -1186,9 +1182,7 @@ export {
   SimplefinAccountLink,
   ReceiptSenderAllowlist,
   ProcessedEmailMessage,
-  UserCaptureToken,
-  UserReportingToken,
-  UserAuditToken,
+  UserToken,
   Entity,
   TaxCategory,
   TaxTag,
