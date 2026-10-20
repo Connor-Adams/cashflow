@@ -14,12 +14,13 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
+import { resetTestDb } from '../../../test/helpers/resetTestDb';
 import { FxRate } from '../../models';
 import { D } from '../util/decimal';
 import { createCadConverter } from './cadConverter';
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 test('CAD short-circuits without any lookup', async () => {

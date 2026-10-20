@@ -1,10 +1,11 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../db';
+import { resetTestDb } from '../../test/helpers/resetTestDb';
 import { Account, Entity, Household, Transaction } from '../models';
 import { buildCorpFacts } from './builders/buildCorpFacts';
 
-beforeEach(async () => { await sequelize.sync({ force: true }); });
+beforeEach(async () => { await resetTestDb(sequelize); });
 
 async function seedCorp() {
   const household = await Household.create({ name: 'C' });

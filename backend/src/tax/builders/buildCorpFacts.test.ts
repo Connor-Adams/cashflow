@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
+import { resetTestDb } from '../../../test/helpers/resetTestDb';
 import {
   Account,
   Entity,
@@ -15,9 +16,10 @@ import { D } from '../util/decimal';
 import { buildCorpFacts } from './buildCorpFacts';
 
 beforeEach(async () => {
-  // Fresh schema per test so seeded rows never leak between tests. (Each test
+  // Empty tables per test so seeded rows never leak between tests. (Each test
   // process already gets its own temp DB — test/setup.ts, keyed by PID.)
-  await sequelize.sync({ force: true });
+  // resetTestDb builds the schema once, then wipes rows in one transaction.
+  await resetTestDb(sequelize);
 });
 
 // Rewritten from the original "builds corp facts from seeded business

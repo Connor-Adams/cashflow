@@ -6,11 +6,14 @@ import {
 } from '../../models';
 import { D } from '../util/decimal';
 import { buildPersonalFacts } from './buildPersonalFacts';
+import { resetTestDb } from '../../../test/helpers/resetTestDb';
 
 beforeEach(async () => {
-  // Fresh schema per test so seeded rows never leak between tests. (Each test
+  // Empty tables per test so seeded rows never leak between tests. (Each test
   // process already gets its own temp DB — test/setup.ts, keyed by PID.)
-  await sequelize.sync({ force: true });
+  // resetTestDb builds the schema once, then wipes rows in one transaction;
+  // a per-test sync({ force: true }) was ~85% of this file's runtime.
+  await resetTestDb(sequelize);
 });
 
 test('builds facts from seeded data', async () => {

@@ -17,6 +17,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
+import { resetTestDb } from '../../../test/helpers/resetTestDb';
 import { Account, Entity, Household, Transaction } from '../../models';
 import { buildOutlook } from './buildOutlook';
 
@@ -26,7 +27,7 @@ let corpId: number;
 let accountId: number;
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
   const household = await Household.create({ name: 'HH' });
   householdId = household.id;
   const personal = await Entity.create({

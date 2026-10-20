@@ -2,6 +2,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
+import { resetTestDb } from '../../../test/helpers/resetTestDb';
 import {
   Account, Entity, Household, Scenario, ScenarioReturn, Transaction,
 } from '../../models';
@@ -9,7 +10,7 @@ import { computeCorpScenario } from './computeCorpScenario';
 import { ensureCorpBaselineScenario } from './resolveCorpScenario';
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 async function seedCorp() {

@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
+import { resetTestDb } from '../../../test/helpers/resetTestDb';
 import { Account, Entity, Household, InvestmentActivity, Security } from '../../models';
 import { sumD } from '../util/decimal';
 import { buildCorpFacts } from './buildCorpFacts';
@@ -12,7 +13,7 @@ import type { CapGainEvent } from '../engine/types';
 // ITA s.40(3.3)/(3.4) — the corporate stop-loss rule. See corpStopLoss.ts.
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 const FY2025 = { startDate: '2025-01-01', endDate: '2025-12-31' };

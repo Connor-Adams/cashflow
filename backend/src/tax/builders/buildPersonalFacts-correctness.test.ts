@@ -17,6 +17,7 @@
 import { test, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
+import { resetTestDb } from '../../../test/helpers/resetTestDb';
 import {
   Account, Entity, Household, HouseholdMember, TaxSlip, Transaction, TransactionTaxMetadata, User,
 } from '../../models';
@@ -24,7 +25,7 @@ import { D } from '../util/decimal';
 import { buildPersonalFacts } from './buildPersonalFacts';
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 let fp = 0;

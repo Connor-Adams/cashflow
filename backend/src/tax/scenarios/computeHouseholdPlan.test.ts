@@ -2,6 +2,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
+import { resetTestDb } from '../../../test/helpers/resetTestDb';
 import {
   Account, Entity, Household, HouseholdPlan, Scenario, ShareholderLoan, TaxSlip, Transaction,
 } from '../../models';
@@ -11,7 +12,7 @@ import { ensureCorpBaselineScenario } from './resolveCorpScenario';
 import { ensureBaselineScenario } from './resolveScenario';
 
 beforeEach(async () => {
-  await sequelize.sync({ force: true });
+  await resetTestDb(sequelize);
 });
 
 async function seedHouseholdWithCorpAndPersonal() {
