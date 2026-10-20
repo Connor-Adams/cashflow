@@ -10,13 +10,19 @@ import { fileURLToPath } from 'url';
 import request from 'supertest';
 import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
+import { skipUnlessPrivateFixtures } from '../helpers/privateFixtures.js';
+import { synthPdf } from '../helpers/syntheticPdf.js';
+import { SYN_CIBC_B, SYN_CIBC_C } from '../helpers/syntheticStatements.js';
 let models: typeof import('../../src/models/index.js');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.join(__dirname, '..', '..');
+// Connor's real CIBC statements (gitignored): the private-fixture variants of
+// the PDF upload tests are LOCAL-ONLY with a loud skip in CI; their synthetic
+// twins render made-up statements to PDFs at test time and always run.
 const fixturesDir = path.join(backendRoot, 'test', 'fixtures', 'pdf');
-const hasFixtures = fs.existsSync(path.join(fixturesDir, 'cibc-costco-2026-01-12.pdf'));
-const skipNoFixtures = hasFixtures ? undefined : 'PDF fixtures not present (gitignored — see backend/test/fixtures/pdf/)';
+const cibcJanPath = path.join(fixturesDir, 'cibc-costco-2026-01-12.pdf');
+const cibcDecPath = path.join(fixturesDir, 'cibc-costco-2025-12-12.pdf');
 const csvUploadDir = path.join(backendRoot, 'uploads', 'test-integration-csv');
 const receiptsUploadDir = path.join(backendRoot, 'uploads', 'test-integration-receipts');
 
@@ -832,9 +838,9 @@ test('enrichment: rule-matched row has confident auto fields and signals; cold r
   }
 });
 
-test('POST /api/import/upload: parses a CIBC Costco PDF statement end-to-end', { skip: skipNoFixtures }, async () => {
+async function assertCibcPdfUploadEndToEnd(accountName: string, buf: Buffer, filename: string, expectedInserted: number) {
   const acc = await authed.post('/api/accounts').send({
-    name: 'CIBC Costco MC (pdf integration)',
+    name: accountName,
     owner: 'me',
     accountType: 'credit_card',
     defaultCurrency: 'CAD',
@@ -842,18 +848,25 @@ test('POST /api/import/upload: parses a CIBC Costco PDF statement end-to-end', {
   assert.equal(acc.status, 201);
   const accountId = acc.body.id as number;
 
-  const pdfPath = path.join(backendRoot, 'test', 'fixtures', 'pdf', 'cibc-costco-2026-01-12.pdf');
-  const buf = fs.readFileSync(pdfPath);
   const res = await authed
     .post('/api/import/upload')
     .field('accountId', String(accountId))
     .attach('file', buf, {
-      filename: 'cibc-costco-2026-01-12.pdf',
+      filename,
       contentType: 'application/pdf',
     });
   assert.equal(res.status, 200);
-  assert.equal(res.body.inserted, 6, JSON.stringify(res.body));
+  assert.equal(res.body.inserted, expectedInserted, JSON.stringify(res.body));
   assert.equal(res.body.parseErrors?.length ?? 0, 0);
+}
+
+test('POST /api/import/upload: parses a CIBC Costco PDF statement end-to-end', { skip: skipUnlessPrivateFixtures(cibcJanPath) }, async () => {
+  await assertCibcPdfUploadEndToEnd('CIBC Costco MC (pdf integration)', fs.readFileSync(cibcJanPath), 'cibc-costco-2026-01-12.pdf', 6);
+});
+
+test('POST /api/import/upload: parses a CIBC Costco PDF statement end-to-end — synthetic PDF', async () => {
+  // Payment + 5 charges across the year boundary.
+  await assertCibcPdfUploadEndToEnd('CIBC Costco MC (synthetic pdf integration)', synthPdf(SYN_CIBC_C), 'cibc-costco-synthetic-c.pdf', 6);
 });
 
 test('POST /api/import/upload: rejects an unknown-layout PDF with a clear error', async () => {
@@ -885,9 +898,9 @@ test('POST /api/import/upload: rejects an unknown-layout PDF with a clear error'
   assert.match(String(res.body.message ?? ''), /PDF|parser/i);
 });
 
-test('POST /api/import/upload: re-uploading the same CIBC Costco PDF is deduped (no double-insert)', { skip: skipNoFixtures }, async () => {
+async function assertCibcPdfReuploadDeduped(accountName: string, buf: Buffer, filename: string, expectedInserted: number) {
   const acc = await authed.post('/api/accounts').send({
-    name: 'CIBC Costco MC (dedup)',
+    name: accountName,
     owner: 'me',
     accountType: 'credit_card',
     defaultCurrency: 'CAD',
@@ -895,22 +908,19 @@ test('POST /api/import/upload: re-uploading the same CIBC Costco PDF is deduped 
   assert.equal(acc.status, 201);
   const accountId = acc.body.id as number;
 
-  const pdfPath = path.join(backendRoot, 'test', 'fixtures', 'pdf', 'cibc-costco-2025-12-12.pdf');
-  const buf = fs.readFileSync(pdfPath);
-
-  // First upload — 5 charges inserted, no duplicates.
+  // First upload — every charge inserted, no duplicates.
   const first = await authed
     .post('/api/import/upload')
     .field('accountId', String(accountId))
-    .attach('file', buf, { filename: 'cibc-costco-2025-12-12.pdf', contentType: 'application/pdf' });
+    .attach('file', buf, { filename, contentType: 'application/pdf' });
   assert.equal(first.status, 200);
-  assert.equal(first.body.inserted, 5, JSON.stringify(first.body));
+  assert.equal(first.body.inserted, expectedInserted, JSON.stringify(first.body));
 
   // Second upload of the same bytes — should not insert anything new.
   const second = await authed
     .post('/api/import/upload')
     .field('accountId', String(accountId))
-    .attach('file', buf, { filename: 'cibc-costco-2025-12-12.pdf', contentType: 'application/pdf' });
+    .attach('file', buf, { filename, contentType: 'application/pdf' });
   assert.equal(second.status, 200);
   // Either the contentHash short-circuit returns { skipped: true, reason: 'duplicate_file' }
   // (or whatever the project's duplicate-content reason is), OR the row-level dedup catches
@@ -921,4 +931,13 @@ test('POST /api/import/upload: re-uploading the same CIBC Costco PDF is deduped 
     skipped || insertedAgain === 0,
     `expected the second upload to be skipped or insert 0 rows, got ${JSON.stringify(second.body)}`,
   );
+}
+
+test('POST /api/import/upload: re-uploading the same CIBC Costco PDF is deduped (no double-insert)', { skip: skipUnlessPrivateFixtures(cibcDecPath) }, async () => {
+  await assertCibcPdfReuploadDeduped('CIBC Costco MC (dedup)', fs.readFileSync(cibcDecPath), 'cibc-costco-2025-12-12.pdf', 5);
+});
+
+test('POST /api/import/upload: re-uploading the same CIBC Costco PDF is deduped (no double-insert) — synthetic PDF', async () => {
+  // Empty payments section + 5 charges.
+  await assertCibcPdfReuploadDeduped('CIBC Costco MC (synthetic dedup)', synthPdf(SYN_CIBC_B), 'cibc-costco-synthetic-b.pdf', 5);
 });

@@ -2,48 +2,74 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { existsSync } from 'node:fs';
 import { extractPdfLines } from './extractLines';
 import { parseCibcCostcoHeader, parseCibcCostcoRow, inferYearForMonthDay, cibcCostcoMastercardParser } from './cibcCostcoMastercard';
+import { skipUnlessPrivateFixtures } from '../../../test/helpers/privateFixtures';
+import type { PdfLine } from './types';
+import { synthPdfLines, type SynthPage } from '../../../test/helpers/syntheticPdf';
+import { SYN_CIBC_A, SYN_CIBC_B, SYN_CIBC_C, SYN_CIBC_LAST4 } from '../../../test/helpers/syntheticStatements';
 
-// Real statement/receipt PDFs are personal financial documents and are
-// gitignored (.gitignore: backend/test/fixtures/pdf/), so these tests are
-// LOCAL-ONLY. CI coverage comes from the synthetic line fixtures in-file.
+// Two kinds of fixture:
+//  - SYNTHETIC statements (test/helpers/syntheticStatements.ts): made-up values
+//    in the real layout. They always run, including in CI.
+//  - PRIVATE statements: Connor's real PDFs, gitignored under
+//    backend/test/fixtures/pdf/. LOCAL-ONLY regression checks against the real
+//    layout; each has a synthetic twin below. In CI they skip with a loud reason.
 const backendRoot = join(__dirname, '..', '..', '..');
 const fixturesDir = join(backendRoot, 'test', 'fixtures', 'pdf');
-const hasFixtures = existsSync(join(fixturesDir, 'cibc-costco-2026-01-12.pdf'));
-const skipNoFixtures = hasFixtures ? undefined : 'PDF fixtures not present (gitignored — see backend/test/fixtures/pdf/)';
+const skipPrivate = (name: string) => skipUnlessPrivateFixtures(join(fixturesDir, name));
 
 async function loadFixture(name: string) {
   const buf = await readFile(join(fixturesDir, name));
   return extractPdfLines(buf);
 }
 
-test('parseCibcCostcoHeader — January 2026 statement', { skip: skipNoFixtures }, async () => {
-  const lines = await loadFixture('cibc-costco-2026-01-12.pdf');
-  const h = parseCibcCostcoHeader(lines);
-  assert.equal(h.statementDate, '2026-01-12');
-  assert.equal(h.periodStart, '2025-12-13');
-  assert.equal(h.periodEnd, '2026-01-12');
-  assert.equal(h.accountLast4, '3114');
+type ExpectedHeader = { statementDate: string; periodStart: string; periodEnd: string; accountLast4: string };
+type HeaderCase = { label: string; skip?: string; lines: () => Promise<PdfLine[]>; expected: ExpectedHeader };
+
+const privateHeader = (label: string, file: string, expected: ExpectedHeader): HeaderCase => ({
+  label, skip: skipPrivate(file), lines: () => loadFixture(file), expected,
+});
+const syntheticHeader = (label: string, pages: SynthPage[], expected: Omit<ExpectedHeader, 'accountLast4'>): HeaderCase => ({
+  label, lines: async () => synthPdfLines(pages), expected: { ...expected, accountLast4: SYN_CIBC_LAST4 },
 });
 
-test('parseCibcCostcoHeader — December 2025 statement', { skip: skipNoFixtures }, async () => {
-  const lines = await loadFixture('cibc-costco-2025-12-12.pdf');
-  const h = parseCibcCostcoHeader(lines);
-  assert.equal(h.statementDate, '2025-12-12');
-  assert.equal(h.periodStart, '2025-11-13');
-  assert.equal(h.periodEnd, '2025-12-12');
-  assert.equal(h.accountLast4, '3114');
-});
+const HEADER_CASES: HeaderCase[] = [
+  privateHeader('January 2026 statement', 'cibc-costco-2026-01-12.pdf', {
+    statementDate: '2026-01-12', periodStart: '2025-12-13', periodEnd: '2026-01-12', accountLast4: '3114',
+  }),
+  privateHeader('December 2025 statement', 'cibc-costco-2025-12-12.pdf', {
+    statementDate: '2025-12-12', periodStart: '2025-11-13', periodEnd: '2025-12-12', accountLast4: '3114',
+  }),
+  privateHeader('November 2025 statement', 'cibc-costco-2025-11-12.pdf', {
+    statementDate: '2025-11-12', periodStart: '2025-10-13', periodEnd: '2025-11-12', accountLast4: '3114',
+  }),
+  syntheticHeader('synthetic rollover statement (fully-qualified period)', SYN_CIBC_C, {
+    statementDate: '2024-01-12', periodStart: '2023-12-13', periodEnd: '2024-01-12',
+  }),
+  syntheticHeader('synthetic statement (date on next line, period from "Transactions from")', SYN_CIBC_B, {
+    statementDate: '2024-06-12', periodStart: '2024-05-13', periodEnd: '2024-06-12',
+  }),
+  syntheticHeader('synthetic statement (abbreviated same-year period)', SYN_CIBC_A, {
+    statementDate: '2024-05-12', periodStart: '2024-04-13', periodEnd: '2024-05-12',
+  }),
+];
 
-test('parseCibcCostcoHeader — November 2025 statement', { skip: skipNoFixtures }, async () => {
-  const lines = await loadFixture('cibc-costco-2025-11-12.pdf');
-  const h = parseCibcCostcoHeader(lines);
-  assert.equal(h.statementDate, '2025-11-12');
-  assert.equal(h.periodStart, '2025-10-13');
-  assert.equal(h.periodEnd, '2025-11-12');
-  assert.equal(h.accountLast4, '3114');
+for (const c of HEADER_CASES) {
+  test(`parseCibcCostcoHeader — ${c.label}`, { skip: c.skip }, async () => {
+    assert.deepEqual(parseCibcCostcoHeader(await c.lines()), c.expected);
+  });
+}
+
+test('parseCibcCostcoHeader — abbreviated period across the year boundary takes the prior year for its start', () => {
+  const h = parseCibcCostcoHeader(synthPdfLines([[
+    [[0, 'CIBC Costco Mastercard']],
+    [[0, 'Statement Date'], [40, 'January 12, 2024']],
+    [[0, 'December statement period'], [40, 'December 13 to January 12, 2024']],
+    [[0, 'Account number'], [40, `5160 XXXX XXXX ${SYN_CIBC_LAST4}`]],
+  ]]));
+  assert.equal(h.periodStart, '2023-12-13');
+  assert.equal(h.periodEnd, '2024-01-12');
 });
 
 test('inferYearForMonthDay picks the period-start year for Nov 23 in a Nov→Dec period', () => {
@@ -141,7 +167,7 @@ test('parseCibcCostcoRow — interest row', () => {
   assert.equal(row.amount, -0.07);
 });
 
-test('parser end-to-end — November 2025 statement (3 sub-sections present)', { skip: skipNoFixtures }, async () => {
+test('parser end-to-end — November 2025 statement (3 sub-sections present)', { skip: skipPrivate('cibc-costco-2025-11-12.pdf') }, async () => {
   const lines = await loadFixture('cibc-costco-2025-11-12.pdf');
   const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
   assert.equal(out.transactions.length, 3);
@@ -163,7 +189,7 @@ test('parser end-to-end — November 2025 statement (3 sub-sections present)', {
   assert.deepEqual(out.parseErrors, []);
 });
 
-test('parser end-to-end — December 2025 statement (payments empty, charges present)', { skip: skipNoFixtures }, async () => {
+test('parser end-to-end — December 2025 statement (payments empty, charges present)', { skip: skipPrivate('cibc-costco-2025-12-12.pdf') }, async () => {
   const lines = await loadFixture('cibc-costco-2025-12-12.pdf');
   const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
   assert.equal(out.transactions.length, 5);
@@ -171,7 +197,7 @@ test('parser end-to-end — December 2025 statement (payments empty, charges pre
   assert.equal(Math.round(total * 100) / 100, -580.67);
 });
 
-test('parser end-to-end — January 2026 statement (rollover period, payment + 5 charges)', { skip: skipNoFixtures }, async () => {
+test('parser end-to-end — January 2026 statement (rollover period, payment + 5 charges)', { skip: skipPrivate('cibc-costco-2026-01-12.pdf') }, async () => {
   const lines = await loadFixture('cibc-costco-2026-01-12.pdf');
   const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
   assert.equal(out.transactions.length, 6);
@@ -191,6 +217,74 @@ test('parser end-to-end — January 2026 statement (rollover period, payment + 5
   assert.equal(Math.round(chargeSum * 100) / 100, -2278);
 });
 
+// ─── Synthetic twins of the private end-to-end tests above ───────────────────
+
+const parseSynthetic = (pages: SynthPage[]) =>
+  cibcCostcoMastercardParser.parse(synthPdfLines(pages), { defaultCurrency: 'CAD' });
+
+test('parser end-to-end — synthetic statement with all 3 sub-sections', () => {
+  const out = parseSynthetic(SYN_CIBC_A);
+  assert.deepEqual(out.parseErrors, []);
+  assert.deepEqual(out.warnings, []);
+  assert.deepEqual(
+    [...out.transactions]
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((t) => ({ date: t.date, merchantRaw: t.merchantRaw, amount: t.amount, currency: t.currency })),
+    [
+      { date: '2024-04-24', merchantRaw: 'SAMPLE CLOUD STORAGE ANYTOWN ON', amount: -4.99, currency: 'CAD' },
+      { date: '2024-04-28', merchantRaw: 'PAYMENT THANK YOU/PAIEMENT MERCI', amount: 25, currency: 'CAD' },
+      { date: '2024-05-12', merchantRaw: 'REGULAR PURCHASES', amount: -0.42, currency: 'CAD' },
+    ],
+  );
+});
+
+test('parser end-to-end — synthetic statement (payments empty, 5 charges incl. a bonus-rewards row)', () => {
+  const out = parseSynthetic(SYN_CIBC_B);
+  assert.deepEqual(out.parseErrors, []);
+  assert.deepEqual(out.warnings, []);
+  assert.equal(out.transactions.length, 5);
+  const total = out.transactions.reduce((s, t) => s + t.amount, 0);
+  assert.equal(Math.round(total * 100) / 100, -412.37);
+  // The Ý bonus-rewards marker is stripped from the merchant.
+  const gas = out.transactions.find((t) => t.merchantRaw.includes('COSTCO GAS'));
+  assert.equal(gas?.merchantRaw, 'COSTCO GAS W0001 ANYTOWN ON');
+  assert.equal(gas?.amount, -58.1);
+});
+
+test('parser end-to-end — synthetic rollover statement (payment + 5 charges, dated by transaction date)', () => {
+  const out = parseSynthetic(SYN_CIBC_C);
+  assert.deepEqual(out.parseErrors, []);
+  assert.deepEqual(out.warnings, []);
+  assert.equal(out.transactions.length, 6);
+
+  const payment = out.transactions.find((t) => t.merchantRaw.includes('PAYMENT THANK YOU'));
+  // Dates by transaction date (col 0 = Dec 22), not posting date (Dec 27).
+  assert.equal(payment?.date, '2023-12-22');
+  assert.equal(payment?.amount, 300);
+
+  // Dec 30 charge posted Jan 02 stays in the start year; Jan rows take the end year.
+  const transit = out.transactions.find((t) => t.merchantRaw.includes('SAMPLE TRANSIT'));
+  assert.equal(transit?.date, '2023-12-30');
+  const renewal = out.transactions.find((t) => t.merchantRaw.includes('ANNUAL RENEWAL'));
+  assert.equal(renewal?.date, '2024-01-02');
+  assert.equal(renewal?.amount, -120);
+
+  const chargeSum = out.transactions.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0);
+  assert.equal(Math.round(chargeSum * 100) / 100, -1500);
+});
+
+test('parser produces a deterministic merchantClean — synthetic statement', () => {
+  const out = parseSynthetic(SYN_CIBC_B);
+  const costco = out.transactions.find((t) => t.merchantRaw.includes('COSTCO WHOLESALE'));
+  assert.ok(costco);
+  assert.ok(!/\s{2,}/.test(costco.merchantRaw));
+  assert.equal(costco.merchantRaw, 'COSTCO WHOLESALE W0001 ANYTOWN ON');
+  assert.ok(typeof costco.merchantClean === 'string' && costco.merchantClean.length > 0);
+  // Same input, same output.
+  const again = parseSynthetic(SYN_CIBC_B).transactions.find((t) => t.merchantRaw === costco.merchantRaw);
+  assert.equal(again?.merchantClean, costco.merchantClean);
+});
+
 // ─── Section sum cross-check (synthetic lines, no fixtures needed) ────────────
 //
 // The printed "Total for …" of "Your new charges and credits" is NET of
@@ -198,7 +292,6 @@ test('parser end-to-end — January 2026 statement (rollover period, payment + 5
 // own convention (charges positive, CR credits negative) — an absolute-value
 // sum both false-alarms on any CR credit and can never catch a sign flip.
 
-import type { PdfLine } from './types';
 
 function mkSyn(text: string, page = 1): PdfLine {
   return { page, y: 0, text, items: [{ x: 18, width: text.length * 5, str: text }] };
@@ -253,7 +346,7 @@ test('payments section reconciles against its printed total in the statement con
   assert.deepEqual(out.warnings, []);
 });
 
-test('parser produces a deterministic merchantClean (uppercased, collapsed whitespace, no trailing province)', { skip: skipNoFixtures }, async () => {
+test('parser produces a deterministic merchantClean (uppercased, collapsed whitespace, no trailing province)', { skip: skipPrivate('cibc-costco-2025-12-12.pdf') }, async () => {
   const lines = await loadFixture('cibc-costco-2025-12-12.pdf');
   const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
   const costco = out.transactions.find((t) => t.merchantRaw.includes('COSTCO WHOLESALE'));

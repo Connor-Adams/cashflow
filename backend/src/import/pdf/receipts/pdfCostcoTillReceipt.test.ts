@@ -4,7 +4,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { existsSync } from 'node:fs';
 import { extractPdfLines } from '../extractLines';
 import {
   costcoTillReceiptParser,
@@ -14,10 +13,14 @@ import {
   looksLikeNameFragment,
   parseCostcoTenders,
 } from './costcoTillReceipt';
+import { skipUnlessPrivateFixtures } from '../../../../test/helpers/privateFixtures';
+import { synthPdfLines, type SynthPage } from '../../../../test/helpers/syntheticPdf';
+import { SYN_COSTCO_R1, SYN_COSTCO_R2, SYN_COSTCO_R3 } from '../../../../test/helpers/syntheticStatements';
 
-// Real statement/receipt PDFs are personal financial documents and are
-// gitignored (.gitignore: backend/test/fixtures/pdf/), so these tests are
-// LOCAL-ONLY. CI coverage comes from the synthetic line fixtures in-file.
+// The R1/R2/R3 tests read Connor's REAL receipts (gitignored under
+// backend/test/fixtures/pdf/): LOCAL-ONLY, and in CI they skip with a loud
+// reason. Each has a synthetic twin (test/helpers/syntheticStatements.ts,
+// made-up values in the real layout) that always runs.
 const backendRoot = join(__dirname, '..', '..', '..', '..');
 const fixturesDir = join(backendRoot, 'test', 'fixtures', 'pdf');
 /**
@@ -25,9 +28,7 @@ const fixturesDir = join(backendRoot, 'test', 'fixtures', 'pdf');
  * absent PDF silently disabled all of them.
  */
 function skipUnless(name: string): string | undefined {
-  return existsSync(join(fixturesDir, name))
-    ? undefined
-    : `fixture ${name} not present (gitignored — drop it in backend/test/fixtures/pdf/)`;
+  return skipUnlessPrivateFixtures(join(fixturesDir, name));
 }
 
 async function loadLines(name: string) {
@@ -251,6 +252,115 @@ test('Costco R3 — four `qty @ unitPrice` lines across 3 pages (2026-02-13, $58
     assert.equal(it.unitPrice, unit, `${id} unitPrice`);
     assert.equal(it.totalPrice, total, `${id} totalPrice`);
   }
+});
+
+// ─── Synthetic twins of R1/R2/R3 (made-up receipts, always run) ──────────────
+
+const parseSynthetic = (pages: SynthPage[]) =>
+  costcoTillReceiptParser.parse(synthPdfLines(pages), { defaultCurrency: 'CAD' });
+const itemsSum = (items: { totalPrice: number | null }[]) => items.reduce((a, it) => a + (it.totalPrice ?? 0), 0);
+
+test('Costco synthetic R1 — single-tender, TPD discounts, wrapped name', () => {
+  const { extracted, warnings } = parseSynthetic(SYN_COSTCO_R1);
+
+  assert.deepEqual(warnings, []);
+  assert.equal(extracted.vendor, 'costco');
+  assert.equal(extracted.vendorName, 'Costco ANYTOWN #0999');
+  assert.equal(extracted.orderDate, '2024-05-04');
+  assert.equal(extracted.orderId, '0999-11-303-23-20240504-1107');
+  assert.equal(extracted.subtotal, 493.44);
+  assert.equal(extracted.tax, 54.2);
+  assert.equal(extracted.total, 547.64);
+  assert.equal(extracted.currency, 'CAD');
+  assert.equal(extracted.paymentLast4, '9001');
+  assert.deepEqual(extracted.tenders, [{ paymentLast4: '9001', network: 'costco-mastercard', amount: 547.64 }]);
+
+  // 6 catalog items + 2 TPD discount lines = 8 line items
+  assert.equal(extracted.items.length, 8);
+
+  const widget = extracted.items.find((it) => it.vendorItemId === '1000001');
+  assert.ok(widget, 'SAMPLE WIDGET not found');
+  assert.equal(widget.title, 'SAMPLE WIDGET');
+  assert.equal(widget.totalPrice, 29.99);
+  assert.equal(widget.taxable, true);
+
+  // Wrap case: HOT / <id + price> / SAUCE
+  const sauce = extracted.items.find((it) => it.vendorItemId === '2000003');
+  assert.ok(sauce, 'HOT SAUCE item not found');
+  assert.equal(sauce.title, 'HOT SAUCE');
+  assert.equal(sauce.totalPrice, 9.99);
+  assert.equal(sauce.taxable, false);
+
+  // TPD discount (trailing minus)
+  const tpd = extracted.items.find((it) => it.vendorItemId === '1000005');
+  assert.ok(tpd, 'TPD/1000004 discount not found');
+  assert.equal(tpd.title, 'TPD/1000004');
+  assert.equal(tpd.totalPrice, -100);
+
+  assert.ok(Math.abs(itemsSum(extracted.items) - 493.44) < 0.01);
+});
+
+test('Costco synthetic R2 — split tender over a page break, deposit wrap, comma-thousands', () => {
+  const { extracted, warnings } = parseSynthetic(SYN_COSTCO_R2);
+
+  assert.deepEqual(warnings, []);
+  assert.equal(extracted.orderDate, '2024-06-15');
+  assert.equal(extracted.orderId, '0999-7-285-17-20240615-1546');
+  assert.equal(extracted.subtotal, 1763.86);
+  assert.equal(extracted.tax, 224.36);
+  assert.equal(extracted.total, 1988.22);
+
+  // Split tender: the Costco MC tender has no printed mask, so no last4.
+  assert.deepEqual(extracted.tenders, [
+    { paymentLast4: '4242', network: 'mastercard', amount: 1200 },
+    { paymentLast4: null, network: 'costco-mastercard', amount: 788.22 },
+  ]);
+  // Multi-tender → top-level paymentLast4 is null (matcher must use tenders[]).
+  assert.equal(extracted.paymentLast4, null);
+
+  assert.ok(Math.abs(itemsSum(extracted.items) - 1763.86) < 0.01);
+
+  const deposit = extracted.items.find((it) => it.vendorItemId === '4002');
+  assert.ok(deposit, 'bottle deposit item not found');
+  assert.equal(deposit.title, 'DEPOSIT VL/3000004');
+  assert.equal(deposit.totalPrice, 2.4);
+  assert.equal(deposit.taxable, null); // no Y/N flag on deposit lines
+
+  const tv = extracted.items.find((it) => it.vendorItemId === '3000001');
+  assert.ok(tv, 'SAMPLE TV 65IN not found');
+  assert.equal(tv.title, 'SAMPLE TV 65IN');
+  assert.equal(tv.totalPrice, 1899.99);
+});
+
+test('Costco synthetic R3 — four `qty @ unitPrice` lines across 3 pages', () => {
+  const { extracted, warnings } = parseSynthetic(SYN_COSTCO_R3);
+
+  assert.deepEqual(warnings, []);
+  assert.equal(extracted.orderDate, '2024-02-13');
+  assert.equal(extracted.orderId, '0999-8-492-36-20240213-2013');
+  assert.equal(extracted.subtotal, 81.13);
+  assert.equal(extracted.total, 89.49);
+
+  assert.equal(extracted.items.filter((it) => it.title === '@').length, 0);
+  assert.equal(extracted.items.length, 5);
+  assert.ok(Math.abs(itemsSum(extracted.items) - 81.13) < 0.01);
+
+  const expectations: [string, number, number, number][] = [
+    ['5000001', 2, 15.99, 31.98],
+    ['5000002', 2, 6.49, 12.98],
+    ['5000004', 2, 13.99, 27.98], // qty line ends page 1, its item opens page 2
+    ['4003', 2, 0.1, 0.2],        // bottle deposit, name wraps around its row
+  ];
+  for (const [id, qty, unit, total] of expectations) {
+    const it = extracted.items.find((x) => x.vendorItemId === id);
+    assert.ok(it, `item ${id} not found`);
+    assert.equal(it.quantity, qty, `${id} quantity`);
+    assert.equal(it.unitPrice, unit, `${id} unitPrice`);
+    assert.equal(it.totalPrice, total, `${id} totalPrice`);
+  }
+  // A plain row with no qty line keeps quantity 1.
+  const bread = extracted.items.find((x) => x.vendorItemId === '5000003');
+  assert.equal(bread?.quantity, 1);
 });
 
 // Synthetic receipt — no real purchase data, so it is committable to a public

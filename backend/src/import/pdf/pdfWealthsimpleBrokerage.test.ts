@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PdfLine } from './types';
+import { synthPdfLines } from '../../../test/helpers/syntheticPdf';
+import { SYN_WS_ACCOUNT, SYN_WS_BROKERAGE } from '../../../test/helpers/syntheticStatements';
 import {
   wsPdfCodeToActivity,
   WS_PDF_SKIP_CODES,
@@ -945,4 +947,25 @@ test('an in-kind securities transfer gets NO cash mirror', () => {
     0,
     `securities are not cash: ${JSON.stringify(result.transactions)}`,
   );
+});
+
+// ---------------------------------------------------------------------------
+// The synthetic statement the async-import integration tests push through the
+// pipeline as a rendered PDF (test/helpers/syntheticStatements.ts).
+// ---------------------------------------------------------------------------
+
+test('synthetic WS brokerage statement parses to 2 holdings + 3 activities', () => {
+  const result = wealthsimpleBrokerageParser.parse(synthPdfLines(SYN_WS_BROKERAGE), { defaultCurrency: 'CAD' });
+  assert.equal(wealthsimpleBrokerageParser.sniff(synthPdfLines(SYN_WS_BROKERAGE)), true);
+  assert.equal(result.header?.accountSuffix, SYN_WS_ACCOUNT);
+  assert.equal(result.header?.productLabel, 'Wealthsimple TFSA');
+  assert.deepEqual(
+    result.holdings!.map((h) => [h.security.symbol, h.quantity, h.marketValue, h.costBasis]).sort(),
+    [['EXBK', 2.5, 200, 190], ['SMPL', 10, 250, 240]],
+  );
+  assert.deepEqual(
+    result.investmentActivities!.map((a) => [a.activityType, a.tradeDate, a.amount]),
+    [['transfer', '2024-05-02', 100], ['buy', '2024-05-03', -50], ['interest', '2024-05-15', 0.01]],
+  );
+  assert.deepEqual(result.warnings, []);
 });

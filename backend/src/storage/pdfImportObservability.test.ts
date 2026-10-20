@@ -5,7 +5,12 @@ import fs from 'node:fs';
 import { sequelize, PdfImportBatch, PdfImportItem, Household, User } from '../models';
 import { saveVaultObject } from './vaultStorage';
 import { drainPendingChunk } from '../import/pdfImportProcessor';
+import { skipUnlessPrivateFixtures } from '../../test/helpers/privateFixtures';
+import { synthPdf } from '../../test/helpers/syntheticPdf';
+import { SYN_UNRECOGNIZED } from '../../test/helpers/syntheticStatements';
 
+// Connor's real yearly-performance PDF: LOCAL-ONLY (loud skip in CI). The
+// synthetic twin renders a made-up non-statement PDF at test time.
 const PERFORMANCE_PDF = '/Users/connoradams/Downloads/monthly_pdf_statements/HQ8H0GZ07CAD_2025-01_YEARLY_PERFORMANCE.pdf';
 
 async function hhUser() {
@@ -37,11 +42,11 @@ test('drain reports pendingRemaining and respects maxItems', async () => {
   assert.equal(s.pendingRemaining, 1);
 });
 
-test('a no-parser file is skipped (not failed) with a reason', { skip: !fs.existsSync(PERFORMANCE_PDF) }, async () => {
+async function assertNoParserFileIsSkipped(buffer: Buffer) {
   await sequelize.sync({ force: true });
   const { hh, u } = await hhUser();
   const put = await saveVaultObject(`${crypto.randomUUID()}.pdf`, {
-    buffer: fs.readFileSync(PERFORMANCE_PDF),
+    buffer,
     contentType: 'application/pdf',
     originalName: 'performance.pdf',
   });
@@ -57,4 +62,12 @@ test('a no-parser file is skipped (not failed) with a reason', { skip: !fs.exist
   assert.equal(batch?.status, 'done');     // skipped-only batch is done, not failed
   assert.equal(batch?.skipped, 1);
   assert.ok(batch?.startedAt);             // started_at set
+}
+
+test('a no-parser file is skipped (not failed) with a reason', { skip: skipUnlessPrivateFixtures(PERFORMANCE_PDF) }, async () => {
+  await assertNoParserFileIsSkipped(fs.readFileSync(PERFORMANCE_PDF));
+});
+
+test('a no-parser file is skipped (not failed) with a reason — synthetic PDF', async () => {
+  await assertNoParserFileIsSkipped(synthPdf(SYN_UNRECOGNIZED));
 });

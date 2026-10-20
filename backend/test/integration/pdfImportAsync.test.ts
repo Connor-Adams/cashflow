@@ -8,9 +8,11 @@
  * HoldingSnapshot dedup work.  Mirrors pdfBundleUploadRoute.test.ts exactly
  * for DB setup/teardown.
  *
- * The test is gated on the brokerage PDF being present at:
+ * Each scenario runs twice: against a SYNTHETIC Wealthsimple brokerage
+ * statement rendered to a PDF at test time (made-up values, always runs,
+ * including CI), and against Connor's REAL statement at
  *   /Users/connoradams/Downloads/monthly_pdf_statements/HQ6LMLTK8CAD_2025-05_BROKERAGE.pdf
- * If absent the test is skipped automatically.
+ * (LOCAL-ONLY; in CI it skips with a loud reason).
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,6 +23,9 @@ import { fileURLToPath } from 'url';
 import request from 'supertest';
 import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
+import { skipUnlessPrivateFixtures } from '../helpers/privateFixtures.js';
+import { synthPdf } from '../helpers/syntheticPdf.js';
+import { SYN_WS_ACCOUNT, SYN_WS_BROKERAGE, SYN_WS_FILENAME } from '../helpers/syntheticStatements.js';
 
 // NOTE: vaultStorage, pdfImportProcessor, and models are dynamically imported
 // inside before() AFTER setupPgTestDb sets DATABASE_URL — otherwise db.ts
@@ -34,6 +39,20 @@ const backendRoot = path.join(__dirname, '..', '..');
 const receiptsUploadDir = path.join(backendRoot, 'uploads', 'test-integration-pdf-async');
 
 const BRK = '/Users/connoradams/Downloads/monthly_pdf_statements/HQ6LMLTK8CAD_2025-05_BROKERAGE.pdf';
+
+/** A brokerage statement to push through the pipeline. */
+type BrokerageFixture = { bytes: () => Buffer; fileName: string; shortCode: string };
+const SYNTHETIC_BRK: BrokerageFixture = {
+  bytes: () => synthPdf(SYN_WS_BROKERAGE),
+  fileName: SYN_WS_FILENAME,
+  shortCode: SYN_WS_ACCOUNT,
+};
+const PRIVATE_BRK: BrokerageFixture = {
+  bytes: () => fs.readFileSync(BRK),
+  fileName: path.basename(BRK),
+  shortCode: 'HQ6LMLTK8CAD',
+};
+const skipPrivateBrk = skipUnlessPrivateFixtures(BRK);
 
 let models: typeof import('../../src/models/index.js');
 let testDb: PgTestDb;
@@ -87,14 +106,14 @@ after(async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Helper: count HoldingSnapshot + InvestmentActivity rows for the account
-// identified by shortCode HQ6LMLTK8CAD (the TFSA brokerage account).
+// Helper: count HoldingSnapshot + InvestmentActivity rows for the brokerage
+// account identified by the statement's shortCode.
 // ---------------------------------------------------------------------------
 
-async function countRows(): Promise<{ holdingSnapshots: number; investmentActivities: number }> {
+async function countRows(shortCode: string): Promise<{ holdingSnapshots: number; investmentActivities: number }> {
   const { HoldingSnapshot, InvestmentActivity, Account } = models;
 
-  const account = await Account.findOne({ where: { householdId, shortCode: 'HQ6LMLTK8CAD' } });
+  const account = await Account.findOne({ where: { householdId, shortCode } });
   if (!account) return { holdingSnapshots: 0, investmentActivities: 0 };
 
   const [holdingSnapshots, investmentActivities] = await Promise.all([
@@ -108,219 +127,233 @@ async function countRows(): Promise<{ holdingSnapshots: number; investmentActivi
 // Main integration test: upload→drain→committed→idempotent re-run
 // ---------------------------------------------------------------------------
 
+async function assertDrainCommitsIdempotently(fx: BrokerageFixture): Promise<void> {
+  const { PdfImportBatch, PdfImportItem } = models;
+
+  // ---- Step 1: save PDF bytes to vault, create batch + item ----
+  const pdfBytes = fx.bytes();
+  const storedFilename = `${crypto.randomUUID()}.pdf`;
+  const put = await saveVaultObject(storedFilename, {
+    buffer: pdfBytes,
+    contentType: 'application/pdf',
+    originalName: fx.fileName,
+  });
+
+  const batch = await PdfImportBatch.create({
+    id: crypto.randomUUID(),
+    householdId,
+    userId,
+    status: 'pending',
+    total: 1,
+    processed: 0,
+    succeeded: 0,
+    failed: 0,
+  });
+
+  await PdfImportItem.create({
+    id: crypto.randomUUID(),
+    batchId: batch.id,
+    fileName: fx.fileName,
+    storedFilename: put.storedFilename,
+    storageKind: put.storageKind,
+    encryptionAlgorithm: put.encryptionAlgorithm,
+    status: 'pending',
+  });
+
+  // ---- Step 2: first drain ----
+  const first = await drainPendingChunk({ maxItems: 12 });
+
+  assert.equal(first.succeeded, 1, `expected 1 succeeded, got ${JSON.stringify(first)}`);
+  assert.equal(first.failed, 0, `expected 0 failed, got ${JSON.stringify(first)}`);
+
+  // Batch must be done
+  const reloadedBatch = await PdfImportBatch.findByPk(batch.id);
+  assert.equal(
+    reloadedBatch?.status,
+    'done',
+    `expected batch status=done, got ${reloadedBatch?.status}`,
+  );
+  assert.equal(reloadedBatch?.succeeded, 1);
+  assert.equal(reloadedBatch?.failed, 0);
+
+  // Item must be done with an accountId
+  const item = await PdfImportItem.findOne({ where: { batchId: batch.id } });
+  assert.equal(item?.status, 'done', `expected item status=done, got ${item?.status}`);
+  assert.ok(item?.accountId, `expected item.accountId to be set`);
+
+  // HoldingSnapshot + InvestmentActivity rows must have been committed
+  const after1 = await countRows(fx.shortCode);
+  assert.ok(
+    after1.holdingSnapshots > 0 || after1.investmentActivities > 0,
+    `expected HoldingSnapshot or InvestmentActivity rows after first drain; got ${JSON.stringify(after1)}`,
+  );
+
+  // Capture counts from resultJson for idempotency comparison
+  const rj1 = (item?.resultJson ?? {}) as Record<string, number>;
+  const insertedHoldings1 = rj1.insertedHoldings ?? after1.holdingSnapshots;
+  const insertedActivities1 = rj1.insertedInvestmentActivities ?? after1.investmentActivities;
+
+  // ---- Step 3: idempotency — fresh pending item for the same file + same household ----
+  // Re-save the same bytes (or reuse the stored key) in a new batch.
+  const storedFilename2 = `${crypto.randomUUID()}.pdf`;
+  const put2 = await saveVaultObject(storedFilename2, {
+    buffer: pdfBytes,
+    contentType: 'application/pdf',
+    originalName: fx.fileName,
+  });
+
+  const batch2 = await PdfImportBatch.create({
+    id: crypto.randomUUID(),
+    householdId,
+    userId,
+    status: 'pending',
+    total: 1,
+    processed: 0,
+    succeeded: 0,
+    failed: 0,
+  });
+
+  await PdfImportItem.create({
+    id: crypto.randomUUID(),
+    batchId: batch2.id,
+    fileName: fx.fileName,
+    storedFilename: put2.storedFilename,
+    storageKind: put2.storageKind,
+    encryptionAlgorithm: put2.encryptionAlgorithm,
+    status: 'pending',
+  });
+
+  const second = await drainPendingChunk({ maxItems: 12 });
+  // Second run must also succeed (processor shouldn't hard-fail on duplicates)
+  assert.equal(second.succeeded, 1, `expected second drain succeeded=1, got ${JSON.stringify(second)}`);
+
+  // Read second item's resultJson for dedup evidence
+  const item2 = await PdfImportItem.findOne({ where: { batchId: batch2.id } });
+  const rj2 = (item2?.resultJson ?? {}) as Record<string, number>;
+  const insertedHoldings2 = rj2.insertedHoldings ?? 0;
+  const insertedActivities2 = rj2.insertedInvestmentActivities ?? 0;
+
+  // The second run must NOT have inserted more InvestmentActivity rows —
+  // the content-hash dedup in commitStatementImport short-circuits them.
+  assert.equal(
+    insertedActivities2,
+    0,
+    `idempotency: expected 0 new InvestmentActivity on re-run (dedup), got ${insertedActivities2} (first run inserted ${insertedActivities1})`,
+  );
+
+  // HoldingSnapshot dedup: the ws_holding unique index (only present in
+  // migrated Postgres, not sqlite) absorbs re-inserts via upsert.
+  // Net new HoldingSnapshot rows across the two runs must equal run-1 count.
+  const after2 = await countRows(fx.shortCode);
+  assert.equal(
+    after2.holdingSnapshots,
+    after1.holdingSnapshots,
+    `idempotency: HoldingSnapshot count grew from ${after1.holdingSnapshots} to ${after2.holdingSnapshots} on re-run (expected no growth); insertedHoldings2=${insertedHoldings2}`,
+  );
+  // Allow 0 new activities (strict) or the same total rows (lenient fallback)
+  assert.equal(
+    after2.investmentActivities,
+    after1.investmentActivities,
+    `idempotency: InvestmentActivity count grew from ${after1.investmentActivities} to ${after2.investmentActivities} on re-run (expected no growth)`,
+  );
+}
+
 test(
   'async pdf import: drain→committed→batch done→idempotent re-run (brokerage)',
-  { skip: !fs.existsSync(BRK) },
-  async () => {
-    const { PdfImportBatch, PdfImportItem } = models;
+  { skip: skipPrivateBrk },
+  () => assertDrainCommitsIdempotently(PRIVATE_BRK),
+);
 
-    // ---- Step 1: save PDF bytes to vault, create batch + item ----
-    const pdfBytes = fs.readFileSync(BRK);
-    const storedFilename = `${crypto.randomUUID()}.pdf`;
-    const put = await saveVaultObject(storedFilename, {
-      buffer: pdfBytes,
-      contentType: 'application/pdf',
-      originalName: path.basename(BRK),
-    });
-
-    const batch = await PdfImportBatch.create({
-      id: crypto.randomUUID(),
-      householdId,
-      userId,
-      status: 'pending',
-      total: 1,
-      processed: 0,
-      succeeded: 0,
-      failed: 0,
-    });
-
-    await PdfImportItem.create({
-      id: crypto.randomUUID(),
-      batchId: batch.id,
-      fileName: path.basename(BRK),
-      storedFilename: put.storedFilename,
-      storageKind: put.storageKind,
-      encryptionAlgorithm: put.encryptionAlgorithm,
-      status: 'pending',
-    });
-
-    // ---- Step 2: first drain ----
-    const first = await drainPendingChunk({ maxItems: 12 });
-
-    assert.equal(first.succeeded, 1, `expected 1 succeeded, got ${JSON.stringify(first)}`);
-    assert.equal(first.failed, 0, `expected 0 failed, got ${JSON.stringify(first)}`);
-
-    // Batch must be done
-    const reloadedBatch = await PdfImportBatch.findByPk(batch.id);
-    assert.equal(
-      reloadedBatch?.status,
-      'done',
-      `expected batch status=done, got ${reloadedBatch?.status}`,
-    );
-    assert.equal(reloadedBatch?.succeeded, 1);
-    assert.equal(reloadedBatch?.failed, 0);
-
-    // Item must be done with an accountId
-    const item = await PdfImportItem.findOne({ where: { batchId: batch.id } });
-    assert.equal(item?.status, 'done', `expected item status=done, got ${item?.status}`);
-    assert.ok(item?.accountId, `expected item.accountId to be set`);
-
-    // HoldingSnapshot + InvestmentActivity rows must have been committed
-    const after1 = await countRows();
-    assert.ok(
-      after1.holdingSnapshots > 0 || after1.investmentActivities > 0,
-      `expected HoldingSnapshot or InvestmentActivity rows after first drain; got ${JSON.stringify(after1)}`,
-    );
-
-    // Capture counts from resultJson for idempotency comparison
-    const rj1 = (item?.resultJson ?? {}) as Record<string, number>;
-    const insertedHoldings1 = rj1.insertedHoldings ?? after1.holdingSnapshots;
-    const insertedActivities1 = rj1.insertedInvestmentActivities ?? after1.investmentActivities;
-
-    // ---- Step 3: idempotency — fresh pending item for the same file + same household ----
-    // Re-save the same bytes (or reuse the stored key) in a new batch.
-    const storedFilename2 = `${crypto.randomUUID()}.pdf`;
-    const put2 = await saveVaultObject(storedFilename2, {
-      buffer: pdfBytes,
-      contentType: 'application/pdf',
-      originalName: path.basename(BRK),
-    });
-
-    const batch2 = await PdfImportBatch.create({
-      id: crypto.randomUUID(),
-      householdId,
-      userId,
-      status: 'pending',
-      total: 1,
-      processed: 0,
-      succeeded: 0,
-      failed: 0,
-    });
-
-    await PdfImportItem.create({
-      id: crypto.randomUUID(),
-      batchId: batch2.id,
-      fileName: path.basename(BRK),
-      storedFilename: put2.storedFilename,
-      storageKind: put2.storageKind,
-      encryptionAlgorithm: put2.encryptionAlgorithm,
-      status: 'pending',
-    });
-
-    const second = await drainPendingChunk({ maxItems: 12 });
-    // Second run must also succeed (processor shouldn't hard-fail on duplicates)
-    assert.equal(second.succeeded, 1, `expected second drain succeeded=1, got ${JSON.stringify(second)}`);
-
-    // Read second item's resultJson for dedup evidence
-    const item2 = await PdfImportItem.findOne({ where: { batchId: batch2.id } });
-    const rj2 = (item2?.resultJson ?? {}) as Record<string, number>;
-    const insertedHoldings2 = rj2.insertedHoldings ?? 0;
-    const insertedActivities2 = rj2.insertedInvestmentActivities ?? 0;
-
-    // The second run must NOT have inserted more InvestmentActivity rows —
-    // the content-hash dedup in commitStatementImport short-circuits them.
-    assert.equal(
-      insertedActivities2,
-      0,
-      `idempotency: expected 0 new InvestmentActivity on re-run (dedup), got ${insertedActivities2} (first run inserted ${insertedActivities1})`,
-    );
-
-    // HoldingSnapshot dedup: the ws_holding unique index (only present in
-    // migrated Postgres, not sqlite) absorbs re-inserts via upsert.
-    // Net new HoldingSnapshot rows across the two runs must equal run-1 count.
-    const after2 = await countRows();
-    assert.equal(
-      after2.holdingSnapshots,
-      after1.holdingSnapshots,
-      `idempotency: HoldingSnapshot count grew from ${after1.holdingSnapshots} to ${after2.holdingSnapshots} on re-run (expected no growth); insertedHoldings2=${insertedHoldings2}`,
-    );
-    // Allow 0 new activities (strict) or the same total rows (lenient fallback)
-    assert.equal(
-      after2.investmentActivities,
-      after1.investmentActivities,
-      `idempotency: InvestmentActivity count grew from ${after1.investmentActivities} to ${after2.investmentActivities} on re-run (expected no growth)`,
-    );
-  },
+test(
+  'async pdf import: drain→committed→batch done→idempotent re-run (brokerage) — synthetic PDF',
+  () => assertDrainCommitsIdempotently(SYNTHETIC_BRK),
 );
 
 // ---------------------------------------------------------------------------
 // Optional HTTP path smoke test: POST→drain→GET batch done
 // ---------------------------------------------------------------------------
 
+async function assertHttpUploadDrains(fx: BrokerageFixture): Promise<void> {
+  const pdfBytes = fx.bytes();
+  const { PdfImportBatch } = models;
+
+  // POST to upload endpoint
+  const uploadRes = await authed
+    .post('/api/import/upload-pdf-bundle')
+    .attach('files', pdfBytes, {
+      filename: fx.fileName,
+      contentType: 'application/pdf',
+    });
+
+  assert.equal(
+    uploadRes.status,
+    201,
+    `expected 201 from upload, got ${uploadRes.status}: ${JSON.stringify(uploadRes.body)}`,
+  );
+  assert.ok(
+    typeof uploadRes.body.batchId === 'string' && uploadRes.body.batchId.length > 0,
+    `expected non-empty batchId in response body, got ${JSON.stringify(uploadRes.body)}`,
+  );
+
+  const { batchId } = uploadRes.body as { batchId: string; total: number };
+
+  // The upload handler kicks one drain inline (best-effort via runJobByName).
+  // We drain explicitly here to ensure the item is processed synchronously.
+  await drainPendingChunk({ maxItems: 12 });
+
+  // GET progress endpoint
+  const progressRes = await authed.get(`/api/import/pdf-batch/${batchId}`);
+  assert.equal(
+    progressRes.status,
+    200,
+    `expected 200 from GET /api/import/pdf-batch/:id, got ${progressRes.status}: ${JSON.stringify(progressRes.body)}`,
+  );
+
+  const body = progressRes.body as {
+    id: string;
+    status: string;
+    total: number;
+    processed: number;
+    succeeded: number;
+    failed: number;
+    items: Array<{
+      fileName: string;
+      status: string;
+      accountName: string | null;
+      insertedTransactions: number;
+      insertedInvestmentActivities: number;
+      insertedHoldings: number;
+      skippedDuplicates: number;
+      error: string | null;
+    }>;
+  };
+
+  assert.equal(body.id, batchId);
+  assert.equal(body.status, 'done', `expected status=done, got ${body.status}`);
+  assert.equal(body.total, 1);
+  assert.equal(body.succeeded, 1);
+  assert.equal(body.failed, 0);
+  assert.equal(body.items.length, 1);
+
+  const item = body.items[0];
+  assert.equal(item.status, 'done');
+  assert.ok(
+    typeof item.accountName === 'string' && item.accountName.length > 0,
+    `expected non-empty accountName, got ${JSON.stringify(item.accountName)}`,
+  );
+
+  // Verify the batch row directly
+  const batchRow = await PdfImportBatch.findOne({ where: { id: batchId } });
+  assert.equal(batchRow?.status, 'done');
+}
+
 test(
   'async pdf import: HTTP upload→drain→GET /api/import/pdf-batch/:id (brokerage)',
-  { skip: !fs.existsSync(BRK) },
-  async () => {
-    const pdfBytes = fs.readFileSync(BRK);
-    const { PdfImportBatch } = models;
+  { skip: skipPrivateBrk },
+  () => assertHttpUploadDrains(PRIVATE_BRK),
+);
 
-    // POST to upload endpoint
-    const uploadRes = await authed
-      .post('/api/import/upload-pdf-bundle')
-      .attach('files', pdfBytes, {
-        filename: path.basename(BRK),
-        contentType: 'application/pdf',
-      });
-
-    assert.equal(
-      uploadRes.status,
-      201,
-      `expected 201 from upload, got ${uploadRes.status}: ${JSON.stringify(uploadRes.body)}`,
-    );
-    assert.ok(
-      typeof uploadRes.body.batchId === 'string' && uploadRes.body.batchId.length > 0,
-      `expected non-empty batchId in response body, got ${JSON.stringify(uploadRes.body)}`,
-    );
-
-    const { batchId } = uploadRes.body as { batchId: string; total: number };
-
-    // The upload handler kicks one drain inline (best-effort via runJobByName).
-    // We drain explicitly here to ensure the item is processed synchronously.
-    await drainPendingChunk({ maxItems: 12 });
-
-    // GET progress endpoint
-    const progressRes = await authed.get(`/api/import/pdf-batch/${batchId}`);
-    assert.equal(
-      progressRes.status,
-      200,
-      `expected 200 from GET /api/import/pdf-batch/:id, got ${progressRes.status}: ${JSON.stringify(progressRes.body)}`,
-    );
-
-    const body = progressRes.body as {
-      id: string;
-      status: string;
-      total: number;
-      processed: number;
-      succeeded: number;
-      failed: number;
-      items: Array<{
-        fileName: string;
-        status: string;
-        accountName: string | null;
-        insertedTransactions: number;
-        insertedInvestmentActivities: number;
-        insertedHoldings: number;
-        skippedDuplicates: number;
-        error: string | null;
-      }>;
-    };
-
-    assert.equal(body.id, batchId);
-    assert.equal(body.status, 'done', `expected status=done, got ${body.status}`);
-    assert.equal(body.total, 1);
-    assert.equal(body.succeeded, 1);
-    assert.equal(body.failed, 0);
-    assert.equal(body.items.length, 1);
-
-    const item = body.items[0];
-    assert.equal(item.status, 'done');
-    assert.ok(
-      typeof item.accountName === 'string' && item.accountName.length > 0,
-      `expected non-empty accountName, got ${JSON.stringify(item.accountName)}`,
-    );
-
-    // Verify the batch row directly
-    const batchRow = await PdfImportBatch.findOne({ where: { id: batchId } });
-    assert.equal(batchRow?.status, 'done');
-  },
+test(
+  'async pdf import: HTTP upload→drain→GET /api/import/pdf-batch/:id (brokerage) — synthetic PDF',
+  () => assertHttpUploadDrains(SYNTHETIC_BRK),
 );
