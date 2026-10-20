@@ -120,7 +120,7 @@ before(async () => {
   // through them — including /api/large-purchases/* and the PATCH review route.
   // This file fires >20 sequential requests from the same client, which would
   // otherwise 429 every assertion past the first handful (mirrors the
-  // reimbursements/statements/cfoBriefings integration tests).
+  // reimbursements/statements integration tests).
   process.env.NODE_ENV = 'test';
 
   testDb = await setupPgTestDb('lp-review');

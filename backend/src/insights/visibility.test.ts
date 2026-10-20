@@ -18,6 +18,7 @@ let models: typeof import('../models');
 let filterInsightsVisibleTo: typeof import('./visibility').filterInsightsVisibleTo;
 let filterInsightsVisibleToUser: typeof import('./visibility').filterInsightsVisibleToUser;
 let backingTransactionIds: typeof import('./visibility').backingTransactionIds;
+let supportingIdsFromMetadata: typeof import('./visibility').supportingIdsFromMetadata;
 
 // Real FK targets, filled in by `before`: transactions carry FKs to
 // accounts/users, so invented ids trip SQLite's FOREIGN KEY constraint.
@@ -40,8 +41,12 @@ async function makeUser(name: string): Promise<number> {
 before(async () => {
   models = await import('../models');
   sequelize = models.sequelize;
-  ({ filterInsightsVisibleTo, filterInsightsVisibleToUser, backingTransactionIds } =
-    await import('./visibility'));
+  ({
+    filterInsightsVisibleTo,
+    filterInsightsVisibleToUser,
+    backingTransactionIds,
+    supportingIdsFromMetadata,
+  } = await import('./visibility'));
   await sequelize.sync({ force: true });
 
   const hh = await models.Household.create({ name: 'Visibility' });
@@ -72,8 +77,7 @@ beforeEach(async () => {
 /**
  * `currentAuth(req)` just returns `req.auth`, so a plain object carrying the
  * fields `visibleTransactionWhere` reads is a sufficient fake — the same
- * pattern already used in `backend/src/auth/scope.test.ts` and
- * `backend/src/cfo/cfoBriefingBuilder.test.ts`.
+ * pattern already used in `backend/src/auth/scope.test.ts`.
  */
 function fakeReq(userId: number, globalRole = 'user'): Request {
   return {
@@ -139,6 +143,14 @@ function insight(
     metadata: fields.metadata ?? null,
   };
 }
+
+test('supporting ids come from metadata.transactionIds when present', () => {
+  assert.deepEqual(supportingIdsFromMetadata({ transactionIds: [3, 1, 2] }), [3, 1, 2]);
+  assert.deepEqual(supportingIdsFromMetadata({ transactionIds: [1, 'x', 2] }), [1, 2]);
+  assert.deepEqual(supportingIdsFromMetadata(null), []);
+  assert.deepEqual(supportingIdsFromMetadata({}), []);
+  assert.deepEqual(supportingIdsFromMetadata('nope'), []);
+});
 
 test('backingTransactionIds unions entityId and metadata.transactionIds', () => {
   assert.deepEqual(

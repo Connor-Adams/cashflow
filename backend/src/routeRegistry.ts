@@ -47,8 +47,6 @@ import moneyLeaksRouter from './routes/moneyLeaks';
 import reportsRouter from './routes/reports';
 import aiRouter from './routes/ai';
 import aiQueryRouter from './routes/aiQuery';
-import aiReviewRouter from './routes/aiReview';
-import cfoBriefingsRouter from './routes/cfoBriefings';
 import reviewItemsRouter from './routes/reviewItems';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
@@ -318,12 +316,6 @@ export const gatedRoutes: RouteEntry[] = [
     why: 'Full user data export (issue #302). Specific /api/me prefix (NOT a bare-/api catch-all): exposes /export[s] and /export/:id[/download], user-scoped via currentAuth. Download is HMAC-signed so a URL issued to one user cannot be replayed by another.',
   },
   { paths: '/api/reports', handlers: [reportsRouter] },
-  {
-    paths: '/api/ai',
-    handlers: [aiReviewRouter],
-    why: 'AI review router (issue #210) mounted BEFORE aiRouter so its /review and /reviews/* paths win against any future overlap. Both share the /api/ai prefix to satisfy the issue endpoint spec.',
-  },
-  { paths: '/api/cfo', handlers: [cfoBriefingsRouter], why: 'Personal CFO briefings (issue #236).' },
   {
     paths: '/api/review-items',
     handlers: [reviewItemsRouter],

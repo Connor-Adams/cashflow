@@ -3,6 +3,8 @@
 Date: 2026-09-08
 Status: proposed
 
+> **2026-10 update:** the CFO briefing and AI review features were removed end to end (routes, builders, runner, the `cfo-briefing` / `ai-review` inbox sources). The `cfo_briefings` / `ai_review_runs` tables remain pending a drop migration. Briefing/review content below is historical.
+
 ## Problem
 
 Three user-facing AI surfaces underperform: the CFO briefing reads as a to-do

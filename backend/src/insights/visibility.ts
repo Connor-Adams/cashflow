@@ -19,7 +19,6 @@ import type { WhereOptions } from 'sequelize';
 import { Transaction } from '../models';
 import { isSuperadmin } from '../auth/scope';
 import { currentAuth } from '../auth/middleware';
-import { supportingIdsFromMetadata } from './toActionItems';
 
 /** The subset of an `Insight` needed to resolve its backing transactions. */
 export type InsightVisibilityFields = {
@@ -29,12 +28,24 @@ export type InsightVisibilityFields = {
 };
 
 /**
+ * Several detectors put the transactions behind a finding in
+ * `metadata.transactionIds` (see detectDuplicateTransactions). Anything else
+ * yields an empty list rather than a partial one.
+ */
+export function supportingIdsFromMetadata(metadata: unknown): number[] {
+  if (metadata == null || typeof metadata !== 'object') return [];
+  const raw = (metadata as { transactionIds?: unknown }).transactionIds;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+}
+
+/**
  * The transaction ids an insight is derived from — the union of the two places
  * detectors record them:
  *
  * - `entityType === 'transaction'` → `entityId` (e.g. detectMissingReceipt)
  * - `metadata.transactionIds` (e.g. detectDuplicateTransactions), read with
- *   the existing {@link supportingIdsFromMetadata}
+ *   {@link supportingIdsFromMetadata}
  *
  * An empty list means the insight is a household-level fact (cash_runway_low,
  * settlement_imbalance) with no single transaction behind it.

@@ -1,9 +1,8 @@
 /**
  * Integration tests for GET /api/review-items (issue #378).
  *
- * The unified read endpoint fans out across the four review-item sources
- * (AiSuggestion, AiReviewRun action items, CfoBriefing action items,
- * ChatProposal) and normalizes them into a common shape. Writes stay
+ * The unified read endpoint fans out across the review-item sources
+ * (AiSuggestion, ChatProposal) and normalizes them into a common shape. Writes stay
  * per-source — this endpoint is read-only.
  *
  * Runs in isolation (`yarn test:integration`) against a per-file Postgres
@@ -60,10 +59,10 @@ async function seed(emailPrefix: string): Promise<Seeded> {
 }
 
 /**
- * Seed exactly one item of each of the four sources for a household/user, with
+ * Seed exactly one item of each source for a household/user, with
  * monotonically increasing createdAt so the merge order is deterministic.
- * Order of creation (oldest → newest): ai-suggestion, ai-review, cfo-briefing,
- * chat-proposal — so chat-proposal must come first in the desc-sorted result.
+ * Order of creation (oldest → newest): ai-suggestion, chat-proposal — so
+ * chat-proposal must come first in the desc-sorted result.
  */
 async function seedAllSources(householdId: number, userId: number): Promise<void> {
   const models = await import('../../src/models');
@@ -83,59 +82,6 @@ async function seedAllSources(householdId: number, userId: number): Promise<void
     output: { headline: 'Spending up 20%' },
     createdAt: new Date('2026-05-01T00:00:00Z'),
     updatedAt: new Date('2026-05-01T00:00:00Z'),
-  } as never);
-
-  await models.AiReviewRun.create({
-    householdId,
-    userId,
-    periodStart: '2026-04-01',
-    periodEnd: '2026-04-30',
-    currency: 'CAD',
-    status: 'completed',
-    summary: 'review',
-    actionItems: [
-      {
-        id: 'rev-item-1',
-        type: 'subscription',
-        refType: 'transaction',
-        refId: 999,
-        severity: 'watch',
-        title: 'Netflix recurring',
-        summary: 'Looks like a subscription',
-        status: 'suggested',
-      },
-    ],
-    model: 'deterministic',
-    promptVersion: 'ai-review-v1',
-    createdAt: new Date('2026-05-02T00:00:00Z'),
-    updatedAt: new Date('2026-05-02T00:00:00Z'),
-  } as never);
-
-  await models.CfoBriefing.create({
-    householdId,
-    userId,
-    periodStart: '2026-05-01',
-    periodEnd: '2026-05-07',
-    currency: 'CAD',
-    status: 'completed',
-    summary: 'briefing',
-    actionItems: [
-      {
-        id: 'brief-item-1',
-        type: 'safe_to_spend_low',
-        refType: 'subscription',
-        refId: 12,
-        severity: 'action',
-        title: 'Safe-to-spend low',
-        summary: 'Careful this week',
-        status: 'open',
-      },
-    ],
-    safeToSpendSnapshot: null,
-    model: 'deterministic',
-    promptVersion: 'cfo-briefing-v1',
-    createdAt: new Date('2026-05-03T00:00:00Z'),
-    updatedAt: new Date('2026-05-03T00:00:00Z'),
   } as never);
 
   const thread = await models.ChatThread.create({
@@ -226,10 +172,10 @@ test('GET /api/review-items returns one normalized item per source, all pending,
   assert.equal(r.status, 200);
   const body = r.body as ListResponse;
   assert.ok(Array.isArray(body.data), 'data must be an array');
-  assert.equal(body.data.length, 4, `expected 4 items, got ${body.data.length}`);
+  assert.equal(body.data.length, 2, `expected 2 items, got ${body.data.length}`);
 
   const sources = body.data.map((i) => i.source).sort();
-  assert.deepEqual(sources, ['ai-review', 'ai-suggestion', 'cfo-briefing', 'chat-proposal']);
+  assert.deepEqual(sources, ['ai-suggestion', 'chat-proposal']);
 
   for (const item of body.data) {
     assert.equal(item.status_common, 'pending');
@@ -237,7 +183,7 @@ test('GET /api/review-items returns one normalized item per source, all pending,
     assert.ok(item.resolved_at == null, 'pending items have null resolved_at');
   }
 
-  // created_at desc: chat-proposal (05-04) >= cfo-briefing (05-03) >= ai-review (05-02) >= ai-suggestion (05-01)
+  // created_at desc: chat-proposal (05-04) >= ai-suggestion (05-01)
   for (let i = 1; i < body.data.length; i++) {
     assert.ok(
       body.data[i - 1].created_at >= body.data[i].created_at,
@@ -251,18 +197,6 @@ test('GET /api/review-items normalizes per-source subject + payload correctly', 
   const r = await primaryAgent.get('/api/review-items');
   const bySource = new Map((r.body as ListResponse).data.map((i) => [i.source, i]));
 
-  const review = bySource.get('ai-review')!;
-  assert.ok(review.id.endsWith(':rev-item-1'), `review id should end with item id: ${review.id}`);
-  assert.equal(review.subject_type, 'transaction');
-  assert.equal(review.subject_id, '999');
-  assert.equal(review.native_status, 'suggested');
-
-  const briefing = bySource.get('cfo-briefing')!;
-  assert.ok(briefing.id.endsWith(':brief-item-1'));
-  assert.equal(briefing.subject_type, 'subscription');
-  assert.equal(briefing.subject_id, '12');
-  assert.equal(briefing.native_status, 'open');
-
   const chat = bySource.get('chat-proposal')!;
   assert.equal(chat.subject_type, 'chat-message');
   assert.equal(chat.native_status, 'pending');
@@ -273,12 +207,19 @@ test('GET /api/review-items normalizes per-source subject + payload correctly', 
   assert.equal(suggestion.native_status, 'suggested');
 });
 
-test('GET /api/review-items?source=ai-review returns only that source', async () => {
-  const r = await primaryAgent.get('/api/review-items').query({ source: 'ai-review' });
+test('GET /api/review-items?source=chat-proposal returns only that source', async () => {
+  const r = await primaryAgent.get('/api/review-items').query({ source: 'chat-proposal' });
   assert.equal(r.status, 200);
   const data = (r.body as ListResponse).data;
   assert.equal(data.length, 1);
-  assert.equal(data[0].source, 'ai-review');
+  assert.equal(data[0].source, 'chat-proposal');
+});
+
+test('GET /api/review-items ignores the removed ai-review/cfo-briefing sources like any unknown value', async () => {
+  const r = await primaryAgent.get('/api/review-items').query({ source: 'ai-review,cfo-briefing' });
+  assert.equal(r.status, 200);
+  const sources = (r.body as ListResponse).data.map((i) => i.source).sort();
+  assert.deepEqual(sources, ['ai-suggestion', 'chat-proposal']);
 });
 
 test('GET /api/review-items?source=ai-suggestion,chat-proposal returns the two', async () => {
@@ -296,10 +237,10 @@ test('GET /api/review-items?status=resolved returns none (all seeded items are p
   assert.equal((r.body as ListResponse).data.length, 0);
 });
 
-test('GET /api/review-items?status=pending,resolved still returns the four pending items', async () => {
+test('GET /api/review-items?status=pending,resolved still returns the two pending items', async () => {
   const r = await primaryAgent.get('/api/review-items').query({ status: 'pending,resolved' });
   assert.equal(r.status, 200);
-  assert.equal((r.body as ListResponse).data.length, 4);
+  assert.equal((r.body as ListResponse).data.length, 2);
 });
 
 test('GET /api/review-items is household/user scoped — other household sees nothing', async () => {
@@ -309,18 +250,18 @@ test('GET /api/review-items is household/user scoped — other household sees no
 });
 
 test('GET /api/review-items paginates with limit + cursor', async () => {
-  const first = await primaryAgent.get('/api/review-items').query({ limit: 2 });
+  const first = await primaryAgent.get('/api/review-items').query({ limit: 1 });
   assert.equal(first.status, 200);
   const firstBody = first.body as ListResponse;
-  assert.equal(firstBody.data.length, 2);
+  assert.equal(firstBody.data.length, 1);
   assert.ok(firstBody.nextCursor, 'expected a nextCursor when more remain');
 
   const second = await primaryAgent
     .get('/api/review-items')
-    .query({ limit: 2, cursor: firstBody.nextCursor });
+    .query({ limit: 1, cursor: firstBody.nextCursor });
   assert.equal(second.status, 200);
   const secondBody = second.body as ListResponse;
-  assert.equal(secondBody.data.length, 2);
+  assert.equal(secondBody.data.length, 1);
   assert.equal(secondBody.nextCursor, null, 'no more pages after the last item');
 
   // No overlap between pages.
@@ -333,7 +274,7 @@ test('GET /api/review-items paginates with limit + cursor', async () => {
 test('GET /api/review-items rejects limit over the max with a clamp (returns <=200)', async () => {
   const r = await primaryAgent.get('/api/review-items').query({ limit: 9999 });
   assert.equal(r.status, 200);
-  // Only 4 items exist; the clamp is exercised by the route, asserted indirectly.
+  // Only 2 items exist; the clamp is exercised by the route, asserted indirectly.
   assert.ok((r.body as ListResponse).data.length <= 200);
 });
 

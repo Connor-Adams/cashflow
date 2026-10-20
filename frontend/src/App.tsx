@@ -210,7 +210,9 @@ function AppRoutes() {
           <Route path="enrichment" element={<EnrichmentTab />} />
           {/* Unified review-items inbox (issue #378) replaces the separate AI
               inbox / AI reviews / CFO briefings list surfaces. Old routes
-              redirect, preselecting the matching saved view. */}
+              redirect, preselecting the matching saved view where one still
+              exists (AI reviews and CFO briefings were removed, so their old
+              bookmarks land on the plain inbox). */}
           <Route path="inbox" element={<InboxLayout />}>
             <Route index element={<InboxIndexRoute />} />
             <Route path="review" element={<ReviewInboxPage />} />
@@ -222,11 +224,11 @@ function AppRoutes() {
           />
           <Route
             path="ai/reviews"
-            element={<Navigate to="/inbox?view=review-queue-pending" replace />}
+            element={<Navigate to="/inbox" replace />}
           />
           <Route
             path="cfo/briefings"
-            element={<Navigate to="/inbox?view=cfo-briefings-pending" replace />}
+            element={<Navigate to="/inbox" replace />}
           />
           <Route path="insights" element={<Navigate to="/inbox/insights" replace />} />
           <Route path="chat" element={<ChatPage />} />

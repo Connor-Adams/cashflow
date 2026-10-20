@@ -9,6 +9,12 @@ import {
 } from 'sequelize';
 
 /**
+ * RETIRED: the AI review feature (routes, runner, inbox source) was removed.
+ * The model stays registered only because the `ai_review_runs` table still
+ * exists; nothing reads or writes it. Drop the model with the table.
+ */
+
+/**
  * AI finance review status. STRING(32) so we can add async states
  * (e.g. 'queued', 'in_progress') later without a destructive migration.
  */
@@ -40,12 +46,6 @@ export type AiReviewActionItemRefType =
 
 export type AiReviewActionItemStatus = 'suggested' | 'accepted' | 'dismissed';
 
-export const AI_REVIEW_ACTION_ITEM_STATUSES: readonly AiReviewActionItemStatus[] = [
-  'suggested',
-  'accepted',
-  'dismissed',
-] as const;
-
 export type AiReviewActionItemSeverity = 'info' | 'watch' | 'action';
 
 /**
@@ -63,12 +63,7 @@ export interface AiReviewActionItem {
   title: string;
   summary: string;
   status: AiReviewActionItemStatus;
-  /**
-   * Optional supporting transaction ids. Populated from `Insight.metadata`
-   * (e.g. `metadata.transactionIds`) via `insightToActionItem` in
-   * `backend/src/insights/toActionItems.ts`, which owns the mapping from
-   * detector `Insight` rows onto this shape.
-   */
+  /** Optional supporting transaction ids (from `Insight.metadata.transactionIds`). */
   supportingTransactionIds?: number[];
   /** Optional rationale string for transparency. */
   rationale?: string;

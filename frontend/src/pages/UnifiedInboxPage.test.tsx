@@ -29,42 +29,6 @@ const SAMPLE: ReviewItem[] = [
     resolved_at: null,
   },
   {
-    id: 'cfo-briefing:200:brief-item-1',
-    source: 'cfo-briefing',
-    subject_type: 'subscription',
-    subject_id: '12',
-    payload: {
-      id: 'brief-item-1',
-      type: 'safe_to_spend_low',
-      title: 'Safe-to-spend low',
-      summary: 'Careful this week',
-      severity: 'action',
-      runId: 200,
-    },
-    status_common: 'pending',
-    native_status: 'open',
-    created_at: '2026-05-03T00:00:00Z',
-    resolved_at: null,
-  },
-  {
-    id: 'ai-review:100:rev-item-1',
-    source: 'ai-review',
-    subject_type: 'transaction',
-    subject_id: '999',
-    payload: {
-      id: 'rev-item-1',
-      type: 'subscription',
-      title: 'Netflix recurring',
-      summary: 'Looks like a subscription',
-      severity: 'watch',
-      runId: 100,
-    },
-    status_common: 'pending',
-    native_status: 'suggested',
-    created_at: '2026-05-02T00:00:00Z',
-    resolved_at: null,
-  },
-  {
     id: 'ai-suggestion:7',
     source: 'ai-suggestion',
     subject_type: null,
@@ -152,10 +116,8 @@ describe('UnifiedInboxPage', () => {
         <UnifiedInboxPage />
       </MemoryRouter>,
     )
-    // Source-specific payload titles / summaries render.
-    await waitFor(() => screen.getByText('Netflix recurring'))
-    expect(screen.getByText('Safe-to-spend low')).toBeTruthy()
-    expect(screen.getByText(/Spending up 20%/)).toBeTruthy()
+    // Source-specific payload headlines render.
+    await waitFor(() => screen.getByText(/Spending up 20%/))
     // chat-proposal card renders its kind.
     expect(screen.getByText(/bulk_patch/i)).toBeTruthy()
   })
@@ -192,16 +154,28 @@ describe('UnifiedInboxPage', () => {
         <UnifiedInboxPage />
       </MemoryRouter>,
     )
-    await waitFor(() => screen.getByText('Netflix recurring'))
+    await waitFor(() => screen.getByText(/Spending up 20%/))
     const sourceSelect = screen.getByLabelText(/Filter by source/i)
-    fireEvent.change(sourceSelect, { target: { value: 'ai-review' } })
+    fireEvent.change(sourceSelect, { target: { value: 'chat-proposal' } })
     await waitFor(() => {
       const last = urls[urls.length - 1]
-      expect(last).toContain('source=ai-review')
+      expect(last).toContain('source=chat-proposal')
     })
-    // Only the ai-review card remains.
-    await waitFor(() => expect(screen.queryByText('Safe-to-spend low')).toBeNull())
-    expect(screen.getByText('Netflix recurring')).toBeTruthy()
+    // Only the chat-proposal card remains.
+    await waitFor(() => expect(screen.queryByText(/Spending up 20%/)).toBeNull())
+    expect(screen.getByText(/bulk_patch/i)).toBeTruthy()
+  })
+
+  it('offers only the live sources in the source dropdown', async () => {
+    mockReviewItems(SAMPLE)
+    render(
+      <MemoryRouter>
+        <UnifiedInboxPage />
+      </MemoryRouter>,
+    )
+    const sourceSelect = (await screen.findByLabelText(/Filter by source/i)) as HTMLSelectElement
+    const values = Array.from(sourceSelect.options).map((o) => o.value)
+    expect(values).toEqual(['all', 'ai-suggestion', 'chat-proposal'])
   })
 
   it('selecting a status in the dropdown refetches scoped to that status', async () => {
@@ -211,7 +185,7 @@ describe('UnifiedInboxPage', () => {
         <UnifiedInboxPage />
       </MemoryRouter>,
     )
-    await waitFor(() => screen.getByText('Netflix recurring'))
+    await waitFor(() => screen.getByText(/Spending up 20%/))
     const statusSelect = screen.getByLabelText(/Filter by status/i)
     fireEvent.change(statusSelect, { target: { value: 'resolved' } })
     await waitFor(() => {
@@ -227,7 +201,7 @@ describe('UnifiedInboxPage', () => {
         <UnifiedInboxPage />
       </MemoryRouter>,
     )
-    await waitFor(() => screen.getByText('Netflix recurring'))
+    await waitFor(() => screen.getByText(/Spending up 20%/))
     expect(screen.queryByRole('button', { name: /AI suggestions \(pending\)/i })).toBeNull()
     expect(screen.queryByRole('button', { name: /All resolved \(last 30 days\)/i })).toBeNull()
   })
@@ -247,6 +221,23 @@ describe('UnifiedInboxPage', () => {
     window.history.pushState({}, '', '/')
   })
 
+  it.each(['cfo-briefings-pending', 'review-queue-pending'])(
+    'a stale ?view=%s deep link (removed saved view) falls back to the default filters',
+    async (view) => {
+      window.history.pushState({}, '', `/inbox?view=${view}`)
+      const { urls } = mockReviewItems(SAMPLE)
+      render(
+        <MemoryRouter>
+          <UnifiedInboxPage />
+        </MemoryRouter>,
+      )
+      await waitFor(() => expect(urls.length).toBeGreaterThan(0))
+      expect(urls[0]).toContain('status=pending')
+      expect(urls[0]).not.toContain('source=')
+      window.history.pushState({}, '', '/')
+    },
+  )
+
   it('forwards the legacy ?view=insights deep link to the Insights tab', async () => {
     window.history.pushState({}, '', '/inbox?view=insights')
     const { urls } = mockReviewItems(SAMPLE)
@@ -262,38 +253,6 @@ describe('UnifiedInboxPage', () => {
     // Insights are not review items — no /api/review-items fetch for this view.
     expect(urls.length).toBe(0)
     window.history.pushState({}, '', '/')
-  })
-
-  it('clicking accept on an ai-review card POSTs to the per-source accept endpoint', async () => {
-    const postSpy = vi.fn()
-    vi.spyOn(globalThis, 'fetch').mockImplementation(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = typeof input === 'string' ? input : input.toString()
-        const method = init?.method ?? 'GET'
-        if (method === 'GET' && url.includes('/api/review-items')) {
-          return new Response(
-            JSON.stringify({ data: [SAMPLE[2]], nextCursor: null }),
-            { status: 200 },
-          )
-        }
-        if (method === 'POST') {
-          postSpy(url)
-          return new Response(JSON.stringify({ ok: true }), { status: 200 })
-        }
-        return new Response('not found', { status: 404 })
-      },
-    )
-    render(
-      <MemoryRouter>
-        <UnifiedInboxPage />
-      </MemoryRouter>,
-    )
-    const acceptBtn = await waitFor(() => screen.getByRole('button', { name: /^Accept$/i }))
-    fireEvent.click(acceptBtn)
-    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1))
-    expect(String(postSpy.mock.calls[0][0])).toContain(
-      '/api/ai/reviews/100/items/rev-item-1/accept',
-    )
   })
 
   it('counterparty_email_match: renders candidate name and Accept POSTs to interac accept endpoint', async () => {
@@ -420,144 +379,5 @@ describe('UnifiedInboxPage', () => {
     fireEvent.click(applyBtn)
     await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1))
     expect(String(postSpy.mock.calls[0][0])).toContain('/api/chat/proposals/3/apply')
-  })
-
-  describe('CFO briefing narrative header', () => {
-    it('renders the run narrative once above its items, not repeated on every card', async () => {
-      const runNarrative = 'Two things need your attention this week.'
-      const items: ReviewItem[] = [
-        {
-          id: 'cfo-briefing:200:b1',
-          source: 'cfo-briefing',
-          subject_type: 'subscription',
-          subject_id: '12',
-          payload: {
-            id: 'b1',
-            title: 'Safe-to-spend low',
-            summary: 'Careful this week',
-            severity: 'action',
-            runId: 200,
-            runSummary: runNarrative,
-          },
-          status_common: 'pending',
-          native_status: 'open',
-          created_at: '2026-05-03T00:00:00Z',
-          resolved_at: null,
-        },
-        {
-          id: 'cfo-briefing:200:b2',
-          source: 'cfo-briefing',
-          subject_type: 'import',
-          subject_id: '9',
-          payload: {
-            id: 'b2',
-            title: 'Import stuck',
-            summary: 'Fix it',
-            severity: 'watch',
-            runId: 200,
-            runSummary: runNarrative,
-          },
-          status_common: 'pending',
-          native_status: 'open',
-          created_at: '2026-05-03T00:00:00Z',
-          resolved_at: null,
-        },
-      ]
-      mockReviewItems(items)
-      render(
-        <MemoryRouter>
-          <UnifiedInboxPage />
-        </MemoryRouter>,
-      )
-      await waitFor(() => screen.getByText('Safe-to-spend low'))
-      expect(screen.getByText('Import stuck')).toBeTruthy()
-      // Narrative text appears exactly once, even though two items share the run.
-      expect(screen.getAllByText(runNarrative)).toHaveLength(1)
-    })
-
-    it('a run without a narrative (summary null) renders cleanly with no empty header', async () => {
-      const items: ReviewItem[] = [
-        {
-          id: 'cfo-briefing:201:c1',
-          source: 'cfo-briefing',
-          subject_type: 'subscription',
-          subject_id: '5',
-          payload: {
-            id: 'c1',
-            title: 'Low safe-to-spend',
-            summary: 'careful',
-            severity: 'action',
-            runId: 201,
-            runSummary: null,
-          },
-          status_common: 'pending',
-          native_status: 'open',
-          created_at: '2026-05-04T00:00:00Z',
-          resolved_at: null,
-        },
-      ]
-      mockReviewItems(items)
-      render(
-        <MemoryRouter>
-          <UnifiedInboxPage />
-        </MemoryRouter>,
-      )
-      await waitFor(() => screen.getByText('Low safe-to-spend'))
-      // No Alert/header element rendered — only the item's own card content.
-      expect(screen.queryByText('CFO briefing')).toBeNull()
-    })
-
-    it('renders each run under its own narrative when two briefing runs appear in one list', async () => {
-      const firstNarrative = 'First run needs attention.'
-      const secondNarrative = 'Second run needs attention.'
-      const items: ReviewItem[] = [
-        {
-          id: 'cfo-briefing:300:x1',
-          source: 'cfo-briefing',
-          subject_type: null,
-          subject_id: null,
-          payload: {
-            id: 'x1',
-            title: 'Newer run item',
-            summary: 's',
-            severity: 'info',
-            runId: 300,
-            runSummary: secondNarrative,
-          },
-          status_common: 'pending',
-          native_status: 'open',
-          created_at: '2026-05-05T00:00:00Z',
-          resolved_at: null,
-        },
-        {
-          id: 'cfo-briefing:200:y1',
-          source: 'cfo-briefing',
-          subject_type: null,
-          subject_id: null,
-          payload: {
-            id: 'y1',
-            title: 'Older run item',
-            summary: 's',
-            severity: 'info',
-            runId: 200,
-            runSummary: firstNarrative,
-          },
-          status_common: 'pending',
-          native_status: 'open',
-          created_at: '2026-05-03T00:00:00Z',
-          resolved_at: null,
-        },
-      ]
-      mockReviewItems(items)
-      render(
-        <MemoryRouter>
-          <UnifiedInboxPage />
-        </MemoryRouter>,
-      )
-      await waitFor(() => screen.getByText('Newer run item'))
-      expect(screen.getByText('Older run item')).toBeTruthy()
-      expect(screen.getByText(firstNarrative)).toBeTruthy()
-      expect(screen.getByText(secondNarrative)).toBeTruthy()
-    })
   })
 })
