@@ -19,7 +19,10 @@ import { defineJob } from '../registry';
 import * as env from '../../config/env';
 import { logger } from '../../observability/logger';
 import { User } from '../../models';
-import { runWeeklyDigest } from '../../notifications/runWeeklyDigest';
+import {
+  runWeeklyDigest,
+  weeklyDigestSkipReason,
+} from '../../notifications/runWeeklyDigest';
 
 defineJob({
   name: 'weekly_digest',
@@ -50,6 +53,7 @@ defineJob({
         skippedNoHistory: result.skippedNoHistory,
         skippedMuted: result.skippedMuted,
         skippedWrongDay: result.skippedWrongDay,
+        emailSkippedNotConfigured: result.emailSkippedNotConfigured,
         errors: result.errors,
       },
       'weekly_digest_run',
@@ -65,9 +69,13 @@ defineJob({
         skippedMuted: result.skippedMuted,
         skippedWrongDay: result.skippedWrongDay,
         emailFailures: result.emailFailures,
+        emailSkippedNotConfigured: result.emailSkippedNotConfigured,
         pushFailures: result.pushFailures,
         errors: result.errors,
       },
+      // Email requested but no mailer configured → run recorded as skipped
+      // with the reason (not a failure, never pages).
+      skipped: weeklyDigestSkipReason(result),
     };
   },
 });

@@ -70,8 +70,8 @@ import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
 import { ReimbursementsPage } from './pages/ReimbursementsPage'
 import { PeopleLedgerPage } from './pages/PeopleLedgerPage'
 import { LargePurchasesPage } from './pages/LargePurchasesPage'
-import { UnifiedInboxPage } from './pages/UnifiedInboxPage'
-// InsightsPage kept on disk — route redirects to /inbox?view=insights (Phase 1 IA cleanup)
+import { InboxIndexRoute } from './pages/UnifiedInboxPage'
+import { InsightsPage } from './pages/InsightsPage'
 import { ChatPage } from './pages/ChatPage'
 import { SearchPage } from './pages/SearchPage'
 import { VaultPage } from './pages/VaultPage'
@@ -212,8 +212,9 @@ function AppRoutes() {
               inbox / AI reviews / CFO briefings list surfaces. Old routes
               redirect, preselecting the matching saved view. */}
           <Route path="inbox" element={<InboxLayout />}>
-            <Route index element={<UnifiedInboxPage />} />
+            <Route index element={<InboxIndexRoute />} />
             <Route path="review" element={<ReviewInboxPage />} />
+            <Route path="insights" element={<InsightsPage />} />
           </Route>
           <Route
             path="ai/inbox"
@@ -227,7 +228,7 @@ function AppRoutes() {
             path="cfo/briefings"
             element={<Navigate to="/inbox?view=cfo-briefings-pending" replace />}
           />
-          <Route path="insights" element={<Navigate to="/inbox?view=insights" replace />} />
+          <Route path="insights" element={<Navigate to="/inbox/insights" replace />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="ask" element={<Navigate to="/chat" replace />} />
           <Route path="search" element={<Navigate to="/transactions/search" replace />} />

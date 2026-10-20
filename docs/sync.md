@@ -73,10 +73,20 @@ household-id parameter.
 | POST   | `/api/sync/restore`        | Apply bundle to the active household.         |
 | GET    | `/api/sync/history`        | List past backup + restore events.            |
 
-The restore endpoint accepts `mode: 'merge' | 'replace'`. **Merge** is
-the safe default — it refuses if the target household already has rows
-in any V1 table. **Replace** wipes the V1 tables for the target
-household before inserting; intended for "I just made a fresh install".
+Restore is **merge-only**: it refuses if the target household already
+has rows in any V1 table, so a bundle can only be restored into an empty
+household (e.g. a fresh install). `mode` is optional; the only accepted
+value is `'merge'`. Any other value is rejected with `400`.
+
+There used to be a **Replace** mode that wiped the V1 tables for the
+household before inserting. It was removed, and `mode: 'replace'` now
+returns `400` so an old client cannot trigger it. Deleting `transactions`
+(and `accounts`, `categories`, ...) `ON DELETE CASCADE`s into receipts,
+`transaction_order_links`, `transaction_labels`, purchases,
+reimbursements, tax/return metadata, budget exclusions, signals, AI
+suggestions, large-purchase reviews and revisions, and wiping accounts
+cascades into investment activity and holdings snapshots. None of those
+are in the bundle, so a replace destroyed data it could never restore.
 
 ## V1 table set
 
@@ -119,7 +129,7 @@ use:
 
 1. **Delta-only bundles** — `BundlePayload.tables` already keys by table
    name. A future sync engine can ship a per-row HMAC alongside each
-   row and let the receiver merge by row id instead of wiping. This is
+   row and let the receiver merge by row id instead of refusing. This is
    where the next `schemaVersion` rotation lands.
 2. **Server-side blob store** — once `receipts` enter the bundle, the
    row metadata + the binary itself can live in S3-compatible storage
@@ -129,9 +139,9 @@ use:
    metadata per (household, user, kind, created_at). A future cloud
    agent records a `kind: 'cloud_sync_push'` row with `user_id = NULL`
    to flag automated work.
-4. **Conflict resolution** — V1 takes a hard line: merge mode refuses,
-   replace mode wipes. The cloud-sync follow-up will need a per-row
-   conflict policy (last-write-wins keyed by `updated_at`, or
+4. **Conflict resolution** — V1 takes a hard line: restore refuses any
+   non-empty household and never deletes. The cloud-sync follow-up will
+   need a per-row conflict policy (last-write-wins keyed by `updated_at`, or
    user-supplied "keep mine / take theirs"). Where this lands: a new
    `applyMerge()` function alongside `restoreBundle()` in
    `backend/src/sync/`.
@@ -142,8 +152,13 @@ use:
   wrong-passphrase, version, schemaVersion checks.
 - `backend/src/migrations/__tests__/syncBackupsMigration.test.ts` — schema +
   index + down-migration.
+- `backend/src/routes/sync.restoreMode.test.ts` — restore is merge-only:
+  `mode=replace` and unknown modes are 400 and write nothing; merge into
+  an empty household succeeds.
+- `backend/src/sync/restoreBundleTransactionLinks.test.ts` — transfer /
+  refund links are remapped to the restored rows' new ids.
 - `backend/test/integration/sync.test.ts` — end-to-end via the API:
-  encrypt → preview → restore, merge-refuses, replace-succeeds,
+  encrypt → preview → restore, merge-refuses, replace-rejected,
   cross-household isolation, history listing, 401 on unauthenticated.
 
 ## Security caveats

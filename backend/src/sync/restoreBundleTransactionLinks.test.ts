@@ -126,34 +126,7 @@ test('merge restore rewrites linked_transaction_id to the new ids of both legs',
   const payload = await buildBundle(sequelize, { householdId: sourceHouseholdId, origin: 'test' });
 
   const target = await Household.create({ name: 'Target' });
-  await restoreBundle(sequelize, payload, { householdId: target.id, mode: 'merge' });
+  await restoreBundle(sequelize, payload, { householdId: target.id });
 
   await assertLinksRestored(target.id, outIds);
-});
-
-test('replace restore rewrites linked_transaction_id to the new ids of both legs', async () => {
-  const { sourceHouseholdId, outIds } = await seedSource();
-  const payload = await buildBundle(sequelize, { householdId: sourceHouseholdId, origin: 'test' });
-
-  // Target already holds live data that replace mode must wipe first.
-  const target = await Household.create({ name: 'Target' });
-  const live = await Account.create({ name: 'Live', owner: 'me', householdId: target.id });
-  await seedTxn(live.id, target.id, 'STALE', '-1.0000');
-
-  await restoreBundle(sequelize, payload, { householdId: target.id, mode: 'replace' });
-
-  const merchants = (await Transaction.findAll({ where: { householdId: target.id } })).map(
-    (r) => r.merchantRaw,
-  );
-  assert.ok(!merchants.includes('STALE'), 'replace wiped the stale live row');
-  await assertLinksRestored(target.id, outIds);
-});
-
-test('replace restore over the SAME household re-links the pair to the new ids', async () => {
-  const { sourceHouseholdId, outIds } = await seedSource();
-  const payload = await buildBundle(sequelize, { householdId: sourceHouseholdId, origin: 'test' });
-
-  await restoreBundle(sequelize, payload, { householdId: sourceHouseholdId, mode: 'replace' });
-
-  await assertLinksRestored(sourceHouseholdId, outIds);
 });

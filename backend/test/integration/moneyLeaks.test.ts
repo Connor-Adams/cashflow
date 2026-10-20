@@ -148,7 +148,8 @@ async function seedSubscription(args: {
       entityId: pe.id,
       status: 'open',
       fingerprint: `subscription_price_increase:${pe.id}:1899`,
-      metadata: { newAmountCents: 1899 },
+      // Baseline 15.99 -> 18.99: the leak counts only the 3.00/charge excess.
+      metadata: { previousAmountCents: 1599, newAmountCents: 1899 },
       detectedAt: new Date(),
     });
   }
@@ -261,8 +262,10 @@ test('GET /api/money-leaks surfaces subscription_price_increase from an open Ins
   const priceLeaks = items.filter((i) => i.leakType === 'subscription_price_increase');
   assert.equal(priceLeaks.length, 1);
   assert.equal(priceLeaks[0].currency, 'CAD');
-  // 18.99 * 12 = 227.88
-  assert.equal(Number(priceLeaks[0].annualImpact.toFixed(2)), 227.88);
+  // Only the increase counts: (18.99 - 15.99) * 12 = 36.00 — not the full
+  // 227.88/yr cost of the subscription.
+  assert.equal(Number(priceLeaks[0].annualImpact.toFixed(2)), 36);
+  assert.equal(Number(priceLeaks[0].monthlyImpact.toFixed(2)), 3);
   // Totals should include this leak.
   assert.equal(res.body.totals.byCurrency.length >= 1, true);
 });

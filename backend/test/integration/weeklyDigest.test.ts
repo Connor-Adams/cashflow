@@ -8,7 +8,9 @@
  * Coverage:
  *   - User with no transactions is skipped (AC #11).
  *   - User with channelInApp=true gets an in-app row written.
- *   - User with channelEmail=true gets the recorded noop mailer driver hit.
+ *   - User with channelEmail=true gets the recording (delivering) mailer driver hit.
+ *     (The real noop driver reports `skipped` — covered by the colocated unit
+ *     test `src/notifications/runWeeklyDigest.test.ts`.)
  *   - User with both channels off is skipped (AC #3 / muted contract).
  *   - Per-user failure does not block other users (AC #9).
  *   - `last_digest_sent_at` updated only on success (AC #10).
@@ -25,8 +27,15 @@ let models: any;
 let runWeeklyDigest: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let setMailerDriverForTest: any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let NoopMailerDriver: any;
+
+/** Stands in for a configured transport: records each send and succeeds. */
+class RecordingMailerDriver {
+  name = 'recording';
+  sent: Array<{ to: string; subject: string; html: string; text: string }> = [];
+  async send(opts: { to: string; subject: string; html: string; text: string }): Promise<void> {
+    this.sent.push(opts);
+  }
+}
 
 before(async () => {
   process.env.NODE_ENV = 'test';
@@ -40,7 +49,6 @@ before(async () => {
   runWeeklyDigest = orch.runWeeklyDigest;
   const mailer = await import('../../src/notifications/mailer');
   setMailerDriverForTest = mailer.setMailerDriverForTest;
-  NoopMailerDriver = mailer.NoopMailerDriver;
 });
 
 after(async () => {
@@ -126,7 +134,7 @@ test('runWeeklyDigest: skips user with no transactions (AC #11)', async () => {
     email: 'nohist@example.com',
     displayName: 'No History',
   });
-  setMailerDriverForTest(new NoopMailerDriver());
+  setMailerDriverForTest(new RecordingMailerDriver());
   const result = await runWeeklyDigest([user], thisMondayUTC());
   assert.equal(result.skippedNoHistory, 1);
   assert.equal(result.processed, 0);
@@ -149,7 +157,7 @@ test('runWeeklyDigest: skips user with all channels muted', async () => {
     channelInApp: false,
     channelEmail: false,
   });
-  setMailerDriverForTest(new NoopMailerDriver());
+  setMailerDriverForTest(new RecordingMailerDriver());
   const result = await runWeeklyDigest([user], thisMondayUTC());
   assert.equal(result.skippedMuted, 1);
   assert.equal(result.wroteInApp, 0);
@@ -169,7 +177,7 @@ test('runWeeklyDigest: writes in-app row when channelInApp=true (default)', asyn
   // Prior week: more spend
   await seedTxn(accountId, householdId, '2026-05-19', '-200.00', 'Groceries', 'Mart');
 
-  setMailerDriverForTest(new NoopMailerDriver());
+  setMailerDriverForTest(new RecordingMailerDriver());
   const result = await runWeeklyDigest([user], thisMondayUTC());
 
   assert.equal(result.processed, 1);
@@ -201,7 +209,7 @@ test('runWeeklyDigest: sends email when channelEmail=true', async () => {
     channelEmail: true,
   });
 
-  const noop = new NoopMailerDriver();
+  const noop = new RecordingMailerDriver();
   setMailerDriverForTest(noop);
   const result = await runWeeklyDigest([user], thisMondayUTC());
 
@@ -227,7 +235,7 @@ test('runWeeklyDigest: empty week with email-only enabled skips in-app, sends em
     channelEmail: true,
   });
 
-  const noop = new NoopMailerDriver();
+  const noop = new RecordingMailerDriver();
   setMailerDriverForTest(noop);
   const result = await runWeeklyDigest([user], thisMondayUTC());
 
@@ -362,7 +370,7 @@ test('#796 AC1-4: persists netChange, full categoryDeltas, insight rollup, upcom
     kind: 'planned',
   });
 
-  setMailerDriverForTest(new NoopMailerDriver());
+  setMailerDriverForTest(new RecordingMailerDriver());
   const result = await runWeeklyDigest([user], thisMondayUTC());
   assert.equal(result.processed, 1);
 
@@ -431,7 +439,7 @@ test('#796 AC6/AC7: push fired when channelPush=true + subscription; not when fa
     return 'sent' as const;
   };
 
-  setMailerDriverForTest(new NoopMailerDriver());
+  setMailerDriverForTest(new RecordingMailerDriver());
   const result = await runWeeklyDigest([a.user, b.user], thisMondayUTC(), { pushSender: sender });
 
   assert.equal(result.sentPush, 1, 'exactly one user got push');
@@ -451,7 +459,7 @@ test('#796 AC7: all channels off → skippedMuted, no Notification row', async (
     channelEmail: false,
     channelPush: false,
   });
-  setMailerDriverForTest(new NoopMailerDriver());
+  setMailerDriverForTest(new RecordingMailerDriver());
   const result = await runWeeklyDigest([user], thisMondayUTC());
   assert.equal(result.skippedMuted, 1);
   const notif = await models.Notification.findOne({
@@ -475,7 +483,7 @@ test('#796 AC8: day-of-week skips on a non-matching tick, processes on a matchin
     channelPush: false,
     digestDayOfWeek: 3,
   });
-  setMailerDriverForTest(new NoopMailerDriver());
+  setMailerDriverForTest(new RecordingMailerDriver());
 
   // Monday tick → skipped, last_digest_sent_at untouched.
   const monday = await runWeeklyDigest([user], new Date('2026-06-01T09:00:00Z'));
@@ -516,7 +524,7 @@ test('#796 AC10: a push-send failure is isolated and never blocks other users', 
     return 'sent' as const;
   };
 
-  setMailerDriverForTest(new NoopMailerDriver());
+  setMailerDriverForTest(new RecordingMailerDriver());
   const result = await runWeeklyDigest([a.user, b.user], thisMondayUTC(), { pushSender: sender });
 
   // A's in-app still written (push failure is independent); B processed too.
@@ -536,7 +544,7 @@ test('runWeeklyDigest: idempotent — second run when not due is a no-op', async
   });
   await seedTxn(accountId, householdId, '2026-05-26', '-20.00', 'Groceries', 'Mart');
 
-  setMailerDriverForTest(new NoopMailerDriver());
+  setMailerDriverForTest(new RecordingMailerDriver());
   const r1 = await runWeeklyDigest([user], thisMondayUTC());
   assert.equal(r1.processed, 1);
   const r2 = await runWeeklyDigest([user], thisMondayUTC());

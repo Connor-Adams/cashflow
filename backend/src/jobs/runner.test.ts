@@ -29,8 +29,22 @@ beforeEach(async () => {
   await models.Job.destroy({ where: {}, truncate: true });
   await models.JobRun.destroy({ where: {}, truncate: true });
   await models.Notification.destroy({ where: {}, truncate: true });
+  await models.HouseholdMember.destroy({ where: {} });
+  await models.Household.destroy({ where: {} });
   await models.User.destroy({ where: {}, truncate: true });
 });
+
+async function makeUser(email: string) {
+  return models.User.create({
+    email,
+    passwordHash: 'x',
+    passwordSalt: 'x',
+    passwordParams: 'x',
+    displayName: email,
+    globalRole: 'user',
+    dob: null,
+  });
+}
 
 test('disabled job returns skipped_disabled and upserts row', async () => {
   const def = makeDef('r_disabled', false, async () => ({}));
@@ -172,4 +186,60 @@ test('failed tick enqueues one notification for each owner recipient', async () 
   assert.equal(notifications[0].type, 'job.failed');
   assert.equal(notifications[0].severity, 'critical');
   assert.ok(notifications[0].title.includes('r_notify'));
+});
+
+test('handler-reported skip records the run as skipped with the reason, not failed', async () => {
+  const def = makeDef('r_skip_part', true, async () => ({
+    summary: { sentEmail: 0 },
+    skipped: 'email not sent to 1 user: mailer not configured',
+  }));
+  const r = await runner.tick(def);
+  // The job itself did not fail — no error status, no failure notification.
+  assert.equal(r.status, 'ok');
+  const run = await models.JobRun.findByPk(r.runId);
+  assert.ok(run);
+  assert.equal(run.status, 'skipped');
+  assert.equal(run.errorMessage, 'email not sent to 1 user: mailer not configured');
+  const row = await models.Job.findOne({ where: { name: 'r_skip_part' } });
+  assert.equal(row?.lastStatus, 'ok');
+  assert.equal(row?.lastError, null);
+});
+
+test('failed tick with no explicit recipients (cron) notifies every household owner once', async () => {
+  const ownerA = await makeUser('owner-a@example.com');
+  const ownerB = await makeUser('owner-b@example.com');
+  const member = await makeUser('member@example.com');
+  const h1 = await models.Household.create({ name: 'H1' });
+  const h2 = await models.Household.create({ name: 'H2' });
+  await models.HouseholdMember.create({ householdId: h1.id, userId: ownerA.id, role: 'owner' });
+  await models.HouseholdMember.create({ householdId: h1.id, userId: member.id, role: 'member' });
+  await models.HouseholdMember.create({ householdId: h2.id, userId: ownerB.id, role: 'owner' });
+  // ownerA owns two households — still exactly one notification.
+  const h3 = await models.Household.create({ name: 'H3' });
+  await models.HouseholdMember.create({ householdId: h3.id, userId: ownerA.id, role: 'owner' });
+
+  const def = makeDef('r_cron_notify', true, async () => {
+    throw new Error('cron boom');
+  });
+  // Cron ticks call `tick(def)` with no options.
+  const r = await runner.tick(def);
+
+  assert.equal(r.status, 'error');
+  const notifs = await models.Notification.findAll({ where: { type: 'job.failed' } });
+  assert.deepEqual(
+    notifs.map((n) => n.userId).sort((a, b) => a - b),
+    [ownerA.id, ownerB.id].sort((a, b) => a - b),
+  );
+  assert.ok(notifs.every((n) => n.title.includes('r_cron_notify')));
+});
+
+test('explicit empty recipient list sends no failure notification', async () => {
+  const owner = await makeUser('solo-owner@example.com');
+  const h = await models.Household.create({ name: 'Solo' });
+  await models.HouseholdMember.create({ householdId: h.id, userId: owner.id, role: 'owner' });
+  const def = makeDef('r_no_notify', true, async () => {
+    throw new Error('quiet boom');
+  });
+  await runner.tick(def, { failureNotificationUserIds: [] });
+  assert.equal(await models.Notification.count({ where: { type: 'job.failed' } }), 0);
 });

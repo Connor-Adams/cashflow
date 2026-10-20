@@ -90,7 +90,6 @@ test('restore rewrites a foreign owner_user_id / created_by_user_id to the resto
   await restoreBundle(sequelize, payload, {
     householdId: target.id,
     userId: RESTORING_USER_ID,
-    mode: 'merge',
   });
 
   const restoredAccount = await Account.findOne({ where: { householdId: target.id } });
@@ -139,7 +138,6 @@ test('restore leaves NULL user-id columns as NULL', async () => {
   await restoreBundle(sequelize, payload, {
     householdId: target.id,
     userId: RESTORING_USER_ID,
-    mode: 'merge',
   });
 
   const restoredAccount = await Account.findOne({ where: { householdId: target.id } });
@@ -167,7 +165,7 @@ test('restore without a userId leaves user-id columns NULL (no foreign id plante
   });
 
   const target = await Household.create({ name: 'Target3' });
-  await restoreBundle(sequelize, payload, { householdId: target.id, mode: 'merge' });
+  await restoreBundle(sequelize, payload, { householdId: target.id });
 
   const restoredAccount = await Account.findOne({ where: { householdId: target.id } });
   assert.equal(

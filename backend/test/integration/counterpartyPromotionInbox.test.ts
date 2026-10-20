@@ -5,7 +5,7 @@
  *   - GET /api/ai/counterparty-promotions returns groups when
  *     un-linked counterparty_raw recurs >= threshold in trailing 90 days
  *   - GET /api/ai/inbox includes the counterparty_promotion items
- *   - GET /api/ai/inbox/count includes the counterparty_promotion bucket
+ *   - GET /api/ai/inbox/count does NOT count them (no Inbox UI lists them)
  *   - POST /api/transactions/counterparty/promote-bulk creates a Contact
  *     and bulk-links every matching un-linked txn in the window
  *   - POST /api/ai/counterparty-promotions/:normalizedName/dismiss persists
@@ -187,11 +187,11 @@ test('inbox: counterparty_promotion items appear in /api/ai/inbox', async () => 
   assert.match(jane.summary, /promote to Contact/i);
 });
 
-test('inbox count: includes counterparty_promotion bucket', async () => {
+test('inbox count: does NOT count counterparty promotions (no Inbox UI lists them)', async () => {
   const res = await agentA.get('/api/ai/inbox/count');
   assert.equal(res.status, 200);
-  assert.ok(res.body.byKind.counterparty_promotion >= 1);
-  assert.ok(res.body.total >= 1);
+  assert.equal(res.body.byKind.counterparty_promotion, undefined);
+  assert.equal(res.body.total, res.body.byKind.transaction_audit);
 });
 
 test('bulk promote: creates one Contact and links all matching txns (AC #2)', async () => {

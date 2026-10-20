@@ -1,5 +1,6 @@
 import { Decimal, sumD, maxZero } from '../util/decimal';
 import type { CorpTaxYearFacts, RateTable } from './types';
+import { capitalGainOf } from './capital-gains';
 
 /**
  * Adjusted Aggregate Investment Income — used to grind the SBD limit.
@@ -12,7 +13,7 @@ export function computeAaii(facts: CorpTaxYearFacts, r: RateTable): Decimal {
   const elDiv = sumD(facts.investmentIncome.eligibleDividends.map(i => i.cadAmount));
   const nonElDiv = sumD(facts.investmentIncome.nonEligibleDividends.map(i => i.cadAmount));
   const rentNet = sumD(facts.investmentIncome.rentNet.map(i => i.cadAmount));
-  const grossGains = sumD(facts.capitalGainEvents.map(e => e.proceeds.minus(e.acb).minus(e.outlays)));
+  const grossGains = sumD(facts.capitalGainEvents.map(capitalGainOf));
   const corpInclusionRate = r.capitalGainsInclusionHigh ?? r.capitalGainsInclusion;
   const includableGains = grossGains.times(corpInclusionRate);
   return maxZero(interest.plus(elDiv).plus(nonElDiv).plus(rentNet).plus(includableGains));

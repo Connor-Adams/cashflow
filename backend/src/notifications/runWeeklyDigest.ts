@@ -16,6 +16,10 @@
  *     if that channel is on.
  *   - The mailer's own retry semantics are honored; this function does NOT
  *     re-retry on top of them.
+ *   - When no mail transport is configured (noop driver) the email is NOT
+ *     counted as sent: it is tallied in `emailSkippedNotConfigured` and does
+ *     not, on its own, advance `last_digest_sent_at` — so the user stays
+ *     eligible for a real send once SMTP is set up.
  */
 import {
   Notification,
@@ -27,7 +31,7 @@ import { logger } from '../observability/logger';
 import { buildDigestForUser, type WeeklyDigestData } from './digest';
 import { renderWeeklyDigest } from './templates/weeklyDigest';
 import { buildDigestPush } from './digestPush';
-import { sendEmail } from './mailer';
+import { MAILER_NOT_CONFIGURED, sendEmail } from './mailer';
 import { fanOutWebPush, type WebPushSender } from './webPush';
 
 export const WEEKLY_DIGEST_TYPE = 'digest.weekly' as const;
@@ -46,6 +50,11 @@ export interface WeeklyDigestRunResult {
   skippedWrongDay: number;
   /** Users where the email send (after retries) failed. */
   emailFailures: number;
+  /**
+   * Users who asked for email but no mail transport is configured (noop
+   * driver) — nothing was sent. A skip, not a failure.
+   */
+  emailSkippedNotConfigured: number;
   /** Users where the push fan-out threw (counted, never blocks other channels). */
   pushFailures: number;
   errors: number;
@@ -168,16 +177,18 @@ async function maybeSendPush(
   }
 }
 
+type EmailOutcome = 'sent' | 'failed' | 'not_configured' | 'no_address';
+
 async function maybeSendEmail(
   user: ProcessableUser,
   data: WeeklyDigestData,
-): Promise<{ sent: boolean; failed: boolean }> {
+): Promise<EmailOutcome> {
   if (!user.email || !/.+@.+\..+/.test(user.email)) {
     logger.warn(
       { userId: user.id },
       'weekly_digest_skip_email_no_address',
     );
-    return { sent: false, failed: false };
+    return 'no_address';
   }
   const rendered = renderWeeklyDigest(data);
   const res = await sendEmail({
@@ -186,6 +197,13 @@ async function maybeSendEmail(
     html: rendered.html,
     text: rendered.text,
   });
+  if (res.skipped) {
+    logger.warn(
+      { userId: user.id, driver: res.driver },
+      'weekly_digest_email_skipped_mailer_not_configured',
+    );
+    return 'not_configured';
+  }
   if (!res.ok) {
     logger.error(
       {
@@ -196,9 +214,22 @@ async function maybeSendEmail(
       },
       'weekly_digest_email_failed',
     );
-    return { sent: false, failed: true };
+    return 'failed';
   }
-  return { sent: true, failed: false };
+  return 'sent';
+}
+
+/**
+ * The job-run "skipped" note for a digest tick: set when any user asked for
+ * email but no mail transport is configured, so the Jobs tab shows the run as
+ * skipped-with-reason instead of a plain success. Undefined otherwise.
+ */
+export function weeklyDigestSkipReason(
+  result: WeeklyDigestRunResult,
+): string | undefined {
+  const n = result.emailSkippedNotConfigured;
+  if (n === 0) return undefined;
+  return `Email not sent to ${n} user${n === 1 ? '' : 's'}: ${MAILER_NOT_CONFIGURED}`;
 }
 
 export interface RunWeeklyDigestOptions {
@@ -239,6 +270,7 @@ export async function runWeeklyDigest(
     skippedMuted: 0,
     skippedWrongDay: 0,
     emailFailures: 0,
+    emailSkippedNotConfigured: 0,
     pushFailures: 0,
     errors: 0,
   };
@@ -282,12 +314,13 @@ export async function runWeeklyDigest(
       }
       if (pref.channelEmail) {
         const out = await maybeSendEmail(user, data);
-        if (out.sent) {
+        if (out === 'sent') {
           result.sentEmail += 1;
           didAnything = true;
-        }
-        if (out.failed) {
+        } else if (out === 'failed') {
           result.emailFailures += 1;
+        } else if (out === 'not_configured') {
+          result.emailSkippedNotConfigured += 1;
         }
       }
       // Web-push (#796): independent of the in-app/email outcome and never

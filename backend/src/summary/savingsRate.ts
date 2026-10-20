@@ -30,11 +30,17 @@
  *   - investments  — a positive amount on an investment account, OR a row whose
  *                     txnType is `investment`, OR a transfer whose
  *                     transferPurpose is `investment`.
- *   - debtPrincipal— a positive amount (a payment) landing on a liability
- *                     account (loan / mortgage / credit card). This is the
- *                     principal you paid down; the matching outflow leg lives on
- *                     your checking account and is skipped as money movement
+ *   - debtPrincipal— a positive amount (a payment) landing on a loan, line of
+ *                     credit (typed `loan`) or mortgage. This is the principal
+ *                     you paid down; the matching outflow leg lives on your
+ *                     checking account and is skipped as money movement
  *                     (txnType 'transfer' or 'payment', via isNonSpend).
+ *                     Revolving credit cards are deliberately EXCLUDED: paying
+ *                     a card off only settles purchases already counted as
+ *                     spending, so it builds no wealth. Any positive amount on
+ *                     a card (payment, refund, reward) is skipped — counting it
+ *                     would let "spend income on a card, pay it off" read as a
+ *                     100% savings rate.
  *
  * A transfer from checking to savings therefore contributes nothing on the
  * checking side (the outflow leg is money-movement, skipped) and a `savings`
@@ -50,19 +56,27 @@
 import { num } from '../util/numbers';
 import { classifyPositiveAmount, isNonSpend } from './classifyTransactionFlow';
 
-/** Account types treated as cash savings vehicles. */
-const SAVINGS_ACCOUNT_TYPES: ReadonlySet<string> = new Set(['savings']);
 /** Account types treated as investment vehicles. */
 const INVESTMENT_ACCOUNT_TYPES: ReadonlySet<string> = new Set(['investment']);
 /**
- * Account types treated as liabilities. Mirrors networth/accountKind plus the
- * legacy `credit` spelling that some seeds / imports use for credit cards.
+ * Where a positive amount lands, keyed by the account type it lands on:
+ *   - savings          → a cash-savings deposit.
+ *   - loan / mortgage  → debt principal paid down. Lines of credit are stored
+ *                        as `loan` ("Loan / line of credit" in the account
+ *                        picker), so they count too.
+ *   - credit_card / credit (legacy spelling some seeds / imports use) → skip.
+ *                        A payment, refund or reward on a revolving card only
+ *                        settles or offsets spending; it is neither principal
+ *                        nor income. Cards are excluded from principal BY
+ *                        DESIGN.
+ * Types absent here (checking, cash, …) fall through to the income check.
  */
-const LIABILITY_ACCOUNT_TYPES: ReadonlySet<string> = new Set([
-  'credit_card',
-  'credit',
-  'loan',
-  'mortgage',
+const INFLOW_BUCKET_BY_ACCOUNT_TYPE: ReadonlyMap<string, Bucket> = new Map<string, Bucket>([
+  ['savings', 'savings'],
+  ['loan', 'debtPrincipal'],
+  ['mortgage', 'debtPrincipal'],
+  ['credit_card', 'skip'],
+  ['credit', 'skip'],
 ]);
 
 /** Transaction row consumed by the aggregator. Mirrors the columns the route
@@ -144,14 +158,27 @@ function ymOf(date: string): string {
   return String(date).slice(0, 7);
 }
 
-function isSavingsAccount(accountType: string | null): boolean {
-  return accountType != null && SAVINGS_ACCOUNT_TYPES.has(accountType);
+/** An investment contribution: explicit txnType / transferPurpose, or any
+ *  positive amount on a brokerage account. */
+function isInvestmentInflow(row: SavingsRateTxnRow): boolean {
+  return (
+    row.txnType === 'investment' ||
+    row.transferPurpose === 'investment' ||
+    INVESTMENT_ACCOUNT_TYPES.has(String(row.accountType))
+  );
 }
-function isInvestmentAccount(accountType: string | null): boolean {
-  return accountType != null && INVESTMENT_ACCOUNT_TYPES.has(accountType);
-}
-function isLiabilityAccount(accountType: string | null): boolean {
-  return accountType != null && LIABILITY_ACCOUNT_TYPES.has(accountType);
+
+/** Bucket for a positive amount (an inflow landing on `row`'s account). */
+function classifyInflow(row: SavingsRateTxnRow): Bucket {
+  if (isInvestmentInflow(row)) return 'investments';
+  // Savings deposit, loan/LOC/mortgage principal, or a skipped card credit.
+  const byAccount = INFLOW_BUCKET_BY_ACCOUNT_TYPE.get(String(row.accountType));
+  if (byAccount) return byAccount;
+  // Otherwise it's a cash-account inflow — income only if it reads as a
+  // genuine credit (statement payments / transfers / dividends are skipped).
+  return classifyPositiveAmount({ txnType: row.txnType, accountType: row.accountType }) === 'credit'
+    ? 'income'
+    : 'skip';
 }
 
 /**
@@ -165,38 +192,18 @@ function isLiabilityAccount(accountType: string | null): boolean {
 export function classifySavingsRow(row: SavingsRateTxnRow): Bucket {
   const amount = num(row.amount);
   if (amount == null) return 'skip';
-  const accountType = row.accountType;
 
   // --- positive amounts: an inflow landing somewhere ---
-  if (amount > 0) {
-    // Investment contribution: explicit txnType / transferPurpose, or any
-    // positive amount on a brokerage account.
-    if (
-      row.txnType === 'investment' ||
-      row.transferPurpose === 'investment' ||
-      isInvestmentAccount(accountType)
-    ) {
-      return 'investments';
-    }
-    // Deposit into a savings account.
-    if (isSavingsAccount(accountType)) return 'savings';
-    // Payment landing on a liability account pays down principal.
-    if (isLiabilityAccount(accountType)) return 'debtPrincipal';
-    // Otherwise it's a cash-account inflow — income only if it reads as a
-    // genuine credit (statement payments / transfers / dividends are skipped).
-    return classifyPositiveAmount({ txnType: row.txnType, accountType }) === 'credit'
-      ? 'income'
-      : 'skip';
-  }
+  if (amount > 0) return classifyInflow(row);
 
   // --- negative amounts: an outflow ---
   // Money-movement outflows are not spending: the source leg of a transfer,
   // brokerage sells, dividend sweeps, investment-account activity, AND the
   // checking-side leg of a statement payment (txnType='payment' — its
-  // matching positive leg is the debtPrincipal classified above, and the
-  // card purchases it pays off are already counted as spending). Same rule
+  // matching positive leg is debtPrincipal on a loan, or skipped on a card,
+  // whose purchases are already counted as spending). Same rule
   // as the dashboard's isNonSpend so the two reconcile.
-  if (isNonSpend(row.txnType, accountType)) return 'skip';
+  if (isNonSpend(row.txnType, row.accountType)) return 'skip';
   // Everything else negative is real consumption.
   return 'spending';
 }

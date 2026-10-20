@@ -9,6 +9,8 @@ import {
 } from '../../models';
 import { D } from '../util/decimal';
 import { computeAcb } from '../../portfolio/acb';
+import { loadAcbFeed } from './acbFeed';
+import { applyCorpStopLoss } from './corpStopLoss';
 import { toCad as convertToCad } from '../../fx/toCad';
 import { createFxFallbackCollector } from '../../fx/fxFallbackWarnings';
 import { partitionCorpPerimeter } from './corpPerimeter';
@@ -21,7 +23,23 @@ import type {
   CorpFiscalYear,
   CorpTaxYearFacts,
   IncomeItem,
+  SuspendedCapitalLoss,
 } from '../engine/types';
+
+/**
+ * One warning line per s.40(3.4) suspension, so the T2 tab (which shows the
+ * return's warnings, seeded from these facts) says where a loss went.
+ */
+function describeSuspendedLosses(items: SuspendedCapitalLoss[], endDate: string): string[] {
+  return items.map((s) => (s.releasedOn
+    ? `Stop-loss (ITA s.40(3.4)(b)): the $${s.amount.toFixed(2)} capital loss on security `
+      + `${s.securityId} suspended on ${s.dispositionDate} is recognized this year, on ${s.releasedOn}, `
+      + 'when the corporation stopped holding identical property for 30 days.'
+    : `Stop-loss (ITA s.40(3.4)(a)): the $${s.amount.toFixed(2)} capital loss on security `
+      + `${s.securityId} from ${s.dispositionDate} is suspended and still suspended at ${endDate} — `
+      + 'the corporation acquired identical property within 30 days of the sale and held it at the end '
+      + 'of that window. It is recognized once no identical property is held for 30 days.'));
+}
 
 export async function buildCorpFacts(
   entityId: number,
@@ -116,66 +134,35 @@ export async function buildCorpFacts(
     eligibleDividends.push({ source: `Txn #${t.id} ${t.merchant ?? ''}`.trim(), amount: raw, cadAmount: cad });
   }
 
-  // Capital gains via ACB (same pattern as personal). ACB is a weighted-average
-  // running balance (ITA s.47), so computeAcb needs the FULL per-security
-  // history up to fiscal year end — NOT just this fiscal year's rows. A
-  // fiscal-windowed feed makes prior-year buys invisible, collapsing ACB to ~0
-  // and overstating realized gains as near-$0-cost dispositions. Walk all
-  // activity through endDate, then keep only the dispositions that settled
-  // DURING the fiscal year (income items above stay fiscal-windowed: income is
-  // reported in the year received).
-  const acbActivity = accountIds.length
-    ? await InvestmentActivity.findAll({
-        where: {
-          accountId: accountIds,
-          tradeDate: { [Op.lte]: endDate },
-        },
-      })
-    : [];
-
-  const capitalGainEvents: CapGainEvent[] = [];
-  const securityIds = Array.from(
-    new Set(
-      acbActivity
-        .map((a) => a.securityId)
-        .filter((x): x is number => x != null),
-    ),
+  // Capital gains via ACB, over the same full-history feed (through 30 days
+  // past fiscal year end) the personal builder walks — see acbFeed.ts. Income
+  // items above stay fiscal-windowed: income is reported in the year received.
+  //
+  // A corporation's losses are under the s.40(3.3)/(3.4) stop-loss rule rather
+  // than the superficial-loss rule (the s.54 definition excludes, at (h), a
+  // disposition to which s.40(3.4) applies): a caught loss is suspended, not
+  // added to the substituted property's ACB. See corpStopLoss.ts.
+  const acbFeed = await loadAcbFeed(
+    accountIds,
+    endDate,
+    async (amount, currency, date) => (await toCad(amount, currency, date)).cad,
   );
-  for (const sid of securityIds) {
-    const acts = acbActivity.filter((a) => a.securityId === sid);
-    // CRA requires per-leg FX conversion: each buy/sell/fee leg converts at its
-    // own trade-date rate, so the ACB walk — and the CapGainEvent the T2 engine
-    // feeds into AAII / CDA / RDTOH math — is genuinely in CAD.
-    const acbInput = [];
-    for (const a of acts) {
-      const currency = (a as unknown as { currency?: string }).currency ?? 'CAD';
-      const tradeDate = a.tradeDate as unknown as string;
-      let amount = a.amount != null ? Number(a.amount) : null;
-      let fees = a.fees != null ? Number(a.fees) : null;
-      if (currency !== 'CAD') {
-        if (amount != null) amount = (await toCad(D(amount), currency, tradeDate)).cad.toNumber();
-        if (fees != null) fees = (await toCad(D(fees), currency, tradeDate)).cad.toNumber();
-      }
-      acbInput.push({
-        id: a.id as number,
-        activityType: a.activityType as string,
-        tradeDate,
-        quantity: a.quantity != null ? Number(a.quantity) : null,
-        amount,
-        currency: 'CAD',
-        fees,
-        splitRatio: a.splitRatio != null ? Number(a.splitRatio) : null,
-        costBasisAllocationPct:
-          a.costBasisAllocationPct != null ? Number(a.costBasisAllocationPct) : null,
-        cashComponent: a.cashComponent != null ? Number(a.cashComponent) : null,
-        recipientSecurityId: a.recipientSecurityId ?? null,
-      });
-    }
+  const today = new Date().toISOString().slice(0, 10);
+  const capitalGainEvents: CapGainEvent[] = [];
+  const suspendedCapitalLosses: SuspendedCapitalLoss[] = [];
+  const stopLossWarnings: string[] = [];
+  let lossDispositionsTested = 0;
+  for (const { securityId: sid, acts, acbInput } of acbFeed) {
     const acb = computeAcb(acbInput);
+    const stopLoss = applyCorpStopLoss({ securityId: sid, acts, acb, startDate, endDate, today });
+    lossDispositionsTested += stopLoss.lossDispositionsTested;
+    suspendedCapitalLosses.push(...stopLoss.report);
+    stopLossWarnings.push(...stopLoss.warnings);
     for (const realized of acb.realizedEvents) {
       // Prior-fiscal-year dispositions are already reported on their own year's
       // return; here they only serve to advance the ACB state.
       if (realized.tradeDate < startDate || realized.tradeDate > endDate) continue;
+      const stopLossSuspended = stopLoss.suspendedByActivity.get(realized.activityId);
       capitalGainEvents.push({
         source: `Security ${sid} sell ${realized.tradeDate}`,
         securityId: sid,
@@ -183,8 +170,35 @@ export async function buildCorpFacts(
         acb: D(realized.costRemoved),
         outlays: D(0),
         date: realized.tradeDate,
+        ...(stopLossSuspended ? { stopLossSuspended } : {}),
       });
     }
+    // s.40(3.4)(b): the suspended loss "is deemed to be a loss of the transferor
+    // from a disposition of the particular property" at the recognition time —
+    // a capital loss of THIS period, carried as its own event.
+    for (const rel of stopLoss.released) {
+      capitalGainEvents.push({
+        source: `Security ${sid} suspended loss from ${rel.dispositionDate} recognized (s.40(3.4)(b))`,
+        securityId: sid,
+        proceeds: D(0),
+        acb: rel.amount,
+        outlays: D(0),
+        date: rel.releasedOn as string,
+        stopLossReleasedFrom: rel.dispositionDate,
+      });
+    }
+  }
+  stopLossWarnings.push(...describeSuspendedLosses(suspendedCapitalLosses, endDate));
+  if (lossDispositionsTested > 0) {
+    stopLossWarnings.push(
+      `${lossDispositionsTested} capital loss disposition(s) this year were tested against the `
+      + 'stop-loss rule (ITA s.40(3.3)) using this corporation\'s own holdings only. A purchase of '
+      + 'identical property within 30 days by an affiliated person (s.251.1: e.g. the controlling '
+      + 'shareholder, their spouse, or another corporation they control) also suspends the loss and '
+      + 'is not checked. Recognition on emigration, a change in tax-exempt status, a loss '
+      + 'restriction event, a s.50 deemed disposition or a winding-up (s.40(3.4)(b)(ii)-(v)) is not '
+      + 'modelled either.',
+    );
   }
 
   // Carryforwards as of start of fiscal year — use the calendar year before startDate
@@ -340,8 +354,10 @@ export async function buildCorpFacts(
     dividendsPaid,
     salaryPaid,
     carryforwards,
+    ...(suspendedCapitalLosses.length > 0 ? { suspendedCapitalLosses } : {}),
     factWarnings: [
       ...perimeter.warnings,
+      ...stopLossWarnings,
       ...ownerPaidWarnings,
       ...mirrorWarnings,
       ...fxFallbacks.warnings(),

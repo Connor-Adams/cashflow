@@ -3,7 +3,9 @@ import { postJson } from '@/lib/api'
 import { getAppConfig } from '@/lib/appConfig'
 
 /**
- * Drives the "Enable browser alerts" control (issue #651).
+ * Browser web-push subscription lifecycle, shared by the dashboard's "Enable
+ * browser alerts" control (issue #651) and the Settings → Notifications push
+ * toggles.
  *
  * Owns the browser-side web-push subscription lifecycle:
  *   - capability detection (`window.PushManager` + service-worker support),
@@ -12,14 +14,20 @@ import { getAppConfig } from '@/lib/appConfig'
  *     pushManager.subscribe({ applicationServerKey }) → POST the subscription,
  *   - unsubscribe: DELETE the row server-side and drop the browser subscription.
  *
- * `supported` is false when the browser lacks PushManager (caller hides the
- * control entirely) or when the server has no VAPID key configured (push is
- * disabled end-to-end). `permission === 'denied'` is surfaced so the caller can
- * render the "Blocked in browser settings" disabled state.
+ * `supported` is false when the browser lacks PushManager (`browserSupported`)
+ * or when the server can't send push (`serverConfigured` — /api/config returns
+ * a null VAPID key unless both VAPID keys are set). The two are exposed
+ * separately so a caller can say *why* push is unavailable.
+ * `permission === 'denied'` is surfaced so the caller can render the "Blocked
+ * in browser settings" disabled state.
  */
 export type PushSubscriptionState = {
   /** Browser + server both support push (caller hides the control when false). */
   supported: boolean
+  /** The server can actually send web-push (VAPID fully configured). */
+  serverConfigured: boolean
+  /** This browser has the Push API + service workers. */
+  browserSupported: boolean
   /** Current OS permission. 'denied' cannot be re-prompted. */
   permission: NotificationPermission
   /** True when an active push subscription exists for this browser. */
@@ -28,7 +36,8 @@ export type PushSubscriptionState = {
   busy: boolean
   /** Last error message, if the most recent action failed. */
   error: string | null
-  subscribe: () => Promise<void>
+  /** Resolves true when this browser ended up with an active subscription. */
+  subscribe: () => Promise<boolean>
   unsubscribe: () => Promise<void>
 }
 
@@ -64,7 +73,9 @@ async function ensureRegistration(): Promise<ServiceWorkerRegistration> {
 
 export function usePushSubscription(): PushSubscriptionState {
   const vapidPublicKey = getAppConfig()?.vapidPublicKey ?? null
-  const supported = browserSupportsPush() && Boolean(vapidPublicKey)
+  const serverConfigured = Boolean(vapidPublicKey)
+  const browserSupported = browserSupportsPush()
+  const supported = browserSupported && serverConfigured
 
   const [permission, setPermission] = useState<NotificationPermission>(
     supported ? Notification.permission : 'default',
@@ -91,8 +102,8 @@ export function usePushSubscription(): PushSubscriptionState {
     }
   }, [supported])
 
-  const subscribe = useCallback(async () => {
-    if (!supported || !vapidPublicKey) return
+  const subscribe = useCallback(async (): Promise<boolean> => {
+    if (!supported || !vapidPublicKey) return false
     setBusy(true)
     setError(null)
     try {
@@ -100,7 +111,7 @@ export function usePushSubscription(): PushSubscriptionState {
       setPermission(perm)
       if (perm !== 'granted') {
         setError('Notification permission was not granted')
-        return
+        return false
       }
       const reg = await ensureRegistration()
       const sub = await reg.pushManager.subscribe({
@@ -117,9 +128,11 @@ export function usePushSubscription(): PushSubscriptionState {
         userAgent: navigator.userAgent,
       })
       setSubscribed(true)
+      return true
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to enable browser alerts')
       setSubscribed(false)
+      return false
     } finally {
       setBusy(false)
     }
@@ -154,5 +167,15 @@ export function usePushSubscription(): PushSubscriptionState {
     }
   }, [supported])
 
-  return { supported, permission, subscribed, busy, error, subscribe, unsubscribe }
+  return {
+    supported,
+    serverConfigured,
+    browserSupported,
+    permission,
+    subscribed,
+    busy,
+    error,
+    subscribe,
+    unsubscribe,
+  }
 }

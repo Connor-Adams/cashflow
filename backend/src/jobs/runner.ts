@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Span } from '@opentelemetry/api';
-import { Job, JobRun } from '../models';
+import { HouseholdMember, Job, JobRun } from '../models';
 import { enqueueNotification } from '../notifications';
 import { logger } from '../observability/logger';
 import { runJobSpan } from '../observability/jobSpan';
@@ -63,6 +63,13 @@ export interface TickOutcome {
 }
 
 export interface TickOptions {
+  /**
+   * Who gets a `job.failed` notification if this tick throws. A manual run
+   * passes the requesting household's owners. When omitted — cron ticks and
+   * internally chained runs — every household owner is notified, so the
+   * `job.failed` preference toggle covers scheduled failures too. Pass `[]`
+   * to suppress.
+   */
   failureNotificationUserIds?: number[];
 }
 
@@ -117,13 +124,35 @@ async function pruneRuns(jobName: string, keep = 100): Promise<void> {
   }
 }
 
+/**
+ * Distinct user ids of every household owner. Jobs are process-wide (not
+ * household-scoped), so a scheduled failure is reported to all owners.
+ */
+async function allHouseholdOwnerIds(): Promise<number[]> {
+  const owners = await HouseholdMember.findAll({
+    where: { role: 'owner' },
+    attributes: ['userId'],
+  });
+  return [...new Set(owners.map((o) => o.userId))];
+}
+
 async function notifyFailure(
   def: JobDefinition,
   run: JobRun | null,
   message: string,
-  userIds: number[] | undefined,
+  explicitUserIds: number[] | undefined,
 ): Promise<void> {
-  if (!run || !userIds?.length) return;
+  if (!run) return;
+  let userIds = explicitUserIds;
+  if (userIds === undefined) {
+    try {
+      userIds = await allHouseholdOwnerIds();
+    } catch (err) {
+      logger.error({ err, name: def.name, runId: run.id }, 'job_failure_recipients_lookup_failed');
+      return;
+    }
+  }
+  if (userIds.length === 0) return;
   await Promise.all(userIds.map(async (userId) => {
     try {
       await enqueueNotification(userId, 'job.failed', {
@@ -194,6 +223,13 @@ async function tickInner(def: JobDefinition, opts: TickOptions, span?: Span): Pr
     const lastResultJson = summary
       ? truncate(JSON.stringify(summary), RESULT_MAX)
       : null;
+    // A handler can report that part of its work was skipped for a
+    // non-failure reason (e.g. email not configured). The run is recorded as
+    // `skipped` with the reason, but it is not an error and does not notify.
+    const skippedReason =
+      handlerResult && typeof handlerResult === 'object' && 'skipped' in handlerResult
+        ? (handlerResult as { skipped?: string }).skipped
+        : undefined;
     await upsertState(def.name, {
       lastFinishedAt: new Date(),
       lastStatus: 'ok',
@@ -201,7 +237,12 @@ async function tickInner(def: JobDefinition, opts: TickOptions, span?: Span): Pr
       lastError: null,
       lastResultJson,
     });
-    await finishRun(run, { status: 'success', durationMs });
+    await finishRun(
+      run,
+      skippedReason
+        ? { status: 'skipped', durationMs, errorMessage: truncate(skippedReason, ERROR_MAX) }
+        : { status: 'success', durationMs },
+    );
     await pruneRuns(def.name);
     span?.setAttribute('cashflow.job.result', 'success');
     recordJobRun(def.name, 'success', durationMs);

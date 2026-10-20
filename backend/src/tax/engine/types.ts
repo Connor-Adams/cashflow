@@ -23,6 +23,35 @@ export type CapGainEvent = {
   outlays: Decimal;
   date: string;
   superficialLossDenied?: Decimal;
+  /**
+   * Corporations only: the part of this disposition's loss that ITA s.40(3.4)(a)
+   * deems nil because s.40(3.3) applied (identical property acquired in the
+   * 61-day window and still owned at its end). Suspended, not extinguished — it
+   * comes back as a separate event dated when s.40(3.4)(b) recognizes it.
+   */
+  stopLossSuspended?: Decimal;
+  /**
+   * Set on the synthetic event that recognizes a previously suspended loss under
+   * s.40(3.4)(b): the date of the original disposition whose loss was suspended.
+   */
+  stopLossReleasedFrom?: string;
+};
+
+/**
+ * One capital loss a corporation's s.40(3.4) stop-loss rule suspended, reported
+ * on the facts so the suspension is visible rather than buried in a smaller gain.
+ */
+export type SuspendedCapitalLoss = {
+  securityId: number;
+  /** Date of the disposition whose loss s.40(3.4)(a) deemed nil. */
+  dispositionDate: string;
+  amount: Decimal;
+  /**
+   * When s.40(3.4)(b)(i) deems the loss realized (the day this corporation's
+   * position went to zero and stayed there for 30 days), or null if it is still
+   * suspended at the end of the fiscal period.
+   */
+  releasedOn: string | null;
 };
 
 export type RrspContrib = {
@@ -81,6 +110,12 @@ export type CorpTaxYearFacts = {
   dividendsPaid: CorpDividendPaid[];
   salaryPaid: Decimal;                  // T4 box 14 from corp to owner
   carryforwards: CorpCarryforwards;
+  /**
+   * s.40(3.4) suspended capital losses that matter to this period: suspended by
+   * a disposition in it, recognized in it, or still suspended at its end.
+   * Optional: scenario projections and hand-built facts carry none.
+   */
+  suspendedCapitalLosses?: SuspendedCapitalLoss[];
   /**
    * Caveats raised while ASSEMBLING these facts (as opposed to while computing
    * the return). buildT2 seeds its own `warnings` from this so a shaky input —
