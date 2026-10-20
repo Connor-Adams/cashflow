@@ -98,7 +98,7 @@ export interface HalfLinkScan {
 const TRANSFER_TYPES = ['transfer', 'payment'];
 
 /** Exactly opposite amounts, like the transfer matcher requires. */
-function oppositeAmounts(a: string, b: string): boolean {
+export function oppositeAmounts(a: string, b: string): boolean {
   const x = Number(a);
   const y = Number(b);
   return Math.sign(x) === -Math.sign(y) && Math.abs(Math.abs(x) - Math.abs(y)) <= 0.01;
@@ -221,6 +221,33 @@ export class BackfillAborted extends Error {
 }
 
 /**
+ * Write each pair's missing half: B points back at A and is stamped, A is stamped
+ * if it was not, and a guessed B type becomes transfer. Instance saves, so each
+ * touched row gets a TransactionRevision. Throws (rolling the caller's
+ * transaction back) if a sibling was linked by someone else in the meantime.
+ */
+export async function closeHalfLinkedPairs(
+  pairs: HalfLinkedPair[],
+  now: Date,
+  t: DbTransaction,
+): Promise<void> {
+  for (const p of pairs) {
+    const b = await Transaction.findByPk(p.bId, { transaction: t, lock: t.LOCK.UPDATE });
+    if (b == null || b.linkedTransactionId != null) {
+      throw new BackfillAborted(`sibling ${p.bId} changed under the backfill; nothing written`);
+    }
+    b.set({ linkedTransactionId: p.aId, transferLinkedAt: now });
+    if (p.bRetype) b.set({ txnType: 'transfer' });
+    await b.save({ transaction: t });
+    if (p.aNeedsStamp) {
+      const a = await Transaction.findByPk(p.aId, { transaction: t, lock: t.LOCK.UPDATE });
+      a!.set({ transferLinkedAt: now });
+      await a!.save({ transaction: t });
+    }
+  }
+}
+
+/**
  * Close every pair in one SQL transaction. The scan runs again inside the
  * transaction (with the siblings row-locked) so the write acts on what is true at
  * commit time, not at dry-run time; if that differs from `expectPairs`, or any
@@ -234,21 +261,7 @@ export async function applyHalfLinkedCsvTransferBackfill(
     if (opts.expectPairs != null && pairs.length !== opts.expectPairs) {
       throw new BackfillAborted(`expected ${opts.expectPairs} pair(s), found ${pairs.length}; nothing written`);
     }
-    const now = opts.now ?? new Date();
-    for (const p of pairs) {
-      const b = await Transaction.findByPk(p.bId, { transaction: t, lock: t.LOCK.UPDATE });
-      if (b == null || b.linkedTransactionId != null) {
-        throw new BackfillAborted(`sibling ${p.bId} changed under the backfill; nothing written`);
-      }
-      b.set({ linkedTransactionId: p.aId, transferLinkedAt: now });
-      if (p.bRetype) b.set({ txnType: 'transfer' });
-      await b.save({ transaction: t });
-      if (p.aNeedsStamp) {
-        const a = await Transaction.findByPk(p.aId, { transaction: t, lock: t.LOCK.UPDATE });
-        a!.set({ transferLinkedAt: now });
-        await a!.save({ transaction: t });
-      }
-    }
+    await closeHalfLinkedPairs(pairs, opts.now ?? new Date(), t);
     const after = await scanHalfLinkedCsvTransfers(t);
     if (after.pairs.length !== 0) {
       throw new BackfillAborted(`${after.pairs.length} pair(s) still half-linked after the writes; rolled back`);
