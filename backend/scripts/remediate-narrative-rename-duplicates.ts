@@ -37,6 +37,10 @@
  *                    the settlement-vs-execution offset cluster.
  *   --household N    Restrict to one household.
  *   --accounts a,b   Restrict to these account ids.
+ *   --drop-batch L   Only drop rows from import batch L (repeatable). Takes one
+ *                    proven re-import at --window 1 without the other batches'
+ *                    probable pairs, e.g.
+ *                    --window 1 --accounts 14 --drop-batch "2026-06 WK3DD9X35CAD"
  */
 import { sequelize } from '../src/models';
 import {
@@ -53,6 +57,14 @@ function flag(name: string): boolean {
 function value(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
+}
+
+function values(name: string): string[] {
+  const out: string[] = [];
+  process.argv.forEach((a, i) => {
+    if (a === `--${name}` && process.argv[i + 1] != null) out.push(process.argv[i + 1]);
+  });
+  return out;
 }
 
 function money(n: number, currency: string): string {
@@ -116,13 +128,15 @@ async function main(): Promise<void> {
     windowDays: windowRaw === '1' ? 1 : 0,
     householdId: household != null ? Number(household) : undefined,
     accountIds: accounts != null ? accounts.split(',').map((s) => Number(s.trim())) : undefined,
+    dropBatches: values('drop-batch').length > 0 ? values('drop-batch') : undefined,
   };
 
   console.log(
     `narrative-rename duplicate remediation — ${apply ? 'APPLY (destructive)' : 'DRY RUN'}, ` +
       `window ±${opts.windowDays}d` +
       (opts.householdId != null ? `, household ${opts.householdId}` : '') +
-      (opts.accountIds ? `, accounts ${opts.accountIds.join(',')}` : ''),
+      (opts.accountIds ? `, accounts ${opts.accountIds.join(',')}` : '') +
+      (opts.dropBatches ? `, drop batches ${opts.dropBatches.map((b) => `"${b}"`).join(', ')}` : ''),
   );
 
   if (!apply) {
