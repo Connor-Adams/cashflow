@@ -35,6 +35,7 @@ import {
 } from '../config/env';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { isEstablishedLink } from '../transfers/linkProtection';
+import { GUESSED_TXN_TYPES, linkTransferSibling, transferSiblingId } from './importedTransaction';
 import { runBackfillBatchTrace } from './backfillTrace';
 import {
   maybeRunAiBatchOverColdRows,
@@ -432,6 +433,12 @@ export async function runBackfill(
               continue;
             }
 
+            // The page was read before earlier rows in it were written, and an
+            // earlier row's new transfer link may have written this row's reverse
+            // pointer. Decide from the row as it is now, or that link reads as
+            // missing and its type as a guess.
+            await txn.reload();
+
             // An established link is the user's (or a whole pair); the matcher's
             // fresh guess never replaces or clears it.
             const keepLink = txn.linkedTransactionId != null && isEstablishedLink(
@@ -440,13 +447,38 @@ export async function runBackfill(
                 attributes: ['id', 'linkedTransactionId'],
               }))?.linkedTransactionId === txn.id,
             );
-            const nextLinkedTransactionId = keepLink ? txn.linkedTransactionId : f.linkedTransactionId;
+            let nextLinkedTransactionId = keepLink ? txn.linkedTransactionId : f.linkedTransactionId;
+            // Only a link this run is about to CREATE gets the reverse pointer. A
+            // half-link the matcher merely re-derives is left as it is: some of
+            // those had their reverse pointer cleared on purpose by an older
+            // version of this job, and closing them is a decision for an explicit
+            // repair, not a side effect of a nightly sweep.
+            const siblingId = transferSiblingId(merged);
+            const createsTransferLink =
+              !keepLink && siblingId != null && siblingId !== txn.linkedTransactionId;
 
             await sequelize.transaction(async (t) => {
+              let linkedAt: Date | null = null;
+              if (createsTransferLink) {
+                const now = new Date();
+                if (await linkTransferSibling(txn.id, siblingId, now, t)) linkedAt = now;
+                // The sibling was taken in the meantime. This job holds only
+                // two-way links, so it does not write a one-sided one.
+                else nextLinkedTransactionId = txn.linkedTransactionId;
+              }
+              const twoWay = keepLink || linkedAt != null;
+              // A two-way link is evidence the row is internal movement. A fresh
+              // re-derivation that can only GUESS the type (purchase/unknown) must
+              // not demote the `transfer`/`payment` the link established — prod
+              // had 78 linked rows demoted this way.
+              const keepType =
+                twoWay &&
+                GUESSED_TXN_TYPES.includes(f.txnType) &&
+                (txn.txnType === 'transfer' || txn.txnType === 'payment');
               txn.set({
                 merchantClean: f.merchantClean,
                 merchantCanonical: f.merchantCanonical,
-                txnType: f.txnType,
+                txnType: keepType ? txn.txnType : f.txnType,
                 autoSource: f.autoSource,
                 autoConfidence: f.autoConfidence,
                 autoCategory: f.autoCategory,
@@ -458,6 +490,7 @@ export async function runBackfill(
                 linkedTransactionId: nextLinkedTransactionId,
                 isRecurring: f.isRecurring,
               });
+              if (linkedAt != null) txn.set({ transferLinkedAt: linkedAt });
               // Only fill notes if the row had none — don't overwrite user-authored notes.
               if (!txn.notes && f.notes) {
                 txn.set({ notes: f.notes });
