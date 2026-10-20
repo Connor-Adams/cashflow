@@ -22,6 +22,7 @@ export function loadAppConfig(): Promise<AppConfig> {
         logoDevToken: null,
         quoteProviderConfigured: false,
         vapidPublicKey: null,
+        emailConfigured: false,
       }
       window.__APP_CONFIG__ = fallback
       console.warn('[appConfig] failed to load, degrading:', err)

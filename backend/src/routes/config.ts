@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import * as env from '../config/env';
 import { isPushConfigured } from '../notifications/webPush';
+import { isEmailConfigured } from '../notifications/mailer';
 
 const router = Router();
 
@@ -14,6 +15,9 @@ router.get('/', (_req, res) => {
     // `null` as "push unavailable on this server". Never expose the private
     // key here.
     vapidPublicKey: isPushConfigured() ? env.vapidPublicKey : null,
+    // Whether the mailer driver can deliver (false on the noop driver). A
+    // boolean only — SMTP host/user/credentials never leave the server.
+    emailConfigured: isEmailConfigured(),
   });
 });
 

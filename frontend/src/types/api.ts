@@ -1285,6 +1285,10 @@ export type AppConfig = {
    *  push as unavailable (hides "Enable browser alerts", disables the
    *  Settings push toggles). */
   vapidPublicKey: string | null;
+  /** True when the server's mailer can deliver email (not the noop driver).
+   *  A boolean only — SMTP settings are never sent to the client. When false
+   *  the Settings digest Email toggle is disabled. */
+  emailConfigured?: boolean;
 };
 
 export type BackfillStatus = {

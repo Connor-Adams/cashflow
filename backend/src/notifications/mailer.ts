@@ -220,6 +220,16 @@ export function getMailerDriver(): MailerDriver {
   return activeDriver;
 }
 
+/**
+ * True when the selected driver can actually deliver mail. The noop driver
+ * (no MAILER_DRIVER, or smtp with incomplete config) delivers nothing, so the
+ * client should not offer email as a channel. Exposes a boolean only — never
+ * any transport settings.
+ */
+export function isEmailConfigured(): boolean {
+  return !(getMailerDriver() instanceof NoopMailerDriver);
+}
+
 /** Tests inject a recording / failing driver here. */
 export function setMailerDriverForTest(driver: MailerDriver | null): void {
   activeDriver = driver;
