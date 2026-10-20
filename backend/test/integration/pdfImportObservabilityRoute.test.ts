@@ -507,7 +507,8 @@ let drainPendingChunk: (typeof import('../../src/import/pdfImportProcessor.js'))
 let e2eHouseholdId: number;
 let e2eUserId: number;
 
-async function assertDoneAndSkippedBatch(fx: E2eFixtures): Promise<void> {
+/** Store both PDFs and create a pending batch (total=2) with one item each. */
+async function seedE2eBatch(fx: E2eFixtures): Promise<{ batchId: string; brkItemId: string; perfItemId: string }> {
   // Dynamic imports (same lazy pattern as pdfImportAsync.test.ts)
   if (!saveVaultObject) {
     ({ saveVaultObject } = await import('../../src/storage/vaultStorage.js'));
@@ -525,7 +526,7 @@ async function assertDoneAndSkippedBatch(fx: E2eFixtures): Promise<void> {
   assert.ok(e2eUserId, `expected userId from /api/auth/me`);
   assert.ok(e2eHouseholdId, `expected householdId from /api/auth/me`);
 
-  const { PdfImportBatch, PdfImportItem, HoldingSnapshot, InvestmentActivity, Account } = models;
+  const { PdfImportBatch, PdfImportItem } = models;
 
   // ---- Step 1: save both PDFs to vault ----
   const brkBytes = fx.brk.bytes();
@@ -579,8 +580,12 @@ async function assertDoneAndSkippedBatch(fx: E2eFixtures): Promise<void> {
     status: 'pending',
   } as never);
 
-  // ---- Step 3: drain ----
-  await drainPendingChunk({ maxItems: 12 });
+  return { batchId, brkItemId, perfItemId };
+}
+
+/** Steps 4–5: the brokerage item committed rows, the performance item was skipped, totals add up. */
+async function assertDrainedOutcomes(batchId: string, brkItemId: string, perfItemId: string): Promise<void> {
+  const { PdfImportItem, HoldingSnapshot, InvestmentActivity, Account } = models;
 
   // ---- Step 4: assert item outcomes ----
   const brkItem = await PdfImportItem.findByPk(brkItemId);
@@ -607,15 +612,23 @@ async function assertDoneAndSkippedBatch(fx: E2eFixtures): Promise<void> {
     `expected reason matching /No parser matched/, got ${JSON.stringify(perfItem?.reason)}`,
   );
 
-  // ---- Step 5: assert batch totals ----
-  const batch = await PdfImportBatch.findByPk(batchId);
-  assert.equal(batch?.status, 'done', `expected batch status=done, got ${batch?.status}`);
-  assert.equal(batch?.succeeded, 1, `expected succeeded=1, got ${batch?.succeeded}`);
-  assert.equal(batch?.skipped, 1, `expected skipped=1, got ${batch?.skipped}`);
-  assert.equal(batch?.failed, 0, `expected failed=0, got ${batch?.failed}`);
-  assert.equal(batch?.processed, 2, `expected processed=2, got ${batch?.processed}`);
-  assert.ok(batch?.startedAt, `expected startedAt to be set`);
+  await assertBatchTotals(batchId);
+}
 
+async function assertBatchTotals(batchId: string): Promise<void> {
+  // ---- Step 5: assert batch totals ----
+  const batch = await models.PdfImportBatch.findByPk(batchId);
+  assert.ok(batch, 'batch not found');
+  assert.equal(batch.status, 'done', `expected batch status=done, got ${batch.status}`);
+  assert.equal(batch.succeeded, 1, `expected succeeded=1, got ${batch.succeeded}`);
+  assert.equal(batch.skipped, 1, `expected skipped=1, got ${batch.skipped}`);
+  assert.equal(batch.failed, 0, `expected failed=0, got ${batch.failed}`);
+  assert.equal(batch.processed, 2, `expected processed=2, got ${batch.processed}`);
+  assert.ok(batch.startedAt, `expected startedAt to be set`);
+}
+
+/** Steps 6–7: the GET route reflects the skip, and retry is a no-op with no failed items. */
+async function assertBatchRouteAndRetry(batchId: string, perfFileName: string): Promise<void> {
   // ---- Step 6: GET /api/import/pdf-batch/:id ----
   const getRes = await authed.get(`/api/import/pdf-batch/${batchId}`);
   assert.equal(getRes.status, 200, `expected 200, got ${getRes.status}: ${JSON.stringify(getRes.body)}`);
@@ -635,7 +648,7 @@ async function assertDoneAndSkippedBatch(fx: E2eFixtures): Promise<void> {
     `expected estimatedRemainingMs=null when all processed, got ${getBody.estimatedRemainingMs}`,
   );
 
-  const skippedRouteItem = getBody.items.find((i) => i.fileName === fx.perf.fileName);
+  const skippedRouteItem = getBody.items.find((i) => i.fileName === perfFileName);
   assert.ok(skippedRouteItem, `expected skipped item in GET response items`);
   assert.equal(skippedRouteItem!.status, 'skipped');
   assert.ok(
@@ -649,6 +662,14 @@ async function assertDoneAndSkippedBatch(fx: E2eFixtures): Promise<void> {
   const retryBody = retryRes.body as { retried: number; status: string };
   assert.equal(retryBody.retried, 0, `expected retried=0 (no failed items), got ${retryBody.retried}`);
   assert.equal(retryBody.status, 'done', `expected batch stays done after retry no-op, got ${retryBody.status}`);
+}
+
+async function assertDoneAndSkippedBatch(fx: E2eFixtures): Promise<void> {
+  const { batchId, brkItemId, perfItemId } = await seedE2eBatch(fx);
+  // ---- Step 3: drain ----
+  await drainPendingChunk({ maxItems: 12 });
+  await assertDrainedOutcomes(batchId, brkItemId, perfItemId);
+  await assertBatchRouteAndRetry(batchId, fx.perf.fileName);
 }
 
 test(
