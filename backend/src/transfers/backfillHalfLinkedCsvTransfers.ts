@@ -104,6 +104,20 @@ function oppositeAmounts(a: string, b: string): boolean {
   return Math.sign(x) === -Math.sign(y) && Math.abs(Math.abs(x) - Math.abs(y)) <= 0.01;
 }
 
+/** Why a direct-CSV half-link cannot be closed mechanically, or null when it can. */
+function skipReason(
+  a: Transaction,
+  b: Transaction | undefined,
+  claims: Map<number, number>,
+): SkipReason | null {
+  if (b == null) return 'sibling_missing';
+  if ((claims.get(b.id) ?? 0) > 1) return 'sibling_claimed_twice';
+  if (a.accountId === b.accountId) return 'same_account';
+  if (a.householdId !== b.householdId) return 'cross_household';
+  if (!oppositeAmounts(a.amount, b.amount)) return 'amount_mismatch';
+  return null;
+}
+
 export async function scanHalfLinkedCsvTransfers(t?: DbTransaction): Promise<HalfLinkScan> {
   const skipped: Record<SkipReason, number> = {
     sibling_missing: 0,
@@ -156,12 +170,7 @@ export async function scanHalfLinkedCsvTransfers(t?: DbTransaction): Promise<Hal
       continue;
     }
     const b = siblings.get(a.linkedTransactionId as number);
-    let reason: SkipReason | null = null;
-    if (b == null) reason = 'sibling_missing';
-    else if ((claims.get(b.id) ?? 0) > 1) reason = 'sibling_claimed_twice';
-    else if (a.accountId === b.accountId) reason = 'same_account';
-    else if (a.householdId !== b.householdId) reason = 'cross_household';
-    else if (!oppositeAmounts(a.amount, b.amount)) reason = 'amount_mismatch';
+    const reason = skipReason(a, b, claims);
     if (reason != null || b == null) {
       skipped[reason ?? 'sibling_missing'] += 1;
       continue;
