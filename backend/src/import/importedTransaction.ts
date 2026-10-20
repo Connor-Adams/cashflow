@@ -67,7 +67,7 @@ export interface ImportedTransactionContext {
  * negative amount defaults to `purchase`, a positive one to `unknown`. Only
  * these may be overwritten when a link reveals the row was internal movement.
  */
-const GUESSED_TXN_TYPES = ['purchase', 'unknown'];
+export const GUESSED_TXN_TYPES = ['purchase', 'unknown'];
 
 function ruleTxnType(signals: Signal[]): TxnType | null {
   return signals.find((s) => s.source === 'rule' && s.fields.txnType)?.fields.txnType ?? null;
