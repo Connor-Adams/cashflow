@@ -1740,10 +1740,16 @@ export type DebtLiability = {
   currency: string
   /** Amount currently owed, as a positive number. */
   balance: number
+  /**
+   * Where `balance` came from: the stored statement balance (used only while
+   * it is dated on/after the account's newest imported transaction) or the
+   * live balance derived from transactions.
+   */
+  balanceSource: 'statement' | 'live'
   /** APR as a percent (e.g. 19.99). */
   interestRate: number
   minimumPayment: number
-  /** Optional owed-balance override; null when derived from transactions. */
+  /** Stored statement balance, if any (see `balanceSource` for whether it is used). */
   statementBalance: number | null
   /** Optional day-of-month (1-31) the payment is due. */
   dueDay: number | null

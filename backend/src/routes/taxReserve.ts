@@ -35,6 +35,11 @@ import {
   classifyPositiveAmount,
   isNonSpend,
 } from '../summary/classifyTransactionFlow';
+import {
+  loadItemAllocationContext,
+  type ItemAllocationContext,
+} from '../summary/loadItemAllocations';
+import { splitTxnByItems } from '../import/splitTxnByItems';
 
 const router = Router();
 
@@ -88,6 +93,13 @@ export interface ReserveInputRow {
   /** From TransactionTaxMetadata.hstGstAmount. Null when not classified. */
   hstGstAmount: string | null;
   /**
+   * The business portion of `amount` (same sign), as the dashboard's business
+   * tile counts it: Transaction.businessAmount, or for an itemized txn the sum
+   * of its item allocations (splitTxnByItems), so an order whose items are
+   * only partly business deducts only that part. Absent → the full `amount`.
+   */
+  businessAmount?: string | null;
+  /**
    * Transaction.txnType, the owning account's type, and the merchant/category
    * text. These feed the dashboard headline's classifier
    * (summary/classifyTransactionFlow.ts) so only `txnType='income'` rows count
@@ -104,13 +116,18 @@ export interface ReserveComponents {
   /** Sum of business income for the period+currency (positive `txnType='income'` rows). */
   businessIncome: number;
   /**
-   * Sum of |amount| * deductiblePercent for business expenses (negative spend
-   * rows), less the same for business refunds/credits, which net against it.
+   * Sum of |businessAmount| * deductiblePercent for business expenses
+   * (negative spend rows), less the same for business refunds/credits, which
+   * net against it. Only the business portion of a partly-business row counts.
    */
   deductibleExpenses: number;
   /** Sum of hstGstAmount on income rows (positive amounts where HST/GST collected). */
   hstGstCollected: number;
-  /** Sum of hstGstAmount on expense rows (input tax credits / ITC), less refunded HST/GST. */
+  /**
+   * Sum of hstGstAmount on expense rows (input tax credits / ITC), less
+   * refunded HST/GST — each scaled by the row's business share, since only
+   * the business-use portion of the tax is claimable.
+   */
   hstGstPaid: number;
 }
 
@@ -170,6 +187,18 @@ function classifyReserveFlow(
 }
 
 /**
+ * Fraction (0..1) of a non-zero `amount` that is business. Absent
+ * `businessAmount` means the whole row; clamped like splitTxnByItems'
+ * txn-level business fraction.
+ */
+function businessShare(row: ReserveInputRow, amount: number): number {
+  const business = num(row.businessAmount);
+  if (business == null) return 1;
+  const ratio = business / amount;
+  return Number.isFinite(ratio) ? Math.min(Math.max(ratio, 0), 1) : 0;
+}
+
+/**
  * Builds one rollup per (period, currency). Reserve percent is looked up
  * per-currency via the passed `reservePercents` map; missing currencies
  * fall back to `defaultPercent`.
@@ -209,9 +238,13 @@ export function aggregateReserveRollups(
       } else if (flow === 'expense' || flow === 'refund') {
         // A refund is a negative expense: it nets the deductible amount and
         // the input tax credit back down rather than counting as revenue.
+        // Only the business share of the row is deductible, and only that
+        // share of its HST/GST is an input tax credit.
+        const share = businessShare(row, amount);
         const deductiblePct = resolveDeductiblePercent(row.deductiblePercent, true);
-        bucket.components.deductibleExpenses += -amount * deductiblePct;
-        bucket.components.hstGstPaid += flow === 'refund' ? -hstGst : hstGst;
+        bucket.components.deductibleExpenses += -amount * share * deductiblePct;
+        const itc = hstGst * share;
+        bucket.components.hstGstPaid += flow === 'refund' ? -itc : itc;
       }
     }
     buckets.set(key, bucket);
@@ -453,6 +486,31 @@ router.delete('/settings/:currency', async (req, res, next) => {
 });
 
 /**
+ * The business portion of a transaction exactly as the dashboard's business
+ * tile computes it (aggregateDashboard → splitTxnByItems): accepted-linked
+ * order items carry their own business-use percent, falling back to the
+ * txn-level businessAmount; an un-itemized txn is just its businessAmount.
+ */
+function businessPortion(txn: Transaction, ctx: ItemAllocationContext): number {
+  const allocations = splitTxnByItems({
+    txn: {
+      id: txn.id,
+      amount: String(txn.amount),
+      currency: txn.currency,
+      finalCategory: txn.finalCategory ?? null,
+      finalCategoryId: txn.finalCategoryId ?? null,
+      finalBusiness: Boolean(txn.finalBusiness),
+      finalSplitType: txn.finalSplitType,
+      businessAmount: String(txn.businessAmount ?? '0'),
+    },
+    links: ctx.linksByTxn.get(txn.id) ?? [],
+    ordersById: ctx.ordersById,
+    itemsByOrder: ctx.itemsByOrder,
+  });
+  return allocations.reduce((sum, a) => sum + a.businessAmount, 0);
+}
+
+/**
  * Load business transactions matching `where` (+ their tax metadata) and the
  * household's per-currency reserve settings, and roll them up. The single
  * source of the reserve number: GET /summary below and the /api/v1 reporting
@@ -469,12 +527,15 @@ export async function loadReserveRollups(
       'id',
       'date',
       'amount',
+      'businessAmount',
       'currency',
       'finalBusiness',
+      'finalSplitType',
       'txnType',
       'merchantRaw',
       'merchantClean',
       'finalCategory',
+      'finalCategoryId',
     ],
     include: [
       {
@@ -491,6 +552,7 @@ export async function loadReserveRollups(
       },
     ],
   });
+  const itemContext = await loadItemAllocationContext(rows.map((r) => r.id));
   const inputRows: ReserveInputRow[] = rows.map((r) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const meta = (r as any).taxMetadata as TransactionTaxMetadata | undefined;
@@ -505,6 +567,7 @@ export async function loadReserveRollups(
         meta?.deductiblePercent == null ? null : String(meta.deductiblePercent),
       hstGstAmount:
         meta?.hstGstAmount == null ? null : String(meta.hstGstAmount),
+      businessAmount: String(businessPortion(r, itemContext)),
       txnType: r.txnType ?? null,
       accountType: account?.accountType ?? null,
       merchantRaw: r.merchantRaw ?? null,

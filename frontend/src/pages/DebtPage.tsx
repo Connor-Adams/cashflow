@@ -219,7 +219,10 @@ function LiabilityRow({
         </div>
       </TableCell>
       <TableCell className="text-right tabular-nums">
-        {formatMoney(liability.balance, currency)}
+        <div>{formatMoney(liability.balance, currency)}</div>
+        <div className="text-xs text-muted-foreground">
+          {liability.balanceSource === 'statement' ? 'Statement balance' : 'Live balance'}
+        </div>
       </TableCell>
       <TableCell className="text-right tabular-nums">
         {editing ? (

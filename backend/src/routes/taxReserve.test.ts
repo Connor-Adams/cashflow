@@ -401,6 +401,62 @@ test('aggregateReserveRollups: net negative HST/GST clips to zero', () => {
   assert.equal(rollup[0].reserveTarget, 1800);
 });
 
+test('aggregateReserveRollups: a partly-business purchase deducts only its business portion', () => {
+  // $1,000 purchase of which $300 is business (item-level split, as the
+  // dashboard's business tile counts it). Only $300 is deductible and only
+  // 30% of the $130 HST is an input tax credit.
+  const rollup = aggregateReserveRollups(
+    [
+      row({ amount: '5000', txnType: 'income' }),
+      row({ amount: '-1000', businessAmount: '-300', hstGstAmount: '130' }),
+    ],
+    'quarterly',
+    new Map(),
+    0.25,
+  );
+  const c = rollup[0].components;
+  assert.equal(c.deductibleExpenses, 300);
+  assert.equal(c.hstGstPaid, 39);
+  assert.equal(rollup[0].netBusinessIncome, 4700);
+});
+
+test('aggregateReserveRollups: deductible percent applies on top of the business portion', () => {
+  // $300 business portion of a $1,000 meal, 50% deductible → $150.
+  const rollup = aggregateReserveRollups(
+    [row({ amount: '-1000', businessAmount: '-300', deductiblePercent: '0.5000' })],
+    'quarterly',
+    new Map(),
+    0.25,
+  );
+  assert.equal(rollup[0].components.deductibleExpenses, 150);
+});
+
+test('aggregateReserveRollups: a refund of a partly-business purchase nets only its business portion', () => {
+  const rollup = aggregateReserveRollups(
+    [
+      row({ amount: '-1000', businessAmount: '-300', hstGstAmount: '130' }),
+      row({ amount: '100', txnType: 'refund', businessAmount: '30', hstGstAmount: '13' }),
+    ],
+    'quarterly',
+    new Map(),
+    0.25,
+  );
+  const c = rollup[0].components;
+  assert.equal(c.deductibleExpenses, 270);
+  assert.equal(c.hstGstPaid, 35.1);
+});
+
+test('aggregateReserveRollups: a zero business portion deducts nothing', () => {
+  const rollup = aggregateReserveRollups(
+    [row({ amount: '-1000', businessAmount: '0', hstGstAmount: '130' })],
+    'quarterly',
+    new Map(),
+    0.25,
+  );
+  assert.equal(rollup[0].components.deductibleExpenses, 0);
+  assert.equal(rollup[0].components.hstGstPaid, 0);
+});
+
 // ---- validateReservePatch ----------------------------------------------
 
 test('validateReservePatch: accepts valid percent and note', () => {

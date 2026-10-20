@@ -7,8 +7,8 @@
  * reuse the exact same debt data behind `GET /api/debt` server-side without a
  * second HTTP round-trip.
  */
-import { Op } from 'sequelize';
-import { Account, LiabilityAccount } from '../models';
+import { Op, fn, col } from 'sequelize';
+import { Account, LiabilityAccount, Transaction } from '../models';
 import { currentOwed } from '../cards/utilization';
 import { looseHistoricalFxLookup } from '../networth/aggregate';
 import type { FxLookup } from '../networth/unifyToCad';
@@ -26,6 +26,8 @@ export type LiabilityRow = {
   currency: string;
   /** Amount currently owed, as a positive number. */
   balance: number;
+  /** Whether `balance` is the stored statement balance or the live balance. */
+  balanceSource: BalanceSource;
   interestRate: number;
   minimumPayment: number;
   statementBalance: number | null;
@@ -37,25 +39,88 @@ export type LiabilityRow = {
 };
 
 /**
- * The owed balance for a liability account, in the account's own currency. We
- * prefer the explicit `statementBalance` override when set (a product decision
- * — deliberately unchanged); otherwise we derive it from the transaction stream
- * via `currentOwed`, which FX-folds any foreign-currency legs into the
- * account's default currency instead of dropping them (the old
- * `find(defCcy) ?? balances[0]` only ever read one bucket — the same bug
- * cards/utilization.ts already fixed). Liability balances are negative (money
- * owed), so the magnitude is surfaced as a positive "owed" figure.
+ * Which figure a liability row's `balance` came from: the stored statement
+ * balance, or the live running balance derived from the transaction stream.
+ */
+export type BalanceSource = 'statement' | 'live';
+
+/**
+ * The statement balance wins only while it is at least as fresh as the
+ * account's newest imported transaction (on/after it). Once anything has been
+ * imported past the statement's as-of date, the statement no longer reflects
+ * what is owed and the live balance is used instead. With no transactions at
+ * all there is nothing fresher, so the statement stands.
+ */
+export function chooseBalanceSource(
+  hasStatementBalance: boolean,
+  statementAsOf: string | null,
+  lastTxnDate: string | null,
+): BalanceSource {
+  if (!hasStatementBalance) return 'live';
+  if (lastTxnDate == null || statementAsOf == null) return 'statement';
+  return statementAsOf >= lastTxnDate ? 'statement' : 'live';
+}
+
+/**
+ * The date a stored statement balance is as of: the statement cycle date when
+ * one was captured (PDF import, Credit Card planner); otherwise the date the
+ * profile was last saved — the Debt page sets the balance without a statement
+ * date, and a hand-typed balance is current as of the day it was entered.
+ */
+function statementAsOfDate(profile: InstanceType<typeof LiabilityAccount>): string | null {
+  if (profile.statementDate) return String(profile.statementDate).slice(0, 10);
+  const saved = profile.updatedAt as Date | string | null | undefined;
+  if (saved == null) return null;
+  const d = saved instanceof Date ? saved : new Date(saved);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
+/**
+ * The owed balance for a liability account, in the account's own currency,
+ * and which source it came from (see `chooseBalanceSource`). The stored
+ * `statementBalance` is used while it is not older than `lastTxnDate` (the
+ * account's newest transaction on/before asOf); otherwise the balance is
+ * derived from the transaction stream via `currentOwed`, which FX-folds any
+ * foreign-currency legs into the account's default currency instead of
+ * dropping them (the old `find(defCcy) ?? balances[0]` only ever read one
+ * bucket — the same bug cards/utilization.ts already fixed). Liability
+ * balances are negative (money owed), so the magnitude is surfaced as a
+ * positive "owed" figure.
  */
 export async function owedBalance(
   account: InstanceType<typeof Account>,
   profile: InstanceType<typeof LiabilityAccount> | null,
   asOf: string,
   fxLookup: FxLookup = looseHistoricalFxLookup,
-): Promise<number> {
-  if (profile && profile.statementBalance != null) {
-    return Math.abs(Number(profile.statementBalance));
+  lastTxnDate: string | null = null,
+): Promise<{ balance: number; balanceSource: BalanceSource }> {
+  const hasStatement = profile != null && profile.statementBalance != null;
+  const source = chooseBalanceSource(
+    hasStatement,
+    hasStatement ? statementAsOfDate(profile) : null,
+    lastTxnDate,
+  );
+  if (source === 'statement') {
+    return { balance: Math.abs(Number(profile!.statementBalance)), balanceSource: 'statement' };
   }
-  return currentOwed(account, asOf, fxLookup);
+  return { balance: await currentOwed(account, asOf, fxLookup), balanceSource: 'live' };
+}
+
+/** Newest transaction date (on/before asOf) per account, YYYY-MM-DD. */
+async function lastTxnDates(accountIds: number[], asOf: string): Promise<Map<number, string>> {
+  const rows = (await Transaction.findAll({
+    where: { accountId: { [Op.in]: accountIds }, date: { [Op.lte]: asOf } },
+    attributes: ['accountId', [fn('MAX', col('date')), 'lastDate']],
+    group: ['accountId'],
+    raw: true,
+  })) as unknown as Array<{ accountId: number; lastDate: string | Date | null }>;
+  const out = new Map<number, string>();
+  for (const r of rows) {
+    if (r.lastDate == null) continue;
+    const d = r.lastDate instanceof Date ? r.lastDate.toISOString() : String(r.lastDate);
+    out.set(Number(r.accountId), d.slice(0, 10));
+  }
+  return out;
 }
 
 /**
@@ -84,13 +149,20 @@ export async function loadLiabilities(
   });
   const profileByAccount = new Map<number, InstanceType<typeof LiabilityAccount>>();
   for (const p of profiles) profileByAccount.set(p.accountId, p);
+  const lastTxnByAccount = await lastTxnDates(accounts.map((a) => a.id), asOf);
 
   const toCadAmount = makeCadConverter(asOf, fxLookup);
   const rows: LiabilityRow[] = [];
   for (const account of accounts) {
     const profile = profileByAccount.get(account.id) ?? null;
     const currency = account.defaultCurrency ?? 'CAD';
-    const balance = await owedBalance(account, profile, asOf, fxLookup);
+    const { balance, balanceSource } = await owedBalance(
+      account,
+      profile,
+      asOf,
+      fxLookup,
+      lastTxnByAccount.get(account.id) ?? null,
+    );
     const minimumPayment = profile ? Number(profile.minimumPayment) : 0;
     rows.push({
       accountId: account.id,
@@ -98,6 +170,7 @@ export async function loadLiabilities(
       accountType: account.accountType,
       currency,
       balance,
+      balanceSource,
       interestRate: profile ? Number(profile.interestRate) : 0,
       minimumPayment,
       statementBalance:
