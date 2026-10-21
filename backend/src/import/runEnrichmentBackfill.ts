@@ -22,6 +22,7 @@ import { applyRuleSideEffects, findRuleActionsSignal } from '../rules/applyRuleS
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
+  loadAccountEntityContext,
   loadHouseholdOwnerNames,
   loadRecurringHistory,
   loadRelationshipCandidates,
@@ -186,6 +187,14 @@ export async function runBackfill(
     return householdAccountIdsByAccount.get(accountId)!;
   }
 
+  const accountEntityByAccount = new Map<number, Awaited<ReturnType<typeof loadAccountEntityContext>>>();
+  async function getAccountEntity(accountId: number, hh: number | null) {
+    if (!accountEntityByAccount.has(accountId)) {
+      accountEntityByAccount.set(accountId, await loadAccountEntityContext(accountId, hh));
+    }
+    return accountEntityByAccount.get(accountId)!;
+  }
+
   const ownerNamesByHousehold = new Map<string, string[]>();
   async function getOwnerNames(hh: number | null) {
     const k = householdKey(hh);
@@ -317,6 +326,7 @@ export async function runBackfill(
               txn.householdId,
             );
             const ownerNames = await getOwnerNames(txn.householdId);
+            const accountEntity = await getAccountEntity(txn.accountId, txn.householdId);
             const memory = await findMerchantMemory(
               txn.householdId,
               txn.merchantClean,
@@ -365,6 +375,7 @@ export async function runBackfill(
               householdId: txn.householdId,
               householdAccountIds,
               ownerNames,
+              accountEntity,
               rules,
               amazonOrders,
               memory,

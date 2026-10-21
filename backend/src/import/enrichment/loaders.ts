@@ -1,5 +1,6 @@
 import { QueryTypes, type Transaction as SequelizeTransaction } from 'sequelize';
-import { sequelize, Account, ExternalOrder, ExternalOrderItem, HouseholdMember, User, Contact } from '../../models';
+import { sequelize, Account, Entity, ExternalOrder, ExternalOrderItem, HouseholdMember, User, Contact } from '../../models';
+import type { AccountEntityContext } from './detectTypeStage';
 import type { ExternalOrderItem as ExternalOrderItemType } from '../../models/ExternalOrderItem';
 import type { LinkItemsCandidateOrder } from './linkItemsStage';
 import type { RecurringHistoryRow } from './detectRecurringStage';
@@ -74,6 +75,31 @@ export async function loadHouseholdOwnerNames(householdId: number | null): Promi
     ...partnerContacts.map((c) => c.name),
   ].filter((n): n is string => Boolean(n));
   return Array.from(new Set(names));
+}
+
+/**
+ * The tax entity that owns `accountId`, plus every household company's legal
+ * name, for detect-type's entity rules. Null when the account has no entity.
+ * Company names are deliberately NOT owner names: a deposit from the owner's
+ * company into a PERSONAL account is salary or dividends, i.e. income.
+ */
+export async function loadAccountEntityContext(
+  accountId: number,
+  householdId: number | null,
+): Promise<AccountEntityContext | null> {
+  const account = await Account.findByPk(accountId, { attributes: ['id', 'entityId'] });
+  if (account?.entityId == null) return null;
+  const entities = await Entity.findAll({
+    where: householdId != null ? { householdId } : { id: account.entityId },
+    attributes: ['id', 'kind', 'legalName'],
+  });
+  const own = entities.find((e) => e.id === account.entityId);
+  if (own == null) return null;
+  return {
+    kind: own.kind,
+    legalName: own.legalName,
+    householdEntityNames: entities.filter((e) => e.kind === 'corp').map((e) => e.legalName),
+  };
 }
 
 export async function loadRecurringHistory(
