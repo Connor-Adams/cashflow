@@ -8,6 +8,17 @@ import type { Signal, TxnType } from './types';
 export const BROKERAGE_PAYMENT_RE =
   /\b(?:online banking|online|misc|bill|web)\s+payment\b[^.]{0,40}\bquestrade\b/i;
 
+/**
+ * RBC "Find & Save" (NOMI): an automatic sweep from chequing into the
+ * customer's own Find & Save savings account, and the occasional sweep back.
+ * Prod narratives, all on RBC Day to Day Banking: "TO FIND & SAVE" (the
+ * outflow, 495 rows 2019-06 to 2026-04), "AUTO TRANSFER FROM FIND & SAVE" and
+ * "Auto transfer from Find & Save" (the return). The `to|from` anchor keeps a
+ * bare "save" (Save-On-Foods) or "find" out. Exported so the historical
+ * re-type (retypeFindAndSave.ts) scopes itself to exactly this rule.
+ */
+export const FIND_AND_SAVE_RE = /\b(?:to|from)\s+find\s*&\s*save\b/i;
+
 // Order matters: patterns are tried top-down and the first match wins.
 // `dividend` and `investment` must come BEFORE the generic positive/negative
 // fallbacks below; `transfer` and `fee` come before the broader
@@ -16,7 +27,24 @@ export const BROKERAGE_PAYMENT_RE =
 // were added when the bundle importer started routing the same descriptions
 // through the regular /upload path — without them, every WS BUY/AFT_OUT/FEE
 // row would default to 'purchase' and bloat the dashboard totalSpend metric.
-const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'negative' }> = [
+//
+// `category` is set only where the narrative alone settles the category too.
+// It rides on a high-confidence non-AI signal, so the row clears review and
+// never reaches the AI fallback. Most transfer rules deliberately leave it
+// unset: an Interac e-transfer can be paying a person for goods and must stay
+// in review.
+type Pattern = {
+  type: TxnType;
+  re: RegExp;
+  requireSign?: 'positive' | 'negative';
+  category?: string;
+};
+const PATTERNS: Pattern[] = [
+  // RBC Find & Save sweep (see FIND_AND_SAVE_RE). First so no merchant-shaped
+  // rule below can claim it. The AI fallback had filed all 495 prod outflows
+  // under Groceries (it reads "SAVE" as a grocer), and the sign-based default
+  // typed them `purchase`, so they counted as spend.
+  { type: 'transfer', re: FIND_AND_SAVE_RE, category: 'Transfer' },
   { type: 'refund', re: /\b(refund|return(?:ed)?|reversal|chargeback)\b/i, requireSign: 'positive' },
   // Brokerage funding/withdrawal worded as a bill payment. RBC renders a
   // contribution to a Questrade account as "ONLINE BANKING PAYMENT - 4503
@@ -367,14 +395,20 @@ function typed(txnType: TxnType, confidence: Signal['confidence'], rationale: st
 }
 
 /** First narrative pattern that matches, honouring its sign requirement. */
-function matchPattern(haystack: string, amount: number): TxnType | null {
-  for (const p of PATTERNS) {
-    if (!p.re.test(haystack)) continue;
-    if (p.requireSign === 'positive' && amount <= 0) continue;
-    if (p.requireSign === 'negative' && amount >= 0) continue;
-    return p.type;
-  }
-  return null;
+function matchPattern(haystack: string, amount: number): Pattern | null {
+  return PATTERNS.find((p) => p.re.test(haystack) && signAllows(p.requireSign, amount)) ?? null;
+}
+
+function signAllows(requireSign: Pattern['requireSign'], amount: number): boolean {
+  if (requireSign === 'positive') return amount > 0;
+  if (requireSign === 'negative') return amount < 0;
+  return true;
+}
+
+function patternSignal(p: Pattern): Signal {
+  const fields: Signal['fields'] = { txnType: p.type };
+  if (p.category != null) fields.autoCategory = p.category;
+  return { source: 'type-detect', confidence: 'high', fields, rationale: `narrative matched ${p.type}` };
 }
 
 export function runDetectTypeStage(input: DetectTypeInput): Signal[] {
@@ -401,7 +435,7 @@ export function runDetectTypeStage(input: DetectTypeInput): Signal[] {
   }
 
   const pattern = matchPattern(haystack, input.amount);
-  if (pattern) return typed(pattern, 'high', `narrative matched ${pattern}`);
+  if (pattern) return [patternSignal(pattern)];
 
   return input.amount < 0
     ? typed('purchase', 'medium', 'negative amount with no narrative cue')

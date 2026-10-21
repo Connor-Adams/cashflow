@@ -147,3 +147,34 @@ test('deterministic signals are still replaced — a stale rule signal is droppe
   await txn.reload();
   assert.equal(txn.autoCategory, null, 'and its category claim no longer applies');
 });
+
+// RBC "TO FIND & SAVE": the AI fallback filed every row under Groceries while
+// the narrative detector could only guess `purchase`. Once the detector knows
+// the narrative is a transfer with category Transfer (a deterministic,
+// high-confidence answer), the stale AI guess must not win the merge back. It
+// was only ever consulted because nothing deterministic answered.
+test('a deterministic high-confidence category supersedes a stale ai guess', async () => {
+  const txn = await mkFlaggedTxn('TO FIND & SAVE');
+  await Transaction.update(
+    { autoCategory: 'Groceries', autoSource: 'ai', autoConfidence: 'medium' },
+    { where: { id: txn.id } },
+  );
+  await TransactionSignal.create({
+    transactionId: txn.id,
+    source: 'ai',
+    confidence: 'medium',
+    fields: { autoCategory: 'Groceries', autoBusiness: false, autoSplitType: 'me' },
+    rationale: 'looks like a grocery store',
+  });
+
+  await runBackfill(flags());
+
+  await txn.reload();
+  assert.equal(txn.txnType, 'transfer');
+  assert.equal(txn.autoCategory, 'Transfer');
+  assert.equal(txn.finalCategory, 'Transfer');
+  assert.equal(txn.autoSource, 'type-detect');
+  assert.equal(txn.reviewFlag, false);
+  const ai = await TransactionSignal.findAll({ where: { transactionId: txn.id, source: 'ai' } });
+  assert.equal(ai.length, 1, 'the ai observation is kept as history, just no longer merged');
+});
