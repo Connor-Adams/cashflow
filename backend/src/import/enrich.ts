@@ -2,6 +2,7 @@ import { logger } from '../observability/logger';
 import { mergeSignals } from './enrichment/computeReviewFlag';
 import { runNormalizeStage } from './enrichment/normalizeStage';
 import { runDetectTypeStage } from './enrichment/detectTypeStage';
+import type { AccountEntityContext } from './enrichment/detectTypeStage';
 import { runDetectRecurringStage, type RecurringHistoryRow } from './enrichment/detectRecurringStage';
 import { runApplyRuleStage } from './enrichment/applyRuleStage';
 import { runMerchantMemoryStage } from './enrichment/merchantMemoryStage';
@@ -48,6 +49,12 @@ export interface EnrichInputs {
    * Optional; when omitted, any external "direct deposit from <X>" is income.
    */
   ownerNames?: string[];
+  /**
+   * The tax entity owning the row's account (loadAccountEntityContext). Lets
+   * detect-type tell a company moving its own money (transfer) from a client
+   * paying it (income). Optional; omitted → those rules do not fire.
+   */
+  accountEntity?: AccountEntityContext | null;
   /** Optional learned-brand lookup for stage 1; orchestrator may pass a memo'd resolver. */
   learnedBrandLookup?: (merchantClean: string) => string | null;
 }
@@ -106,6 +113,7 @@ export async function enrichTransaction(input: EnrichInputs): Promise<Enrichment
     merchantClean,
     amount: input.raw.amount,
     ownerNames: input.ownerNames,
+    accountEntity: input.accountEntity ?? null,
   }), []));
 
   // Stage 7's gate. A source that knows its own type (the synthesised brokerage

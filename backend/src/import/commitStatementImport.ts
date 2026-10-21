@@ -48,6 +48,7 @@ import { logger } from '../observability/logger';
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
+  loadAccountEntityContext,
   loadHouseholdOwnerNames,
   loadRecurringHistory,
   loadRelationshipCandidates,
@@ -511,6 +512,7 @@ export async function commitStatementImport(
   const amazonOrdersCache = await loadAmazonOrdersCache(account.householdId ?? null);
   const householdAccountIds = await loadHouseholdAccountIds(account.id, account.householdId ?? null);
   const ownerNames = await loadHouseholdOwnerNames(account.householdId ?? null);
+  const accountEntity = await loadAccountEntityContext(account.id, account.householdId ?? null);
   // Partner/shared splits carry the household's sole partner so settlements
   // against that partner net against them (null when 0 or 2+ partners).
   const solePartnerId = await findSolePartnerContactId(account.householdId ?? null);
@@ -613,6 +615,7 @@ export async function commitStatementImport(
         householdId: account.householdId ?? null,
         householdAccountIds,
         ownerNames,
+        accountEntity,
         rules,
         amazonOrders: amazonOrdersCache,
         memory,
