@@ -32,7 +32,7 @@ const LEGAL_NAME = 'CDG LABS INC.';
 
 test('counts an external receipt as revenue', () => {
   const rows = [
-    txn({ id: 1, amount: '5207.60', currency: 'USD', merchant: 'Received money from WANDERCOM with reference' }),
+    txn({ id: 1, amount: '5207.60', currency: 'USD', txnType: 'income', merchant: 'Received money from WANDERCOM with reference' }),
   ];
   const out = partitionCorpPerimeter(rows, { legalName: LEGAL_NAME, linkTargetIds: new Set() });
   assert.deepEqual(out.revenue.map((r) => r.id), [1]);
@@ -41,7 +41,7 @@ test('counts an external receipt as revenue', () => {
 
 test('drops every internal hop of a transfer chain', () => {
   const rows = [
-    txn({ id: 1, amount: '5207.60', currency: 'USD', merchant: 'Received money from WANDERCOM with reference' }),
+    txn({ id: 1, amount: '5207.60', currency: 'USD', txnType: 'income', merchant: 'Received money from WANDERCOM with reference' }),
     txn({ id: 2, amount: '-5207.60', currency: 'USD', linkedTransactionId: 3 }), // Wise USD out
     txn({ id: 3, amount: '7125.92', merchant: 'Converted 5,207.60 USD to 7,125.92 CAD', linkedTransactionId: 2 }),
     txn({ id: 4, amount: '-7125.92', merchant: 'Sent money to CDG Labs Inc.', linkedTransactionId: 5 }),
@@ -68,7 +68,7 @@ test('warns on an orphaned arrival leg but still counts it', () => {
 });
 
 test('warns on a perimeter receipt with no counterparty named', () => {
-  const rows = [txn({ id: 10, amount: '14500.00', merchant: 'Deposit' })];
+  const rows = [txn({ id: 10, amount: '14500.00', txnType: 'unknown', merchant: 'Deposit' })];
   const out = partitionCorpPerimeter(rows, { legalName: LEGAL_NAME, linkTargetIds: new Set() });
   assert.deepEqual(out.revenue.map((r) => r.id), [10]);
   assert.equal(out.warnings.length, 1);
@@ -155,8 +155,7 @@ test('zero-amount rows land in neither bucket', () => {
 // An outbound row typed `transfer` is, by definition, half of a pair. Reaching
 // the perimeter means its other half was never imported — it is your own money
 // moving, not a cost of doing business. Deducting it would understate income,
-// so it is dropped and called out. (Inbound transfers are NOT symmetric: Wise
-// labels genuine customer payments `transfer`, so those still count.)
+// so it is dropped and called out. Inbound own-money rows mirror this below.
 test('drops an outbound transfer with no imported pair, and says so', () => {
   const rows = [
     txn({
@@ -173,13 +172,50 @@ test('drops an outbound transfer with no imported pair, and says so', () => {
   assert.match(out.warnings[0], /not deducted/i);
 });
 
-test('an inbound transfer from a named external payer is still revenue', () => {
+// Inbound own-money rows are the mirror of the outbound rule. Wise used to type
+// every customer payment `transfer`, which is the only reason inbound transfers
+// counted; detect-type now types those `income`.
+test('an inbound transfer whose other leg is not linked is not revenue, and says so', () => {
   const rows = [
-    txn({ id: 22, amount: '5207.60', currency: 'USD', txnType: 'transfer', merchant: 'Received money from WANDERCOM' }),
+    // Prod 2911: RBC arrival of a Wise send; the Wise leg is $1.21 off (fee), so never linked.
+    txn({ id: 22, amount: '7169.88', txnType: 'transfer', merchant: 'Misc Payment CDG LABS INC' }),
+    // Prod 11717: owner top-up with no funding leg imported.
+    txn({ id: 25, amount: '55.00', txnType: 'transfer', merchant: 'Topped up account' }),
   ];
   const out = partitionCorpPerimeter(rows, { legalName: LEGAL_NAME, linkTargetIds: new Set() });
-  assert.deepEqual(out.revenue.map((r) => r.id), [22]);
+  assert.deepEqual(out.revenue, []);
+  assert.deepEqual(out.unimportedInboundTransfers.map((r) => r.id), [22, 25]);
+  assert.equal(out.warnings.length, 2);
+  assert.match(out.warnings[0], /#22.*NOT counted as business income/);
+});
+
+test('inbound payment and investment rows are the corp\'s own money, not revenue', () => {
+  const rows = [
+    txn({ id: 26, amount: '500.00', txnType: 'payment', merchant: 'PAYMENT RECEIVED - THANK YOU' }),
+    txn({ id: 27, amount: '9000.00', txnType: 'investment', merchant: 'Sold 10 shares of VFV' }),
+  ];
+  const out = partitionCorpPerimeter(rows, { legalName: LEGAL_NAME, linkTargetIds: new Set() });
+  assert.deepEqual(out.revenue, []);
+  assert.deepEqual(out.unimportedInboundTransfers.map((r) => r.id), [26, 27]);
+});
+
+test('a client receipt typed income is revenue with no warning', () => {
+  const rows = [
+    txn({ id: 28, amount: '5207.60', currency: 'USD', txnType: 'income', merchant: 'Received money from WANDERCOM' }),
+  ];
+  const out = partitionCorpPerimeter(rows, { legalName: LEGAL_NAME, linkTargetIds: new Set() });
+  assert.deepEqual(out.revenue.map((r) => r.id), [28]);
   assert.deepEqual(out.warnings, []);
+});
+
+test('a refund nets against expenses instead of counting as revenue', () => {
+  const rows = [
+    txn({ id: 29, amount: '-120.00', txnType: 'purchase', merchant: 'Software' }),
+    txn({ id: 38, amount: '20.00', txnType: 'refund', merchant: 'Software refund' }),
+  ];
+  const out = partitionCorpPerimeter(rows, { legalName: LEGAL_NAME, linkTargetIds: new Set() });
+  assert.deepEqual(out.revenue, []);
+  assert.deepEqual(out.expenses.map((r) => r.id), [29, 38], 'summed signed: -120 + 20');
 });
 
 test('a passive row tagged not_income is dropped, not bucketed as investment income', () => {

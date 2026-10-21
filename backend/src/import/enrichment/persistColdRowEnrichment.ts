@@ -18,6 +18,7 @@
  * enhancement is fine. A failure is CONTAINED — logged and reported as `false`,
  * never thrown — because neither stage may fail an import.
  */
+import { businessForAccount } from './corpBusinessDefault';
 import { mergeSignals } from './computeReviewFlag';
 import { resolveFinalCategory } from '../calculateShares';
 import { computeImportConfidence, serializeFlags } from '../computeImportConfidence';
@@ -37,6 +38,8 @@ export type EnrichableColdRow = {
   accountVisibility: 'private' | 'shared';
   txnType: string;
   categoryOverride: string | null;
+  /** On a corp-owned account the corp business default applies (corpBusinessDefault.ts). */
+  accountIsCorp?: boolean;
 };
 
 export async function persistColdRowEnrichment(args: {
@@ -102,7 +105,7 @@ export async function persistColdRowEnrichment(args: {
         autoCategoryId: autoMirror.id,
         finalCategory: finalMirror.name,
         finalCategoryId: finalMirror.id,
-        autoBusiness: merged.fields.autoBusiness,
+        autoBusiness: businessForAccount(merged.fields.autoBusiness, row.accountIsCorp === true),
         autoSplitType: merged.fields.autoSplitType,
         autoPctMe: merged.fields.autoPctMe,
         autoPctPartner: merged.fields.autoPctPartner,

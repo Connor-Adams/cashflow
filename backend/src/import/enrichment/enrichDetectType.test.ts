@@ -1011,3 +1011,77 @@ test('GUARD: Questrade and dashed card-payment rules are unchanged by the Find &
   });
   assert.equal(dashed[0].fields.txnType, 'payment');
 });
+
+// ─── entity-aware rules: who owns the receiving account ─────────────────────
+
+const CORP = { kind: 'corp' as const, legalName: 'CDG LABS INC.', householdEntityNames: ['CDG LABS INC.'] };
+const PERSONAL = { kind: 'personal' as const, legalName: 'Personal', householdEntityNames: ['CDG LABS INC.'] };
+const OWNERS = ['Connor Adams'];
+
+function typeOf(merchantRaw: string, amount: number, accountEntity: typeof CORP | typeof PERSONAL | null) {
+  return runDetectTypeStage({ merchantRaw, merchantClean: merchantRaw, amount, ownerNames: OWNERS, accountEntity })[0];
+}
+
+test('entity: a deposit from the company into its own account is a transfer', () => {
+  // Prod 2867 / 2869 / 11614 / 11615 / 12009: Wise Corporate CAD → WS Corporate Chequing.
+  for (const raw of ['Direct deposit from CDG LABS INC', 'Direct deposit from CDG LABS IN', 'Misc Payment CDG LABS INC']) {
+    const s = typeOf(raw, 7229.27, CORP);
+    assert.equal(s.fields.txnType, 'transfer', raw);
+    assert.equal(s.confidence, 'high', raw);
+  }
+});
+
+test('entity: the same deposit into the owner\'s PERSONAL account stays income (salary / dividends)', () => {
+  assert.equal(typeOf('Direct deposit from CDG LABS INC', 5000, PERSONAL).fields.txnType, 'income');
+});
+
+test('entity: a client paying the company is income', () => {
+  for (const raw of [
+    'Received money from WANDERCOM with reference INV-12',
+    'Received money from AURELIUS TECHNOL',
+    'Received money from RIPPLING PAYMENTS INC.',
+  ]) {
+    const s = typeOf(raw, 4200, CORP);
+    assert.equal(s.fields.txnType, 'income', raw);
+    assert.equal(s.confidence, 'high', raw);
+  }
+});
+
+test('entity: the household paying the company is not revenue', () => {
+  assert.equal(typeOf('Received money from Connor Adams', 1000, CORP).fields.txnType, 'transfer', 'owner funding');
+  assert.equal(typeOf('Received money from CDG Labs Inc.', 1000, CORP).fields.txnType, 'transfer', 'company to itself');
+});
+
+test('entity: "received money from" on a personal account stays a transfer', () => {
+  assert.equal(typeOf('Received money from Jane Doe', 50, PERSONAL).fields.txnType, 'transfer');
+});
+
+test('entity: outflows and unknown entities are untouched', () => {
+  assert.equal(typeOf('Sent money to CDG Labs Inc.', -7229.27, CORP).fields.txnType, 'transfer');
+  assert.equal(typeOf('Direct deposit from CDG LABS INC', 100, null).fields.txnType, 'income', 'no entity → old behaviour');
+  assert.equal(typeOf('Received money from WANDERCOM', 100, null).fields.txnType, 'transfer', 'no entity → old behaviour');
+});
+
+test('entity: an external misc payment onto a corp account is not assumed to be revenue', () => {
+  assert.notEqual(typeOf('MISC PAYMENT CANADA REVENUE AGENCY', 812, CORP).fields.txnType, 'income');
+});
+
+test('bare "Interest" / "Dividend" inflows are passive income, outflows are not', () => {
+  const t = (merchantRaw: string, amount: number) =>
+    runDetectTypeStage({ merchantRaw, merchantClean: merchantRaw, amount })[0];
+  assert.equal(t('Interest', 10.78).fields.txnType, 'interest');
+  assert.equal(t('Interest', 10.78).confidence, 'high');
+  assert.equal(t('Dividend', 81.89).fields.txnType, 'dividend');
+  assert.notEqual(t('Interest', -12).fields.txnType, 'interest', 'a bare interest debit may be a loan charge');
+  assert.notEqual(t('Dividend', -5).fields.txnType, 'dividend');
+});
+
+test('GUARD: the Find & Save rule still decides its narrative on a personal or corp account', () => {
+  for (const entity of [PERSONAL, CORP]) {
+    for (const [raw, amount] of [['TO FIND & SAVE', -17], ['AUTO TRANSFER FROM FIND & SAVE', 120.5]] as const) {
+      const s = typeOf(raw, amount, entity);
+      assert.equal(s.fields.txnType, 'transfer', `${raw} on ${entity.kind}`);
+      assert.equal(s.fields.autoCategory, 'Transfer', `${raw} on ${entity.kind}`);
+    }
+  }
+});

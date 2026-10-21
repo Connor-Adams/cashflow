@@ -200,8 +200,16 @@ const PATTERNS: Pattern[] = [
 // haystack — checked before PATTERNS as exact-match shortcuts. "Deposit"
 // alone is a Wealthsimple deposit ledger entry (treat as transfer); a generic
 // \bDeposit\b regex would false-positive on "Direct deposit" or "term deposit".
-const EXACT_RAW_MATCHES: Array<{ value: string; type: TxnType }> = [
+// "Interest" / "Dividend" alone are how Wealthsimple's 2026-10 export words a
+// monthly interest payout on chequing and a fund distribution on an investment
+// account (prod 12368/12369 and 12465-12467). Without them both read as
+// `unknown`, and the corp T2 counted them as active business revenue — the
+// dividend a second time, since the InvestmentActivity ledger already has it.
+// Inflows only: a bare "Interest" debit could be a loan charge.
+const EXACT_RAW_MATCHES: Array<{ value: string; type: TxnType; requireSign?: 'positive' }> = [
   { value: 'deposit', type: 'transfer' },
+  { value: 'interest', type: 'interest', requireSign: 'positive' },
+  { value: 'dividend', type: 'dividend', requireSign: 'positive' },
 ];
 
 // Income: external payroll / direct-deposit inflows. Distinguished from the
@@ -211,8 +219,11 @@ const EXACT_RAW_MATCHES: Array<{ value: string; type: TxnType }> = [
 // money movement, not earned income. Bank descriptions are truncated (35-char
 // cap in the reference data) so a corporate-entity suffix is not reliably
 // present — own-name exclusion against the household members is the precision
-// signal that separates "Direct deposit from CDG LABS INC" / "...ADAMS GREENE"
-// (income) from "...ADAMS CONNOR" (the owner paying themselves → transfer).
+// signal that separates "...ADAMS GREENE" (income) from "...ADAMS CONNOR" (the
+// owner paying themselves → transfer). A deposit from one of the household's
+// own companies depends on which account receives it — see the entity rules
+// below: into an account of that same company it is a transfer, into the
+// owner's personal account it is salary/dividends and stays income.
 const INCOME_WORD_RE = /\b(payroll|salary|paycheque|paycheck)\b/i;
 const DIRECT_DEPOSIT_FROM_RE = /\bdirect deposit from\b/i;
 const OWN_ACCOUNT_RE =
@@ -263,6 +274,100 @@ function detectsIncome(
   return !isOwnNameDeposit(new Set(tokenizeName(haystack)), ownerNames);
 }
 
+/**
+ * Company-form suffixes. Bank narratives truncate ("CDG LABS IN") or drop them,
+ * so an entity is matched on its distinctive tokens only.
+ */
+const CORP_SUFFIX_TOKENS = new Set([
+  'inc', 'incorporated', 'ltd', 'limited', 'corp', 'corporation', 'co', 'company', 'llc', 'ltee', 'ulc',
+]);
+
+function entityTokens(legalName: string): string[] {
+  return tokenizeName(legalName).filter((t) => !CORP_SUFFIX_TOKENS.has(t));
+}
+
+function namesEntity(payeeTokens: Set<string>, legalName: string): boolean {
+  const tokens = entityTokens(legalName);
+  return tokens.length > 0 && tokens.every((t) => payeeTokens.has(t));
+}
+
+/** "Direct deposit from X" / "Received money from X" / "Misc payment X": an inflow naming its payer. */
+const PAYER_NAMED_INFLOW_RE = /\b(direct deposit from|received money from|misc payment)\b/i;
+/**
+ * Wise's wording for every incoming payment. The client-receipt rule keys on
+ * this alone: "direct deposit from <external>" is already income under the
+ * owner-name rule, and an external "misc payment" onto a corp account is as
+ * likely a CRA refund as revenue.
+ */
+const RECEIVED_MONEY_FROM_RE = /\breceived money from\b/i;
+
+/** The tax entity that owns the account a row sits on. */
+export interface AccountEntityContext {
+  kind: 'personal' | 'corp';
+  /** The entity's legal name (for a corp, e.g. "CDG LABS INC."). */
+  legalName: string;
+  /**
+   * Every household company's legal name, the account's own included. A payer
+   * matching one of these, or an owner name, is the household paying itself.
+   */
+  householdEntityNames: string[];
+}
+
+/**
+ * Money arriving on an account from the very entity that owns it — e.g. the
+ * corp's Wise account sending to the corp's Wealthsimple chequing, which reads
+ * "Direct deposit from CDG LABS INC". That is the entity moving its own money,
+ * whatever the detector would otherwise make of a "direct deposit from".
+ * Personal accounts are covered by the owner-name rule instead.
+ */
+function isSameEntityInflow(haystack: string, amount: number, entity: AccountEntityContext | null): boolean {
+  if (amount <= 0 || entity == null || entity.kind !== 'corp') return false;
+  if (!PAYER_NAMED_INFLOW_RE.test(haystack)) return false;
+  return namesEntity(new Set(tokenizeName(haystack)), entity.legalName);
+}
+
+/**
+ * A client paying a company: an inflow onto a corp account naming a payer that
+ * is neither a household member nor any household company. Wise words every
+ * receipt "Received money from <payer>", which the generic transfer rule would
+ * otherwise claim. Corp accounts only — on a personal account "received money
+ * from <person>" is as likely a friend repaying as income, and stays a transfer.
+ */
+function isCorpExternalReceipt(
+  haystack: string,
+  amount: number,
+  entity: AccountEntityContext | null,
+  ownerNames: string[],
+): boolean {
+  if (amount <= 0 || entity == null || entity.kind !== 'corp') return false;
+  if (!RECEIVED_MONEY_FROM_RE.test(haystack)) return false;
+  const tokens = new Set(tokenizeName(haystack));
+  if (isOwnNameDeposit(tokens, ownerNames)) return false;
+  return !entity.householdEntityNames.some((name) => namesEntity(tokens, name));
+}
+
+/**
+ * The type the entity rules alone assign a row, or null when neither fires:
+ * `transfer` for an inflow from the entity that owns the account, `income` for a
+ * client receipt into a corp account. Shared with the historical re-type
+ * (retypeEntityFlows.ts) so it cannot drift from what imports and the nightly
+ * backfill decide.
+ */
+export function entityFlowType(input: {
+  merchantRaw: string;
+  merchantClean: string;
+  amount: number;
+  ownerNames?: string[];
+  accountEntity?: AccountEntityContext | null;
+}): 'transfer' | 'income' | null {
+  const haystack = `${input.merchantRaw} ${input.merchantClean}`.trim();
+  const entity = input.accountEntity ?? null;
+  if (isSameEntityInflow(haystack, input.amount, entity)) return 'transfer';
+  if (detectsIncome(haystack, input.amount, input.ownerNames ?? [])) return null;
+  if (isCorpExternalReceipt(haystack, input.amount, entity, input.ownerNames ?? [])) return 'income';
+  return null;
+}
+
 export interface DetectTypeInput {
   merchantRaw: string;
   merchantClean: string;
@@ -276,6 +381,22 @@ export interface DetectTypeInput {
    * external income.
    */
   ownerNames?: string[];
+  /**
+   * The tax entity that owns the row's account. Lets a deposit from a household
+   * company be told apart by WHERE it lands: same company → transfer; the
+   * owner's personal account → income. Optional; without it neither entity rule
+   * fires and behaviour is unchanged.
+   */
+  accountEntity?: AccountEntityContext | null;
+}
+
+function typed(txnType: TxnType, confidence: Signal['confidence'], rationale: string): Signal[] {
+  return [{ source: 'type-detect', confidence, fields: { txnType }, rationale }];
+}
+
+/** First narrative pattern that matches, honouring its sign requirement. */
+function matchPattern(haystack: string, amount: number): Pattern | null {
+  return PATTERNS.find((p) => p.re.test(haystack) && signAllows(p.requireSign, amount)) ?? null;
 }
 
 function signAllows(requireSign: Pattern['requireSign'], amount: number): boolean {
@@ -292,53 +413,31 @@ function patternSignal(p: Pattern): Signal {
 
 export function runDetectTypeStage(input: DetectTypeInput): Signal[] {
   const haystack = `${input.merchantRaw} ${input.merchantClean}`.trim();
+  const ownerNames = input.ownerNames ?? [];
+  const entity = input.accountEntity ?? null;
 
   const trimmedRaw = input.merchantRaw.trim().toLowerCase();
-  for (const m of EXACT_RAW_MATCHES) {
-    if (trimmedRaw === m.value) {
-      return [
-        {
-          source: 'type-detect',
-          confidence: 'high',
-          fields: { txnType: m.type },
-          rationale: `narrative matched ${m.type} (bare ${m.value})`,
-        },
-      ];
-    }
+  const exact = EXACT_RAW_MATCHES.find(
+    (m) => m.value === trimmedRaw && (m.requireSign !== 'positive' || input.amount > 0),
+  );
+  if (exact) return typed(exact.type, 'high', `narrative matched ${exact.type} (bare ${exact.value})`);
+
+  // Order matters: a company moving its own money is decided before the
+  // external-direct-deposit income rule could claim it.
+  if (isSameEntityInflow(haystack, input.amount, entity)) {
+    return typed('transfer', 'high', 'inflow from the entity that owns this account (internal move)');
+  }
+  if (detectsIncome(haystack, input.amount, ownerNames)) {
+    return typed('income', 'high', 'narrative matched income (payroll / government benefit / external direct deposit)');
+  }
+  if (isCorpExternalReceipt(haystack, input.amount, entity, ownerNames)) {
+    return typed('income', 'high', 'receipt from an external payer into a corporate account');
   }
 
-  if (detectsIncome(haystack, input.amount, input.ownerNames ?? [])) {
-    return [
-      {
-        source: 'type-detect',
-        confidence: 'high',
-        fields: { txnType: 'income' },
-        rationale:
-          'narrative matched income (payroll / government benefit / external direct deposit)',
-      },
-    ];
-  }
-
-  const pattern = PATTERNS.find((p) => p.re.test(haystack) && signAllows(p.requireSign, input.amount));
+  const pattern = matchPattern(haystack, input.amount);
   if (pattern) return [patternSignal(pattern)];
 
-  if (input.amount < 0) {
-    return [
-      {
-        source: 'type-detect',
-        confidence: 'medium',
-        fields: { txnType: 'purchase' },
-        rationale: 'negative amount with no narrative cue',
-      },
-    ];
-  }
-
-  return [
-    {
-      source: 'type-detect',
-      confidence: 'low',
-      fields: { txnType: 'unknown' },
-      rationale: 'positive amount with no narrative cue',
-    },
-  ];
+  return input.amount < 0
+    ? typed('purchase', 'medium', 'negative amount with no narrative cue')
+    : typed('unknown', 'low', 'positive amount with no narrative cue');
 }

@@ -516,7 +516,8 @@ test('active business income counts the external receipt, not the internal hops'
 
   // Hop 1 — the money enters the corp from a customer. THIS is revenue.
   await seedTxn(ctx, ctx.wiseUsd, {
-    date: '2025-03-13', amount: '5000.0000', currency: 'USD', txnType: 'transfer',
+    // detect-type's entity rule types a Wise client receipt `income`.
+    date: '2025-03-13', amount: '5000.0000', currency: 'USD', txnType: 'income',
     merchantRaw: 'Received money from WANDERCOM', merchantClean: 'Received money from WANDERCOM',
     finalBusiness: false,
   });
@@ -871,7 +872,7 @@ test('revenue converted at a stale fallback rate is warned about with both dates
     rate: '1.44', source: 'manual_seed', fetchedAt: new Date(),
   } as never);
   await seedTxn(ctx, ctx.wiseUsd, {
-    date: '2025-03-13', amount: '5000.0000', currency: 'USD', txnType: 'transfer',
+    date: '2025-03-13', amount: '5000.0000', currency: 'USD', txnType: 'income',
     merchantRaw: 'Received money from WANDERCOM', finalBusiness: false,
   });
 

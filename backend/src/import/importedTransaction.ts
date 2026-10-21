@@ -31,6 +31,7 @@ import { normalizeSourceRef } from './normalizeSourceRef';
 import { narrativeTxnType } from './resolveRelationshipTxnType';
 import type { ColdRow } from './enrichment/aiBatchOverColdRows';
 import { persistSuggestedOrderLink, persistTransactionSignals } from './enrichment/persistSignals';
+import { businessForAccount } from './enrichment/corpBusinessDefault';
 import type { EnrichmentResult, Signal, TxnType } from './enrichment/types';
 
 /** One cash row as an importer hands it over, after its own parsing and dedup. */
@@ -56,6 +57,8 @@ export interface ImportedTransactionContext {
   importBatch: string;
   /** Statement-level "everything in this file is business". */
   overrideBusiness?: boolean;
+  /** The account is owned by a corporation: business by default (corpBusinessDefault.ts). */
+  accountIsCorp?: boolean;
   /** Absent means authoritative; only the SimpleFIN feed declares itself provisional. */
   sourceTier?: string;
   /** The household's only partner contact, stamped onto partner/shared splits. */
@@ -124,6 +127,8 @@ export interface BuiltImportedTransaction {
   /** The type actually stored, which the cold-row fallbacks recompute confidence from. */
   txnType: TxnType;
   accountVisibility: 'private' | 'shared';
+  /** The account is corp-owned, so the cold-row fallbacks keep the corp business default. */
+  accountIsCorp: boolean;
 }
 
 export async function buildImportedTransaction(
@@ -180,7 +185,9 @@ export async function buildImportedTransaction(
     status: 'posted',
     appliedRuleId: f.appliedRuleId,
     autoCategory: f.autoCategory,
-    autoBusiness: ctx.overrideBusiness ? true : f.autoBusiness,
+    autoBusiness: ctx.overrideBusiness
+      ? true
+      : businessForAccount(f.autoBusiness, ctx.accountIsCorp === true),
     autoSplitType: f.autoSplitType,
     autoPctMe: f.autoPctMe,
     autoPctPartner: f.autoPctPartner,
@@ -204,7 +211,7 @@ export async function buildImportedTransaction(
     sourceTier: ctx.sourceTier ?? 'authoritative',
   });
   recomputeTransactionAmounts(txn);
-  return { txn, txnType, accountVisibility };
+  return { txn, txnType, accountVisibility, accountIsCorp: ctx.accountIsCorp === true };
 }
 
 /**
@@ -319,5 +326,6 @@ export function coldRowFor(
     txnType: built.txnType,
     // Brand-new row: it cannot carry a user override yet.
     categoryOverride: null,
+    accountIsCorp: built.accountIsCorp,
   };
 }

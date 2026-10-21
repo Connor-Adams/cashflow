@@ -78,6 +78,12 @@ export type ColdRow = {
    * may hold a category a human chose, which MUST survive this stage.
    */
   categoryOverride: string | null;
+  /**
+   * The row sits on an account owned by a corporation, so the fallback's
+   * household-wide business guess must not override the corp default (see
+   * corpBusinessDefault.ts). Optional: absent means a personal account.
+   */
+  accountIsCorp?: boolean;
 };
 
 export function dedupeColdRowsByMerchantKey(coldRows: ColdRow[]): ColdRow[] {

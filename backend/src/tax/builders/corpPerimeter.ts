@@ -87,6 +87,13 @@ export interface PerimeterPartition {
    */
   unimportedOutboundTransfers: PerimeterTxn[];
   /**
+   * Inbound rows typed as the corp's own money moving (`transfer`, `payment`,
+   * `investment`) whose other leg is not imported or not linked. Not revenue —
+   * the mirror of `unimportedOutboundTransfers` — and each one warns, because a
+   * genuine receipt mistyped `transfer` would silently understate income.
+   */
+  unimportedInboundTransfers: PerimeterTxn[];
+  /**
    * Receipts counted as revenue whose external-ness could not be corroborated —
    * see `looksLikeOrphanedArrival`. They ARE included in `revenue`; the warning
    * exists so the number's shakiest inputs are visible on the return.
@@ -161,6 +168,19 @@ const PASSIVE_TXN_TYPES = new Set(['dividend', 'interest']);
  */
 const ANONYMOUS_MERCHANTS = new Set(['deposit', 'transfer', 'credit', 'payment']);
 
+/**
+ * Inbound types that say the money was the corp's own, not a payer's: a
+ * transfer between its accounts, a card payment received, or sale proceeds of
+ * its own investments. The outbound side of each is already excluded from
+ * expenses for the same reason (see the negative branch below).
+ *
+ * Until 2026-10 an inbound `transfer` WAS counted as revenue, only because Wise
+ * labelled every customer payment `transfer`. detect-type's entity rule now
+ * types those `income` ("Received money from <client>" onto a corp account), so
+ * the exception has no reason left and the rule is symmetric.
+ */
+const OWN_MONEY_INBOUND_TYPES = new Set(['transfer', 'payment', 'investment']);
+
 /** Days a bank transfer and its brokerage settlement may legitimately differ by. */
 const CASH_MOVE_WINDOW_DAYS = 3;
 
@@ -198,90 +218,125 @@ export function looksLikeOrphanedArrival(txn: PerimeterTxn, legalName: string): 
   return self !== '' && merchant.includes(self);
 }
 
+type Bucket = Exclude<keyof PerimeterPartition, 'warnings'>;
+
+/** Where a perimeter row lands, plus the warning it raises, if any. */
+type Verdict = { bucket: Bucket | null; warning?: string };
+
+function money(t: PerimeterTxn, amount: Decimal): string {
+  return `Txn #${t.id} (${t.date}, ${amount.toFixed(2)} ${t.currency})`;
+}
+
+/** Passive income is settled before the sign split so a reversal nets against it. */
+function passiveVerdict(t: PerimeterTxn): Verdict | null {
+  if (t.txnType === null || !PASSIVE_TXN_TYPES.has(t.txnType)) return null;
+  if (t.accountType === 'investment') return { bucket: null };
+  return { bucket: t.txnType === 'interest' ? 'interestIncome' : 'dividendIncome' };
+}
+
+function inboundVerdict(t: PerimeterTxn, amount: Decimal, legalName: string): Verdict {
+  // A refund returns money the corp spent: it reduces the expense, it is not
+  // income. Same rule as the T1's business rows, which net a refund against
+  // expenses and leave an owner-paid corp refund to the T2
+  // (buildPersonalFacts.ts), and as the tax reserve (taxReserve.ts
+  // classifyReserveFlow). Expenses are summed signed, so a positive row in that
+  // bucket nets off.
+  if (t.txnType === 'refund') return { bucket: 'expenses' };
+  if (t.txnType !== null && OWN_MONEY_INBOUND_TYPES.has(t.txnType)) {
+    return {
+      bucket: 'unimportedInboundTransfers',
+      warning:
+        `${money(t, amount)} was NOT counted as business income: it is typed ${t.txnType}, `
+        + "i.e. the corp's own money arriving, and its other leg is not linked. "
+        + 'If it is really a customer payment, retype it income.',
+    };
+  }
+  return {
+    bucket: 'revenue',
+    warning: looksLikeOrphanedArrival(t, legalName)
+      ? `${money(t, amount)} counted as business income, `
+        + 'but it names no external counterparty — it may be the arrival leg of a transfer '
+        + 'whose earlier hops are not imported. Verify before filing.'
+      : undefined,
+  };
+}
+
+function outboundVerdict(t: PerimeterTxn, amount: Decimal): Verdict {
+  // Buying securities moves capital, it does not consume it.
+  if (t.txnType === 'investment') return { bucket: null };
+  // An outbound `transfer` is half of a pair by definition; reaching the
+  // perimeter means the other half was never imported. That is the corp's own
+  // money moving, not a cost — deducting it would understate income. Inbound
+  // own-money rows are handled symmetrically in inboundVerdict.
+  if (t.txnType === 'transfer') {
+    return {
+      bucket: 'unimportedOutboundTransfers',
+      warning:
+        `${money(t, amount)} was NOT deducted as a `
+        + 'business expense: it is an outbound transfer whose matching leg is not imported, '
+        + 'so it reads as the corp moving its own money rather than spending it.',
+    };
+  }
+  return { bucket: 'expenses' };
+}
+
+/**
+ * Greedy 1:1 — a movement, once used to explain a transfer, cannot explain
+ * another. Matched on the OPPOSITE sign: cash leaving the bank arrives at the
+ * brokerage as a positive deposit.
+ */
+function cashMoveClaimer(internalCashMoves: readonly InternalCashMove[]) {
+  const unclaimed = internalCashMoves.map((m) => ({ move: m, claimed: false }));
+  const matches = (candidate: (typeof unclaimed)[number], t: PerimeterTxn, amount: Decimal) =>
+    !candidate.claimed
+    && candidate.move.currency === t.currency
+    && D(candidate.move.amount).plus(amount).isZero()
+    && daysApart(candidate.move.date, t.date) <= CASH_MOVE_WINDOW_DAYS;
+  return (t: PerimeterTxn, amount: Decimal): boolean => {
+    const entry = unclaimed.find((candidate) => matches(candidate, t, amount));
+    if (entry) entry.claimed = true;
+    return entry != null;
+  };
+}
+
+/** Internal hop (either direction of the one-way pointer) or a non-operating treatment. */
+function outsidePerimeter(t: PerimeterTxn, linkTargetIds: ReadonlySet<number>): boolean {
+  if (t.linkedTransactionId !== null || linkTargetIds.has(t.id)) return true;
+  return t.taxTreatmentOverride !== null && NON_OPERATING_TREATMENTS.has(t.taxTreatmentOverride);
+}
+
 export function partitionCorpPerimeter(
   txns: readonly PerimeterTxn[],
   { legalName, linkTargetIds, internalCashMoves = [] }: PerimeterOptions,
 ): PerimeterPartition {
-  // Greedy 1:1 — a movement, once used to explain a transfer, cannot explain
-  // another. Matched on the OPPOSITE sign: cash leaving the bank arrives at the
-  // brokerage as a positive deposit.
-  const unclaimedMoves = internalCashMoves.map((m) => ({ move: m, claimed: false }));
-  const claimMatchingCashMove = (t: PerimeterTxn, amount: Decimal): boolean => {
-    const entry = unclaimedMoves.find(
-      (candidate) =>
-        !candidate.claimed
-        && candidate.move.currency === t.currency
-        && D(candidate.move.amount).plus(amount).isZero()
-        && daysApart(candidate.move.date, t.date) <= CASH_MOVE_WINDOW_DAYS,
-    );
-    if (!entry) return false;
-    entry.claimed = true;
-    return true;
+  const claimMatchingCashMove = cashMoveClaimer(internalCashMoves);
+  const out: PerimeterPartition = {
+    revenue: [],
+    expenses: [],
+    interestIncome: [],
+    dividendIncome: [],
+    unimportedOutboundTransfers: [],
+    unimportedInboundTransfers: [],
+    warnings: [],
   };
-  const revenue: PerimeterTxn[] = [];
-  const expenses: PerimeterTxn[] = [];
-  const interestIncome: PerimeterTxn[] = [];
-  const dividendIncome: PerimeterTxn[] = [];
-  const unimportedOutboundTransfers: PerimeterTxn[] = [];
-  const warnings: string[] = [];
+  const verdictFor = (t: PerimeterTxn, amount: Decimal): Verdict => {
+    const passive = passiveVerdict(t);
+    if (passive) return passive;
+    // Cash returning from, or going to, the brokerage is the corp's own money;
+    // the far side is in the InvestmentActivity ledger, so nothing to flag.
+    // Outbound, only a `transfer` may claim a movement.
+    const mayClaim = amount.greaterThan(0) || t.txnType === 'transfer';
+    if (mayClaim && claimMatchingCashMove(t, amount)) return { bucket: null };
+    return amount.greaterThan(0) ? inboundVerdict(t, amount, legalName) : outboundVerdict(t, amount);
+  };
 
   for (const t of txns) {
-    // Internal hop: either it points at another row, or another row points at
-    // it. Both directions must be checked — the pointer is one-way.
-    if (t.linkedTransactionId !== null) continue;
-    if (linkTargetIds.has(t.id)) continue;
-    if (t.taxTreatmentOverride !== null && NON_OPERATING_TREATMENTS.has(t.taxTreatmentOverride)) {
-      continue;
-    }
-
+    if (outsidePerimeter(t, linkTargetIds)) continue;
     const amount: Decimal = D(t.amount);
-
-    // Passive income is settled before the sign split so a reversal nets
-    // against the income it reverses rather than posing as an expense.
-    if (t.txnType !== null && PASSIVE_TXN_TYPES.has(t.txnType)) {
-      if (t.accountType === 'investment') continue;
-      if (t.txnType === 'interest') interestIncome.push(t);
-      else dividendIncome.push(t);
-      continue;
-    }
-
-    if (amount.greaterThan(0)) {
-      // Cash returning from the brokerage is the corp's own money, not a payer.
-      if (claimMatchingCashMove(t, amount)) continue;
-      revenue.push(t);
-      if (looksLikeOrphanedArrival(t, legalName)) {
-        warnings.push(
-          `Txn #${t.id} (${t.date}, ${amount.toFixed(2)} ${t.currency}) counted as business income, `
-          + 'but it names no external counterparty — it may be the arrival leg of a transfer '
-          + 'whose earlier hops are not imported. Verify before filing.',
-        );
-      }
-    } else if (amount.lessThan(0)) {
-      // Buying securities moves capital, it does not consume it.
-      if (t.txnType === 'investment') continue;
-      // An outbound `transfer` is half of a pair by definition; reaching the
-      // perimeter means the other half was never imported. That is the corp's
-      // own money moving, not a cost — deducting it would understate income.
-      // Inbound transfers are NOT symmetric: Wise labels genuine customer
-      // payments `transfer`, so those still count as revenue above.
-      if (t.txnType === 'transfer') {
-        // The far side is in the brokerage ledger — accounted for, so there is
-        // nothing to flag.
-        if (claimMatchingCashMove(t, amount)) continue;
-        unimportedOutboundTransfers.push(t);
-        warnings.push(
-          `Txn #${t.id} (${t.date}, ${amount.toFixed(2)} ${t.currency}) was NOT deducted as a `
-          + 'business expense: it is an outbound transfer whose matching leg is not imported, '
-          + 'so it reads as the corp moving its own money rather than spending it.',
-        );
-        continue;
-      }
-      expenses.push(t);
-    }
+    if (amount.isZero()) continue;
+    const verdict = verdictFor(t, amount);
+    if (verdict.bucket != null) out[verdict.bucket].push(t);
+    if (verdict.warning) out.warnings.push(verdict.warning);
   }
-
-  return {
-    revenue, expenses, interestIncome, dividendIncome,
-    unimportedOutboundTransfers, warnings,
-  };
+  return out;
 }

@@ -55,6 +55,7 @@ import {
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
+  loadAccountEntityContext,
   loadHouseholdOwnerNames,
   loadRecurringHistory,
   loadRelationshipCandidates,
@@ -385,6 +386,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
 
   const householdAccountIds = await loadHouseholdAccountIds(account.id, opts.householdId ?? account.householdId ?? null);
   const ownerNames = await loadHouseholdOwnerNames(opts.householdId ?? account.householdId ?? null);
+  const accountEntity = await loadAccountEntityContext(account.id, opts.householdId ?? account.householdId ?? null);
   // Partner/shared splits carry the household's sole partner so settlements
   // against that partner net against them (null when 0 or 2+ partners).
   const solePartnerId = await findSolePartnerContactId(opts.householdId ?? account.householdId ?? null);
@@ -503,6 +505,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         householdId: opts.householdId ?? account.householdId ?? null,
         householdAccountIds,
         ownerNames,
+        accountEntity,
         rules,
         amazonOrders: amazonOrdersCache,
         memory,
@@ -532,6 +535,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
           createdByUserId: opts.userId ?? account.ownerUserId ?? null,
           importBatch,
           solePartnerContactId: solePartnerId,
+          accountIsCorp: accountEntity?.kind === 'corp',
         },
         t,
       );
