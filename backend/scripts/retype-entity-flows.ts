@@ -6,7 +6,7 @@
  *
  * Usage (prod backend container):
  *   tsx scripts/retype-entity-flows.ts                 # dry run
- *   tsx scripts/retype-entity-flows.ts --apply --expect 34
+ *   tsx scripts/retype-entity-flows.ts --apply --expect 37
  *
  * Flags:
  *   (none)        Dry run: counts per transition and per account, every id. Writes nothing.

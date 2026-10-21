@@ -89,10 +89,13 @@ test('a classified outbound transfer is not reported', () => {
   assert.equal(res.unimportedOutboundTransfers.length, 0);
 });
 
-test('an INBOUND transfer is not reported — Wise labels customer payments transfer', () => {
+test('an INBOUND transfer is not an outbound blocker; it is listed as unimported inbound, not revenue', () => {
+  // Wise customer payments used to arrive typed `transfer`; detect-type now types
+  // them `income`, so an inbound transfer is the corp's own money arriving.
   const res = partitionCorpPerimeter([txn({ id: 7, amount: '5000' })], opts);
   assert.equal(res.unimportedOutboundTransfers.length, 0);
-  assert.equal(res.revenue.length, 1);
+  assert.equal(res.revenue.length, 0);
+  assert.deepEqual(res.unimportedInboundTransfers.map((r) => r.id), [7]);
 });
 
 test('a securities purchase is not reported', () => {

@@ -1,7 +1,8 @@
 /**
  * Re-type historical rows the entity rules in detectTypeStage now decide:
  *
- *   income → transfer   an inflow onto a company account from that same company
+ *   income/unknown → transfer
+ *                       an inflow onto a company account from that same company
  *                       ("Direct deposit from CDG LABS INC" into the corp's own
  *                       Wealthsimple chequing). The nightly job had flipped these
  *                       to income because the payer was not an owner NAME.
@@ -36,7 +37,10 @@ export function retypeTarget(
   current: string | null,
   decided: 'transfer' | 'income' | null,
 ): 'transfer' | 'income' | null {
-  if (decided === 'transfer' && current === 'income') return 'transfer';
+  // `unknown` too: prod 2911/2919/2921 ("Misc Payment CDG LABS INC" on the RBC
+  // business account) were never typed, and the T2 counted them as revenue on
+  // top of the client receipts that funded them.
+  if (decided === 'transfer' && (current === 'income' || current === 'unknown')) return 'transfer';
   if (decided === 'income' && (current === 'transfer' || current === 'unknown')) return 'income';
   return null;
 }

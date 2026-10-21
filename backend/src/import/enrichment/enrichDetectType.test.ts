@@ -1009,3 +1009,13 @@ test('entity: outflows and unknown entities are untouched', () => {
 test('entity: an external misc payment onto a corp account is not assumed to be revenue', () => {
   assert.notEqual(typeOf('MISC PAYMENT CANADA REVENUE AGENCY', 812, CORP).fields.txnType, 'income');
 });
+
+test('bare "Interest" / "Dividend" inflows are passive income, outflows are not', () => {
+  const t = (merchantRaw: string, amount: number) =>
+    runDetectTypeStage({ merchantRaw, merchantClean: merchantRaw, amount })[0];
+  assert.equal(t('Interest', 10.78).fields.txnType, 'interest');
+  assert.equal(t('Interest', 10.78).confidence, 'high');
+  assert.equal(t('Dividend', 81.89).fields.txnType, 'dividend');
+  assert.notEqual(t('Interest', -12).fields.txnType, 'interest', 'a bare interest debit may be a loan charge');
+  assert.notEqual(t('Dividend', -5).fields.txnType, 'dividend');
+});

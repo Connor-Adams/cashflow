@@ -172,8 +172,16 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
 // haystack — checked before PATTERNS as exact-match shortcuts. "Deposit"
 // alone is a Wealthsimple deposit ledger entry (treat as transfer); a generic
 // \bDeposit\b regex would false-positive on "Direct deposit" or "term deposit".
-const EXACT_RAW_MATCHES: Array<{ value: string; type: TxnType }> = [
+// "Interest" / "Dividend" alone are how Wealthsimple's 2026-10 export words a
+// monthly interest payout on chequing and a fund distribution on an investment
+// account (prod 12368/12369 and 12465-12467). Without them both read as
+// `unknown`, and the corp T2 counted them as active business revenue — the
+// dividend a second time, since the InvestmentActivity ledger already has it.
+// Inflows only: a bare "Interest" debit could be a loan charge.
+const EXACT_RAW_MATCHES: Array<{ value: string; type: TxnType; requireSign?: 'positive' }> = [
   { value: 'deposit', type: 'transfer' },
+  { value: 'interest', type: 'interest', requireSign: 'positive' },
+  { value: 'dividend', type: 'dividend', requireSign: 'positive' },
 ];
 
 // Income: external payroll / direct-deposit inflows. Distinguished from the
@@ -375,7 +383,9 @@ export function runDetectTypeStage(input: DetectTypeInput): Signal[] {
   const entity = input.accountEntity ?? null;
 
   const trimmedRaw = input.merchantRaw.trim().toLowerCase();
-  const exact = EXACT_RAW_MATCHES.find((m) => m.value === trimmedRaw);
+  const exact = EXACT_RAW_MATCHES.find(
+    (m) => m.value === trimmedRaw && (m.requireSign !== 'positive' || input.amount > 0),
+  );
   if (exact) return typed(exact.type, 'high', `narrative matched ${exact.type} (bare ${exact.value})`);
 
   // Order matters: a company moving its own money is decided before the
