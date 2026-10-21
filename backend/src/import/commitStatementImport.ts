@@ -651,6 +651,7 @@ export async function commitStatementImport(
           createdByUserId: userId ?? account.ownerUserId,
           importBatch: preview.importBatch,
           overrideBusiness,
+          accountIsCorp: accountEntity?.kind === 'corp',
           sourceTier: preview.sourceTier,
           solePartnerContactId: solePartnerId,
         },
