@@ -6,6 +6,7 @@ import { applyEntityFlowRetypes, retypeTarget, scanEntityFlowRetypes } from './r
 
 test('retypeTarget: only the two entity transitions', () => {
   assert.equal(retypeTarget('income', 'transfer'), 'transfer');
+  assert.equal(retypeTarget('unknown', 'transfer'), 'transfer');
   assert.equal(retypeTarget('transfer', 'income'), 'income');
   assert.equal(retypeTarget('unknown', 'income'), 'income');
   assert.equal(retypeTarget('payment', 'income'), null, 'a narrative-typed payment is left alone');
