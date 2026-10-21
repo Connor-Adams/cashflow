@@ -955,3 +955,59 @@ test('GUARD: "thank you" without "payment" is not a card payment', () => {
   const out = runDetectTypeStage({ merchantRaw: 'THANK YOU FOR SHOPPING', merchantClean: 'THANK YOU FOR SHOPPING', amount: -12 });
   assert.notEqual(out[0].fields.txnType, 'payment');
 });
+
+// RBC "Find & Save" (NOMI) sweeps a few dollars from chequing into the
+// customer's own Find & Save savings account. Prod held 494 chequing rows
+// "TO FIND & SAVE" (2019-06 to 2026-04, -26,801.00) typed `purchase` and
+// categorised Groceries by the AI fallback, inflating spend. The money never
+// leaves the household: it is a transfer, and its category is Transfer.
+test('transfer: RBC "TO FIND & SAVE" sweep is a high-confidence transfer categorised Transfer', () => {
+  const out = runDetectTypeStage({ merchantRaw: 'TO FIND & SAVE', merchantClean: 'TO FIND & SAVE', amount: -17 });
+  assert.equal(out[0].fields.txnType, 'transfer');
+  assert.equal(out[0].confidence, 'high');
+  assert.equal(out[0].fields.autoCategory, 'Transfer');
+});
+
+test('transfer: the Find & Save return leg in both prod casings is a transfer categorised Transfer', () => {
+  for (const merchantRaw of ['AUTO TRANSFER FROM FIND & SAVE', 'Auto transfer from Find & Save']) {
+    const out = runDetectTypeStage({ merchantRaw, merchantClean: merchantRaw, amount: 120.5 });
+    assert.equal(out[0].fields.txnType, 'transfer', merchantRaw);
+    assert.equal(out[0].confidence, 'high', merchantRaw);
+    assert.equal(out[0].fields.autoCategory, 'Transfer', merchantRaw);
+  }
+});
+
+test('GUARD: only the Find & Save rule carries a category; other transfer rules stay type-only', () => {
+  // An Interac e-transfer can be paying a person for goods, so it must stay in
+  // review rather than be auto-filed as Transfer.
+  const out = runDetectTypeStage({
+    merchantRaw: 'INTERAC E-TRANSFER SENT JOHN',
+    merchantClean: 'INTERAC E-TRANSFER SENT JOHN',
+    amount: -40,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+  assert.equal('autoCategory' in out[0].fields, false);
+});
+
+test('GUARD: a grocery store with "save" in its name is still a purchase', () => {
+  for (const merchantRaw of ['SAVE ON FOODS #2231', 'SAVE-ON-FOODS', 'FIND IT FAST']) {
+    const out = runDetectTypeStage({ merchantRaw, merchantClean: merchantRaw, amount: -54.12 });
+    assert.equal(out[0].fields.txnType, 'purchase', merchantRaw);
+  }
+});
+
+test('GUARD: Questrade and dashed card-payment rules are unchanged by the Find & Save rule', () => {
+  const questrade = runDetectTypeStage({
+    merchantRaw: 'ONLINE BANKING PAYMENT - 4503 QUESTRADE',
+    merchantClean: 'ONLINE BANKING PAYMENT -',
+    amount: -250,
+  });
+  assert.equal(questrade[0].fields.txnType, 'transfer');
+  assert.equal('autoCategory' in questrade[0].fields, false);
+  const dashed = runDetectTypeStage({
+    merchantRaw: 'PAYMENT - THANK YOU / PAIEMENT - MERCI',
+    merchantClean: 'PAYMENT - THANK YOU / PAIEMENT - MERCI',
+    amount: 250,
+  });
+  assert.equal(dashed[0].fields.txnType, 'payment');
+});

@@ -48,7 +48,7 @@ import {
 } from './enrichment/persistSignals';
 import type { ChatMessage } from './enrichment/aiBatchStage';
 import { mergeSignals } from './enrichment/computeReviewFlag';
-import type { Confidence, Signal, SignalFields, SignalSource } from './enrichment/types';
+import type { Confidence, EnrichmentResult, Signal, SignalFields, SignalSource } from './enrichment/types';
 
 /**
  * Signal sources the deterministic re-derivation CANNOT reproduce.
@@ -77,6 +77,24 @@ function persistedSignalToSignal(row: TransactionSignal): Signal {
     fields: (row.fields ?? {}) as SignalFields,
     ...(row.rationale ? { rationale: row.rationale } : {}),
   };
+}
+
+/**
+ * Re-merge the preserved fallback signals so precedence in computeReviewFlag.ts
+ * hands the AI/embedding-set category back to `autoCategory`; otherwise the
+ * write nulls it.
+ *
+ * Unless the deterministic stages now answer on their own (`reviewFlag ===
+ * false` on the fresh result means a non-AI high-confidence category exists).
+ * The fallback was only asked because nothing deterministic answered; once
+ * something does, a stale fallback guess must not outrank it, and `ai` medium
+ * does outrank `type-detect` high in PRECEDENCE. Prod: 495 RBC "TO FIND & SAVE"
+ * rows kept the AI's Groceries after the detector learned they are a Transfer.
+ * The fallback signal rows themselves are still kept.
+ */
+function withPriorFallback(enriched: EnrichmentResult, priorFallbackSignals: Signal[]): EnrichmentResult {
+  if (priorFallbackSignals.length === 0 || !enriched.fields.reviewFlag) return enriched;
+  return mergeSignals([...enriched.signals, ...priorFallbackSignals]);
 }
 
 export interface BackfillFlags {
@@ -377,13 +395,7 @@ export async function runBackfill(
               amazonLinkThreshold: enrichmentAmazonLinkThreshold,
             });
 
-            // Re-merge with the preserved signals so precedence in
-            // computeReviewFlag.ts hands the AI/embedding-set category back to
-            // `f.autoCategory` — otherwise the write below nulls it.
-            const merged =
-              priorFallbackSignals.length > 0
-                ? mergeSignals([...enriched.signals, ...priorFallbackSignals])
-                : enriched;
+            const merged = withPriorFallback(enriched, priorFallbackSignals);
             const f = merged.fields;
 
             let willClearReview = false;
