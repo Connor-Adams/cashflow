@@ -535,6 +535,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
           createdByUserId: opts.userId ?? account.ownerUserId ?? null,
           importBatch,
           solePartnerContactId: solePartnerId,
+          accountIsCorp: accountEntity?.kind === 'corp',
         },
         t,
       );

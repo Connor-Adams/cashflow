@@ -17,10 +17,10 @@
  * Every write is an instance save, so each row gets a TransactionRevision.
  */
 import { Op } from 'sequelize';
-import { Account, Transaction, sequelize } from '../models';
+import { Account, Transaction } from '../models';
 import { entityFlowType } from './enrichment/detectTypeStage';
 import { loadAccountEntityContext, loadHouseholdOwnerNames } from './enrichment/loaders';
-import { BackfillAborted } from '../transfers/backfillHalfLinkedCsvTransfers';
+import { runPlannedWrites } from './plannedWrites';
 
 export interface EntityFlowRetype {
   id: number;
@@ -96,20 +96,14 @@ export async function scanEntityFlowRetypes(
  * `expect` mismatch and rolls back unless nothing is left to re-type.
  */
 export async function applyEntityFlowRetypes(opts: { expect?: number | null } = {}): Promise<{ retyped: number }> {
-  return sequelize.transaction(async (t) => {
-    const planned = await scanEntityFlowRetypes(t);
-    if (opts.expect != null && planned.length !== opts.expect) {
-      throw new BackfillAborted(`expected ${opts.expect} row(s), found ${planned.length}; nothing written`);
-    }
-    for (const p of planned) {
+  const { written } = await runPlannedWrites({
+    plan: scanEntityFlowRetypes,
+    expect: opts.expect,
+    write: async (p, t) => {
       const row = await Transaction.findByPk(p.id, { transaction: t, lock: t.LOCK.UPDATE });
       row!.set({ txnType: p.to });
       await row!.save({ transaction: t });
-    }
-    const left = await scanEntityFlowRetypes(t);
-    if (left.length !== 0) {
-      throw new BackfillAborted(`${left.length} row(s) still to re-type after the writes; rolled back`);
-    }
-    return { retyped: planned.length };
+    },
   });
+  return { retyped: written };
 }

@@ -36,6 +36,7 @@ import {
 } from '../config/env';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { isEstablishedLink } from '../transfers/linkProtection';
+import { businessForAccount } from './enrichment/corpBusinessDefault';
 import { GUESSED_TXN_TYPES, linkTransferSibling, transferSiblingId } from './importedTransaction';
 import { runBackfillBatchTrace } from './backfillTrace';
 import {
@@ -493,7 +494,7 @@ export async function runBackfill(
                 autoSource: f.autoSource,
                 autoConfidence: f.autoConfidence,
                 autoCategory: f.autoCategory,
-                autoBusiness: f.autoBusiness,
+                autoBusiness: businessForAccount(f.autoBusiness, accountEntity?.kind === 'corp'),
                 autoSplitType: f.autoSplitType,
                 autoPctMe: f.autoPctMe,
                 autoPctPartner: f.autoPctPartner,
@@ -579,6 +580,7 @@ export async function runBackfill(
                   currency: txn.currency,
                   memory,
                   accountVisibility: txn.visibility === 'shared' ? 'shared' : 'private',
+                  accountIsCorp: accountEntity?.kind === 'corp',
                   txnType: f.txnType,
                   // EXISTING row — it may carry a category a human chose, and
                   // the post-loop fallbacks must not overwrite it. The
