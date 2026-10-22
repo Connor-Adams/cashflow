@@ -3,7 +3,10 @@ import { apiBase } from '../lib/runtimeConfig'
  * Hooks backing the Tax Reserve tab (issue #223). Mirrors the vanilla
  * useEffect/useState pattern used by useTaxHygiene — no TanStack Query in
  * this codebase yet. One hook for settings, one for the summary rollup,
- * plus a mutation helper that writes one currency's row at a time.
+ * plus mutation helpers for the setting.
+ *
+ * The reserve is one CAD figure: the backend converts every transaction to
+ * CAD at its own date, so there is a single (CAD) reserve percent.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { deleteReq, getJson } from '@/lib/api';
@@ -24,7 +27,11 @@ export interface ReserveSettingDto {
 }
 
 export interface ReserveSettingsResponse {
+  /** One element: the household's CAD setting (or the synthesised default). */
   data: ReserveSettingDto[];
+  currency: 'CAD';
+  /** Legacy per-currency rows that no longer affect the reserve. */
+  ignored: ReserveSettingDto[];
 }
 
 export function useTaxReserveSettings() {
@@ -52,18 +59,17 @@ export function useTaxReserveSettings() {
 }
 
 /**
- * Upsert one currency's reserve row. Uses raw fetch because the shared
- * lib/api.ts doesn't expose a PUT helper yet — the rest of the app only
+ * Upsert the household's (CAD) reserve setting. Uses raw fetch because the
+ * shared lib/api.ts doesn't expose a PUT helper yet — the rest of the app only
  * uses GET/POST/PATCH/DELETE. Adding `putJson` would touch every other
  * surface, so the local fetch is the smaller change for one route.
  */
 export async function putReserveSetting(
-  currency: string,
   input: { reservePercent?: number; note?: string | null },
 ): Promise<ReserveSettingDto> {
   const base = apiBase();
   const r = await fetch(
-    `${base}/api/tax/reserve/settings/${encodeURIComponent(currency)}`,
+    `${base}/api/tax/reserve/settings/CAD`,
     {
       method: 'PUT',
       credentials: 'include',
@@ -86,6 +92,7 @@ export async function putReserveSetting(
   return body.data;
 }
 
+/** Delete a setting row: CAD reverts to the default; any other currency clears a legacy row. */
 export async function deleteReserveSetting(currency: string): Promise<void> {
   await deleteReq(
     `/api/tax/reserve/settings/${encodeURIComponent(currency)}`,
@@ -95,8 +102,11 @@ export async function deleteReserveSetting(currency: string): Promise<void> {
 // ---- Summary -----------------------------------------------------------
 
 export interface ReserveSummaryRow {
+  /** Always 'CAD'. */
   currency: string;
   period: string;
+  /** Original currencies of the period's transactions, e.g. ['CAD', 'USD']. */
+  sourceCurrencies: string[];
   components: {
     businessIncome: number;
     deductibleExpenses: number;
@@ -111,6 +121,10 @@ export interface ReserveSummaryRow {
 
 export interface ReserveSummaryResponse {
   data: ReserveSummaryRow[];
+  currency: 'CAD';
+  reservePercent: number;
+  /** Conversions on a substituted (stale or post-dated) FX rate, or currencies left out. */
+  warnings: string[];
   scope: string;
   periodicity: Periodicity;
   disclaimer: string;

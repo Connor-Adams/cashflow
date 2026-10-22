@@ -1,26 +1,47 @@
 /**
  * Tax Reserve tab — issue #223. Estimates how much cash to set aside per
- * currency and per period (monthly / quarterly / annual) for an upcoming
- * tax bill, given the household's business income, deductible business
- * expenses, and any HST/GST collected.
+ * period (monthly / quarterly / annual) for an upcoming tax bill, given the
+ * household's business income, deductible business expenses, and any HST/GST
+ * collected.
+ *
+ * The reserve is ONE CAD figure. Canadian tax is paid in CAD and USD client
+ * income is converted to CAD on arrival, so the backend converts every
+ * transaction to CAD at its own date and applies a single CAD reserve percent.
  *
  * Layout:
- * - Period + scope picker.
- * - Settings card: per-currency reserve percent + note editor. Defaults
- *   are synthesised by the backend for currencies the household has
- *   business txns in but no explicit row yet.
- * - Summary table: per-period rollup with the computed reserve target.
  * - Disclaimer banner: this is planning support, NOT tax advice. The
  *   backend repeats the disclaimer in the API response so a programmatic
  *   consumer (chat, AI summary) cannot strip it.
+ * - Period picker.
+ * - Reserve rate: the household's CAD percent + rationale note.
+ * - FX warnings: conversions made on a substituted (stale or post-dated)
+ *   exchange rate, or a currency left out for want of any rate.
+ * - Summary table: per-period CAD rollup with the computed reserve target.
  */
 import { useEffect, useMemo, useState } from 'react';
 import {
-  deleteReserveSetting, putReserveSetting, useTaxReserveSettings, useTaxReserveSummary, PERIODICITY_LABELS, type Periodicity, type ReserveSettingDto, } from '../../hooks/useTaxReserve';
-import { Button } from '@connor-adams/designsystem'
-import { fmtCurrency, fmtPct } from './util/format';
+  deleteReserveSetting,
+  putReserveSetting,
+  useTaxReserveSettings,
+  useTaxReserveSummary,
+  PERIODICITY_LABELS,
+  type Periodicity,
+  type ReserveSettingDto,
+  type ReserveSummaryRow,
+} from '../../hooks/useTaxReserve';
 import {
-  Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@connor-adams/designsystem'
+  Alert,
+  Button,
+  Input,
+  Label,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@connor-adams/designsystem';
+import { fmtCurrency, fmtPct } from './util/format';
 
 interface Props {
   year: number;
@@ -50,16 +71,15 @@ export function TaxReserveTab({ year }: Props) {
   return (
     <div className="tax-reserve-tab flex flex-col gap-6">
       <Disclaimer text={summary.data?.disclaimer} />
-      <PeriodicityBar
-        periodicity={periodicity}
-        onChange={setPeriodicity}
-      />
+      <PeriodicityBar periodicity={periodicity} onChange={setPeriodicity} />
       <SettingsSection
-        rows={settings.data?.data ?? []}
+        setting={settings.data?.data[0] ?? null}
+        ignored={settings.data?.ignored ?? []}
         loading={settings.loading}
         error={settings.error}
         onChanged={refreshAll}
       />
+      <FxWarnings warnings={summary.data?.warnings ?? []} />
       <SummarySection
         rows={summary.data?.data ?? []}
         loading={summary.loading}
@@ -117,87 +137,51 @@ function PeriodicityBar({
 // ----- Settings section --------------------------------------------------
 
 interface SettingsSectionProps {
-  rows: ReserveSettingDto[];
+  setting: ReserveSettingDto | null;
+  ignored: ReserveSettingDto[];
   loading: boolean;
   error: string | null;
   onChanged: () => void;
 }
 
-function SettingsSection({
-  rows,
-  loading,
-  error,
-  onChanged,
-}: SettingsSectionProps) {
+function SettingsSection({ setting, ignored, loading, error, onChanged }: SettingsSectionProps) {
   if (loading) return <p className="muted">Loading reserve settings…</p>;
-  if (error) {
-    return <p className="error">Failed to load settings: {error}</p>;
-  }
+  if (error) return <p className="error">Failed to load settings: {error}</p>;
   return (
-    <section>
-      <h2>Reserve rules</h2>
-      {rows.length === 0 ? (
-        <p className="muted">
-          No business transactions yet — add one and refresh, or add a rule
-          below.
-        </p>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Currency</TableHead>
-              <TableHead className="text-right">Reserve %</TableHead>
-              <TableHead>Rationale</TableHead>
-              <TableHead></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r) => (
-              <SettingsRow key={r.currency} row={r} onChanged={onChanged} />
-            ))}
-          </TableBody>
-        </Table>
-      )}
+    <section className="flex flex-col gap-2">
+      <h2>Reserve rate</h2>
+      <p className="muted">
+        Applied to net business income in CAD. HST/GST owed is reserved in full on top.
+      </p>
+      {setting && <SettingForm setting={setting} onChanged={onChanged} />}
+      {ignored.length > 0 && <LegacyRates rows={ignored} onChanged={onChanged} />}
     </section>
   );
 }
 
-function SettingsRow({
-  row,
+function SettingForm({
+  setting,
   onChanged,
 }: {
-  row: ReserveSettingDto;
+  setting: ReserveSettingDto;
   onChanged: () => void;
 }) {
-  const [percent, setPercent] = useState(
-    String(Number(row.reservePercent) * 100),
-  );
-  const [note, setNote] = useState(row.note ?? '');
+  const [percent, setPercent] = useState(String(Number(setting.reservePercent) * 100));
+  const [note, setNote] = useState(setting.note ?? '');
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Keep local form state in sync if the row changes (e.g. after refresh
-  // following a reset). Without this, edits persist visually after a
-  // sibling row's save triggers refetch.
+  // Re-sync local form state after a refresh (e.g. following a reset).
   useEffect(() => {
-    setPercent(String(Number(row.reservePercent) * 100));
-    setNote(row.note ?? '');
-  }, [row.reservePercent, row.note]);
+    setPercent(String(Number(setting.reservePercent) * 100));
+    setNote(setting.note ?? '');
+  }, [setting.reservePercent, setting.note]);
 
-  const handleSave = async () => {
+  const run = async (action: () => Promise<unknown>) => {
     setSaving(true);
     setErrorMsg(null);
     try {
-      const n = Number(percent);
-      if (!Number.isFinite(n) || n < 0 || n > 100) {
-        setErrorMsg('Reserve percent must be between 0 and 100.');
-        setSaving(false);
-        return;
-      }
-      await putReserveSetting(row.currency, {
-        reservePercent: n / 100,
-        note: note.trim() === '' ? null : note,
-      });
+      await action();
       onChanged();
     } catch (e) {
       setErrorMsg(String((e as Error)?.message ?? e));
@@ -206,96 +190,113 @@ function SettingsRow({
     }
   };
 
-  const handleReset = async () => {
-    setSaving(true);
-    setErrorMsg(null);
-    try {
-      await deleteReserveSetting(row.currency);
-      onChanged();
-    } catch (e) {
-      setErrorMsg(String((e as Error)?.message ?? e));
-    } finally {
-      setSaving(false);
+  const handleSave = () => {
+    const n = Number(percent);
+    if (!Number.isFinite(n) || n < 0 || n > 100) {
+      setErrorMsg('Reserve percent must be between 0 and 100.');
+      return;
     }
+    void run(() =>
+      putReserveSetting({
+        reservePercent: n / 100,
+        note: note.trim() === '' ? null : note,
+      }),
+    );
   };
 
   return (
-    <TableRow>
-      <TableCell>
-        <strong>{row.currency}</strong>
-        {row.isDefault && (
-          <span className="muted ml-1">
-            (default)
-          </span>
-        )}
-      </TableCell>
-      <TableCell className="text-right">
-        <input
+    <div className="flex flex-wrap items-end gap-3">
+      <div className="w-28">
+        <Label htmlFor="tax-reserve-percent">Reserve percent</Label>
+        <Input
+          id="tax-reserve-percent"
           type="number"
           min="0"
           max="100"
           step="0.5"
           value={percent}
           onChange={(e) => setPercent(e.target.value)}
-          className="w-20 text-right"
-          aria-label={`Reserve percent for ${row.currency}`}
         />
-        <span className="ml-1">%</span>
-      </TableCell>
-      <TableCell>
-        <input
+      </div>
+      <div className="min-w-48 flex-1">
+        <Label htmlFor="tax-reserve-note">Rationale</Label>
+        <Input
+          id="tax-reserve-note"
           type="text"
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          placeholder="e.g. Federal + ON sole prop"
-          className="w-full"
-          aria-label={`Note for ${row.currency}`}
+          placeholder="e.g. Federal + ON small business rate"
         />
-      </TableCell>
-      <TableCell className="whitespace-nowrap">
+      </div>
+      <div className="flex items-center gap-1">
         <Button type="button" variant="primary" size="sm" onClick={handleSave} disabled={saving}>
           Save
         </Button>
-        {!row.isDefault && (
+        {setting.isDefault ? (
+          <span className="muted">(default)</span>
+        ) : (
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            onClick={handleReset}
+            onClick={() => void run(() => deleteReserveSetting('CAD'))}
             disabled={saving}
-            className="ml-1"
             title="Revert to the default 25% reserve"
           >
             Reset
           </Button>
         )}
-        {errorMsg && (
-          <span className="error ml-2">
-            {errorMsg}
-          </span>
-        )}
-      </TableCell>
-    </TableRow>
+      </div>
+      {errorMsg && <span className="error">{errorMsg}</span>}
+    </div>
+  );
+}
+
+/** Per-currency rates saved before the reserve became a single CAD figure. */
+function LegacyRates({ rows, onChanged }: { rows: ReserveSettingDto[]; onChanged: () => void }) {
+  const [removing, setRemoving] = useState(false);
+  const label = rows
+    .map((r) => `${r.currency} ${fmtPct(Number(r.reservePercent))}`)
+    .join(', ');
+  const remove = async () => {
+    setRemoving(true);
+    try {
+      await Promise.all(rows.map((r) => deleteReserveSetting(r.currency)));
+      onChanged();
+    } finally {
+      setRemoving(false);
+    }
+  };
+  return (
+    <p className="muted">
+      Older per-currency rates ({label}) are no longer used: every transaction is
+      converted to CAD.{' '}
+      <Button type="button" variant="ghost" size="sm" onClick={() => void remove()} disabled={removing}>
+        Remove them
+      </Button>
+    </p>
+  );
+}
+
+// ----- FX warnings -------------------------------------------------------
+
+function FxWarnings({ warnings }: { warnings: string[] }) {
+  if (warnings.length === 0) return null;
+  return (
+    <Alert variant="warning" title="Exchange-rate gaps">
+      <ul className="list-disc pl-5">
+        {warnings.map((w) => (
+          <li key={w}>{w}</li>
+        ))}
+      </ul>
+    </Alert>
   );
 }
 
 // ----- Summary section ---------------------------------------------------
 
 interface SummarySectionProps {
-  rows: Array<{
-    currency: string;
-    period: string;
-    components: {
-      businessIncome: number;
-      deductibleExpenses: number;
-      hstGstCollected: number;
-      hstGstPaid: number;
-    };
-    netBusinessIncome: number;
-    netHstGst: number;
-    reservePercent: number;
-    reserveTarget: number;
-  }>;
+  rows: ReserveSummaryRow[];
   loading: boolean;
   error: string | null;
 }
@@ -315,13 +316,16 @@ function SummarySection({ rows, loading, error }: SummarySectionProps) {
     );
   }
   return (
-    <section>
-      <h2>Reserve targets</h2>
-      <Table>
+    <section className="flex flex-col gap-2">
+      <h2 id="tax-reserve-targets">Reserve targets</h2>
+      <p className="muted">
+        All amounts in CAD. Transactions in other currencies are converted at
+        the Bank of Canada rate for their own date.
+      </p>
+      <Table aria-labelledby="tax-reserve-targets">
         <TableHeader>
           <TableRow>
             <TableHead>Period</TableHead>
-            <TableHead>Currency</TableHead>
             <TableHead className="text-right">Income</TableHead>
             <TableHead className="text-right">Deductible exp.</TableHead>
             <TableHead className="text-right">Net income</TableHead>
@@ -333,32 +337,35 @@ function SummarySection({ rows, loading, error }: SummarySectionProps) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((r) => (
-            <TableRow key={`${r.currency}-${r.period}`}>
-              <TableCell>{r.period}</TableCell>
-              <TableCell>{r.currency}</TableCell>
-              <TableCell className="text-right">
-                {fmtCurrency(r.components.businessIncome)}
-              </TableCell>
-              <TableCell className="text-right">
-                {fmtCurrency(r.components.deductibleExpenses)}
-              </TableCell>
-              <TableCell
-                className={`text-right${r.netBusinessIncome < 0 ? ' text-danger' : ''}`}
-              >
-                {fmtCurrency(r.netBusinessIncome)}
-              </TableCell>
-              <TableCell className="text-right">
-                {fmtCurrency(r.netHstGst)}
-              </TableCell>
-              <TableCell className="text-right">
-                {fmtPct(r.reservePercent)}
-              </TableCell>
-              <TableCell className="text-right">
-                <strong>{fmtCurrency(r.reserveTarget)}</strong>
-              </TableCell>
-            </TableRow>
-          ))}
+          {rows.map((r) => {
+            const converted = r.sourceCurrencies.filter((c) => c !== 'CAD');
+            return (
+              <TableRow key={r.period}>
+                <TableCell>
+                  {r.period}
+                  {converted.length > 0 && (
+                    <span className="muted ml-1">(incl. {converted.join(', ')})</span>
+                  )}
+                </TableCell>
+                <TableCell className="text-right">
+                  {fmtCurrency(r.components.businessIncome)}
+                </TableCell>
+                <TableCell className="text-right">
+                  {fmtCurrency(r.components.deductibleExpenses)}
+                </TableCell>
+                <TableCell
+                  className={`text-right${r.netBusinessIncome < 0 ? ' text-danger' : ''}`}
+                >
+                  {fmtCurrency(r.netBusinessIncome)}
+                </TableCell>
+                <TableCell className="text-right">{fmtCurrency(r.netHstGst)}</TableCell>
+                <TableCell className="text-right">{fmtPct(r.reservePercent)}</TableCell>
+                <TableCell className="text-right">
+                  <strong>{fmtCurrency(r.reserveTarget)}</strong>
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </section>

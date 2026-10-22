@@ -11,8 +11,12 @@ import {
   composeTaxReserve,
   aggregateReserveRollups,
   validateReservePatch,
+  convertReserveRowsToCad,
+  type CadConverter,
   type ReserveInputRow,
 } from './taxReserve';
+import type { ToCadResult, ToCadSource } from '../fx/toCad';
+import type { Decimal } from '../tax/util/decimal';
 
 // ---- parsePeriodicity ---------------------------------------------------
 
@@ -154,7 +158,6 @@ test('aggregateReserveRollups: groups by (currency, period) and applies percent'
       row({ date: '2026-04-15', amount: '8000', hstGstAmount: '1040', txnType: 'income' }), // Q2 income
     ],
     'quarterly',
-    new Map([['CAD', 0.25]]),
     0.25,
   );
   assert.equal(rollup.length, 2);
@@ -182,7 +185,6 @@ test('aggregateReserveRollups: non-business rows ignored', () => {
       row({ date: '2026-03-20', amount: '1000', txnType: 'income' }), // this one counts
     ],
     'quarterly',
-    new Map(),
     0.25,
   );
   assert.equal(rollup.length, 1);
@@ -198,7 +200,6 @@ test('aggregateReserveRollups: deductible percent applies to expenses', () => {
       row({ amount: '-1000', deductiblePercent: '0.5000' }),
     ],
     'quarterly',
-    new Map(),
     0.25,
   );
   assert.equal(rollup[0].components.businessIncome, 2000);
@@ -207,37 +208,159 @@ test('aggregateReserveRollups: deductible percent applies to expenses', () => {
   assert.equal(rollup[0].reserveTarget, 375);
 });
 
-test('aggregateReserveRollups: separates currencies', () => {
-  // AC: "Calculate suggested reserve by period and currency"
+test('aggregateReserveRollups: one CAD bucket per period, one percent', () => {
+  // The reserve is a single CAD figure (Canadian tax is paid in CAD): rows
+  // arrive already converted, so every period has exactly one bucket.
   const rollup = aggregateReserveRollups(
     [
-      row({ amount: '1000', currency: 'CAD', txnType: 'income' }),
-      row({ amount: '500', currency: 'USD', txnType: 'income' }),
+      row({ amount: '1000', txnType: 'income' }),
+      row({ amount: '500', txnType: 'income', sourceCurrency: 'USD' }),
+      row({ amount: '-300', txnType: 'purchase' }),
     ],
     'quarterly',
-    new Map([
-      ['CAD', 0.25],
-      ['USD', 0.30],
-    ]),
-    0.20,
+    0.3,
   );
-  const cad = rollup.find((r) => r.currency === 'CAD')!;
-  const usd = rollup.find((r) => r.currency === 'USD')!;
-  assert.equal(cad.reservePercent, 0.25);
-  assert.equal(cad.reserveTarget, 250);
-  assert.equal(usd.reservePercent, 0.30);
-  assert.equal(usd.reserveTarget, 150);
+  assert.equal(rollup.length, 1);
+  assert.equal(rollup[0].currency, 'CAD');
+  assert.equal(rollup[0].reservePercent, 0.3);
+  assert.equal(rollup[0].components.businessIncome, 1500);
+  // (1500 - 300) x 0.3 = 360
+  assert.equal(rollup[0].reserveTarget, 360);
+  assert.deepEqual(rollup[0].sourceCurrencies, ['CAD', 'USD']);
 });
 
-test('aggregateReserveRollups: missing currency falls back to default percent', () => {
-  const rollup = aggregateReserveRollups(
-    [row({ amount: '1000', currency: 'EUR', txnType: 'income' })],
-    'quarterly',
-    new Map(),
-    0.15,
+test('aggregateReserveRollups: refuses an unconverted non-CAD row', () => {
+  // Summing USD into a CAD bucket would be silently wrong; the loader must
+  // convert first.
+  assert.throws(
+    () => aggregateReserveRollups([row({ amount: '1000', currency: 'USD', txnType: 'income' })], 'quarterly', 0.25),
+    /convert/i,
   );
-  assert.equal(rollup[0].reservePercent, 0.15);
-  assert.equal(rollup[0].reserveTarget, 150);
+});
+
+// ---- convertReserveRowsToCad -------------------------------------------
+
+/** Fake converter: fixed rate per currency, records each call. */
+function fakeConverter(
+  rates: Record<string, { rate: string; ratedDate?: string; source?: ToCadSource }>,
+  calls: string[] = [],
+): CadConverter {
+  return async (amount: Decimal, currency: string, date: string): Promise<ToCadResult> => {
+    calls.push(`${currency}|${date}`);
+    if (currency === 'CAD') return { cad: amount, rate: 1, ratedDate: date, source: 'cad_identity' };
+    const r = rates[currency];
+    if (!r) throw new Error(`FX rate missing for ${currency}→CAD on/before ${date} (no rows for pair at all)`);
+    return {
+      cad: amount.times(r.rate),
+      rate: Number(r.rate),
+      ratedDate: r.ratedDate ?? date,
+      source: r.source ?? 'cached',
+    };
+  };
+}
+
+test('convertReserveRowsToCad: converts amount, business portion and HST at the row date rate', async () => {
+  const { rows, warnings } = await convertReserveRowsToCad(
+    [
+      row({
+        date: '2025-06-10',
+        amount: '1000',
+        currency: 'USD',
+        businessAmount: '800',
+        hstGstAmount: '50',
+        txnType: 'income',
+      }),
+    ],
+    fakeConverter({ USD: { rate: '1.37' } }),
+  );
+  assert.deepEqual(warnings, []);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].currency, 'CAD');
+  assert.equal(rows[0].sourceCurrency, 'USD');
+  assert.equal(Number(rows[0].amount), 1370);
+  assert.equal(Number(rows[0].businessAmount), 1096);
+  assert.equal(Number(rows[0].hstGstAmount), 68.5);
+  assert.equal(rows[0].date, '2025-06-10');
+});
+
+test('convertReserveRowsToCad: CAD rows pass through untouched', async () => {
+  const calls: string[] = [];
+  const input = row({ amount: '-250', hstGstAmount: '32.5' });
+  const { rows } = await convertReserveRowsToCad([input], fakeConverter({}, calls));
+  assert.equal(rows[0].amount, '-250');
+  assert.equal(rows[0].hstGstAmount, '32.5');
+  assert.equal(rows[0].sourceCurrency, 'CAD');
+  assert.deepEqual(calls, []);
+});
+
+test('convertReserveRowsToCad: one rate lookup per (currency, date)', async () => {
+  const calls: string[] = [];
+  await convertReserveRowsToCad(
+    [
+      row({ date: '2025-06-10', amount: '100', currency: 'USD', txnType: 'income' }),
+      row({ date: '2025-06-10', amount: '200', currency: 'USD', txnType: 'income' }),
+      row({ date: '2025-06-11', amount: '300', currency: 'USD', txnType: 'income' }),
+    ],
+    fakeConverter({ USD: { rate: '1.35' } }, calls),
+  );
+  assert.deepEqual(calls.sort(), ['USD|2025-06-10', 'USD|2025-06-11']);
+});
+
+test('convertReserveRowsToCad: a stale substituted rate surfaces as a warning', async () => {
+  const { warnings } = await convertReserveRowsToCad(
+    [row({ date: '2025-06-10', amount: '100', currency: 'USD', txnType: 'income' })],
+    fakeConverter({ USD: { rate: '1.3', ratedDate: '2025-05-01', source: 'fallback_nearest' } }),
+  );
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /USD→CAD/);
+  assert.match(warnings[0], /2025-06-10/);
+  assert.match(warnings[0], /2025-05-01/);
+});
+
+test('convertReserveRowsToCad: a future-dated rate is never used silently', async () => {
+  const { rows, warnings } = await convertReserveRowsToCad(
+    [row({ date: '2020-01-02', amount: '100', currency: 'USD', txnType: 'income' })],
+    fakeConverter({ USD: { rate: '1.4', ratedDate: '2021-05-26', source: 'fallback_any' } }),
+  );
+  assert.equal(Number(rows[0].amount), 140);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /AFTER the transaction/);
+  assert.match(warnings[0], /2021-05-26/);
+});
+
+test('convertReserveRowsToCad: a currency with no rate at all is left out with a warning', async () => {
+  const { rows, warnings } = await convertReserveRowsToCad(
+    [
+      row({ amount: '100', currency: 'GBP', txnType: 'income' }),
+      row({ amount: '200', currency: 'GBP', txnType: 'income' }),
+      row({ amount: '50', txnType: 'income' }),
+    ],
+    fakeConverter({}),
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].amount, '50');
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /GBP/);
+  assert.match(warnings[0], /2 business transaction/);
+});
+
+test('convert then aggregate: USD income nets against CAD expenses in one CAD figure', async () => {
+  // The prod shape this fixes: USD client income, CAD deductible expenses.
+  // Per-currency buckets reserved 25% of the gross USD and let the CAD
+  // expenses go to waste in a separate loss bucket.
+  const { rows } = await convertReserveRowsToCad(
+    [
+      row({ date: '2025-03-01', amount: '10000', currency: 'USD', txnType: 'income' }),
+      row({ date: '2025-03-05', amount: '-2000', txnType: 'purchase' }),
+    ],
+    fakeConverter({ USD: { rate: '1.4' } }),
+  );
+  const rollup = aggregateReserveRollups(rows, 'annual', 0.25);
+  assert.equal(rollup.length, 1);
+  assert.equal(rollup[0].components.businessIncome, 14000);
+  assert.equal(rollup[0].components.deductibleExpenses, 2000);
+  // (14000 - 2000) x 0.25 = 3000
+  assert.equal(rollup[0].reserveTarget, 3000);
 });
 
 test('aggregateReserveRollups: monthly periodicity buckets into YYYY-MM', () => {
@@ -248,7 +371,6 @@ test('aggregateReserveRollups: monthly periodicity buckets into YYYY-MM', () => 
       row({ date: '2026-02-28', amount: '500', txnType: 'income' }),
     ],
     'monthly',
-    new Map([['CAD', 0.2]]),
     0.2,
   );
   assert.equal(rollup.length, 2);
@@ -256,26 +378,21 @@ test('aggregateReserveRollups: monthly periodicity buckets into YYYY-MM', () => 
   assert.equal(rollup.find((r) => r.period === '2026-02')!.components.businessIncome, 2500);
 });
 
-test('aggregateReserveRollups: sort order is (currency asc, period asc)', () => {
+test('aggregateReserveRollups: sorted by period', () => {
   const rollup = aggregateReserveRollups(
     [
-      row({ date: '2026-04-15', currency: 'USD', amount: '100', txnType: 'income' }),
-      row({ date: '2026-01-15', currency: 'USD', amount: '100', txnType: 'income' }),
-      row({ date: '2026-04-15', currency: 'CAD', amount: '100', txnType: 'income' }),
-      row({ date: '2026-01-15', currency: 'CAD', amount: '100', txnType: 'income' }),
+      row({ date: '2026-07-15', amount: '100', txnType: 'income' }),
+      row({ date: '2026-01-15', amount: '100', txnType: 'income' }),
+      row({ date: '2026-04-15', amount: '100', txnType: 'income' }),
     ],
     'quarterly',
-    new Map(),
     0.2,
   );
-  assert.deepEqual(
-    rollup.map((r) => `${r.currency}-${r.period}`),
-    ['CAD-2026-Q1', 'CAD-2026-Q2', 'USD-2026-Q1', 'USD-2026-Q2'],
-  );
+  assert.deepEqual(rollup.map((r) => r.period), ['2026-Q1', '2026-Q2', '2026-Q3']);
 });
 
 test('aggregateReserveRollups: empty input returns empty array', () => {
-  assert.deepEqual(aggregateReserveRollups([], 'quarterly', new Map(), 0.25), []);
+  assert.deepEqual(aggregateReserveRollups([], 'quarterly', 0.25), []);
 });
 
 test('aggregateReserveRollups: an untyped positive business deposit is not income', () => {
@@ -288,7 +405,6 @@ test('aggregateReserveRollups: an untyped positive business deposit is not incom
       row({ amount: '2500', txnType: 'unknown', merchantRaw: 'MOBILE DEPOSIT' }),
     ],
     'quarterly',
-    new Map(),
     0.25,
   );
   assert.equal(rollup[0].components.businessIncome, 1000);
@@ -309,7 +425,6 @@ test('aggregateReserveRollups: payment and transfer legs are neither income nor 
       row({ amount: '-400', txnType: 'purchase' }),
     ],
     'quarterly',
-    new Map(),
     0.25,
   );
   assert.equal(rollup[0].components.businessIncome, 3000);
@@ -327,7 +442,6 @@ test('aggregateReserveRollups: a business refund nets against expenses, not inco
       row({ amount: '300', txnType: 'refund', hstGstAmount: '39' }),
     ],
     'quarterly',
-    new Map(),
     0.25,
   );
   const c = rollup[0].components;
@@ -346,7 +460,6 @@ test('aggregateReserveRollups: an untyped positive with refund text nets as a re
       row({ amount: '50', txnType: null, merchantRaw: 'AMAZON REFUND' }),
     ],
     'quarterly',
-    new Map(),
     0.25,
   );
   assert.equal(rollup[0].components.businessIncome, 0);
@@ -361,7 +474,6 @@ test('aggregateReserveRollups: rows on an investment account are ignored', () =>
       row({ amount: '-5000', txnType: 'purchase', accountType: 'investment' }),
     ],
     'quarterly',
-    new Map(),
     0.25,
   );
   assert.equal(rollup[0].components.businessIncome, 1000);
@@ -376,7 +488,6 @@ test('aggregateReserveRollups: net loss clips to zero before percent; HST still 
       row({ amount: '-5000', txnType: 'purchase' }),
     ],
     'quarterly',
-    new Map(),
     0.25,
   );
   assert.equal(rollup[0].netBusinessIncome, -4000);
@@ -393,7 +504,6 @@ test('aggregateReserveRollups: net negative HST/GST clips to zero', () => {
       row({ amount: '-1000', hstGstAmount: '500', txnType: 'purchase' }),
     ],
     'quarterly',
-    new Map(),
     0.2,
   );
   assert.equal(rollup[0].netHstGst, -400);
@@ -411,7 +521,6 @@ test('aggregateReserveRollups: a partly-business purchase deducts only its busin
       row({ amount: '-1000', businessAmount: '-300', hstGstAmount: '130' }),
     ],
     'quarterly',
-    new Map(),
     0.25,
   );
   const c = rollup[0].components;
@@ -425,7 +534,6 @@ test('aggregateReserveRollups: deductible percent applies on top of the business
   const rollup = aggregateReserveRollups(
     [row({ amount: '-1000', businessAmount: '-300', deductiblePercent: '0.5000' })],
     'quarterly',
-    new Map(),
     0.25,
   );
   assert.equal(rollup[0].components.deductibleExpenses, 150);
@@ -438,7 +546,6 @@ test('aggregateReserveRollups: a refund of a partly-business purchase nets only 
       row({ amount: '100', txnType: 'refund', businessAmount: '30', hstGstAmount: '13' }),
     ],
     'quarterly',
-    new Map(),
     0.25,
   );
   const c = rollup[0].components;
@@ -450,7 +557,6 @@ test('aggregateReserveRollups: a zero business portion deducts nothing', () => {
   const rollup = aggregateReserveRollups(
     [row({ amount: '-1000', businessAmount: '0', hstGstAmount: '130' })],
     'quarterly',
-    new Map(),
     0.25,
   );
   assert.equal(rollup[0].components.deductibleExpenses, 0);

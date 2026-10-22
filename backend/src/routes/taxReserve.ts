@@ -1,21 +1,31 @@
 /**
  * Tax reserve calculator endpoints (issue #223).
  *
- * Estimates how much cash a household should set aside per currency for an
- * upcoming tax bill, given the period's business income, deductible
- * business expenses, and any HST/GST collected on top. This is planning
- * support, NOT tax filing advice — the disclaimer is also surfaced in the
- * UI so the user is never confused about what the number represents.
+ * Estimates how much cash a household should set aside for an upcoming tax
+ * bill, given the period's business income, deductible business expenses,
+ * and any HST/GST collected on top. This is planning support, NOT tax filing
+ * advice — the disclaimer is also surfaced in the UI so the user is never
+ * confused about what the number represents.
+ *
+ * The reserve is ONE figure in CAD. Canadian tax is assessed and paid in CAD,
+ * and USD client income is converted to CAD almost as soon as it lands, so
+ * every business row is converted at its own transaction date (fx/toCad.ts,
+ * the same path the T2 builder uses) before it is bucketed. Bucketing per
+ * currency reserved 25% of gross USD income while CAD expenses sat unused in
+ * a separate loss bucket. A conversion made on a substituted rate (stale or
+ * post-dated) is returned as a warning, as the tax facts do (#1190).
  *
  * Endpoints:
- * - GET    /api/tax/reserve/settings       — list per-currency settings (synth defaults).
- * - PUT    /api/tax/reserve/settings/:currency — upsert one currency's row.
- * - DELETE /api/tax/reserve/settings/:currency — delete one currency's row.
- * - GET    /api/tax/reserve/summary?scope&from&to&periodicity — per-period rollup.
+ * - GET    /api/tax/reserve/settings          — the household's CAD reserve setting.
+ * - PUT    /api/tax/reserve/settings/:currency — upsert it (CAD only).
+ * - DELETE /api/tax/reserve/settings/:currency — delete a row (any currency, so
+ *                                               legacy non-CAD rows can be cleared).
+ * - GET    /api/tax/reserve/summary?scope&from&to&periodicity — per-period CAD rollup.
  *
  * The pure helpers (`composeTaxReserve`, `parsePeriodicity`, `periodKey`,
- * `aggregateReserveRollups`, `validateReservePatch`) are exported; reporting.ts
- * reuses `composeTaxReserve` and `loadReserveRollups`.
+ * `convertReserveRowsToCad`, `aggregateReserveRollups`, `validateReservePatch`)
+ * are exported; reporting.ts reuses `composeTaxReserve`, `loadReserveRollups`
+ * and `loadCadReservePercent`.
  */
 import { Router } from 'express';
 import { type WhereOptions } from 'sequelize';
@@ -40,6 +50,12 @@ import {
   type ItemAllocationContext,
 } from '../summary/loadItemAllocations';
 import { splitTxnByItems } from '../import/splitTxnByItems';
+import { toCad, type ToCadResult } from '../fx/toCad';
+import { createFxFallbackCollector } from '../fx/fxFallbackWarnings';
+import { D, type Decimal } from '../tax/util/decimal';
+
+/** The reserve's only currency. */
+export const RESERVE_CURRENCY = 'CAD';
 
 const router = Router();
 
@@ -86,7 +102,10 @@ export interface ReserveInputRow {
   date: string;
   /** Transaction.amount as DECIMAL string. Charges are NEGATIVE, income POSITIVE. */
   amount: string;
+  /** Currency of `amount`. 'CAD' once convertReserveRowsToCad has run. */
   currency: string;
+  /** The row's original currency, kept after conversion. Absent → `currency`. */
+  sourceCurrency?: string;
   finalBusiness: boolean;
   /** From TransactionTaxMetadata.deductiblePercent ([0,1]). Null when no metadata. */
   deductiblePercent: string | null;
@@ -132,8 +151,11 @@ export interface ReserveComponents {
 }
 
 export interface ReserveRollup {
+  /** Always 'CAD' — kept on each row for backward compatibility. */
   currency: string;
   period: string;
+  /** Original currencies of the rows in this period (sorted), e.g. ['CAD', 'USD']. */
+  sourceCurrencies: string[];
   components: ReserveComponents;
   /**
    * Net business income after deductible expenses. `businessIncome -
@@ -198,29 +220,105 @@ function businessShare(row: ReserveInputRow, amount: number): number {
   return Number.isFinite(ratio) ? Math.min(Math.max(ratio, 0), 1) : 0;
 }
 
+export type CadConverter = (
+  amount: Decimal,
+  currency: string,
+  date: string,
+) => Promise<ToCadResult>;
+
 /**
- * Builds one rollup per (period, currency). Reserve percent is looked up
- * per-currency via the passed `reservePercents` map; missing currencies
- * fall back to `defaultPercent`.
+ * Converts each row to CAD at its own transaction date via `convert`
+ * (fx/toCad in production). `amount`, `businessAmount` and `hstGstAmount` all
+ * use that date's rate; the row keeps its original currency in
+ * `sourceCurrency`. One rate lookup per (currency, date).
+ *
+ * Conversions made on a substituted rate (toCad's `fallback_nearest`, or a
+ * post-dated `fallback_any`) become warnings. A currency with no rate on file
+ * at all is left out — its rows cannot be expressed in CAD — and named in a
+ * warning rather than failing the whole reserve.
+ */
+export async function convertReserveRowsToCad(
+  rows: ReserveInputRow[],
+  convert: CadConverter = toCad,
+): Promise<{ rows: ReserveInputRow[]; warnings: string[] }> {
+  const fallbacks = createFxFallbackCollector();
+  const rates = new Map<string, Promise<Decimal | null>>();
+  const unconvertible = new Map<string, number>();
+  const rateFor = (currency: string, date: string): Promise<Decimal | null> => {
+    const key = `${currency}|${date}`;
+    let pending = rates.get(key);
+    if (!pending) {
+      pending = convert(D(1), currency, date).then(
+        (result) => {
+          fallbacks.record(currency, date, result);
+          return result.cad;
+        },
+        () => null,
+      );
+      rates.set(key, pending);
+    }
+    return pending;
+  };
+  const scale = (value: string, rate: Decimal): string =>
+    num(value) == null ? value : D(value).times(rate).toString();
+
+  const out: ReserveInputRow[] = [];
+  for (const row of rows) {
+    const currency = row.currency || RESERVE_CURRENCY;
+    if (currency === RESERVE_CURRENCY) {
+      out.push({ ...row, currency, sourceCurrency: row.sourceCurrency ?? currency });
+      continue;
+    }
+    const rate = await rateFor(currency, row.date);
+    if (rate == null) {
+      unconvertible.set(currency, (unconvertible.get(currency) ?? 0) + 1);
+      continue;
+    }
+    out.push({
+      ...row,
+      currency: RESERVE_CURRENCY,
+      sourceCurrency: currency,
+      amount: scale(row.amount, rate),
+      businessAmount: row.businessAmount == null ? row.businessAmount : scale(row.businessAmount, rate),
+      hstGstAmount: row.hstGstAmount == null ? null : scale(row.hstGstAmount, rate),
+    });
+  }
+  const warnings = fallbacks.warnings();
+  for (const [currency, count] of [...unconvertible].sort()) {
+    warnings.push(
+      `No ${currency}→CAD exchange rate is on file at all, so ${count} business transaction(s) `
+      + `in ${currency} were left out of the reserve. Add the rate and recompute.`,
+    );
+  }
+  return { rows: out, warnings };
+}
+
+/**
+ * Builds one CAD rollup per period at the household's single reserve
+ * percent. Rows must already be in CAD (convertReserveRowsToCad): a non-CAD
+ * row throws rather than being summed into a CAD bucket.
  */
 export function aggregateReserveRollups(
   rows: ReserveInputRow[],
   periodicity: Periodicity,
-  reservePercents: Map<string, number>,
-  defaultPercent: number,
+  reservePercent: number,
 ): ReserveRollup[] {
   type Bucket = {
-    currency: string;
     period: string;
+    sourceCurrencies: Set<string>;
     components: ReserveComponents;
   };
   const buckets = new Map<string, Bucket>();
   for (const row of rows) {
+    if (row.currency !== RESERVE_CURRENCY) {
+      throw new Error(
+        `aggregateReserveRollups: ${row.currency} row on ${row.date}; convert rows to CAD first`,
+      );
+    }
     const period = periodKey(row.date, periodicity);
-    const key = `${row.currency}|${period}`;
-    const bucket = buckets.get(key) ?? {
-      currency: row.currency,
+    const bucket = buckets.get(period) ?? {
       period,
+      sourceCurrencies: new Set<string>(),
       components: {
         businessIncome: 0,
         deductibleExpenses: 0,
@@ -228,6 +326,7 @@ export function aggregateReserveRollups(
         hstGstPaid: 0,
       },
     };
+    bucket.sourceCurrencies.add(row.sourceCurrency ?? row.currency);
     const amount = num(row.amount) ?? 0;
     const hstGst = num(row.hstGstAmount) ?? 0;
     if (row.finalBusiness) {
@@ -247,40 +346,27 @@ export function aggregateReserveRollups(
         bucket.components.hstGstPaid += flow === 'refund' ? -itc : itc;
       }
     }
-    buckets.set(key, bucket);
+    buckets.set(period, bucket);
   }
   const out: ReserveRollup[] = [];
   for (const bucket of buckets.values()) {
-    const reservePercent =
-      reservePercents.get(bucket.currency) ?? defaultPercent;
-    const netBusinessIncome =
-      bucket.components.businessIncome - bucket.components.deductibleExpenses;
-    const netHstGst =
-      bucket.components.hstGstCollected - bucket.components.hstGstPaid;
-    const reserveTarget = round2(
-      Math.max(0, netBusinessIncome) * reservePercent + Math.max(0, netHstGst),
-    );
+    const c = bucket.components;
     out.push({
-      currency: bucket.currency,
+      currency: RESERVE_CURRENCY,
       period: bucket.period,
+      sourceCurrencies: [...bucket.sourceCurrencies].sort(),
       components: {
-        businessIncome: round2(bucket.components.businessIncome),
-        deductibleExpenses: round2(bucket.components.deductibleExpenses),
-        hstGstCollected: round2(bucket.components.hstGstCollected),
-        hstGstPaid: round2(bucket.components.hstGstPaid),
+        businessIncome: round2(c.businessIncome),
+        deductibleExpenses: round2(c.deductibleExpenses),
+        hstGstCollected: round2(c.hstGstCollected),
+        hstGstPaid: round2(c.hstGstPaid),
       },
-      netBusinessIncome: round2(netBusinessIncome),
-      netHstGst: round2(netHstGst),
+      ...composeTaxReserve({ ...c, reservePercent }),
       reservePercent,
-      reserveTarget,
     });
   }
-  // Sort: currency asc, period asc (lexicographically — works for YYYY-MM,
-  // YYYY-Qn, YYYY because each form sorts by year first).
-  out.sort((a, b) => {
-    if (a.currency !== b.currency) return a.currency.localeCompare(b.currency);
-    return a.period.localeCompare(b.period);
-  });
+  // Lexicographic sort works for YYYY-MM, YYYY-Qn and YYYY (year first).
+  out.sort((a, b) => a.period.localeCompare(b.period));
   return out;
 }
 
@@ -289,9 +375,9 @@ function round2(n: number): number {
 }
 
 /**
- * Pure single-period reserve calc over pre-aggregated totals. Used by the
- * /api/v1 reporting routes (reporting.ts) so they report the same reserve
- * as this tab. Mirrors the formula in aggregateReserveRollups.
+ * Pure single-period reserve calc over pre-aggregated CAD totals: the one
+ * formula, applied per period by aggregateReserveRollups and over a whole
+ * window by the /api/v1 reporting routes (reporting.ts).
  */
 export function composeTaxReserve(input: {
   businessIncome: number;
@@ -381,12 +467,25 @@ function isValidCurrency(raw: string): boolean {
 // ---------- Routes -------------------------------------------------------
 
 /**
+ * The household's reserve percent: its CAD row, else the default. Rows for
+ * other currencies predate the single-CAD reserve and are not consulted.
+ */
+export async function loadCadReservePercent(householdId: number): Promise<number> {
+  const row = await TaxReserveSetting.findOne({
+    where: { householdId, currency: RESERVE_CURRENCY },
+  });
+  const v = row ? Number(row.reservePercent) : NaN;
+  return Number.isFinite(v) ? v : Number(DEFAULT_TAX_RESERVE_PERCENT);
+}
+
+/**
  * GET /api/tax/reserve/settings
  *
- * Returns every TaxReserveSetting row for the household plus a synthesised
- * default row for each currency present in the household's transactions
- * that doesn't already have a row. The synthesised rows are flagged
- * `isDefault: true` so the UI can render them as "implicit".
+ * `data` is a one-element list: the household's CAD setting, or a synthesised
+ * default flagged `isDefault: true`. The list shape is kept for backward
+ * compatibility with the per-currency API. Explicit rows for other currencies
+ * no longer affect the reserve (every row is converted to CAD); they are
+ * returned under `ignored` so they can be seen and deleted.
  */
 router.get('/settings', async (req, res, next) => {
   try {
@@ -395,27 +494,12 @@ router.get('/settings', async (req, res, next) => {
       where: { householdId: household.id },
       order: [['currency', 'ASC']],
     });
-    const explicit = new Map(rows.map((r) => [r.currency, serializeSetting(r)]));
-    // Synth defaults for any currency the household has business transactions in.
-    const observed = await Transaction.findAll({
-      where: {
-        ...visibleTransactionWhere(req),
-        finalBusiness: true,
-      },
-      attributes: ['currency'],
-      group: ['currency'],
-      raw: true,
+    const cad = rows.find((r) => r.currency === RESERVE_CURRENCY);
+    res.json({
+      data: [cad ? serializeSetting(cad) : defaultSetting(RESERVE_CURRENCY)],
+      currency: RESERVE_CURRENCY,
+      ignored: rows.filter((r) => r.currency !== RESERVE_CURRENCY).map(serializeSetting),
     });
-    const observedCurrencies = new Set(
-      observed.map((r: unknown) => (r as { currency: string }).currency),
-    );
-    for (const c of observedCurrencies) {
-      if (!explicit.has(c)) explicit.set(c, defaultSetting(c));
-    }
-    const data = Array.from(explicit.values()).sort((a, b) =>
-      a.currency.localeCompare(b.currency),
-    );
-    res.json({ data });
   } catch (e) {
     next(e);
   }
@@ -424,8 +508,9 @@ router.get('/settings', async (req, res, next) => {
 /**
  * PUT /api/tax/reserve/settings/:currency
  *
- * Upserts one row keyed by (household, currency). 400 on invalid percent
- * or currency code. Returns the freshly written row.
+ * Upserts the household's CAD row. 400 on an invalid percent or currency
+ * code, and on any currency other than CAD — a non-CAD percent would be
+ * stored and never applied. Returns the freshly written row.
  */
 router.put('/settings/:currency', async (req, res, next) => {
   try {
@@ -433,6 +518,12 @@ router.put('/settings/:currency', async (req, res, next) => {
     const currency = String(req.params.currency).toUpperCase();
     if (!isValidCurrency(currency)) {
       res.status(400).json({ error: 'currency must be a 3-letter ISO code' });
+      return;
+    }
+    if (currency !== RESERVE_CURRENCY) {
+      res.status(400).json({
+        error: 'The tax reserve is computed in CAD (every transaction is converted at its date); only the CAD reserve percent can be set',
+      });
       return;
     }
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -465,8 +556,9 @@ router.put('/settings/:currency', async (req, res, next) => {
 /**
  * DELETE /api/tax/reserve/settings/:currency
  *
- * Removes the row so the household reverts to the synthesised default for
- * that currency. 204 on success even when no row existed (idempotent).
+ * Removes the row: for CAD the household reverts to the default percent; any
+ * other currency is a legacy row being cleared. 204 on success even when no
+ * row existed (idempotent).
  */
 router.delete('/settings/:currency', async (req, res, next) => {
   try {
@@ -510,17 +602,28 @@ function businessPortion(txn: Transaction, ctx: ItemAllocationContext): number {
   return allocations.reduce((sum, a) => sum + a.businessAmount, 0);
 }
 
+export interface ReserveLoadResult {
+  /** One CAD rollup per period. */
+  rollups: ReserveRollup[];
+  /** The household's CAD reserve percent (or the default) applied to every period. */
+  reservePercent: number;
+  /** FX fallbacks and unconvertible currencies; see convertReserveRowsToCad. */
+  warnings: string[];
+}
+
 /**
- * Load business transactions matching `where` (+ their tax metadata) and the
- * household's per-currency reserve settings, and roll them up. The single
- * source of the reserve number: GET /summary below and the /api/v1 reporting
- * routes both call this, so they can never drift apart.
+ * Load business transactions matching `where` (+ their tax metadata),
+ * convert them to CAD at their own dates, and roll them up at the household's
+ * CAD reserve percent. The single source of the reserve number: GET /summary
+ * below and the /api/v1 reporting routes both call this, so they can never
+ * drift apart.
  */
 export async function loadReserveRollups(
   householdId: number,
   where: WhereOptions,
   periodicity: Periodicity,
-): Promise<ReserveRollup[]> {
+  convert: CadConverter = toCad,
+): Promise<ReserveLoadResult> {
   const rows = await Transaction.findAll({
     where,
     attributes: [
@@ -575,31 +678,29 @@ export async function loadReserveRollups(
       finalCategory: r.finalCategory ?? null,
     };
   });
-  // Build per-currency percent lookup from settings.
-  const settings = await TaxReserveSetting.findAll({
-    where: { householdId },
-  });
-  const reservePercents = new Map<string, number>();
-  for (const s of settings) {
-    const v = Number(s.reservePercent);
-    if (Number.isFinite(v)) reservePercents.set(s.currency, v);
-  }
-  const defaultPercent = Number(DEFAULT_TAX_RESERVE_PERCENT);
-  return aggregateReserveRollups(
-    inputRows,
-    periodicity,
-    reservePercents,
-    defaultPercent,
+  // Only business rows reach the reserve, so only they are converted (a
+  // personal row in a wide scope must not trigger an FX lookup).
+  const converted = await convertReserveRowsToCad(
+    inputRows.filter((r) => r.finalBusiness),
+    convert,
   );
+  const reservePercent = await loadCadReservePercent(householdId);
+  return {
+    rollups: aggregateReserveRollups(converted.rows, periodicity, reservePercent),
+    reservePercent,
+    warnings: converted.warnings,
+  };
 }
 
 /**
  * GET /api/tax/reserve/summary
  *
- * Period rollup of business income, deductible expenses, HST/GST collected
- * and paid, plus suggested reserve target per (period, currency). Reserve
- * percent comes from the household's tax_reserve_settings (or the default
- * fallback) per currency.
+ * Period rollup, in CAD, of business income, deductible expenses, HST/GST
+ * collected and paid, plus the suggested reserve target per period. Every row
+ * is converted to CAD at its transaction date; `warnings` lists conversions
+ * made on a substituted (stale or post-dated) rate and any currency left out
+ * for want of a rate. Reserve percent is the household's CAD setting (or the
+ * default).
  *
  * Query params:
  * - scope:       personal|shared|business|all (default business — matches
@@ -620,9 +721,16 @@ router.get('/summary', async (req, res, next) => {
       ...scopeWhere(scope),
       ...dateRangeWhere(from, to),
     };
-    const rollups = await loadReserveRollups(household.id, where, periodicity);
+    const { rollups, reservePercent, warnings } = await loadReserveRollups(
+      household.id,
+      where,
+      periodicity,
+    );
     res.json({
       data: rollups,
+      currency: RESERVE_CURRENCY,
+      reservePercent,
+      warnings,
       scope,
       periodicity,
       disclaimer:
