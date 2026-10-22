@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { Op } from 'sequelize';
-import { Account, Transaction, TaxReserveSetting, Label, PlannedEvent, FinanceEvent } from '../models';
-import { DEFAULT_TAX_RESERVE_PERCENT } from '../models/TaxReserveSetting';
+import { Account, Transaction, Label, PlannedEvent, FinanceEvent } from '../models';
 import { serializeSubscription } from '../expectations/subscriptionMapper';
 import { balanceAtDate } from '../networth/balanceAtDate';
 import {
@@ -13,7 +12,7 @@ import {
   PORTFOLIO_DRIVEN_TYPES,
 } from '../networth/aggregate';
 import { withCadCrossRates } from '../fx/crossCurrencyFxLookup';
-import { composeTaxReserve, loadReserveRollups } from './taxReserve';
+import { composeTaxReserve, loadCadReservePercent, loadReserveRollups } from './taxReserve';
 import { scopeWhere, dateRangeWhere } from './businessTax';
 import { loadRecurringCandidates } from '../subscriptions/recurringCandidates';
 import { portfolioMarketValueAt } from '../networth/portfolioMarketValueAt';
@@ -451,13 +450,9 @@ router.get('/projections', async (req, res, next) => {
     const monthlyIncome = perMonth(totalIncome, months);
     const monthlyExpenses = perMonth(totalSpend, months);
 
-    // Tax rate from TaxReserveSetting.
-    const reserveSetting = await TaxReserveSetting.findOne({
-      where: { householdId: household.id, currency },
-    });
-    const taxRate = reserveSetting
-      ? round4(Number(reserveSetting.reservePercent))
-      : round4(Number(DEFAULT_TAX_RESERVE_PERCENT));
+    // The household's reserve percent: one CAD setting, whatever the currency
+    // (the reserve is computed in CAD — routes/taxReserve).
+    const taxRate = round4(await loadCadReservePercent(household.id));
 
     // Current balances.
     const accounts = await Account.findAll({
@@ -1044,36 +1039,42 @@ function isoWeekStart(date: string): string {
   return monday.toISOString().slice(0, 10);
 }
 
+const crossFx = withCadCrossRates(looseHistoricalFxLookup);
+
 /**
- * The app's tax-reserve target for one currency over [from, to], via the same
- * loader + formula as /api/tax/reserve/summary. Components are summed across
- * period buckets first and the formula applied once, so the window is treated
- * as a single period (a 90-day window may straddle a year boundary).
+ * The app's tax-reserve target over [from, to], via the same loader + formula
+ * as /api/tax/reserve/summary, expressed in `currency`. The reserve is one CAD
+ * figure over every business row (each converted at its own date), so a
+ * non-CAD request converts that figure at the window's end (capped at today)
+ * the way netWorth is — null when no rate resolves. Components are summed
+ * across period buckets first and the formula applied once, so the window is
+ * treated as a single period (a 90-day window may straddle a year boundary).
  */
 async function appReserveTarget(
   householdId: number,
   currency: string,
   from: string,
   to: string,
-): Promise<number> {
-  const rollups = await loadReserveRollups(
+): Promise<number | null> {
+  const { rollups, reservePercent } = await loadReserveRollups(
     householdId,
-    { householdId, currency, ...scopeWhere('business'), ...dateRangeWhere(from, to) },
+    { householdId, ...scopeWhere('business'), ...dateRangeWhere(from, to) },
     'annual',
   );
-  if (rollups.length === 0) return 0;
   const sum = (k: keyof (typeof rollups)[number]['components']) =>
     rollups.reduce((acc, r) => acc + r.components[k], 0);
-  return composeTaxReserve({
+  const cad = composeTaxReserve({
     businessIncome: sum('businessIncome'),
     deductibleExpenses: sum('deductibleExpenses'),
     hstGstCollected: sum('hstGstCollected'),
     hstGstPaid: sum('hstGstPaid'),
-    reservePercent: rollups[0].reservePercent,
+    reservePercent,
   }).reserveTarget;
+  if (currency === 'CAD' || cad === 0) return cad;
+  const today = new Date().toISOString().slice(0, 10);
+  const fx = await crossFx('CAD', currency, to < today ? to : today);
+  return fx ? round2(cad * fx.rate) : null;
 }
-
-const crossFx = withCadCrossRates(looseHistoricalFxLookup);
 
 /**
  * Household net worth exactly as /net-worth computes it (buildNetWorthAt over

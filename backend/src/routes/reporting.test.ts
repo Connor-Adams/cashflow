@@ -373,6 +373,66 @@ test('GET /summary: taxReserveRequired is the app reserve over the 90d window; a
   assert.equal(res.body.taxReserveActual, null);
 });
 
+// ---- tax reserve is one CAD figure ------------------------------------------
+
+async function seedFxRate(from: string, ratedDate: string, rate: string): Promise<void> {
+  await models.FxRate.create({
+    fromCurrency: from,
+    toCurrency: 'CAD',
+    ratedDate,
+    rate,
+    source: 'test',
+    fetchedAt: new Date(),
+  } as never);
+}
+
+/** USD client income (10,000 USD at 1.4) + a 2,000 CAD business expense. */
+async function seedUsdIncomeCadExpense(dates: { income: string; expense: string }) {
+  const checking = await seedAccount('Chequing', 'checking');
+  const incomeId = await seedTxnReturningId(checking, dates.income, 10000, 'income');
+  const expenseId = await seedTxnReturningId(checking, dates.expense, -2000, 'purchase');
+  await models.Transaction.update({ currency: 'USD' }, { where: { id: incomeId } });
+  await markBusiness(incomeId, expenseId);
+  await seedFxRate('USD', dates.income, '1.4');
+}
+
+test('GET /tax: USD income is converted at its date and nets against CAD expenses', async () => {
+  const year = new Date().getFullYear();
+  await seedUsdIncomeCadExpense({ income: `${year}-01-10`, expense: `${year}-01-12` });
+  const res = await request(app).get('/tax?currency=CAD');
+  assert.equal(res.status, 200);
+  // (10000 x 1.4 - 2000) x 0.25 = 3000. Per-currency buckets said 0 for CAD
+  // (a loss bucket) and 2500 USD for the gross USD income.
+  assert.equal(res.body.taxReserveTarget, 3000);
+  assert.equal(res.body.estimatedTaxOwed, 3000);
+});
+
+test('GET /tax?currency=USD: the CAD reserve expressed in USD, not a USD-only reserve', async () => {
+  const year = new Date().getFullYear();
+  const today = new Date().toISOString().slice(0, 10);
+  await seedUsdIncomeCadExpense({ income: `${year}-01-10`, expense: `${year}-01-12` });
+  await seedFxRate('USD', today, '1.5');
+  const res = await request(app).get('/tax?currency=USD');
+  assert.equal(res.status, 200);
+  // 3000 CAD / 1.5 = 2000 USD (the old USD-only reserve was 10000 x 0.25 = 2500).
+  assert.equal(res.body.taxReserveTarget, 2000);
+});
+
+test('GET /summary: taxReserveRequired is the CAD reserve over every currency', async () => {
+  await seedUsdIncomeCadExpense({ income: isoDaysAgo(20), expense: isoDaysAgo(18) });
+  const res = await request(app).get('/summary');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.taxReserveRequired, 3000);
+});
+
+test('GET /projections: taxRate is the household CAD reserve percent for any currency', async () => {
+  await models.TaxReserveSetting.create({ householdId: household.id, currency: 'CAD', reservePercent: '0.3000' } as never);
+  await models.TaxReserveSetting.create({ householdId: household.id, currency: 'USD', reservePercent: '0.4000' } as never);
+  const res = await request(app).get('/projections?currency=USD');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.assumptions.taxRate, 0.3);
+});
+
 // ---- burn normalization ----------------------------------------------------
 
 /** Data that starts 75 days ago and stops 45 days ago (a stale import):

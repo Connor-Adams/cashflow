@@ -168,15 +168,20 @@ after(async () => {
 
 // ---- GET /api/tax/reserve/settings -------------------------------------
 
-test('GET /api/tax/reserve/settings: empty household returns empty list', async () => {
+test('GET /api/tax/reserve/settings: empty household gets the default CAD setting', async () => {
   const res = await primaryAgent.get('/api/tax/reserve/settings');
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body.data, []);
+  assert.equal(res.body.currency, 'CAD');
+  assert.equal(res.body.data.length, 1);
+  assert.equal(res.body.data[0].currency, 'CAD');
+  assert.equal(res.body.data[0].isDefault, true);
+  assert.equal(res.body.data[0].reservePercent, '0.2500');
+  assert.deepEqual(res.body.ignored, []);
 });
 
-test('GET /api/tax/reserve/settings: synthesises a default row per observed currency', async () => {
-  // Seed a business txn in CAD and one in USD; expect two synthesised
-  // defaults (isDefault: true) since no explicit settings exist yet.
+test('GET /api/tax/reserve/settings: one CAD setting even with business txns in several currencies', async () => {
+  // The reserve converts every row to CAD, so a USD txn no longer gets its
+  // own synthesised setting.
   await createTransaction(primaryHouseholdId, primaryAccountId, '2026-03-01', 1000, {
     business: true,
     currency: 'CAD',
@@ -187,12 +192,7 @@ test('GET /api/tax/reserve/settings: synthesises a default row per observed curr
   });
   const res = await primaryAgent.get('/api/tax/reserve/settings');
   assert.equal(res.status, 200);
-  assert.equal(res.body.data.length, 2);
-  const cad = res.body.data.find((r: { currency: string }) => r.currency === 'CAD');
-  const usd = res.body.data.find((r: { currency: string }) => r.currency === 'USD');
-  assert.equal(cad.isDefault, true);
-  assert.equal(cad.reservePercent, '0.2500');
-  assert.equal(usd.isDefault, true);
+  assert.deepEqual(res.body.data.map((r: { currency: string }) => r.currency), ['CAD']);
 });
 
 // ---- PUT /api/tax/reserve/settings/:currency ---------------------------
@@ -238,32 +238,59 @@ test('PUT /api/tax/reserve/settings/:currency: rejects bad currency code', async
 
 test('PUT /api/tax/reserve/settings/:currency: lowercase currency normalised to uppercase', async () => {
   const res = await primaryAgent
-    .put('/api/tax/reserve/settings/usd')
-    .send({ reservePercent: 0.28 });
+    .put('/api/tax/reserve/settings/cad')
+    .send({ reservePercent: 0.35 });
   assert.equal(res.status, 200);
-  assert.equal(res.body.data.currency, 'USD');
+  assert.equal(res.body.data.currency, 'CAD');
+});
+
+test('PUT /api/tax/reserve/settings/:currency: a non-CAD percent is rejected (it would never apply)', async () => {
+  const res = await primaryAgent
+    .put('/api/tax/reserve/settings/USD')
+    .send({ reservePercent: 0.28 });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /CAD/);
+});
+
+test('GET /api/tax/reserve/settings: a legacy non-CAD row is listed as ignored', async () => {
+  const models = await import('../../src/models');
+  await models.TaxReserveSetting.create({
+    householdId: primaryHouseholdId,
+    currency: 'USD',
+    reservePercent: '0.2800',
+  } as never);
+  const res = await primaryAgent.get('/api/tax/reserve/settings');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.data.map((r: { currency: string }) => r.currency), ['CAD']);
+  assert.deepEqual(res.body.ignored.map((r: { currency: string }) => r.currency), ['USD']);
 });
 
 test('PUT /api/tax/reserve/settings/:currency: scoped to household', async () => {
-  // Primary just wrote CAD = 0.35. Other household has no row — should see
-  // a synthesised default (or nothing if no observed currency).
+  // Primary just wrote CAD = 0.35. Other household has no row, so it sees
+  // the synthesised default, not primary's value.
   const otherList = await otherAgent.get('/api/tax/reserve/settings');
   assert.equal(otherList.status, 200);
-  // Other household has no transactions yet, so no synthesised defaults either.
   const cad = otherList.body.data.find((r: { currency: string }) => r.currency === 'CAD');
-  assert.equal(cad, undefined);
+  assert.equal(cad.isDefault, true);
+  assert.equal(cad.reservePercent, '0.2500');
+  assert.deepEqual(otherList.body.ignored, []);
 });
 
 // ---- DELETE /api/tax/reserve/settings/:currency ------------------------
 
-test('DELETE /api/tax/reserve/settings/:currency: removes the row', async () => {
+test('DELETE /api/tax/reserve/settings/:currency: clears a legacy non-CAD row', async () => {
   const del = await primaryAgent.delete('/api/tax/reserve/settings/USD');
   assert.equal(del.status, 204);
-  // GET should re-synth a default for USD because there's still a USD txn.
   const list = await primaryAgent.get('/api/tax/reserve/settings');
-  const usd = list.body.data.find((r: { currency: string }) => r.currency === 'USD');
-  assert.equal(usd.isDefault, true);
-  assert.equal(usd.reservePercent, '0.2500');
+  assert.deepEqual(list.body.ignored, []);
+});
+
+test('DELETE /api/tax/reserve/settings/CAD: reverts to the default percent', async () => {
+  const del = await primaryAgent.delete('/api/tax/reserve/settings/CAD');
+  assert.equal(del.status, 204);
+  const list = await primaryAgent.get('/api/tax/reserve/settings');
+  assert.equal(list.body.data[0].isDefault, true);
+  assert.equal(list.body.data[0].reservePercent, '0.2500');
 });
 
 test('DELETE /api/tax/reserve/settings/:currency: idempotent when no row exists', async () => {
@@ -302,8 +329,12 @@ test('GET /api/tax/reserve/summary: per-quarter rollup with applied percent', as
   assert.match(res.body.disclaimer, /Not tax filing advice/i);
   assert.equal(res.body.data.length, 1);
   const q1 = res.body.data[0];
+  assert.equal(res.body.currency, 'CAD');
+  assert.equal(res.body.reservePercent, 0.25);
+  assert.deepEqual(res.body.warnings, []);
   assert.equal(q1.period, '2026-Q1');
   assert.equal(q1.currency, 'CAD');
+  assert.deepEqual(q1.sourceCurrencies, ['CAD']);
   assert.equal(q1.components.businessIncome, 4000);
   assert.equal(q1.components.deductibleExpenses, 1000);
   assert.equal(q1.components.hstGstCollected, 520);
@@ -313,6 +344,42 @@ test('GET /api/tax/reserve/summary: per-quarter rollup with applied percent', as
   assert.equal(q1.reservePercent, 0.25);
   // 3000 * 0.25 = 750 + 390 = 1140
   assert.equal(q1.reserveTarget, 1140);
+});
+
+test('GET /api/tax/reserve/summary: USD income is converted to CAD at its date and nets against CAD expenses', async () => {
+  const models = await import('../../src/models');
+  // Rates on file for each USD date, so toCad never reaches for the network.
+  for (const [ratedDate, rate] of [['2026-07-15', '1.4000'], ['2026-03-02', '1.3500']]) {
+    await models.FxRate.create({
+      fromCurrency: 'USD',
+      toCurrency: 'CAD',
+      ratedDate,
+      rate,
+      source: 'test',
+      fetchedAt: new Date(),
+    } as never);
+  }
+  await createTransaction(otherHouseholdId, otherAccountId, '2026-07-15', 5000, {
+    business: true,
+    currency: 'USD',
+    txnType: 'income',
+  });
+  await createTransaction(otherHouseholdId, otherAccountId, '2026-08-01', -1000, {
+    business: true,
+  });
+  const res = await otherAgent.get(
+    '/api/tax/reserve/summary?periodicity=quarterly&from=2026-07-01&to=2026-09-30',
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 1);
+  const q3 = res.body.data[0];
+  assert.equal(q3.currency, 'CAD');
+  assert.deepEqual(q3.sourceCurrencies, ['CAD', 'USD']);
+  assert.equal(q3.components.businessIncome, 7000);
+  assert.equal(q3.components.deductibleExpenses, 1000);
+  // (5000 x 1.4 - 1000) x 0.25 = 1500
+  assert.equal(q3.reserveTarget, 1500);
+  assert.deepEqual(res.body.warnings, []);
 });
 
 test('GET /api/tax/reserve/summary: monthly buckets', async () => {
