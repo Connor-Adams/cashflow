@@ -1,9 +1,18 @@
 import { D, Decimal, sumD, maxZero } from '../util/decimal';
-import type { CorpTaxYearFacts, CorpTaxReturn, RateTable, TaxLine } from './types';
+import type { BusinessIncomeItem, CorpTaxYearFacts, CorpTaxReturn, RateTable, TaxLine } from './types';
 import { computeAaii } from './aaii';
 import { sbdEligibleIncome } from './sbd';
 import { computeIntegration, isConnectedSource } from './integration';
 import { capitalGainOf } from './capital-gains';
+
+/**
+ * A row on the expense side of active business income. Builders tag the side;
+ * an untagged row falls back to its sign (a refund then reads as revenue, which
+ * only matters under s.18(1)(p)).
+ */
+function isExpenseRow(i: BusinessIncomeItem): boolean {
+  return i.side ? i.side === 'expense' : i.cadAmount.isNegative();
+}
 
 export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   // Fact-assembly caveats ride along with the engine's own warnings so the
@@ -19,6 +28,31 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   push('L300', 'Active business income', abi,
     facts.activeBusinessIncome.map(i => ({ source: i.source, amount: i.cadAmount })));
 
+  // Personal services business (s.125(7)): the whole year's active business
+  // income is PSB income, and s.18(1)(p) denies every expense except the
+  // incorporated employee's remuneration. So PSB income = revenue − salary,
+  // with the year's net expenses added back.
+  const psb = facts.personalServicesBusiness === true;
+  let psbIncome = D('0');
+  if (psb) {
+    const expenseRows = facts.activeBusinessIncome.filter(isExpenseRow);
+    const disallowed = maxZero(sumD(expenseRows.map(i => i.cadAmount)).negated());
+    push('L18P', 'Expenses denied under ITA 18(1)(p) (personal services business)', disallowed,
+      expenseRows.map(i => ({ source: i.source, amount: i.cadAmount })));
+    push('L18PS', 'Salary to the incorporated employee, deductible under ITA 18(1)(p)(i)', facts.salaryPaid);
+    psbIncome = abi.plus(disallowed).minus(facts.salaryPaid);
+    push('L432', 'Personal services business income', psbIncome);
+    warnings.push(
+      'Personal services business: all active business income this year is taxed as PSB income '
+      + `(federal ${r.corpPsbRateFederal.times(100).toFixed(1)}% incl. the s.123.5 5% additional tax, `
+      + `Ontario ${r.corpPsbRateOntario.times(100).toFixed(1)}%), with no small business deduction. `
+      + 'Every expense other than the salary paid to the incorporated employee is denied (s.18(1)(p)). '
+      + 'Benefits or allowances to that employee, selling or contract-negotiation costs, and legal '
+      + 'costs of collecting fees (s.18(1)(p)(ii)-(iv)) are also deductible but are not separated '
+      + 'from other expenses here — they are denied with the rest.',
+    );
+  }
+
   // AAII (for SBD grind)
   const aaii = computeAaii(facts, r);
   push('L417', 'Adjusted aggregate investment income', aaii);
@@ -30,7 +64,8 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   if (facts.groupAaii) {
     push('L417G', 'Group AAII (used for SBD grind)', aaiiForSbd);
   }
-  const sbd = sbdEligibleIncome(abi, aaiiForSbd, r);
+  // A PSB earns no SBD: its income is not from an "active business" (s.125(7)).
+  const sbd = sbdEligibleIncome(psb ? D('0') : abi, aaiiForSbd, r);
   push('L425', 'SBD limit (after AAII grind)', sbd.limit);
   push('L427', 'Income eligible for SBD', sbd.eligible);
   push('L430', 'General-rate active business income', sbd.generalRate);
@@ -74,7 +109,7 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   // taxable capital gains; non-capital losses (s.111(1)(a)) against any income.
   const netCapitalLossApplied = Decimal.min(facts.carryforwards.netCapitalLoss, includableGains);
   const taxableIncome = maxZero(
-    sbd.eligible.plus(sbd.generalRate).plus(investmentTaxableIncome).plus(includableGains)
+    sbd.eligible.plus(sbd.generalRate).plus(psbIncome).plus(investmentTaxableIncome).plus(includableGains)
       .minus(facts.carryforwards.nonCapLoss).minus(netCapitalLossApplied),
   );
   push('L300T', 'Taxable income', taxableIncome);
@@ -84,26 +119,32 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   // income, then SBD income — mirroring the statutory residuals):
   // - SBD applies to the least of ABI, taxable income, business limit (s.125(1))
   // - investment-rate income is capped at taxable income minus the SBD amount (s.123.3)
-  // - general-rate income is the residual
+  // - general-rate income is the residual — or, for a PSB, PSB income is
+  //   (sbd.eligible and sbd.generalRate are both zero then, so the residual is
+  //   exactly the PSB income left after losses)
   const sbdTaxBase = Decimal.min(sbd.eligible, taxableIncome);
   const aiiTaxBase = Decimal.min(
     investmentTaxableIncome.plus(includableGains).minus(netCapitalLossApplied),
     taxableIncome.minus(sbdTaxBase),
   );
-  const generalTaxBase = taxableIncome.minus(sbdTaxBase).minus(aiiTaxBase);
+  const residualTaxBase = taxableIncome.minus(sbdTaxBase).minus(aiiTaxBase);
+  const psbTaxBase = psb ? residualTaxBase : D('0');
+  const generalTaxBase = psb ? D('0') : residualTaxBase;
 
   // Federal tax
   const fedSbdTax = sbdTaxBase.times(r.corpAbiSbdRateFederal);
   const fedGeneralTax = generalTaxBase.times(r.corpGeneralRateFederal);
   const fedInvestmentTax = aiiTaxBase.times(r.corpInvestmentRateFederal);
-  const federalTax = fedSbdTax.plus(fedGeneralTax).plus(fedInvestmentTax);
+  const fedPsbTax = psbTaxBase.times(r.corpPsbRateFederal);
+  const federalTax = fedSbdTax.plus(fedGeneralTax).plus(fedInvestmentTax).plus(fedPsbTax);
   push('L700F', 'Federal tax', federalTax);
 
   // ON tax
   const onSbdTax = sbdTaxBase.times(r.corpAbiSbdRateOntario);
   const onGeneralTax = generalTaxBase.times(r.corpGeneralRateOntario);
   const onInvestmentTax = aiiTaxBase.times(r.corpInvestmentRateOntario);
-  const provincialTax = onSbdTax.plus(onGeneralTax).plus(onInvestmentTax);
+  const onPsbTax = psbTaxBase.times(r.corpPsbRateOntario);
+  const provincialTax = onSbdTax.plus(onGeneralTax).plus(onInvestmentTax).plus(onPsbTax);
   push('L700P', 'Ontario corporate tax', provincialTax);
 
   // Refundable tax on AII (added to NERDTOH) — base includes taxable capital
@@ -114,7 +155,10 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   // Integration: GRIP, CDA, RDTOH additions, dividend refund. GRIP is computed
   // on the POST-loss general-rate residual (s.89(1) "adjusted taxable income"
   // starts from Division C taxable income), not the pre-loss sbd.generalRate.
-  const integ = computeIntegration(facts, generalTaxBase, r);
+  // PSB income belongs in it too: GRIP's adjusted taxable income removes only
+  // the SBD-eligible amount and aggregate investment income, and PSB income is
+  // neither — it is taxed at the full rate, so it can fund eligible dividends.
+  const integ = computeIntegration(facts, residualTaxBase, r);
   push('L500', 'GRIP addition', integ.gripAddition);
   push('L501', 'CDA addition', integ.cdaAddition);
   push('L502', 'ERDTOH addition', integ.erdtohAddition);
@@ -153,6 +197,7 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
       activeBusinessIncome: abi,
       sbdEligibleIncome: sbd.eligible,
       generalRateIncome: sbd.generalRate,
+      personalServicesBusinessIncome: psbIncome,
       aii: aaii,
       taxableIncome,
       federalTax,

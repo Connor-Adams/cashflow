@@ -1,6 +1,7 @@
 // backend/src/tax/scenarios/projectCorpFactsFromPrevYear.ts
 import { D } from '../util/decimal';
-import { Scenario } from '../../models';
+import { Entity, Scenario } from '../../models';
+import { isPersonalServicesBusinessYear } from '../../models/Entity';
 import { computeCorpScenario } from './computeCorpScenario';
 import { resolveCorpScenario } from './resolveCorpScenario';
 import { setCorpProjector } from './projectionPorts';
@@ -76,8 +77,10 @@ export async function projectCorpFactsFromPrevYear(
   const assumptions = scenario.assumptions as { inflation?: number };
   const inflationMult = D('1').plus(D(String(assumptions.inflation ?? 0)));
 
-  function scaleItems(items: IncomeItem[], tag: string): IncomeItem[] {
+  // Spread first so a business row keeps its revenue/expense `side`.
+  function scaleItems<T extends IncomeItem>(items: T[], tag: string): T[] {
     return items.map((item) => ({
+      ...item,
       source: `projection:${tag}:${item.source}`,
       amount: item.amount.times(inflationMult),
       cadAmount: item.cadAmount.times(inflationMult),
@@ -102,6 +105,12 @@ export async function projectCorpFactsFromPrevYear(
     netCapitalLoss: D(cfRows.find((c) => c.kind === 'cap_loss')?.amount ?? parentFacts.carryforwards.netCapitalLoss.toString()),
   };
 
+  // PSB status is decided per year, so the projected year reads its own flag
+  // rather than inheriting the parent year's.
+  const entity = await Entity.findByPk(scenario.entityId);
+  const personalServicesBusiness = entity != null
+    && isPersonalServicesBusinessYear(entity, scenario.year);
+
   return {
     fiscalYear: {
       startDate: `${scenario.year}-01-01`,
@@ -119,6 +128,7 @@ export async function projectCorpFactsFromPrevYear(
     dividendsPaid: [],     // future declarations don't exist
     salaryPaid: D('0'),    // future T4 box 14 doesn't exist
     carryforwards,
+    ...(personalServicesBusiness ? { personalServicesBusiness: true } : {}),
   };
 }
 

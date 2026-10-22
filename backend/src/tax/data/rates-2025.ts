@@ -122,6 +122,11 @@ export const RATES_2025: RateTable = {
   corpAbiSbdRateOntario: D('0.032'),
   corpGeneralRateFederal: D('0.15'),
   corpGeneralRateOntario: D('0.115'),
+  // Personal services business income: 38% base − 10% abatement (s.124) + 5%
+  // additional tax (s.123.5); no s.123.4 general rate reduction, no s.125 SBD.
+  // Ontario has no PSB surtax — its SBD simply does not reach PSB income.
+  corpPsbRateFederal: D('0.33'),
+  corpPsbRateOntario: D('0.115'),
   corpInvestmentRateFederal: D('0.387'),
   corpInvestmentRateOntario: D('0.115'),
   corpRefundableTaxOnAII: D('0.1067'),

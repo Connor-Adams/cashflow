@@ -78,8 +78,15 @@ export function CorpT2Tab({ year }: CorpT2TabProps) {
       ) : (
         <>
           <AssociatedGroupInput corpEntity={corpEntity} onSaved={reloadEntities} />
+          <PersonalServicesBusinessToggle
+            corpEntity={corpEntity}
+            year={year}
+            onSaved={reloadEntities}
+          />
+          {/* Keyed on the PSB flag too: flipping it changes the year's facts,
+              so the workspace remounts and refetches its computed returns. */}
           <CorpT2ScenarioWorkspace
-            key={`${corpEntity.id}:${year}`}
+            key={`${corpEntity.id}:${year}:${isPsbYear(corpEntity, year)}`}
             entityId={corpEntity.id}
             year={year}
             otherCorps={otherCorps}
@@ -157,6 +164,66 @@ function AssociatedGroupInput({ corpEntity, onSaved }: AssociatedGroupInputProps
       <p className="muted mt-1">
         Corps sharing the same group tag share a $500k SBD limit and $50k AAII
         threshold. Leave blank for unaffiliated corps.
+      </p>
+    </div>
+  );
+}
+
+function isPsbYear(entity: TaxEntity, year: number): boolean {
+  return (entity.personalServicesBusinessYears ?? []).includes(year);
+}
+
+interface PersonalServicesBusinessToggleProps {
+  corpEntity: TaxEntity;
+  year: number;
+  onSaved: () => void;
+}
+
+/**
+ * Per-year checkbox for `corpEntity.personalServicesBusinessYears`. PSB status
+ * (ITA s.125(7)) turns on each year's facts, so it is set year by year: the
+ * PATCH sends the whole list with this year added or removed.
+ */
+function PersonalServicesBusinessToggle({ corpEntity, year, onSaved }: PersonalServicesBusinessToggleProps) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const checked = isPsbYear(corpEntity, year);
+
+  async function toggle(next: boolean) {
+    const years = (corpEntity.personalServicesBusinessYears ?? []).filter((y) => y !== year);
+    setSaving(true);
+    setError(null);
+    try {
+      await patchJson(`/api/tax/entities/${corpEntity.id}`, {
+        personalServicesBusinessYears: next ? [...years, year] : years,
+      });
+      onSaved();
+    } catch (err: unknown) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mb-3">
+      <label>
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => toggle(e.target.checked)}
+          disabled={saving}
+          className="mr-2"
+        />
+        Personal services business in {year}
+      </label>
+      {saving && <span className="muted ml-2">Saving…</span>}
+      {error && <span className="error ml-2">Failed: {error}</span>}
+      <p className="muted mt-1">
+        For a corp whose income is really the owner&apos;s employment (ITA s.125(7)).
+        That year&apos;s business income gets no small business deduction and is taxed at
+        33% federal + 11.5% Ontario, and only salary paid to the owner is deductible
+        (s.18(1)(p)). Confirm with your accountant before ticking.
       </p>
     </div>
   );

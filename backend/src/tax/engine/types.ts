@@ -15,6 +15,19 @@ export type IncomeItem = {
   cadAmount: Decimal;
 };
 
+/**
+ * One row of a corporation's active business income. Revenue and expenses both
+ * ride in `CorpTaxYearFacts.activeBusinessIncome` as signed amounts; `side`
+ * keeps them apart for the one rule that treats them differently — ITA
+ * s.18(1)(p), which denies a personal services business its expenses but not
+ * its revenue. A refund nets against expenses, so it is an 'expense' row with a
+ * positive amount. Untagged rows (scenario overrides, projections from older
+ * snapshots, hand-built facts) fall back to their sign.
+ */
+export type BusinessIncomeItem = IncomeItem & {
+  side?: 'revenue' | 'expense';
+};
+
 export type CapGainEvent = {
   source: string;
   securityId: number;
@@ -99,7 +112,7 @@ export type CorpCarryforwards = {
 export type CorpTaxYearFacts = {
   fiscalYear: CorpFiscalYear;
   jurisdiction: 'CA-ON';
-  activeBusinessIncome: IncomeItem[];   // revenue - expenses, net
+  activeBusinessIncome: BusinessIncomeItem[];   // revenue - expenses, net
   investmentIncome: {
     interest: IncomeItem[];
     eligibleDividends: IncomeItem[];
@@ -110,6 +123,20 @@ export type CorpTaxYearFacts = {
   dividendsPaid: CorpDividendPaid[];
   salaryPaid: Decimal;                  // T4 box 14 from corp to owner
   carryforwards: CorpCarryforwards;
+  /**
+   * The corporation's active business this year is a personal services business
+   * (ITA s.125(7)): an incorporated employee doing work that would otherwise be
+   * employment. Set per entity per tax year (Entity.personalServicesBusinessYears)
+   * because the status turns on each year's facts.
+   *
+   * When true, buildT2 treats ALL active business income as PSB income: no small
+   * business deduction (s.125(1) only reaches income from an "active business",
+   * which s.125(7) defines to exclude a PSB), no general rate reduction
+   * (s.123.4(1) "full rate taxable income" excludes it), the 5% additional tax
+   * (s.123.5), and expenses other than the incorporated employee's remuneration
+   * denied (s.18(1)(p)). Absent/false → ordinary active business income.
+   */
+  personalServicesBusiness?: boolean;
   /**
    * s.40(3.4) suspended capital losses that matter to this period: suspended by
    * a disposition in it, recognized in it, or still suspended at its end.
@@ -148,6 +175,8 @@ export type CorpTaxReturn = {
     activeBusinessIncome: Decimal;
     sbdEligibleIncome: Decimal;   // post-AAII grind
     generalRateIncome: Decimal;
+    /** Personal services business income (T2 line 432); zero unless facts.personalServicesBusiness. */
+    personalServicesBusinessIncome: Decimal;
     aii: Decimal;                  // adjusted aggregate investment income
     taxableIncome: Decimal;
     federalTax: Decimal;
@@ -349,6 +378,8 @@ export type RateTable = {
   corpAbiSbdRateOntario: Decimal;       // 3.2% ON SBD rate
   corpGeneralRateFederal: Decimal;      // 15% federal general
   corpGeneralRateOntario: Decimal;      // 11.5% ON general
+  corpPsbRateFederal: Decimal;          // 33% federal on PSB income: 38% − 10% abatement + 5% s.123.5, no s.123.4 reduction
+  corpPsbRateOntario: Decimal;          // 11.5% ON on PSB income: general rate, no ON small business deduction
   corpInvestmentRateFederal: Decimal;   // 38.67% federal investment (incl. refundable)
   corpInvestmentRateOntario: Decimal;   // 11.5% ON
   corpRefundableTaxOnAII: Decimal;      // 10.67% refundable portion of investment income tax

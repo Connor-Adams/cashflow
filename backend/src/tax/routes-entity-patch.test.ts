@@ -209,3 +209,40 @@ test('PATCH /entities/:id sets ownerEntityId to a personal entity; rejects non-p
     .expect(200);
   assert.equal(cleared.body.entity.ownerEntityId, null);
 });
+
+test('PATCH /entities/:id sets personalServicesBusinessYears per tax year (deduped, sorted); [] clears', async () => {
+  const corp = await createCorp('Opco');
+
+  const ok = await authed
+    .patch(`/api/tax/entities/${corp.id}`)
+    .send({ personalServicesBusinessYears: [2026, 2025, 2026] })
+    .expect(200);
+  assert.deepEqual(ok.body.entity.personalServicesBusinessYears, [2025, 2026]);
+
+  const models = await import('../models/index.js');
+  const reloaded = await models.Entity.findByPk(corp.id);
+  assert.deepEqual(reloaded?.personalServicesBusinessYears, [2025, 2026]);
+  assert.equal(reloaded?.associatedGroupId ?? null, null, 'other fields untouched');
+
+  const cleared = await authed
+    .patch(`/api/tax/entities/${corp.id}`)
+    .send({ personalServicesBusinessYears: [] })
+    .expect(200);
+  assert.deepEqual(cleared.body.entity.personalServicesBusinessYears, []);
+});
+
+test('PATCH /entities/:id rejects malformed personalServicesBusinessYears and personal entities', async () => {
+  const corp = await createCorp('Opco');
+  const personal = await createPersonal('Owner');
+
+  for (const bad of [true, 2026, ['2026'], [2026.5], [42]]) {
+    await authed
+      .patch(`/api/tax/entities/${corp.id}`)
+      .send({ personalServicesBusinessYears: bad })
+      .expect(400);
+  }
+  await authed
+    .patch(`/api/tax/entities/${personal.id}`)
+    .send({ personalServicesBusinessYears: [2026] })
+    .expect(400);
+});

@@ -16,7 +16,9 @@ import { createFxFallbackCollector } from '../../fx/fxFallbackWarnings';
 import { partitionCorpPerimeter } from './corpPerimeter';
 import { loadCorpPerimeterInputs } from './loadCorpPerimeterInputs';
 import { isOwnerPaidCorpExpense } from './ownerPaidCorpExpense';
+import { isPersonalServicesBusinessYear } from '../../models/Entity';
 import type {
+  BusinessIncomeItem,
   CapGainEvent,
   CorpCarryforwards,
   CorpDividendPaid,
@@ -66,15 +68,21 @@ export async function buildCorpFacts(
   };
 
   // Revenue and expenses both land in activeBusinessIncome; expenses keep their
-  // negative sign so the engine's signed sum nets them off.
-  const activeBusinessIncome: IncomeItem[] = [];
-  for (const t of [...perimeter.revenue, ...perimeter.expenses]) {
+  // negative sign so the engine's signed sum nets them off. `side` records which
+  // bucket each row came from, for the s.18(1)(p) expense denial.
+  const activeBusinessIncome: BusinessIncomeItem[] = [];
+  const sided = [
+    ...perimeter.revenue.map((t) => ({ t, side: 'revenue' as const })),
+    ...perimeter.expenses.map((t) => ({ t, side: 'expense' as const })),
+  ];
+  for (const { t, side } of sided) {
     const raw = D(t.amount);
     const { cad } = await toCad(raw, t.currency, t.date);
     activeBusinessIncome.push({
       source: `Txn #${t.id} ${t.merchant ?? ''}`.trim(),
       amount: raw,
       cadAmount: cad,
+      side,
     });
   }
 
@@ -326,6 +334,7 @@ export async function buildCorpFacts(
         source: `Txn #${t.id} ${t.merchantClean ?? t.merchantRaw ?? ''} (owner-paid)`.trim(),
         amount: raw,
         cadAmount: cad,
+        side: 'expense',
       });
       ownerPaidTotal = ownerPaidTotal.plus(cad.abs());
       ownerPaidCount += 1;
@@ -344,6 +353,9 @@ export async function buildCorpFacts(
     fiscalYear,
     jurisdiction: 'CA-ON',
     activeBusinessIncome,
+    ...(isPersonalServicesBusinessYear(entity, Number(endDate.slice(0, 4)))
+      ? { personalServicesBusiness: true }
+      : {}),
     investmentIncome: {
       interest,
       eligibleDividends,

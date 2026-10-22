@@ -46,6 +46,25 @@ test('projects year+1 corp facts from year N actuals with zero inflation', async
   assert.equal(facts.activeBusinessIncome[0].cadAmount.toFixed(2), '250000.00');
 });
 
+test('projected year reads its own personal services business flag and keeps row sides', async () => {
+  const { entity } = await seedCorpWithRevenue();
+  // PSB in the projected year only — the 2025 parent is ordinary ABI.
+  await entity.update({ personalServicesBusinessYears: [2026] });
+  const yearN = await ensureCorpBaselineScenario(entity.id, 2025);
+  const yearN1 = await Scenario.create({
+    parentId: yearN.id, householdPlanId: null,
+    entityId: entity.id, year: 2026, name: 'Projection 2026', kind: 'projection_root',
+    overrides: {}, assumptions: {}, nextYearId: null, notes: null,
+  });
+  const facts = await projectCorpFactsFromPrevYear(yearN1.id);
+  assert.equal(facts.personalServicesBusiness, true);
+  assert.equal(facts.activeBusinessIncome[0].side, 'revenue');
+
+  await entity.update({ personalServicesBusinessYears: [2025] });
+  const unflagged = await projectCorpFactsFromPrevYear(yearN1.id);
+  assert.equal(unflagged.personalServicesBusiness, undefined, 'the parent year\'s flag is not inherited');
+});
+
 test('applies inflation multiplier from assumptions', async () => {
   const { entity } = await seedCorpWithRevenue();
   const yearN = await ensureCorpBaselineScenario(entity.id, 2025);
