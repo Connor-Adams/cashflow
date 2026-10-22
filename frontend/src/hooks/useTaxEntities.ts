@@ -16,6 +16,10 @@ export type TaxEntity = {
   // it on personal entities; backend PATCH /api/tax/entities/:id rejects
   // setting it on non-corp.
   associatedGroupId: string | null;
+  // Corps only: tax years (fiscal-year-end year) taxed as a personal services
+  // business (ITA s.125(7)) — no SBD, 44.5% combined, non-salary expenses
+  // denied. Replaced wholesale by PATCH /api/tax/entities/:id.
+  personalServicesBusinessYears?: number[];
   currency: string;
 };
 

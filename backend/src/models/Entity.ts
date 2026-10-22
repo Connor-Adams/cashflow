@@ -24,8 +24,22 @@ export class Entity extends Model<
   declare ownerEntityId: number | null;
   declare associatedGroupId: string | null;
   declare currency: CreationOptional<string>;
+  /**
+   * Tax years (fiscal-year-end year) in which this corporation's business is a
+   * personal services business (ITA s.125(7)). Per year because the status
+   * turns on each year's facts. Corp entities only.
+   */
+  declare personalServicesBusinessYears: CreationOptional<number[]>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
+}
+
+/** Whether `entity` is flagged a personal services business for tax year `year`. */
+export function isPersonalServicesBusinessYear(
+  entity: Pick<Entity, 'personalServicesBusinessYears'>,
+  year: number,
+): boolean {
+  return (entity.personalServicesBusinessYears ?? []).includes(year);
 }
 
 export function initEntity(sequelize: Sequelize): typeof Entity {
@@ -65,6 +79,12 @@ export function initEntity(sequelize: Sequelize): typeof Entity {
         type: DataTypes.STRING(3),
         allowNull: false,
         defaultValue: 'CAD',
+      },
+      personalServicesBusinessYears: {
+        type: DataTypes.JSON,
+        field: 'personal_services_business_years',
+        allowNull: false,
+        defaultValue: [],
       },
     } as ModelAttributes<Entity>,
     {

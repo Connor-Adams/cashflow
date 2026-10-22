@@ -61,8 +61,9 @@ const GRIP_GENERAL_RATE_FACTOR = D('0.72');
  *
  * - GRIP addition (s.89(1) element D): 0.72 × adjusted taxable income. The
  *   caller passes `postLossGeneralRateIncome` = taxable income − SBD income −
- *   investment-rate income, i.e. the POST-carryforward general-rate residual
- *   (buildT2's `generalTaxBase`) — loss carryforwards shrink the GRIP addition.
+ *   investment-rate income, i.e. the POST-carryforward full-rate residual
+ *   (buildT2's `residualTaxBase`: general-rate income, or personal services
+ *   business income for a PSB) — loss carryforwards shrink the GRIP addition.
  * - CDA addition: non-taxable portion of capital gains
  * - ERDTOH addition: Part IV tax (38.33%) on portfolio ELIGIBLE dividends
  *   received (s.129(4) "ERDTOH" para (a)(i))

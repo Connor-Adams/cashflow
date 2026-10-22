@@ -260,10 +260,13 @@ router.get('/entities', async (req, res, next) => {
 });
 
 // PATCH /api/tax/entities/:id — partial entity updates.
-// Body: { associatedGroupId?: string | null }.
-// v1 supports only `associatedGroupId` on `kind=corp` entities (used to link
-// corps into a shared SBD/AAII associated group). Null clears the group. Other
-// fields are ignored. Personal entities cannot be grouped (engine ignores
+// Body: { associatedGroupId?: string | null, ownerEntityId?: number | null,
+//         personalServicesBusinessYears?: number[] }.
+// Supported only on `kind=corp` entities: `associatedGroupId` links corps into
+// a shared SBD/AAII associated group (null clears it), `ownerEntityId` names the
+// personal shareholder, and `personalServicesBusinessYears` REPLACES the list of
+// tax years taxed as a personal services business (ITA s.125(7)). Other fields
+// are ignored. Personal entities cannot be grouped (engine ignores
 // associatedGroupId on non-corp anyway, but reject at the API for clarity).
 router.patch('/entities/:id', async (req, res, next) => {
   try {
@@ -274,13 +277,18 @@ router.patch('/entities/:id', async (req, res, next) => {
       return;
     }
 
-    const body = (req.body ?? {}) as { associatedGroupId?: unknown; ownerEntityId?: unknown };
+    const body = (req.body ?? {}) as {
+      associatedGroupId?: unknown;
+      ownerEntityId?: unknown;
+      personalServicesBusinessYears?: unknown;
+    };
     const hasGroup = Object.prototype.hasOwnProperty.call(body, 'associatedGroupId');
     const hasOwner = Object.prototype.hasOwnProperty.call(body, 'ownerEntityId');
-    if (!hasGroup && !hasOwner) {
+    const hasPsb = Object.prototype.hasOwnProperty.call(body, 'personalServicesBusinessYears');
+    if (!hasGroup && !hasOwner && !hasPsb) {
       res.status(400).json({
         error: 'invalid_body',
-        message: 'associatedGroupId or ownerEntityId required',
+        message: 'associatedGroupId, ownerEntityId or personalServicesBusinessYears required',
       });
       return;
     }
@@ -297,12 +305,31 @@ router.patch('/entities/:id', async (req, res, next) => {
     if (entity.kind !== 'corp') {
       res.status(400).json({
         error: 'invalid_kind',
-        message: 'associatedGroupId / ownerEntityId can only be set on kind=corp entities',
+        message: 'associatedGroupId / ownerEntityId / personalServicesBusinessYears can only be set on kind=corp entities',
       });
       return;
     }
 
-    const patch: { associatedGroupId?: string | null; ownerEntityId?: number | null } = {};
+    const patch: {
+      associatedGroupId?: string | null;
+      ownerEntityId?: number | null;
+      personalServicesBusinessYears?: number[];
+    } = {};
+
+    if (hasPsb) {
+      const raw = body.personalServicesBusinessYears;
+      if (
+        !Array.isArray(raw)
+        || !raw.every((y) => Number.isInteger(y) && (y as number) >= 1900 && (y as number) <= 2200)
+      ) {
+        res.status(400).json({
+          error: 'invalid_body',
+          message: 'personalServicesBusinessYears must be an array of integer tax years',
+        });
+        return;
+      }
+      patch.personalServicesBusinessYears = [...new Set(raw as number[])].sort((a, b) => a - b);
+    }
 
     if (hasGroup) {
       const raw = body.associatedGroupId;
@@ -1124,6 +1151,7 @@ router.post('/corp/:fiscalYear/roll-forward', async (req, res, next) => {
         activeBusinessIncome: D(totals.activeBusinessIncome ?? '0'),
         sbdEligibleIncome: D(totals.sbdEligibleIncome ?? '0'),
         generalRateIncome: D(totals.generalRateIncome ?? '0'),
+        personalServicesBusinessIncome: D(totals.personalServicesBusinessIncome ?? '0'),
         aii: D(totals.aii ?? '0'),
         taxableIncome: D(totals.taxableIncome ?? '0'),
         federalTax: D(totals.federalTax ?? '0'),

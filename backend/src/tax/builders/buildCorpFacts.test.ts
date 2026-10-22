@@ -713,6 +713,34 @@ test('business spend on a personal card is deducted by the corp', async () => {
   );
 });
 
+test('personal services business flag is read per tax year; ABI rows carry their side', async () => {
+  const ctx = await seedOwnerExpenseHousehold();
+  await ctx.corp.update({ personalServicesBusinessYears: [2025] });
+  await seedOwnerTxn(ctx.household, ctx.corp.id, ctx.corpChequing, {
+    date: '2025-04-01', amount: '10000.0000', txnType: 'income',
+    merchantRaw: 'ACME CORP invoice',
+  });
+  await seedOwnerTxn(ctx.household, ctx.corp.id, ctx.corpChequing, {
+    date: '2025-04-15', amount: '-300.0000', txnType: 'unknown',
+    finalCategory: 'other', merchantRaw: 'OFFICE SUPPLIES',
+  });
+  await seedOwnerTxn(ctx.household, ctx.personal.id, ctx.personalCard, {
+    date: '2025-05-02', amount: '-1758.3100', finalBusiness: true,
+    finalCategory: 'Internet', merchantRaw: 'BELL CANADA',
+  });
+
+  const flagged = await buildCorpFacts(ctx.corp.id, { startDate: '2025-01-01', endDate: '2025-12-31' });
+  assert.equal(flagged.personalServicesBusiness, true);
+  const sides = flagged.activeBusinessIncome
+    .map((i) => `${i.side}:${i.cadAmount.toFixed(2)}`)
+    .sort();
+  assert.deepEqual(sides, ['expense:-1758.31', 'expense:-300.00', 'revenue:10000.00'],
+    'corp-account and owner-paid costs are both expense-side');
+
+  const otherYear = await buildCorpFacts(ctx.corp.id, { startDate: '2026-01-01', endDate: '2026-12-31' });
+  assert.equal(otherYear.personalServicesBusiness, undefined, 'a year not in the list is ordinary ABI');
+});
+
 test('personal spend not flagged business is left alone', async () => {
   const ctx = await seedOwnerExpenseHousehold();
   await seedOwnerTxn(ctx.household, ctx.personal.id, ctx.personalCard, {

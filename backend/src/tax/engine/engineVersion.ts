@@ -27,8 +27,12 @@ import { RATE_TABLES } from './brackets';
  *       (first additional + CPP2, both halves) joins the employer half of base
  *       on L22200, only the employee half of base is credited on L31000, and the
  *       payable moves to L42100.
+ *   6 — T2 personal services business (s.125(7)): a flagged year's active
+ *       business income is taxed at the PSB rate with no SBD, its non-salary
+ *       expenses denied (s.18(1)(p)) and its salary deducted; totals gain
+ *       `personalServicesBusinessIncome`.
  */
-export const ENGINE_VERSION = 5;
+export const ENGINE_VERSION = 6;
 
 /**
  * A digest over the engine version and every encoded rate constant.

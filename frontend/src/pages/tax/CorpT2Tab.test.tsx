@@ -1,18 +1,24 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 void React
 
 const scenarioYears: number[] = []
 const create = vi.fn()
+const patchJson = vi.fn()
+const corpEntity: Record<string, unknown> = { id: 7, kind: 'corp', legalName: 'Acme Inc', associatedGroupId: null }
 
 vi.mock('../../hooks/useTaxEntities', () => ({
   useTaxEntities: () => ({
-    entities: [{ id: 7, kind: 'corp', legalName: 'Acme Inc', associatedGroupId: null }],
+    entities: [corpEntity],
     error: null,
     reload: vi.fn(),
   }),
+}))
+vi.mock('../../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/api')>()),
+  patchJson: (...args: unknown[]) => patchJson(...args),
 }))
 vi.mock('../../hooks/useCorpScenarios', () => ({
   useCorpScenarios: (_entityId: number, year: number) => {
@@ -43,6 +49,8 @@ describe('CorpT2Tab', () => {
   beforeEach(() => {
     scenarioYears.length = 0
     create.mockReset()
+    patchJson.mockReset()
+    corpEntity.personalServicesBusinessYears = [2024]
   })
 
   it('loads scenarios for the page year and follows it when it changes', () => {
@@ -60,5 +68,31 @@ describe('CorpT2Tab', () => {
     expect(await screen.findByText(/Failed to create a starter scenario: boom/)).toBeInTheDocument()
     await new Promise((r) => setTimeout(r, 50))
     expect(create).toHaveBeenCalledTimes(1)
+  })
+
+  it('toggles personal services business for the page year only', async () => {
+    create.mockResolvedValue({})
+    patchJson.mockResolvedValue({})
+    render(<CorpT2Tab year={2025} />)
+    const box = screen.getByRole('checkbox', { name: /Personal services business in 2025/ })
+    expect(box).not.toBeChecked()
+    fireEvent.click(box)
+    await waitFor(() => expect(patchJson).toHaveBeenCalledTimes(1))
+    expect(patchJson).toHaveBeenCalledWith('/api/tax/entities/7', {
+      personalServicesBusinessYears: [2024, 2025],
+    })
+  })
+
+  it('shows a flagged year as checked and unticking removes only that year', async () => {
+    create.mockResolvedValue({})
+    patchJson.mockResolvedValue({})
+    corpEntity.personalServicesBusinessYears = [2024, 2025]
+    render(<CorpT2Tab year={2025} />)
+    const box = screen.getByRole('checkbox', { name: /Personal services business in 2025/ })
+    expect(box).toBeChecked()
+    fireEvent.click(box)
+    await waitFor(() => expect(patchJson).toHaveBeenCalledWith('/api/tax/entities/7', {
+      personalServicesBusinessYears: [2024],
+    }))
   })
 })
