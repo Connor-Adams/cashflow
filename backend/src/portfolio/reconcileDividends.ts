@@ -4,11 +4,16 @@
  * even when the brokerage CSV/PDF skipped them.
  *
  * For each (security, ex-date) event:
- *   - Find every account holding the security on that date by taking the
- *     most-recent HoldingSnapshot at-or-before the ex-date (and no more than
- *     SNAPSHOT_STALE_MAX_DAYS before it) for each account/security pair.
- *     Accounts with no snapshot in that window — or with a zero quantity —
- *     are skipped.
+ *   - Candidate accounts are those with a HoldingSnapshot of the security
+ *     at-or-before the ex-date (and no more than SNAPSHOT_STALE_MAX_DAYS
+ *     before it).
+ *   - Each candidate's position going into the ex-date is then re-derived by
+ *     `positionOnExDate`: skipped when the account closed before the ex-date,
+ *     when its newest statement omits the security (fully sold — imports
+ *     write no zero-quantity tombstones), or when trades between that
+ *     statement and the ex-date take the quantity to zero. A snapshot alone
+ *     is only a lower-bound date for the quantity, not proof it was held on
+ *     the ex-date.
  *   - Skip the account when a broker-imported `InvestmentActivity` with
  *     `activityType='dividend'` for the same security already exists
  *     within `±dedupDays` of the ex-date. This is the "don't double-count
@@ -26,9 +31,11 @@
  */
 import { Op } from 'sequelize';
 import { createHash } from 'crypto';
-import { HoldingSnapshot, InvestmentActivity, SecurityDividend } from '../models';
+import type { Transaction as DbTransaction } from 'sequelize';
+import { Account, HoldingSnapshot, InvestmentActivity, SecurityDividend } from '../models';
 import { logger } from '../observability/logger';
 import * as env from '../config/env';
+import { applyActivityQty } from './dailySnapshotBuilder';
 
 export interface ReconcileOptions {
   /** Days on either side of the ex-date that constitute a broker-match. */
@@ -42,9 +49,11 @@ export interface ReconcileResult {
   skippedExistingBroker: number;
   skippedNoHolding: number;
   skippedZeroQuantity: number;
+  skippedClosedAccount: number;
+  skippedSoldBeforeExDate: number;
 }
 
-const RECONCILER_IMPORT_BATCH = 'alpha_vantage:dividends';
+export const RECONCILER_IMPORT_BATCH = 'alpha_vantage:dividends';
 
 /**
  * Maximum age (in days) of a HoldingSnapshot relative to the dividend ex-date
@@ -107,6 +116,77 @@ async function latestHoldingPerAccountAtOrBefore(
   return out;
 }
 
+/** Why an account gets no synthetic dividend for an ex-date. */
+export type DividendSkipReason = 'closed_account' | 'no_holding' | 'zero_quantity' | 'sold_before_ex_date';
+
+export type ExDatePosition =
+  | { held: true; quantity: number }
+  | { held: false; reason: DividendSkipReason };
+
+/**
+ * The quantity of `securityId` the account held going into `exDate`, or why
+ * it held none. Shared by the reconciler and the phantom-dividend repair so
+ * the two can never disagree about which rows are legitimate.
+ *
+ *   1. An account closed before the ex-date holds nothing.
+ *   2. The baseline is the account's newest statement at-or-before the
+ *      ex-date (within SNAPSHOT_STALE_MAX_DAYS). A security absent from it
+ *      was fully sold — the same inference `latestActivePositions` makes for
+ *      the Portfolio page and net worth.
+ *   3. Position-changing trades after that statement and before the ex-date
+ *      are replayed onto the baseline (a sale on the ex-date itself still
+ *      earns the dividend, so the window is exclusive of the ex-date).
+ */
+export async function positionOnExDate(
+  accountId: number,
+  securityId: number,
+  exDate: string,
+  t?: DbTransaction,
+): Promise<ExDatePosition> {
+  const account = await Account.findByPk(accountId, { attributes: ['id', 'closedAt'], transaction: t });
+  if (account?.closedAt && exDate > account.closedAt) return { held: false, reason: 'closed_account' };
+
+  const statement = await HoldingSnapshot.findOne({
+    where: {
+      accountId,
+      statementDate: { [Op.gte]: addDays(exDate, -SNAPSHOT_STALE_MAX_DAYS), [Op.lte]: exDate },
+    },
+    attributes: ['statementDate'],
+    order: [['statementDate', 'DESC']],
+    transaction: t,
+  });
+  if (!statement) return { held: false, reason: 'no_holding' };
+  const baselineDate = statement.statementDate;
+
+  const snapshot = await HoldingSnapshot.findOne({
+    where: { accountId, securityId, statementDate: baselineDate },
+    order: [['id', 'DESC']],
+    transaction: t,
+  });
+  const baselineQty = snapshot ? Number(snapshot.quantity) : 0;
+  if (snapshot && !(Number.isFinite(baselineQty) && baselineQty > 0)) {
+    return { held: false, reason: 'zero_quantity' };
+  }
+
+  const trades = await InvestmentActivity.findAll({
+    where: {
+      accountId,
+      securityId,
+      tradeDate: { [Op.gt]: baselineDate, [Op.lt]: exDate },
+    },
+    order: [['tradeDate', 'ASC'], ['id', 'ASC']],
+    transaction: t,
+  });
+  const key = `${accountId}:${securityId}`;
+  const qty = new Map<string, number>([[key, baselineQty]]);
+  for (const trade of trades) applyActivityQty(qty, trade);
+  const quantity = qty.get(key) ?? 0;
+  // Sub-micro-share residue from float replay is not a position.
+  if (!(quantity > 1e-6)) return { held: false, reason: 'sold_before_ex_date' };
+  // DECIMAL(28,10) precision, so the replayed float prints like the column.
+  return { held: true, quantity: Number(quantity.toFixed(10)) };
+}
+
 async function existingBrokerDividendNearby(
   accountId: number,
   securityId: number,
@@ -143,6 +223,8 @@ export async function reconcileDividendsForSecurity(
     skippedExistingBroker: 0,
     skippedNoHolding: 0,
     skippedZeroQuantity: 0,
+    skippedClosedAccount: 0,
+    skippedSoldBeforeExDate: 0,
   };
 
   const events = await SecurityDividend.findAll({
@@ -161,11 +243,15 @@ export async function reconcileDividendsForSecurity(
       continue;
     }
     for (const [accountId, snapshot] of holdings) {
-      const qty = Number(snapshot.quantity);
-      if (!Number.isFinite(qty) || qty <= 0) {
-        result.skippedZeroQuantity += 1;
+      const position = await positionOnExDate(accountId, securityId, ev.exDividendDate);
+      if (!position.held) {
+        if (position.reason === 'closed_account') result.skippedClosedAccount += 1;
+        else if (position.reason === 'sold_before_ex_date') result.skippedSoldBeforeExDate += 1;
+        else if (position.reason === 'zero_quantity') result.skippedZeroQuantity += 1;
+        else result.skippedNoHolding += 1;
         continue;
       }
+      const qty = position.quantity;
       const perShare = Number(ev.amount);
       if (!Number.isFinite(perShare) || perShare <= 0) {
         result.skippedZeroQuantity += 1;
