@@ -418,3 +418,109 @@ test('reconcile: respects custom dedupDays override', async () => {
   assert.equal(widerRun.inserted, 0);
   assert.equal(widerRun.skippedExistingBroker, 1);
 });
+
+async function seedTrade(args: {
+  accountId: number;
+  securityId: number;
+  activityType: 'buy' | 'sell';
+  tradeDate: string;
+  quantity: string;
+}) {
+  return models.InvestmentActivity.create({
+    accountId: args.accountId,
+    householdId: 1,
+    securityId: args.securityId,
+    activityType: args.activityType,
+    tradeDate: args.tradeDate,
+    settlementDate: null,
+    description: `${args.activityType} ${args.quantity}`,
+    quantity: args.quantity,
+    price: null,
+    amount: null,
+    fees: null,
+    splitRatio: null,
+    currency: 'USD',
+    sourceReference: 'seed',
+    sourceRowFingerprint: `trade:${args.accountId}:${args.securityId}:${args.tradeDate}:${args.activityType}`,
+    importBatch: 'seed-test',
+  });
+}
+
+async function syntheticRows() {
+  return models.InvestmentActivity.findAll({ where: { importBatch: 'alpha_vantage:dividends' } });
+}
+
+// Prod 2026-10-23: Individual FHSA sold all of VEQT/XEQT/VFV/NVDA on
+// 2025-08-14 after its 2025-07-31 statement, and still got Sep 2025 dividends
+// because the July snapshot was inside the staleness window.
+test('reconcile: position sold after the statement but before the ex-date → no dividend', async () => {
+  const sec = await setupSecurityAndDividend({ exDate: '2026-03-14' });
+  const acct = await makeAccount();
+  await seedHolding({ accountId: acct.id, securityId: sec.id, statementDate: '2026-02-28', quantity: '117' });
+  await seedTrade({ accountId: acct.id, securityId: sec.id, activityType: 'sell', tradeDate: '2026-03-05', quantity: '117' });
+
+  const result = await reconcileDividendsForSecurity(sec.id);
+  assert.equal(result.inserted, 0);
+  assert.equal(result.skippedSoldBeforeExDate, 1);
+  assert.equal((await syntheticRows()).length, 0);
+});
+
+// Prod: FHSA's CBIL was missing from the 2024-11-29 statement (sold
+// 2024-11-12) yet the 2024-10-31 snapshot produced a 2024-11-29 dividend.
+test('reconcile: security absent from the account\'s newer statement → no dividend', async () => {
+  const sec = await setupSecurityAndDividend({ exDate: '2026-03-14' });
+  const other = await models.Security.create({
+    householdId: 1, symbol: 'OTH', name: 'Other', assetType: 'EQUITY', currency: 'USD',
+  });
+  const acct = await makeAccount();
+  await seedHolding({ accountId: acct.id, securityId: sec.id, statementDate: '2026-01-30', quantity: '23' });
+  // February statement lists only the other security: TST was fully sold.
+  await seedHolding({ accountId: acct.id, securityId: other.id, statementDate: '2026-02-27', quantity: '5' });
+
+  const result = await reconcileDividendsForSecurity(sec.id);
+  assert.equal(result.inserted, 0);
+  assert.equal(result.skippedSoldBeforeExDate, 1);
+  assert.equal((await syntheticRows()).length, 0);
+});
+
+// Prod: Individual Margin closed 2024-12-19 and still collected 2025 dividends.
+test('reconcile: account closed before the ex-date → no dividend', async () => {
+  const sec = await setupSecurityAndDividend({ exDate: '2026-03-14' });
+  const acct = await makeAccount();
+  await acct.update({ closedAt: '2026-03-01' });
+  await seedHolding({ accountId: acct.id, securityId: sec.id, statementDate: '2026-02-28', quantity: '8' });
+
+  const result = await reconcileDividendsForSecurity(sec.id);
+  assert.equal(result.inserted, 0);
+  assert.equal(result.skippedClosedAccount, 1);
+  assert.equal((await syntheticRows()).length, 0);
+});
+
+test('reconcile: open position still held on the ex-date → dividend on the replayed quantity', async () => {
+  const sec = await setupSecurityAndDividend({ exDate: '2026-03-14', perShare: '0.50' });
+  const acct = await makeAccount();
+  // Closing later than the ex-date doesn't matter.
+  await acct.update({ closedAt: '2026-06-30' });
+  await seedHolding({ accountId: acct.id, securityId: sec.id, statementDate: '2026-02-28', quantity: '20' });
+  await seedTrade({ accountId: acct.id, securityId: sec.id, activityType: 'buy', tradeDate: '2026-03-03', quantity: '10' });
+  await seedTrade({ accountId: acct.id, securityId: sec.id, activityType: 'sell', tradeDate: '2026-03-10', quantity: '6' });
+  // Bought ON the ex-date: does not earn this dividend.
+  await seedTrade({ accountId: acct.id, securityId: sec.id, activityType: 'buy', tradeDate: '2026-03-14', quantity: '100' });
+
+  const result = await reconcileDividendsForSecurity(sec.id);
+  assert.equal(result.inserted, 1);
+  const rows = await syntheticRows();
+  assert.equal(rows.length, 1);
+  assert.equal(Number(rows[0].amount), 12); // (20 + 10 - 6) * 0.50
+});
+
+test('reconcile: selling on the ex-date itself still earns the dividend', async () => {
+  const sec = await setupSecurityAndDividend({ exDate: '2026-03-14', perShare: '0.50' });
+  const acct = await makeAccount();
+  await seedHolding({ accountId: acct.id, securityId: sec.id, statementDate: '2026-02-28', quantity: '20' });
+  await seedTrade({ accountId: acct.id, securityId: sec.id, activityType: 'sell', tradeDate: '2026-03-14', quantity: '20' });
+
+  const result = await reconcileDividendsForSecurity(sec.id);
+  assert.equal(result.inserted, 1);
+  assert.equal(Number((await syntheticRows())[0].amount), 10);
+});

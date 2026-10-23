@@ -49,7 +49,7 @@ function floorByDate<T extends { date: string }>(arr: T[] | undefined, d: string
 // Apply an activity's quantity delta to the running per-(account,security) map.
 // Mirrors the position-changing types the ACB engine recognizes (acb.ts):
 // transfer_in is buy-like, transfer_out is sell-like, split multiplies qty.
-function applyActivityQty(qty: Map<string, number>, a: InvestmentActivity): void {
+export function applyActivityQty(qty: Map<string, number>, a: InvestmentActivity): void {
   if (a.securityId == null) return;
   const key = `${a.accountId}:${a.securityId}`;
   const cur = qty.get(key) ?? 0;
