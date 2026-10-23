@@ -135,3 +135,17 @@ test('2026 formerly-placeholder credit amounts are the published amounts', () =>
     assert.equal(got.toString(), expected, label);
   }
 });
+
+// S.O. 2026, c. 2 (Bill 97), Sch. 15 amends Taxation Act, 2007 s.31(4): the
+// Ontario small business deduction rises from 8.3% to 9.3% (rate 3.2% → 2.2%)
+// for days after 2026-06-30, prorated by days for a straddling taxation year.
+test('2026 Ontario small business rate is 3.2% stepping to 2.2% on 2026-07-01', () => {
+  assert.equal(RATES_2026.corpAbiSbdRateOntario.toString(), '0.032');
+  assert.equal(RATES_2026.corpAbiSbdRateOntarioChange?.effective, '2026-07-01');
+  assert.equal(RATES_2026.corpAbiSbdRateOntarioChange?.rate.toString(), '0.022');
+});
+
+// The non-eligible credit cut starts with years ending after 2026-12-31.
+test('2026 Ontario non-eligible dividend tax credit is still 2.9863%', () => {
+  assert.equal(RATES_2026.dtcOntarioNonEligible.toString(), '0.029863');
+});

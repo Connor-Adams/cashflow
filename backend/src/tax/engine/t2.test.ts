@@ -52,7 +52,8 @@ test('unflagged: active business income keeps the small business deduction', () 
   assert.equal(ret.totals.sbdEligibleIncome.toFixed(2), '130000.00');
   assert.equal(ret.totals.personalServicesBusinessIncome.toFixed(2), '0.00');
   assert.equal(ret.totals.federalTax.toFixed(2), '11700.00');   // 130,000 × 9%
-  assert.equal(ret.totals.provincialTax.toFixed(2), '4160.00'); // 130,000 × 3.2%
+  // 130,000 × (181 × 3.2% + 184 × 2.2%) / 365 — Ontario's 2026-07-01 cut, day-weighted
+  assert.equal(ret.totals.provincialTax.toFixed(2), '3504.66');
   assert.equal(lineAmount(ret, 'L432'), undefined, 'no PSB line');
   assert.ok(!ret.warnings.some((w) => /personal services business/i.test(w)));
 });

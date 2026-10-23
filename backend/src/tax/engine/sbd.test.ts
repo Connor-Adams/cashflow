@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { D } from '../util/decimal';
-import { sbdEligibleIncome } from './sbd';
+import { sbdEligibleIncome, ontarioSbdRate } from './sbd';
 import { ratesFor } from './brackets';
 
 const r = ratesFor(2024);
@@ -65,4 +65,39 @@ test('SBD: zero ABI', () => {
   const result = sbdEligibleIncome(D('0'), D('0'), r);
   assert.equal(result.eligible.toFixed(2), '0.00');
   assert.equal(result.generalRate.toFixed(2), '0.00');
+});
+
+// Taxation Act, 2007 (Ontario) s.31(4)(e)-(f), as amended by S.O. 2026, c. 2,
+// Sch. 15: the Ontario small business rate is 3.2% for days before 2026-07-01
+// and 2.2% for days after 2026-06-30, weighted by days in the taxation year.
+test('ON SBD rate: fiscal year ending before 2026-07-01 pays 3.2%', () => {
+  const rate = ontarioSbdRate({ startDate: '2025-07-01', endDate: '2026-06-30' }, ratesFor(2025));
+  assert.equal(rate.toString(), '0.032');
+});
+
+test('ON SBD rate: Dec-31 2026 year end blends 181 days at 3.2% and 184 at 2.2%', () => {
+  const rate = ontarioSbdRate({ startDate: '2026-01-01', endDate: '2026-12-31' }, ratesFor(2026));
+  // (181 × 3.2% + 184 × 2.2%) / 365
+  assert.equal(rate.toFixed(6), '0.026959');
+});
+
+test('ON SBD rate: fiscal year starting 2026-07-01 pays 2.2% throughout', () => {
+  const rate = ontarioSbdRate({ startDate: '2026-07-01', endDate: '2027-06-30' }, ratesFor(2026));
+  assert.equal(rate.toString(), '0.022');
+});
+
+test('ON SBD rate: a year starting in 2025 that ends after 2026-06-30 is prorated too', () => {
+  // 2025-08-01..2026-07-31: 365 days, 31 of them after 2026-06-30.
+  const rate = ontarioSbdRate({ startDate: '2025-08-01', endDate: '2026-07-31' }, ratesFor(2025));
+  assert.equal(rate.toFixed(6), D('0.032').times(334).plus(D('0.022').times(31)).dividedBy(365).toFixed(6));
+});
+
+test('ON SBD rate: 2027 years pay 2.2% with no change pending', () => {
+  const t = ratesFor(2027);
+  assert.equal(t.corpAbiSbdRateOntarioChange, undefined);
+  assert.equal(ontarioSbdRate({ startDate: '2027-01-01', endDate: '2027-12-31' }, t).toString(), '0.022');
+});
+
+test('ON SBD rate: 2024 years pay 3.2% with no change', () => {
+  assert.equal(ontarioSbdRate({ startDate: '2024-01-01', endDate: '2024-12-31' }, ratesFor(2024)).toString(), '0.032');
 });

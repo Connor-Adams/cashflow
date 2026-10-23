@@ -93,11 +93,27 @@ test('2027 leaves statutorily fixed amounts unindexed', () => {
   assert.deepEqual(fixed, expected);
 });
 
-test('2027 corp T2 rates are unchanged from 2026 (no announced change)', () => {
+test('2027 federal corp T2 rates and Ontario general rate are unchanged from 2026', () => {
   assert.equal(RATES_2027.corpAbiSbdRateFederal.toString(), RATES_2026.corpAbiSbdRateFederal.toString());
   assert.equal(RATES_2027.corpGeneralRateOntario.toString(), RATES_2026.corpGeneralRateOntario.toString());
   assert.equal(RATES_2027.corpInvestmentRateFederal.toString(), RATES_2026.corpInvestmentRateFederal.toString());
   assert.equal(RATES_2027.corpDividendRefundRate.toString(), RATES_2026.corpDividendRefundRate.toString());
+});
+
+// S.O. 2026, c. 2 (Bill 97), Sch. 15: Ontario's small business rate is 2.2% for
+// every day after 2026-06-30, so a year starting in 2027 has nothing to prorate.
+test('2027 Ontario small business rate is 2.2% with no mid-year change', () => {
+  assert.equal(RATES_2027.corpAbiSbdRateOntario.toString(), '0.022');
+  assert.equal(RATES_2027.corpAbiSbdRateOntarioChange, undefined);
+});
+
+// Same schedule: Taxation Act, 2007 s.19.1(a.4) sets the non-eligible credit at
+// 15.2283% of the gross-up for years ending after 2026-12-31, which is 1.9863%
+// of the 115% grossed-up dividend (down from 22.895% / 2.9863%).
+test('2027 Ontario non-eligible dividend tax credit is 1.9863% of the grossed-up dividend', () => {
+  assert.equal(RATES_2027.dtcOntarioNonEligible.toString(), '0.019863');
+  const ofGrossUp = RATES_2027.dtcOntarioNonEligible.times(D('1.15')).dividedBy(RATES_2027.dividendGrossUpNonEligible);
+  assert.equal(ofGrossUp.toFixed(4), '0.1523');
 });
 
 // Every scalar the projection indexes, read off both tables by the same picker.

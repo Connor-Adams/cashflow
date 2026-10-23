@@ -1,7 +1,7 @@
 import { D, Decimal, sumD, maxZero } from '../util/decimal';
 import type { BusinessIncomeItem, CorpTaxYearFacts, CorpTaxReturn, RateTable, TaxLine } from './types';
 import { computeAaii } from './aaii';
-import { sbdEligibleIncome } from './sbd';
+import { sbdEligibleIncome, ontarioSbdRate } from './sbd';
 import { computeIntegration, isConnectedSource } from './integration';
 import { capitalGainOf } from './capital-gains';
 
@@ -140,7 +140,8 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   push('L700F', 'Federal tax', federalTax);
 
   // ON tax
-  const onSbdTax = sbdTaxBase.times(r.corpAbiSbdRateOntario);
+  // Day-weighted when a rate change falls inside the year (s.31(4)).
+  const onSbdTax = sbdTaxBase.times(ontarioSbdRate(facts.fiscalYear, r));
   const onGeneralTax = generalTaxBase.times(r.corpGeneralRateOntario);
   const onInvestmentTax = aiiTaxBase.times(r.corpInvestmentRateOntario);
   const onPsbTax = psbTaxBase.times(r.corpPsbRateOntario);
