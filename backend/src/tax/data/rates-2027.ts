@@ -11,8 +11,9 @@
 //
 // What is NOT indexed (and therefore copied from 2026 verbatim):
 //   - tax RATES (federal + ON brackets, corp T2, dividend gross-up/DTC, AMT
-//     rate, clawback rates) — these only move by legislation, and none is
-//     announced for 2027.
+//     rate, clawback rates) — these only move by legislation. Two already have:
+//     the ON small business rate (2.2%) and the ON non-eligible dividend tax
+//     credit (1.9863%), both enacted by S.O. 2026, c. 2, Sch. 15.
 //   - statutorily fixed dollar amounts: CPP basic exemption ($3,500), the
 //     federal pension income amount ($2,000), FHSA limits ($8,000/$40,000),
 //     the donation first-tier threshold ($200), the capital-gains inclusion
@@ -82,7 +83,10 @@ export const RATES_2027: RateTable = {
   dtcFederalEligible: D('0.150198'),
   dtcFederalNonEligible: D('0.090301'),
   dtcOntarioEligible: D('0.10'),
-  dtcOntarioNonEligible: D('0.029863'),
+  // S.O. 2026, c. 2 (Bill 97), Sch. 15, Taxation Act, 2007 s.19.1(a.4): 15.2283%
+  // of the gross-up for years ending after 2026-12-31 = 1.9863% of the grossed-up
+  // dividend (was 22.895% / 2.9863%). Verified 2026-10-23 against the Royal Assent text.
+  dtcOntarioNonEligible: D('0.019863'),
   // CPP: wage-indexed in reality; CPI factor used as a proxy. Rates are the
   // legislated steady-state (base 5.95% + CPP2 4.00%).
   cpp: {
@@ -147,11 +151,14 @@ export const RATES_2027: RateTable = {
   sources: [
     { name: 'CRA indexation announcement — 2027 NOT YET PUBLISHED (values projected)', url: 'https://www.canada.ca/en/revenue-agency/services/tax/individuals/frequently-asked-questions-individuals/adjustment-personal-income-tax-benefit-amounts.html' },
     { name: 'ON Min of Finance personal income tax rates — 2027 TBD', url: 'https://www.fin.gov.on.ca/en/tax/pit/rates.html' },
+    { name: 'S.O. 2026, c. 2 (Bill 97), Sch. 15 — ON small business rate 2.2%, ON non-eligible DTC 1.9863% from 2027', url: 'https://www.ola.org/en/legislative-business/bills/parliament-44/session-1/bill-97' },
   ],
 
-  // Corp T2 — stable since 2019, no 2027 change announced.
+  // Corp T2 — federal rates and the ON general rate unchanged.
   corpAbiSbdRateFederal: D('0.09'),
-  corpAbiSbdRateOntario: D('0.032'),
+  // ON small business rate 2.2% for every day after 2026-06-30 (S.O. 2026, c. 2,
+  // Sch. 15; see rates-2026.ts), so a year starting in 2027 has no proration.
+  corpAbiSbdRateOntario: D('0.022'),
   corpGeneralRateFederal: D('0.15'),
   corpGeneralRateOntario: D('0.115'),
   // Personal services business income: 38% base − 10% abatement (s.124) + 5%

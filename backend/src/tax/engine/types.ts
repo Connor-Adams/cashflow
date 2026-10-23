@@ -375,7 +375,14 @@ export type RateTable = {
   // Phase 3 — Corp T2
 
   corpAbiSbdRateFederal: Decimal;       // 9% federal SBD rate
-  corpAbiSbdRateOntario: Decimal;       // 3.2% ON SBD rate
+  corpAbiSbdRateOntario: Decimal;       // ON SBD rate (3.2% to 2026-06-30, 2.2% after)
+  /**
+   * A legislated change to the Ontario SBD rate that lands inside a taxation
+   * year this table can price. `corpAbiSbdRateOntario` covers the days before
+   * `effective`, `rate` the days on or after it; buildT2 weights the two by days
+   * (Taxation Act, 2007 s.31(4)). Absent when no change falls in reach.
+   */
+  corpAbiSbdRateOntarioChange?: { effective: string; rate: Decimal };
   corpGeneralRateFederal: Decimal;      // 15% federal general
   corpGeneralRateOntario: Decimal;      // 11.5% ON general
   corpPsbRateFederal: Decimal;          // 33% federal on PSB income: 38% − 10% abatement + 5% s.123.5, no s.123.4 reduction

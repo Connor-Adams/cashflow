@@ -136,11 +136,20 @@ export const RATES_2026: RateTable = {
     { name: 'CRA indexation adjustment for personal income tax and benefit amounts (2026)', url: 'https://www.canada.ca/en/revenue-agency/services/tax/individuals/frequently-asked-questions-individuals/adjustment-personal-income-tax-benefit-amounts.html' },
     { name: 'CRA Form TD1 2026 (federal personal tax credits)', url: 'https://www.canada.ca/content/dam/cra-arc/formspubs/pbg/td1/td1-26e.pdf' },
     { name: 'CRA Form TD1ON 2026 (Ontario personal tax credits)', url: 'https://www.canada.ca/content/dam/cra-arc/formspubs/pbg/td1on/td1on-26e.pdf' },
+    { name: 'S.O. 2026, c. 2 (Bill 97, Plan to Protect Ontario Act (Budget Measures), 2026), Sch. 15 — ON small business rate 2.2% from 2026-07-01', url: 'https://www.ola.org/en/legislative-business/bills/parliament-44/session-1/bill-97' },
+    { name: 'CRA corporation tax rates (Ontario lower rate 2.2%, reduced from 3.2% effective 2026-07-01)', url: 'https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/corporations/corporation-tax-rates.html' },
   ],
 
-  // Phase 3 — Corp T2 (stable since 2019; verify before filing-grade use)
+  // Phase 3 — Corp T2 (verify before filing-grade use)
   corpAbiSbdRateFederal: D('0.09'),
+  // Ontario small business rate: 3.2% to 2026-06-30, then 2.2%. Enacted by
+  // S.O. 2026, c. 2 (Bill 97), Sch. 15, amending Taxation Act, 2007 s.31(4):
+  // the deduction off the 11.5% general rate goes from 8.3% to 9.3% for days
+  // after 2026-06-30, weighted by days in a straddling taxation year. A Dec-31
+  // 2026 year end blends to ~2.70%. CRA's rate table lists 2.2% from 2026-07-01.
+  // Verified 2026-10-23 against the Royal Assent text and CRA.
   corpAbiSbdRateOntario: D('0.032'),
+  corpAbiSbdRateOntarioChange: { effective: '2026-07-01', rate: D('0.022') },
   corpGeneralRateFederal: D('0.15'),
   corpGeneralRateOntario: D('0.115'),
   // Personal services business income: 38% base − 10% abatement (s.124) + 5%

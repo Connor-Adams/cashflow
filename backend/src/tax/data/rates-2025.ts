@@ -120,6 +120,9 @@ export const RATES_2025: RateTable = {
   // Phase 3 — Corp T2 (stable since 2019; verify before filing-grade use)
   corpAbiSbdRateFederal: D('0.09'),
   corpAbiSbdRateOntario: D('0.032'),
+  // A year starting in 2025 can still run past 2026-06-30 (e.g. Aug 1 – Jul 31),
+  // so the 2026-07-01 cut reaches it. Source: rates-2026.ts.
+  corpAbiSbdRateOntarioChange: { effective: '2026-07-01', rate: D('0.022') },
   corpGeneralRateFederal: D('0.15'),
   corpGeneralRateOntario: D('0.115'),
   // Personal services business income: 38% base − 10% abatement (s.124) + 5%
