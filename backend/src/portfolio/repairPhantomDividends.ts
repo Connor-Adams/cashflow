@@ -11,7 +11,7 @@
 import type { Transaction as DbTransaction } from 'sequelize';
 import { InvestmentActivity } from '../models';
 import { runPlannedWrites } from '../import/plannedWrites';
-import { positionOnExDate, RECONCILER_IMPORT_BATCH, type DividendSkipReason } from './reconcileDividends';
+import { RECONCILER_IMPORT_BATCH, syntheticDividendsWithPosition, type DividendSkipReason } from './reconcileDividends';
 
 export interface PhantomDividend {
   id: number;
@@ -25,21 +25,13 @@ export interface PhantomDividend {
 
 /** Every synthetic dividend row that fails the ex-date position rule. */
 export async function scanPhantomDividends(t?: DbTransaction): Promise<PhantomDividend[]> {
-  const rows = await InvestmentActivity.findAll({
-    where: { importBatch: RECONCILER_IMPORT_BATCH, activityType: 'dividend' },
-    order: [['accountId', 'ASC'], ['tradeDate', 'ASC'], ['id', 'ASC']],
-    transaction: t,
-  });
   const out: PhantomDividend[] = [];
-  for (const r of rows) {
-    if (r.securityId == null) continue;
-    const exDate = String(r.tradeDate).slice(0, 10);
-    const position = await positionOnExDate(r.accountId, r.securityId, exDate, t);
+  for (const { row: r, securityId, exDate, position } of await syntheticDividendsWithPosition(t)) {
     if (position.held) continue;
     out.push({
       id: r.id,
       accountId: r.accountId,
-      securityId: r.securityId,
+      securityId,
       exDate,
       amount: Number(r.amount),
       currency: r.currency,
