@@ -72,7 +72,7 @@ async function setupSecurityAndDividend(args: SetupArgs = {}) {
     exDividendDate: args.exDate ?? '2026-03-14',
     declarationDate: null,
     recordDate: null,
-    paymentDate: args.paymentDate ?? '2026-04-01',
+    paymentDate: args.paymentDate === undefined ? '2026-04-01' : args.paymentDate,
     amount: args.perShare ?? '0.485',
     currency: args.currency ?? 'USD',
     source: 'alpha_vantage',
@@ -305,7 +305,7 @@ test('reconcile: duplicate synthetic-dividend insert is blocked (no double-count
 test('reconcile: findOrCreate is a no-op when the synthetic row already exists', async () => {
   // Isolate the fingerprint-keyed findOrCreate from the ±dedupDays window
   // check. First run produces the real AV synthetic row; we then move its
-  // tradeDate FAR outside any dedup window so `existingBrokerDividendNearby`
+  // tradeDate FAR outside any dedup window so `existingSyntheticNearby`
   // returns false on the second run and the pass falls through to
   // findOrCreate. findOrCreate must match on (accountId, fingerprint) and NOT
   // insert a duplicate (issue #847). We reuse the row's actual fingerprint
@@ -386,13 +386,14 @@ test('reconcile: respects custom dedupDays override', async () => {
   const sec = await setupSecurityAndDividend({ exDate: '2026-03-14' });
   const acct = await makeAccount();
   await seedHolding({ accountId: acct.id, securityId: sec.id, statementDate: '2026-02-28', quantity: '10' });
-  // Broker landed 10 days after ex-date — outside default ±5 but inside ±14.
+  // Broker dated 9 days BEFORE the ex-date — outside default ±5 but inside ±14.
+  // (After the ex-date the payout window already reaches the pay date.)
   await models.InvestmentActivity.create({
     accountId: acct.id,
     householdId: 1,
     securityId: sec.id,
     activityType: 'dividend',
-    tradeDate: '2026-03-24',
+    tradeDate: '2026-03-05',
     settlementDate: null,
     description: 'Broker DIV (late post)',
     quantity: null,
@@ -523,4 +524,116 @@ test('reconcile: selling on the ex-date itself still earns the dividend', async 
   const result = await reconcileDividendsForSecurity(sec.id);
   assert.equal(result.inserted, 1);
   assert.equal(Number((await syntheticRows())[0].amount), 10);
+});
+
+async function seedBrokerRow(args: {
+  accountId: number;
+  securityId: number | null;
+  activityType: 'dividend' | 'other';
+  tradeDate: string;
+  amount: string;
+  currency?: string;
+}) {
+  return models.InvestmentActivity.create({
+    accountId: args.accountId,
+    householdId: 1,
+    securityId: args.securityId,
+    activityType: args.activityType,
+    tradeDate: args.tradeDate,
+    settlementDate: null,
+    description: `broker ${args.activityType}`,
+    quantity: null,
+    price: null,
+    amount: args.amount,
+    fees: null,
+    splitRatio: null,
+    currency: args.currency ?? 'USD',
+    sourceReference: 'broker-statement',
+    sourceRowFingerprint: `broker:${args.accountId}:${args.tradeDate}:${args.amount}:${args.activityType}`,
+    importBatch: 'broker:statement',
+  });
+}
+
+test('payoutWindow: pay date + dedupDays, else the max payment lag; capped before the next ex-date', async () => {
+  const { payoutWindow, PAYMENT_LAG_MAX_DAYS } = await import('./reconcileDividends');
+  assert.equal(PAYMENT_LAG_MAX_DAYS, 35);
+  assert.deepEqual(payoutWindow('2026-03-14', '2026-04-01', null, 5), { from: '2026-03-09', to: '2026-04-06' });
+  assert.deepEqual(payoutWindow('2026-03-14', null, null, 5), { from: '2026-03-09', to: '2026-04-18' });
+  // Monthly payer: closes the day before the next ex-date's window opens.
+  assert.deepEqual(payoutWindow('2026-03-31', null, '2026-04-30', 5), { from: '2026-03-26', to: '2026-04-24' });
+  // Never narrower than the original ±dedupDays around the ex-date.
+  assert.deepEqual(payoutWindow('2026-03-14', null, '2026-03-16', 5), { from: '2026-03-09', to: '2026-03-19' });
+  // A payment date before the ex-date (bad data) falls back to ±dedupDays.
+  assert.deepEqual(payoutWindow('2026-03-14', '2026-03-01', null, 5), { from: '2026-03-09', to: '2026-03-19' });
+});
+
+// Prod 2026-10-23: Wealthsimple posts the dividend on the PAY date — TD 21 days
+// after the ex-date — so the ±5-day ex-date window never saw it.
+test('reconcile: broker dividend on the payment date blocks the AV row', async () => {
+  const sec = await setupSecurityAndDividend({ exDate: '2026-03-14', paymentDate: '2026-04-04' });
+  const acct = await makeAccount();
+  await seedHolding({ accountId: acct.id, securityId: sec.id, statementDate: '2026-02-28', quantity: '10' });
+  await seedBrokerRow({ accountId: acct.id, securityId: sec.id, activityType: 'dividend', tradeDate: '2026-04-06', amount: '4.85' });
+
+  const result = await reconcileDividendsForSecurity(sec.id);
+  assert.equal(result.inserted, 0);
+  assert.equal(result.skippedExistingBroker, 1);
+});
+
+// Prod 2026-10-23: every SecurityDividend row has a NULL payment date (Yahoo
+// chart events carry only the ex-date). NVDA's broker row landed 28 days later.
+test('reconcile: without a payment date, a broker dividend within the payment lag blocks the AV row', async () => {
+  const sec = await setupSecurityAndDividend({ exDate: '2025-03-12', paymentDate: null });
+  const acct = await makeAccount();
+  await seedHolding({ accountId: acct.id, securityId: sec.id, statementDate: '2025-02-28', quantity: '79' });
+  await seedBrokerRow({ accountId: acct.id, securityId: sec.id, activityType: 'dividend', tradeDate: '2025-04-09', amount: '0.16' });
+
+  const result = await reconcileDividendsForSecurity(sec.id);
+  assert.equal(result.inserted, 0);
+  assert.equal(result.skippedExistingBroker, 1);
+});
+
+test('reconcile: a monthly payer\'s next payout does not block this month\'s AV row', async () => {
+  const sec = await setupSecurityAndDividend({ exDate: '2024-10-31', paymentDate: null, perShare: '0.15' });
+  await models.SecurityDividend.create({
+    securityId: sec.id, exDividendDate: '2024-11-29', declarationDate: null, recordDate: null,
+    paymentDate: null, amount: '0.135', currency: 'USD', source: 'alpha_vantage', fetchedAt: new Date(),
+  });
+  const acct = await makeAccount();
+  await seedHolding({ accountId: acct.id, securityId: sec.id, statementDate: '2024-10-31', quantity: '23' });
+  // Only November's payout was imported; it is 36 days after October's ex-date.
+  await seedBrokerRow({ accountId: acct.id, securityId: sec.id, activityType: 'dividend', tradeDate: '2024-12-06', amount: '3.105' });
+
+  const result = await reconcileDividendsForSecurity(sec.id);
+  assert.equal(result.inserted, 1);
+  const rows = await syntheticRows();
+  assert.deepEqual(rows.map((r) => String(r.tradeDate).slice(0, 10)), ['2024-10-31']);
+});
+
+// Prod 2026-10-23: the Individual FHSA statement import records ETF
+// distributions as activityType 'other' with no security — VEQT 139.10 on
+// 2025-01-07 against the 139.73 the reconciler synthesized for 2024-12-30.
+test('reconcile: a security-less broker distribution of about the same amount blocks the AV row', async () => {
+  const sec = await setupSecurityAndDividend({ exDate: '2024-12-30', paymentDate: null, perShare: '0.7166', currency: 'CAD' });
+  const acct = await makeAccount();
+  await seedHolding({ accountId: acct.id, securityId: sec.id, statementDate: '2024-11-29', quantity: '195' });
+  await seedBrokerRow({ accountId: acct.id, securityId: null, activityType: 'other', tradeDate: '2025-01-07', amount: '139.10', currency: 'CAD' });
+
+  const result = await reconcileDividendsForSecurity(sec.id);
+  assert.equal(result.inserted, 0);
+  assert.equal(result.skippedExistingBroker, 1);
+});
+
+test('reconcile: a security-less row too far off in amount, currency, or date does not block', async () => {
+  const sec = await setupSecurityAndDividend({ exDate: '2024-12-30', paymentDate: null, perShare: '0.7166', currency: 'CAD' });
+  const acct = await makeAccount();
+  await seedHolding({ accountId: acct.id, securityId: sec.id, statementDate: '2024-11-29', quantity: '195' });
+  // Expected 139.737: 10% off, wrong currency, outside the payment lag, an outflow.
+  await seedBrokerRow({ accountId: acct.id, securityId: null, activityType: 'other', tradeDate: '2025-01-07', amount: '125.00', currency: 'CAD' });
+  await seedBrokerRow({ accountId: acct.id, securityId: null, activityType: 'other', tradeDate: '2025-01-08', amount: '139.10', currency: 'USD' });
+  await seedBrokerRow({ accountId: acct.id, securityId: null, activityType: 'other', tradeDate: '2025-02-10', amount: '139.20', currency: 'CAD' });
+  await seedBrokerRow({ accountId: acct.id, securityId: null, activityType: 'other', tradeDate: '2025-01-09', amount: '-139.30', currency: 'CAD' });
+
+  const result = await reconcileDividendsForSecurity(sec.id);
+  assert.equal(result.inserted, 1);
 });

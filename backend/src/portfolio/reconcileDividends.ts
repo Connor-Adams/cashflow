@@ -14,9 +14,11 @@
  *     statement and the ex-date take the quantity to zero. A snapshot alone
  *     is only a lower-bound date for the quantity, not proof it was held on
  *     the ex-date.
- *   - Skip the account when a broker-imported `InvestmentActivity` with
- *     `activityType='dividend'` for the same security already exists
- *     within `±dedupDays` of the ex-date. This is the "don't double-count
+ *   - Skip the account when the broker already recorded the payout
+ *     (`findBrokerPayout`): a broker `dividend` row for the security, or a
+ *     security-less broker distribution of about perShare × quantity,
+ *     anywhere in the event's `payoutWindow` — brokers post on the PAY date,
+ *     which can be weeks after the ex-date. This is the "don't double-count
  *     broker-imported dividends" guard.
  *   - Otherwise insert one InvestmentActivity row per account with the
  *     amount = perShare × quantity, currency = AV-reported currency, and
@@ -187,22 +189,169 @@ export async function positionOnExDate(
   return { held: true, quantity: Number(quantity.toFixed(10)) };
 }
 
-async function existingBrokerDividendNearby(
+/**
+ * How long after the ex-date a broker may post the payout when the event has
+ * no payment date. Yahoo chart events (the dividend source in prod) never
+ * carry one. Prod, 2026-10-23: broker dividends land 3-32 days after the
+ * ex-date (XEQT ~5, VFV ~8, TD ~21, NVDA 28-32).
+ */
+export const PAYMENT_LAG_MAX_DAYS = 35;
+
+/**
+ * Relative amount tolerance when matching a security-less broker distribution
+ * to perShare × quantity. Only the amount ties such a row to the security,
+ * so the tolerance has to stay tight. Prod, 2026-10-23: genuine pairs differ
+ * by at most 2.2% (the per-share figure is rounded, or the quantity is slightly
+ * off), and no other positive security-less row came within 25%.
+ */
+export const SECURITY_LESS_AMOUNT_TOLERANCE = 0.05;
+
+export interface PayoutWindow {
+  from: string;
+  to: string;
+}
+
+/**
+ * The trade dates on which a broker row can be this event's payout: from
+ * `dedupDays` before the ex-date to `dedupDays` after the payment date, or
+ * `PAYMENT_LAG_MAX_DAYS` after the ex-date when no payment date is known. The
+ * window closes before the security's next ex-date window opens, so a
+ * monthly payer's next payout is never mistaken for this one. It never closes
+ * earlier than `dedupDays` after the ex-date (the original window).
+ */
+export function payoutWindow(
+  exDate: string,
+  paymentDate: string | null,
+  nextExDate: string | null,
+  dedupDays: number,
+): PayoutWindow {
+  let to = paymentDate && paymentDate > exDate
+    ? addDays(paymentDate, dedupDays)
+    : addDays(exDate, paymentDate ? dedupDays : PAYMENT_LAG_MAX_DAYS);
+  if (nextExDate) {
+    const beforeNext = addDays(nextExDate, -dedupDays - 1);
+    if (beforeNext < to) to = beforeNext;
+  }
+  const floor = addDays(exDate, dedupDays);
+  return { from: addDays(exDate, -dedupDays), to: to < floor ? floor : to };
+}
+
+export interface BrokerPayout {
+  id: number;
+  /** 'dividend': a broker dividend row for the security. 'security_less': a
+   * distribution the import could not tie to a security, matched on amount. */
+  match: 'dividend' | 'security_less';
+  tradeDate: string;
+  amount: number;
+}
+
+/**
+ * The broker-imported row that already records this payout, or null. Shared
+ * by the reconciler and the duplicate-dividend repair. Synthetic rows never
+ * count, and rows in `exclude` (already paired with another synthetic row) are
+ * skipped so one broker row can't cover two payouts.
+ */
+export async function findBrokerPayout(
+  args: {
+    accountId: number;
+    securityId: number;
+    currency: string;
+    expectedAmount: number;
+    window: PayoutWindow;
+    exclude?: ReadonlySet<number>;
+  },
+  t?: DbTransaction,
+): Promise<BrokerPayout | null> {
+  const base = {
+    accountId: args.accountId,
+    importBatch: { [Op.ne]: RECONCILER_IMPORT_BATCH },
+    tradeDate: { [Op.gte]: args.window.from, [Op.lte]: args.window.to },
+    ...(args.exclude?.size ? { id: { [Op.notIn]: [...args.exclude] } } : {}),
+  };
+  const toPayout = (row: InvestmentActivity, match: BrokerPayout['match']): BrokerPayout => ({
+    id: row.id,
+    match,
+    tradeDate: String(row.tradeDate).slice(0, 10),
+    amount: Number(row.amount),
+  });
+
+  const dividend = await InvestmentActivity.findOne({
+    where: { ...base, securityId: args.securityId, activityType: 'dividend' },
+    order: [['tradeDate', 'ASC'], ['id', 'ASC']],
+    transaction: t,
+  });
+  if (dividend) return toPayout(dividend, 'dividend');
+
+  const expected = args.expectedAmount;
+  if (!(Number.isFinite(expected) && expected > 0)) return null;
+  const candidates = await InvestmentActivity.findAll({
+    where: {
+      ...base,
+      securityId: null,
+      activityType: { [Op.in]: ['dividend', 'other'] },
+      currency: args.currency,
+      amount: {
+        [Op.gte]: expected * (1 - SECURITY_LESS_AMOUNT_TOLERANCE),
+        [Op.lte]: expected * (1 + SECURITY_LESS_AMOUNT_TOLERANCE),
+      },
+    },
+    order: [['tradeDate', 'ASC'], ['id', 'ASC']],
+    transaction: t,
+  });
+  const closest = candidates.reduce<InvestmentActivity | null>(
+    (best, row) => (best == null
+      || Math.abs(Number(row.amount) - expected) < Math.abs(Number(best.amount) - expected) ? row : best),
+    null,
+  );
+  return closest ? toPayout(closest, 'security_less') : null;
+}
+
+export interface SyntheticDividend {
+  row: InvestmentActivity;
+  securityId: number;
+  /** A synthetic row's tradeDate is the ex-date it was built for. */
+  exDate: string;
+  position: ExDatePosition;
+}
+
+/**
+ * Every synthetic dividend row with its ex-date position, in account then
+ * date order. Shared by the phantom and duplicate repairs.
+ */
+export async function syntheticDividendsWithPosition(t?: DbTransaction): Promise<SyntheticDividend[]> {
+  const rows = await InvestmentActivity.findAll({
+    where: { importBatch: RECONCILER_IMPORT_BATCH, activityType: 'dividend' },
+    order: [['accountId', 'ASC'], ['tradeDate', 'ASC'], ['id', 'ASC']],
+    transaction: t,
+  });
+  const out: SyntheticDividend[] = [];
+  for (const row of rows) {
+    if (row.securityId == null) continue;
+    const exDate = String(row.tradeDate).slice(0, 10);
+    const position = await positionOnExDate(row.accountId, row.securityId, exDate, t);
+    out.push({ row, securityId: row.securityId, exDate, position });
+  }
+  return out;
+}
+
+/**
+ * A synthetic row this reconciler already wrote for the event. Keyed on the
+ * ex-date window rather than the fingerprint, which embeds the amount, so a
+ * re-run after the quantity changed is still a no-op.
+ */
+async function existingSyntheticNearby(
   accountId: number,
   securityId: number,
   exDate: string,
   windowDays: number,
 ): Promise<boolean> {
-  const lo = addDays(exDate, -windowDays);
-  const hi = addDays(exDate, windowDays);
   const count = await InvestmentActivity.count({
     where: {
       accountId,
       securityId,
       activityType: 'dividend',
-      tradeDate: { [Op.gte]: lo, [Op.lte]: hi },
-      // Importantly, INCLUDE alpha_vantage:dividends rows too — that way
-      // re-running the reconciler with an unchanged event is a no-op.
+      importBatch: RECONCILER_IMPORT_BATCH,
+      tradeDate: { [Op.gte]: addDays(exDate, -windowDays), [Op.lte]: addDays(exDate, windowDays) },
     },
   });
   return count > 0;
@@ -233,7 +382,13 @@ export async function reconcileDividendsForSecurity(
   });
   if (events.length === 0) return result;
 
-  for (const ev of events) {
+  for (const [i, ev] of events.entries()) {
+    const window = payoutWindow(
+      ev.exDividendDate,
+      ev.paymentDate || null,
+      events[i + 1]?.exDividendDate ?? null,
+      dedupDays,
+    );
     const holdings = await latestHoldingPerAccountAtOrBefore(
       securityId,
       ev.exDividendDate,
@@ -257,17 +412,19 @@ export async function reconcileDividendsForSecurity(
         result.skippedZeroQuantity += 1;
         continue;
       }
-      const conflict = await existingBrokerDividendNearby(
-        accountId,
-        securityId,
-        ev.exDividendDate,
-        dedupDays,
-      );
+      const totalAmount = (qty * perShare).toFixed(4);
+      const conflict = await existingSyntheticNearby(accountId, securityId, ev.exDividendDate, dedupDays)
+        || await findBrokerPayout({
+          accountId,
+          securityId,
+          currency: ev.currency,
+          expectedAmount: Number(totalAmount),
+          window,
+        });
       if (conflict) {
         result.skippedExistingBroker += 1;
         continue;
       }
-      const totalAmount = (qty * perShare).toFixed(4);
       const fp = fingerprintFor({
         accountId,
         securityId,
@@ -278,7 +435,7 @@ export async function reconcileDividendsForSecurity(
         // `findOrCreate` is atomic on the unique
         // (account_id, source_row_fingerprint) index, so two overlapping
         // reconcile passes (request + scheduler) that both COUNT 0 in
-        // `existingBrokerDividendNearby` above can't both INSERT and
+        // `existingSyntheticNearby` above can't both INSERT and
         // double-count the synthetic dividend as income. The loser of the
         // race re-reads the existing row and `created` is false, so
         // `result.inserted` only counts the row we actually wrote. This
