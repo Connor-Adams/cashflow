@@ -21,6 +21,15 @@ const CONNECTED: SimplefinStatusResponse = {
   host: 'beta-bridge.simplefin.org',
 }
 
+const ATTENTION: SimplefinStatusResponse = {
+  connected: false,
+  status: 'error',
+  statusReason:
+    'institution_attention: Connection to Royal Bank of Canada may need attention. Broken. | Connection to CIBC may need attention. Auth required',
+  lastSyncedAt: '2026-10-20T02:00:00.127Z',
+  host: 'beta-bridge.simplefin.org',
+}
+
 function setupFetch(opts: {
   status?: SimplefinStatusResponse
   connect?: () => Response | Promise<Response>
@@ -132,5 +141,44 @@ describe('SimplefinConnectCard', () => {
     await waitFor(() => {
       expect(screen.getByText(/3 accounts found, 2 linked/i)).toBeInTheDocument()
     })
+  })
+
+  it('error state: shows the attention reasons and last sync, not the connect form', async () => {
+    vi.stubGlobal('fetch', setupFetch({ status: ATTENTION }))
+    render(<SimplefinConnectCard />)
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/needs attention/i)
+    expect(alert).toHaveTextContent(/Connection to Royal Bank of Canada may need attention\. Broken\./)
+    expect(alert).toHaveTextContent(/Connection to CIBC may need attention\. Auth required/)
+    expect(alert).not.toHaveTextContent(/institution_attention/)
+    expect(screen.getByRole('heading', { name: /bank connection/i })).toBeInTheDocument()
+    expect(screen.getByText(/last synced/i)).toHaveTextContent(/2026/)
+    expect(screen.getByRole('link', { name: /simplefin bridge/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /disconnect/i })).toBeInTheDocument()
+    expect(screen.queryByLabelText(/simplefin setup token/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/never synced yet/i)).not.toBeInTheDocument()
+  })
+
+  it('error state: a revoked token points at reconnecting', async () => {
+    vi.stubGlobal(
+      'fetch',
+      setupFetch({ status: { ...ATTENTION, statusReason: 'token_revoked', lastSyncedAt: null } }),
+    )
+    render(<SimplefinConnectCard />)
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/access was revoked/i)
+    expect(alert).toHaveTextContent(/disconnect/i)
+    expect(screen.getByText(/never synced yet/i)).toBeInTheDocument()
+  })
+
+  it('connected state shows the last sync time once a sync has run', async () => {
+    vi.stubGlobal(
+      'fetch',
+      setupFetch({ status: { ...CONNECTED, lastSyncedAt: '2026-10-20T02:00:00.127Z' } }),
+    )
+    render(<SimplefinConnectCard />)
+    expect(await screen.findByText(/last synced/i)).toHaveTextContent(/2026/)
+    expect(screen.queryByText(/never synced yet/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
